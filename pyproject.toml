@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "dg-sbi"
+name = "dge"
 version = "0.1.0"
-description = "Deep Generative Simulation-based Inference"
+description = "Deep Generative Emulation"
 authors = ["Daniel Jenson <daniel.a.jenson@gmail.com>"]
 readme = "README.md"
 

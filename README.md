@@ -1,4 +1,4 @@
-# Deep Generative Simualtion-based Inference (dg-sbi)
+# Deep Generative Emulation (dge)
 
 ## Setup
 - Install Python 3.11:
