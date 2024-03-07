@@ -13,7 +13,7 @@
 pip install git+ssh://git@github.com/MLGlobalHealth/dge.git
 ```
 
-## View Documentation
+## View Documentation (Locally)
 ```bash
 pip install pdoc
 git clone git@github.com:danjenson/dge.git
