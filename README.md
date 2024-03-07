@@ -10,7 +10,7 @@
 
 ## Install
 ```bash
-pip install git+ssh://git@github.com/MLGlobalHealth/dge.git
+pip install git+ssh://git@github.com/danjenson/dge.git
 ```
 
 ## View Documentation (Locally)
