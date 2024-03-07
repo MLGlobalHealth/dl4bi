@@ -10,7 +10,7 @@
 
 ## Install
 ```bash
-pip install git+ssh://git@github.com/MLGlobalHealth/sps.git
+pip install git+ssh://git@github.com/MLGlobalHealth/dge.git
 ```
 
 ## View Documentation
