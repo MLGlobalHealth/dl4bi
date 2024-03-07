@@ -16,7 +16,9 @@ pip install git+ssh://git@github.com/MLGlobalHealth/dge.git
 ## View Documentation
 ```bash
 pip install pdoc
-pdoc --docformat google --math sps
+git clone git@github.com:danjenson/dge.git
+cd dge
+pdoc --docformat google --math dge
 ```
 Example scripts can be found [here](https://github.com/danjenson/dge/tree/main/examples).
 
@@ -27,5 +29,5 @@ Example scripts can be found [here](https://github.com/danjenson/dge/tree/main/e
     - Install Python 3.12: `pyenv install 3.12`
     - Make Python 3.12 your default: `pyenv global 3.12`
 - Install `poetry`: `curl -sSL https://install.python-poetry.org | python3 -`
-- Setup env: `cd sps && poetry install`
+- Setup env: `cd dge && poetry install`
 - Run tests: `poetry run pytest`
