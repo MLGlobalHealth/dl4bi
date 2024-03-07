@@ -1,12 +1,24 @@
 # Deep Generative Emulation (dge)
 
 ## TODO
-[] Implement PriorVAE
-[] Implement piVAE
-[] Implement DeepChol
-[] Implement Diffusion
-[] Add optional installs for examples
-[] How do you properly use clu for metrics?
+- [] Implement PriorVAE
+- [] Implement piVAE
+- [X] Implement DeepChol
+- [] Implement Diffusion
+- [] Add optional installs for examples
+- [] How do you properly use clu for metrics?
+
+## Install
+```bash
+pip install git+ssh://git@github.com/MLGlobalHealth/sps.git
+```
+
+## View Documentation
+```bash
+pip install pdoc
+pdoc --docformat google --math sps
+```
+Example scripts can be found [here](https://github.com/danjenson/dge/tree/main/examples).
 
 ## Setup
 - Install Python 3.12:
