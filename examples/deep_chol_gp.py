@@ -32,7 +32,7 @@ def main(kernel: str, num_batches: int):
     rng_data, rng_init = random.split(key, 2)
     loader = dataloader(rng_data, GP(kernel), locations)
     var, ls, z, f = next(loader)
-    model = DeepChol(MLP([128, 128, 32]))
+    model = DeepChol(MLP([128, 32]))
     state = TrainState.create(
         apply_fn=model.apply,
         params=model.init(rng_init, z, var, ls)["params"],
