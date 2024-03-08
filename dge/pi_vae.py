@@ -7,23 +7,21 @@ from jax import Array, random
 
 
 @dataclass
-class PriorCVAE(nn.Module):
-    r"""PriorCVAE approximates a Gaussian Process.
+class PiVAE(nn.Module):
+    r"""PiVAE approximates a stochastic process.
 
     Once trained, the module's `decoder` can be used as a generative
-    model to simulate a GP from the samples it was trained on.
+    model to simulate samples from the approximated process.
 
     Args:
         encoder: A module used to encode GP realizations and
             their hyperparamters.
         decoder: A module used to decode random vectors and
             GP hyperparameters into GP samples.
-        z_dim: The size of the hidden dimension.
+        beta_dim: The size of the hidden dimension.
 
     Returns:
-        $\hat{\mathbf{f}}$, a recreation of the original$\mathbf{f}$,
-        along with $\mu$ and $\log(\sigma^2)$, which are often used
-        to calculate losses involving KL divergence.
+        TODO(danj): Finish
     """
 
     encoder: nn.Module
@@ -31,16 +29,13 @@ class PriorCVAE(nn.Module):
     z_dim: int
 
     @nn.compact
-    def __call__(self, rng: Array, var: float, ls: float, f: Array):
+    def __call__(self, rng: Array, f: Array):
         batch_size = f.shape[0]
-        var = jnp.full((batch_size, 1), var)
-        ls = jnp.full((batch_size, 1), ls)
-        f_flat = f.reshape(batch_size, -1)
-        latents = self.encoder(jnp.hstack([f_flat, var, ls]))
+        latents = self.encoder(f.reshape(batch_size, -1))
         mu = nn.Dense(self.z_dim)(latents)
         log_var = nn.Dense(self.z_dim)(latents)
         std = jnp.exp(log_var / 2)
         eps = random.normal(rng, log_var.shape)
         z = mu + std * eps
-        f_hat = self.decoder(jnp.hstack([z, var, ls]))
+        f_hat = self.decoder(z)
         return f_hat.reshape(f.shape), mu, log_var
