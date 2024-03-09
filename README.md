@@ -1,6 +1,8 @@
 # Deep Generative Emulation (dge)
 
 ## TODO
+- [ ] Implement SPVAE
+    - [ ] Keep randomness constant, change locations - smooth curve?
 - [ ] Implement piVAE
 - [ ] Implement Diffusion
 - [X] Implement PriorVAE
