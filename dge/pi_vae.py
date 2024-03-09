@@ -37,6 +37,7 @@ class PiVAE(nn.Module):
         batch_size = s.shape[0]
         f_flat = f.reshape(batch_size, -1)
         s_flat = s.reshape(batch_size, -1)
+        # Try training on (s, f) -> f_enc -> z with (z, s) -> f_dec -> f_hat
         # TODO(danj): finish
         # |phi(s)| = num features per location
         # K tuples of (s, f) per row
