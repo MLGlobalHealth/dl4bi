@@ -12,6 +12,7 @@ from flax.training import train_state
 from jax import random
 from jax.scipy.stats.multivariate_normal import logpdf as mvn_logp
 from sps.gp import GP
+from sps.priors import Prior
 from tqdm import tqdm
 
 from dge import MLP, SPVAE
@@ -30,10 +31,10 @@ def main(kernel: str, num_batches: int):
     f_dim, z_dim = 32, 32
     key = random.key(42)
     rng_data, rng_init, rng_z, rng_train, rng_sample = random.split(key, 5)
-    loader = dataloader(rng_data, GP(kernel), f_dim)
+    loader = dataloader(rng_data, GP(kernel, ls=Prior("fixed", {"value": 0.2})), f_dim)
     s, f = next(loader)
-    encoder = MLP([128, z_dim])
-    decoder = MLP([128, f_dim])
+    encoder = MLP([256, z_dim])
+    decoder = MLP([256, f_dim])
     model = SPVAE(encoder, decoder, z_dim)
     state = TrainState.create(
         apply_fn=model.apply,
@@ -120,7 +121,7 @@ def parse_args(argv):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("-k", "--kernel", default="matern_3_2")
-    parser.add_argument("-n", "--num_batches", default=10000, type=int)
+    parser.add_argument("-n", "--num_batches", default=1000, type=int)
     return parser.parse_args(argv[1:])
 
 
