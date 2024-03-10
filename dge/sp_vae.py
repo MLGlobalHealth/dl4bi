@@ -10,6 +10,14 @@ from jax import Array, random
 class SPVAE(nn.Module):
     r"""SPVAE approximates any stochastic process.
 
+    SPVAE could be understood as an approximation of the
+    Karhunen-Loeve Expansion of a centered stochastic process:
+
+    $$f(s)=\sum_{j=1}^\infty\beta_j\phi_j(s)$$
+
+    Where the encoder is $f_\text{enc}:(\mathbf{s},\mathbf{f})\to\beta$
+    and the decoder is $f_\text{dec}:(\mathbf{s},\beta)\to\beta^\intercal\phi(\mathbf{s})$.
+
     Once trained, the module's `decoder` can be used as a generative
     model to simulate samples it was trained on.
 
