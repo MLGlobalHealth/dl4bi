@@ -31,6 +31,7 @@ class PiVAE(nn.Module):
     phi: nn.Module
     encoder: nn.Module
     decoder: nn.Module
+    z_dim: int
 
     @nn.compact
     def __call__(self, rng: Array, s: Array, f: Array):
@@ -38,39 +39,36 @@ class PiVAE(nn.Module):
 
         Args:
             rng: A psuedo-random number generator.
-            s: A location array of shape `(B,K,D)` where
-                `B` is batch size, `K` is number of locations,
+            s: A location array of shape `(B,L,D)` where
+                `B` is batch size, `L` is number of locations,
                 and `D` is the dimension of each location.
             f: A function value array of shape `(B, K)`.
 
         Returns:
-            $\hat{\mathbf{f}}$, a recreation of the original $\mathbf{f}$,
-            along with $\mu$ and $\log(\sigma^2)$, which are often used
-            to calculate losses involving KL divergence.
+            $\hat{\mathbf{f}}_\beta=\beta^\intercal\phi(\mathbf{s})$, $\hat{f}
+            _{\hat{\beta}}=\hat{\beta}^\intercal\phi(\mathbf{s})$, $\mu_z$, and
+            $\log(\sigma_z^2)$.
         """
-        batch_size = s.shape[0]
-        f_flat = f.reshape(batch_size, -1)
-        s_flat = s.reshape(batch_size, -1)
-        # TODO(danj): finish
-        # s in BxKxD
-        # phi(s) in BxKxF
-        # beta in BxF
-        # beta_T_phi_s = (beta[:, None, :] * phi(s)).sum(axis=-1)
-        # jnp.einsum('BF,BKF->BK')
-        phi_s = self.phi(s_flat)
-        betas = self.param(
-            "betas",
-            nn.initializers.lecun_normal(),
-            (batch_size, s_flat.shape[-1]),
-        )
-        latents = self.encoder(betas.weights)
+        B, L, D = s.shape  # B=batch, L=num locations, D=location dim
+        phi_s = self.phi(s.reshape(-1, D)).reshape(B, L, -1)  # BxLxF
+        F = phi_s.shape[-1]  # F=|phi(s_i)|, the feature dimensionality
+        betas = self.param("betas", nn.initializers.lecun_normal(), (B, F))
+        f_hat_beta = jnp.einsum("BF,BLF->BL", betas, phi_s)
+        # NOTE: When training the VAE, the betas should be fixed, i.e. you
+        # do not want the input betas being updated via backprop because they
+        # weren't close enough to the predicted beta_hats. To do this, you need
+        # to extract the frozen beta parameters, not the traced jax arrays.
+        betas_fixed = self.variables["params"]["betas"]
+        latents = self.encoder(betas_fixed)
+        latents = self.encoder(betas)
         mu = nn.Dense(self.z_dim)(latents)
         log_var = nn.Dense(self.z_dim)(latents)
         std = jnp.exp(log_var / 2)
         eps = random.normal(rng, log_var.shape)
         z = mu + std * eps
         beta_hats = self.decoder(z)
-        return f_hat.reshape(f.shape), mu, log_var, beta_hats
+        f_hat_beta_hat = jnp.einsum("BF,BLF->BL", beta_hats, phi_s)
+        return f_hat_beta, f_hat_beta_hat, mu, log_var
 
 
 @dataclass
@@ -104,7 +102,9 @@ class Phi(nn.Module):
             nn.initializers.lecun_normal(),
             (self.dims[0], x.shape[-1]),
         )
-        x = jnp.exp(-0.5 * l2_dist_sq(centers, x) / self.var)
+        # RBF layer
+        x = jnp.exp(-0.5 * l2_dist_sq(x, centers) / self.var)
+        # Linear layers
         for dim in self.dims[1:-1]:
             x = nn.Dense(dim)(x)
             x = self.act_fn(x)

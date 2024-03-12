@@ -29,10 +29,12 @@ class TrainState(train_state.TrainState):
 
 
 def main(kernel: str, num_batches: int):
-    f_dim, z_dim = 32, 32
+    f_dim, z_dim, loc_dim = 32, 32, (32, 1)
     key = random.key(42)
     rng_data, rng_init, rng_z, rng_train, rng_sample, rng_dropout = random.split(key, 6)
-    loader = dataloader(rng_data, GP(kernel, ls=Prior("fixed", {"value": 0.2})), f_dim)
+    loader = dataloader(
+        rng_data, GP(kernel, ls=Prior("fixed", {"value": 0.2})), loc_dim
+    )
     s, f = next(loader)
     encoder = MLP([256, z_dim])
     decoder = MLP([256, f_dim])
@@ -65,10 +67,10 @@ def main(kernel: str, num_batches: int):
     plt.savefig("sp_vae_f_vs_f_hat.png")
 
 
-def dataloader(key, gp, loc_dim, batch_size=64, approx=True):
+def dataloader(key, gp, loc_dims, batch_size=64, approx=True):
     while True:
         rng_gp, rng_loc, key = random.split(key, 3)
-        s = random.uniform(rng_loc, (batch_size, loc_dim)).sort(axis=1)[..., None]
+        s = random.uniform(rng_loc, (batch_size, *loc_dims)).sort(axis=1)
         f = []
         for i in range(batch_size):
             rng_gp_i, rng_gp = random.split(rng_gp)
@@ -119,8 +121,8 @@ def kl_divergence(mu, log_var):
 
 @jax.jit
 def compute_metrics(rng, state, batch):
-    x, f = batch
-    f_hat, mu, log_var = state.apply_fn({"params": state.params}, rng, x, f)
+    s, f = batch
+    f_hat, mu, log_var = state.apply_fn({"params": state.params}, rng, s, f)
     loss = neg_elbo(f, f_hat, mu, log_var)
     metric_updates = state.metrics.single_from_model_output(f_hat=f_hat, f=f, loss=loss)
     metrics = state.metrics.merge(metric_updates)

@@ -82,7 +82,7 @@ def compute_metrics(state, batch):
     var, ls, z, f = batch
     f_hat = state.apply_fn({"params": state.params}, z, var, ls)
     loss = optax.squared_error(f_hat, f.squeeze()).mean()
-    metric_updates = state.metrics.single_from_model_output(f_hat=f_hat, f=f, loss=loss)
+    metric_updates = state.metrics.single_from_model_output(loss=loss)
     metrics = state.metrics.merge(metric_updates)
     return state.replace(metrics=metrics)
 

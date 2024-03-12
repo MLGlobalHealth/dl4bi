@@ -105,7 +105,7 @@ def compute_metrics(rng, state, batch):
     var, ls, _, f = batch
     f_hat, mu, log_var = state.apply_fn({"params": state.params}, rng, var, ls, f)
     loss = neg_elbo(f, f_hat, mu, log_var)
-    metric_updates = state.metrics.single_from_model_output(f_hat=f_hat, f=f, loss=loss)
+    metric_updates = state.metrics.single_from_model_output(loss=loss)
     metrics = state.metrics.merge(metric_updates)
     return state.replace(metrics=metrics)
 
