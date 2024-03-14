@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-from dataclasses import dataclass
-
 import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
 
 
-@dataclass
 class SPVAE(nn.Module):
     r"""SPVAE approximates any stochastic process.
 

@@ -1,12 +1,10 @@
 from collections.abc import Callable
-from dataclasses import dataclass
 
 import flax.linen as nn
 import jax.numpy as jnp
 from jax import Array
 
 
-@dataclass
 class DeepChol(nn.Module):
     r"""`DeepChol` learns to approximate the function $f_\theta:(\mathbf{z},\text{var},\text{ls})\to\mathbf{Lz}$.
 

@@ -4,6 +4,10 @@
 - [ ] Implement Diffusion
 - [X] Implement SPVAE
     - [ ] Keep randomness constant, change locations - smooth curve?
+    - [ ] Use additive positional encodings
+    - [ ] Can we do this only with Attention and relative embeddings?
+        - https://arxiv.org/abs/1803.02155
+        - https://arxiv.org/abs/2006.03654
 - [X] Implement piVAE
 - [X] Implement PriorVAE
 - [X] Implement DeepChol

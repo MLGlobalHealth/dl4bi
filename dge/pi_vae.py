@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from collections.abc import Callable
-from dataclasses import dataclass
 
 import jax.numpy as jnp
 from flax import linen as nn
@@ -8,7 +7,6 @@ from jax import Array, jit, random
 from jax.typing import ArrayLike
 
 
-@dataclass
 class PiVAE(nn.Module):
     r"""PiVAE approximates a stochastic process.
 
