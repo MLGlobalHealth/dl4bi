@@ -16,17 +16,17 @@
 1. Install [jax](https://jax.readthedocs.io/en/latest/installation.html)
 2. Install the `dge` package from git:
 ```bash
-pip install git+ssh://git@github.com/danjenson/dge.git
+pip install git+ssh://git@github.com/MLGlobalHealth/dge.git
 ```
 
 ## View Documentation (Locally)
 ```bash
 pip install pdoc
-git clone git@github.com:danjenson/dge.git
+git clone git@github.com:MLGlobalHealth/dge.git
 cd dge
 pdoc --docformat google --math dge
 ```
-Example scripts can be found [here](https://github.com/danjenson/dge/tree/main/examples).
+Example scripts can be found [here](https://github.com/MLGlobalHealth/dge/tree/main/examples).
 
 ## Development Setup
 - Install Python 3.12:
