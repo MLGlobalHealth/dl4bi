@@ -58,7 +58,6 @@ class PiVAE(nn.Module):
         # to use the frozen beta parameters, not the traced jax arrays.
         betas_fixed = self.variables["params"]["betas"]
         latents = self.encoder(betas_fixed)
-        latents = self.encoder(betas)
         mu = nn.Dense(self.z_dim)(latents)
         log_var = nn.Dense(self.z_dim)(latents)
         std = jnp.exp(log_var / 2)
