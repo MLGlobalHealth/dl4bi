@@ -40,7 +40,7 @@ class PiVAE(nn.Module):
             s: A location array of shape `(B,L,D)` where
                 `B` is batch size, `L` is number of locations,
                 and `D` is the dimension of each location.
-            f: A function value array of shape `(B, K)`.
+            f: A function value array of shape `(B, L)`.
 
         Returns:
             $\hat{\mathbf{f}}_\beta=\beta^\intercal\phi(\mathbf{s})$, $\hat{f}
@@ -68,7 +68,6 @@ class PiVAE(nn.Module):
         return f_hat_beta, f_hat_beta_hat, mu, log_var
 
 
-@dataclass
 class Phi(nn.Module):
     r"""`Phi` approximates a collection of basis functions.
 
