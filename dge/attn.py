@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 
 class DotScorer(nn.Module):
-    r"""Performs dot product attention scoring.
+    r"""Performs dot product attention scoring from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
     $$a(\mathbf{q},\mathbf{k}) = \frac{\mathbf{q}^\intercal\mathbf{k}}{\sqrt{d}}$$
     """
@@ -18,7 +18,7 @@ class DotScorer(nn.Module):
 
 
 class AdditiveScorer(nn.Module):
-    r"""Performs additive attention scoring.
+    r"""Performs additive attention scoring from ["Neural Machine Translation by Jointly Learning to Align and Translate"](https://arxiv.org/abs/1409.0473).
 
     $$a(\mathbf{q},\mathbf{k}) = \mathbf{w}_v^\intercal(\mathbf{W}_q\mathbf{q}+\mathbf{W}_k\mathbf{k})$$
     """
@@ -33,6 +33,18 @@ class AdditiveScorer(nn.Module):
         feats = jnp.expand_dims(qs, axis=2) + jnp.expand_dims(ks, axis=1)
         feats = nn.tanh(feats)
         return nn.Dense(1, use_bias=False)(feats).squeeze(-1)
+
+
+class MultiplicativeScorer(nn.Module):
+    r"""Performs multiplicative attention scoring from ["Effective Approaches to Attention-based Neural Machine Translation"](https://arxiv.org/abs/1508.04025).
+
+    $$a(\mathbf{q},\mathbf{k}) = \mathbf{q}^\intercal\mathbf{W}_a\mathbf{k}$$
+    """
+
+    @nn.compact
+    def __call__(self, qs: jax.Array, ks: jax.Array):
+        qs = nn.Dense(qs.shape[-1], use_bias=False)(qs)
+        return DotScorer()(qs, ks)
 
 
 class Attention(nn.Module):
@@ -57,9 +69,8 @@ class Attention(nn.Module):
         return attn @ vs, attn
 
 
-# source: https://d2l.ai/chapter_attention-mechanisms-and-transformers/attention-scoring-functions.html
 def masked_softmax(scores: jax.Array, valid_lens: Optional[jax.Array] = None):
-    """Performs softmax on a 3D logits array using an optional 1 or 2 dim `valid_lens`."""
+    """Performs softmax on a 3D logits array using an optional 1 or 2 dim `valid_lens` from [d2l](https://d2l.ai/chapter_attention-mechanisms-and-transformers/attention-scoring-functions.html)"""
     if valid_lens is None:
         return nn.softmax(scores, axis=-1)
 
