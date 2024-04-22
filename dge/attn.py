@@ -47,8 +47,71 @@ class MultiplicativeScorer(nn.Module):
         return DotScorer()(qs, ks)
 
 
+# TODO(danj): implement https://github.com/YannDubs/Neural-Process-Family/blob/master/npf/architectures/attention.py
+class CosineSimilarityScorer(nn.Module):
+    """Performs cosine similarity attention scoring."""
+
+    @nn.compact
+    def __call__(self, qs: jax.Array, ks: jax.Array):
+        pass
+
+
+# TODO(danj): implement https://github.com/YannDubs/Neural-Process-Family/blob/master/npf/architectures/attention.py
+class DistanceScorer(nn.Module):
+    """Performs `p_norm` distance-based attention scoring."""
+
+    p_norm: int = 1
+
+    @nn.compact
+    def __call__(self, qs: jax.Array, ks: jax.Array):
+        pass
+
+
 class Attention(nn.Module):
-    """Performs (masked) query-key-value attention with dropout."""
+    r"""Performs (masked) query-key-value attention with dropout.
+
+    .. note:: This assumes all queries, keys, and values are already embedded, i.e.
+        $$
+        \begin{aligned}
+            \mathbf{Q}&=\mathbf{W}^Q\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
+            \mathbf{K}&=\mathbf{W}^K\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
+            \mathbf{V}&=\mathbf{W}^V\mathbf{Y}\in\mathbb{R}^{N\times D_V} \\\\
+        \end{aligned}
+        $$
+    """
+
+    scorer: nn.Module = DotScorer()
+    p_dropout: float = 0.0
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, D_Q]
+        ks: jax.Array,  # [B, K, D_K]
+        vs: jax.Array,  # [B, V, D_V]
+        valid_lens: Optional[jax.Array] = None,  # [B] or [B, Q]
+        training=False,
+    ):
+        d = qs.shape[-1]
+        scores = self.scorer(qs, ks)
+        attn = masked_softmax(scores, valid_lens)
+        attn = nn.Dropout(self.p_dropout, deterministic=not training)(attn)
+        return attn @ vs, attn
+
+
+# TODO(danj): impelement
+class MultiheadAttention(nn.Module):
+    r"""Performs multihead (masked) query-key-value attention with dropout.
+
+    .. note:: This assumes all queries, keys, and values are already embedded, i.e.
+        $$
+        \begin{aligned}
+            \mathbf{Q}&=\mathbf{W}^Q\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
+            \mathbf{K}&=\mathbf{W}^K\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
+            \mathbf{V}&=\mathbf{W}^V\mathbf{Y}\in\mathbb{R}^{N\times D_V} \\\\
+        \end{aligned}
+        $$
+    """
 
     scorer: nn.Module = DotScorer()
     p_dropout: float = 0.0

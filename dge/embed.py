@@ -8,8 +8,7 @@ from .mlp import MLP
 
 
 class FixedSinusoidalEmbedding(nn.Module):
-    r"""Fixed sinusoidal positional encoding from "Attention Is All You Need":
-        https://arxiv.org/abs/1706.03762.
+    r"""Fixed sinusoidal positional encoding from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
     $$
     \begin{aligned}
@@ -38,7 +37,7 @@ def _pe_attn_sinusoidal(d):
 
 
 class NeRFEmbedding(nn.Module):
-    r"""Positional encoding with MLP from NeRF: https://arxiv.org/abs/2003.08934.
+    r"""Positional encoding with MLP from ["NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis"](https://arxiv.org/abs/2003.08934).
 
     $$
     \begin{aligned}
@@ -69,8 +68,8 @@ def _pe_nerf_sinusoidal(d):
 
 # TODO(danj): learn/optimize var?
 class GaussianFourierEmbedding(nn.Module):
-    r"""Gaussian Fourier Feature (GFF) positional encoding from "Fourier
-        Features...": https://arxiv.org/abs/2006.10739.
+    r"""Gaussian Fourier Feature (GFF) positional encoding from ["Fourier Features Let Networks Learn
+        High Frequency Functions in Low Dimensional Domains"](https://arxiv.org/abs/2006.10739).
 
     Must provide a starting $\mathbf{B}$, which can be generated with `B =
     random.normal(key, (embed_dim, input_dim))`.
