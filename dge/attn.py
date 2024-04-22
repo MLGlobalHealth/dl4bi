@@ -92,14 +92,13 @@ class Attention(nn.Module):
         valid_lens: Optional[jax.Array] = None,  # [B] or [B, Q]
         training=False,
     ):
-        d = qs.shape[-1]
         scores = self.scorer(qs, ks)
         attn = masked_softmax(scores, valid_lens)
         attn = nn.Dropout(self.p_dropout, deterministic=not training)(attn)
         return attn @ vs, attn
 
 
-# TODO(danj): impelement
+# TODO(danj): add valid lens here: https://d2l.ai/chapter_attention-mechanisms-and-transformers/multihead-attention.html
 class MultiheadAttention(nn.Module):
     r"""Performs multihead (masked) query-key-value attention with dropout.
 
@@ -113,20 +112,27 @@ class MultiheadAttention(nn.Module):
         $$
     """
 
+    num_heads: int = 4
     scorer: nn.Module = DotScorer()
     p_dropout: float = 0.0
 
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,  # [B, Q, D_Q]
-        ks: jax.Array,  # [B, K, D_K]
+        qs: jax.Array,  # [B, Q, D_QK]
+        ks: jax.Array,  # [B, K, D_QK]
         vs: jax.Array,  # [B, V, D_V]
         valid_lens: Optional[jax.Array] = None,  # [B] or [B, Q]
         training=False,
     ):
-        d = qs.shape[-1]
-        scores = self.scorer(qs, ks)
+        (B, Q, D_QK), K, D_V, H = qs.shape, ks.shape[1], vs.shape[-1], self.num_heads
+        D_QK_H, D_V_H = D_QK // H, D_V // H
+        qs, ks, vs = nn.Dense(D_QK)(qs), nn.Dense(D_QK)(ks), nn.Dense(D_V)(vs)
+        # [B, {Q,K}, D_{QK,V}] -> [H * B, {Q,K}, D_{QK,V}_H]
+        qs = qs.reshape(B, Q, H, D_QK_H).transpose(2, 0, 1, 3).reshape(-1, Q, D_QK_H)
+        ks = ks.reshape(B, K, H, D_QK_H).transpose(2, 0, 1, 3).reshape(-1, K, D_QK_H)
+        vs = vs.reshape(B, K, H, D_V_H).transpose(2, 0, 1, 3).reshape(-1, K, D_V_H)
+        scores = self.scorer(qs, ks)  # [H * B, Q, K]
         attn = masked_softmax(scores, valid_lens)
         attn = nn.Dropout(self.p_dropout, deterministic=not training)(attn)
         return attn @ vs, attn
