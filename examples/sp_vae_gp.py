@@ -2,6 +2,7 @@
 import argparse
 import sys
 
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -29,16 +30,19 @@ class TrainState(train_state.TrainState):
 
 
 def main(kernel: str, num_batches: int):
-    f_dim, z_dim, loc_dim = 32, 32, (32, 1)
+    f_dim, z_dim, loc_dim = 32, 128, (32, 1)
+    num_holdout = 1
+    p_holdout = 1 / f_dim
     key = random.key(42)
     rng_data, rng_init, rng_z, rng_train, rng_sample, rng_dropout = random.split(key, 6)
     loader = dataloader(
-        rng_data, GP(kernel, ls=Prior("fixed", {"value": 0.2})), loc_dim
+        rng_data, GP(kernel, ls=Prior("fixed", {"value": 0.3})), loc_dim
     )
     s, f = next(loader)
-    encoder = MLP([256, z_dim])
-    decoder = MLP([256, f_dim])
-    model = SPVAE(encoder, decoder, z_dim)
+    depth = 1
+    encoder = MLP([256] * depth + [z_dim], nn.elu)
+    decoder = MLP([256] * depth + [f_dim], nn.elu)
+    model = SPVAE(encoder, decoder, z_dim, p_holdout)
     state = TrainState.create(
         apply_fn=model.apply,
         params=model.init(rng_init, rng_z, s, f)["params"],
@@ -59,23 +63,35 @@ def main(kernel: str, num_batches: int):
                 state = state.replace(metrics=state.metrics.empty())
                 pbar.set_postfix(loss=f"{metrics['train_loss'][-1]:.3f}")
     s, f = next(loader)
-    f_hat, _, _ = state.apply_fn({"params": state.params}, rng_sample, s, f)
+    s, f, f_hat, _, _ = state.apply_fn({"params": state.params}, rng_sample, s, f)
     plt.title("f vs f_hat samples")
-    s_5 = s[:5].squeeze().T
-    plt.plot(s_5, f[:5].squeeze().T, color="black")
-    plt.plot(s_5, f_hat[:5].squeeze().T, color="red")
+    n = 2
+    s_n = s[:n].squeeze()
+    f_n = f[:n].squeeze()
+    f_hat_n = f_hat[:n].squeeze()
+    s_n_p = s_n[:, -num_holdout:]
+    f_hat_n_p = f_hat_n[:, -num_holdout:]
+    idx = jnp.argsort(s_n, axis=1)
+    s_n = jnp.take_along_axis(s_n, idx, axis=1)
+    f_n = jnp.take_along_axis(f_n, idx, axis=1)
+    f_hat_n = jnp.take_along_axis(f_hat_n, idx, axis=1)
+    plt.scatter(s_n.T, f_n.T, color="black")
+    plt.scatter(s_n.T, f_hat_n.T, color="red")
+    plt.scatter(s_n_p.T, f_hat_n_p.T, color="green")
+    plt.plot(s_n.T, f_n.T, color="black")
+    plt.plot(s_n.T, f_hat_n.T, color="red")
     plt.savefig("sp_vae_f_vs_f_hat.png")
 
 
 def dataloader(key, gp, loc_dims, batch_size=64, approx=True):
     while True:
         rng_gp, rng_loc, key = random.split(key, 3)
-        s = random.uniform(rng_loc, (batch_size, *loc_dims)).sort(axis=1)
+        s = random.uniform(rng_loc, (batch_size, *loc_dims))
         f = []
         for i in range(batch_size):
             rng_gp_i, rng_gp = random.split(rng_gp)
             _, _, _, _f = gp.simulate(rng_gp_i, s[i], 1, approx)
-            f += [_f]
+            f += [_f.squeeze(0)]
         yield s, jnp.array(f)
 
 
@@ -86,9 +102,9 @@ def train_step(rng, state, batch):
 
     def loss_fn(params):
         s, f = batch
-        f_hat, mu, log_var = state.apply_fn(
+        s, f, f_hat, mu, log_var = state.apply_fn(
             {"params": params},
-            rng,
+            rng_z,
             s,
             f,
             training=False,  # NOTE: switch to True to enable dropout
@@ -122,9 +138,9 @@ def kl_divergence(mu, log_var):
 @jax.jit
 def compute_metrics(rng, state, batch):
     s, f = batch
-    f_hat, mu, log_var = state.apply_fn({"params": state.params}, rng, s, f)
+    s, f, f_hat, mu, log_var = state.apply_fn({"params": state.params}, rng, s, f)
     loss = neg_elbo(f, f_hat, mu, log_var)
-    metric_updates = state.metrics.single_from_model_output(f_hat=f_hat, f=f, loss=loss)
+    metric_updates = state.metrics.single_from_model_output(loss=loss)
     metrics = state.metrics.merge(metric_updates)
     return state.replace(metrics=metrics)
 
