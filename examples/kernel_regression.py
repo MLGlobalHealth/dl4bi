@@ -39,7 +39,7 @@ def main(key, func, embedder, scorer, p_dropout):
     rng_data, rng_init, rng_dropout = random.split(key, 3)
     max_x, num_context, num_test = 100, 50, 50
     s = jnp.linspace(0.0, max_x, num=max_x * 10)
-    period = 25  # lengthen period for graphics
+    period = 15  # lengthen period for graphics
     f = func(s / period)
     loader = dataloader(key, s, f, num_context, num_test, batch_size)
     (s_ctx, f_ctx), (s_test, f_test) = next(loader)
@@ -146,14 +146,14 @@ def get_scorer(name: str):
     raise ValueError(f"Invalid scorer: {name}")
 
 
-def get_embedder(name: str, key: jax.Array):
+def get_embedder(name: str, key: jax.Array, embed_dim: int = 64):
     match name:
         case "sinusoidal":
-            return FixedSinusoidalEmbedding()
+            return FixedSinusoidalEmbedding(embed_dim)
         case "nerf":
-            return NeRFEmbedding()
+            return NeRFEmbedding(embed_dim)
         case "fourier":
-            B = random.normal(key, (32, 1))
+            B = random.normal(key, (embed_dim, 1))
             return GaussianFourierEmbedding(B)
     raise ValueError(f"Invalid embedder: {name}")
 
@@ -167,6 +167,7 @@ def parse_args(argv):
     parser.add_argument("-f", "--func", default="sine")
     parser.add_argument("-s", "--scorer", default="dot")
     parser.add_argument("-e", "--embedder", default="sinusoidal")
+    parser.add_argument("-d", "--embed_dim", type=int, default=64)
     parser.add_argument("-p", "--p_dropout", type=float, default=0.5)
     return parser.parse_args(argv[1:])
 
@@ -175,6 +176,6 @@ if __name__ == "__main__":
     args = parse_args(sys.argv)
     key = random.key(args.key)
     func = get_func(args.func)
-    embedder = get_embedder(args.embedder, key)
+    embedder = get_embedder(args.embedder, key, args.embed_dim)
     scorer = get_scorer(args.scorer)
     main(key, func, embedder, scorer, args.p_dropout)
