@@ -20,7 +20,7 @@ class FixedSinusoidalEmbedding(nn.Module):
     .. warning:: This maps each element of the last dimension independently: $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times D\times E}$.
     """
 
-    embed_dim: int = 32
+    embed_dim: int = 256
 
     def setup(self):
         self.pe = _pe_attn_sinusoidal(self.embed_dim)
@@ -49,11 +49,11 @@ class NeRFEmbedding(nn.Module):
     .. warning:: This maps each element of the last dimension independently: $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times D\times E}$.
     """
 
-    embed_dim: int = 32
-    f_theta: nn.Module = MLP([32, 32])
+    embed_dim: int = 256
 
     def setup(self):
         self.pe = _pe_nerf_sinusoidal(self.embed_dim)
+        self.f_theta = nn.Dense(self.embed_dim)
 
     def __call__(self, s: jax.Array):
         return self.f_theta(self.pe(s))
@@ -86,14 +86,15 @@ class GaussianFourierEmbedding(nn.Module):
 
     B: jax.Array  # [embed_dim, input_dim]
     var: float = 10.0
-    f_theta: nn.Module = MLP([32, 32])
 
     def setup(self):
         self.pe = _pe_gaussian_fourier(self.B, self.var)
         self.embed_dim = self.B.shape[0]
+        self.f_theta = nn.Dense(self.embed_dim)
 
     def __call__(self, s):
-        s = s[..., None] if self.B.shape[1] == 1 else s
+        embed_dim, input_dim = self.B.shape
+        s = s[..., None] if input_dim == 1 else s
         return self.f_theta(self.pe(s))
 
 

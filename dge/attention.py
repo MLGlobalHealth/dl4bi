@@ -76,10 +76,19 @@ class Attention(nn.Module):
 
     Returns:
         An `Attention` module.
+
+    .. note:: This assumes all queries, keys, and values are already embedded, i.e.
+        $$
+        \begin{aligned}
+            \mathbf{Q}&=\mathbf{W}^Q\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
+            \mathbf{K}&=\mathbf{W}^K\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
+            \mathbf{V}&=\mathbf{W}^V\mathbf{Y}\in\mathbb{R}^{N\times D_V} \\\\
+        \end{aligned}
+        $$
     """
 
     scorer: nn.Module = DotScorer()
-    p_dropout: float = 0.0
+    p_dropout: float = 0.3
 
     @nn.compact
     def __call__(
@@ -102,15 +111,6 @@ class Attention(nn.Module):
 
         Returns:
             `ctx` and `attn`, the updated values and attention weights.
-
-        .. note:: This assumes all queries, keys, and values are already embedded, i.e.
-            $$
-            \begin{aligned}
-                \mathbf{Q}&=\mathbf{W}^Q\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
-                \mathbf{K}&=\mathbf{W}^K\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
-                \mathbf{V}&=\mathbf{W}^V\mathbf{Y}\in\mathbb{R}^{N\times D_V} \\\\
-            \end{aligned}
-            $$
         """
         scores = self.scorer(qs, ks)
         attn = masked_softmax(scores, valid_lens)
@@ -128,6 +128,15 @@ class MultiheadAttention(nn.Module):
 
     Returns:
         A `MultiheadAttention` module.
+
+    .. note:: This assumes all queries, keys, and values are already embedded, i.e.
+        $$
+        \begin{aligned}
+            \mathbf{Q}&=\mathbf{W}^Q\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
+            \mathbf{K}&=\mathbf{W}^K\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
+            \mathbf{V}&=\mathbf{W}^V\mathbf{Y}\in\mathbb{R}^{N\times D_V} \\\\
+        \end{aligned}
+        $$
     """
 
     attention: nn.Module = Attention()
@@ -154,15 +163,6 @@ class MultiheadAttention(nn.Module):
 
         Returns:
             `ctx` and `attn`, the updated values and attention weights.
-
-        .. note:: This assumes all queries, keys, and values are already embedded, i.e.
-            $$
-            \begin{aligned}
-                \mathbf{Q}&=\mathbf{W}^Q\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
-                \mathbf{K}&=\mathbf{W}^K\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
-                \mathbf{V}&=\mathbf{W}^V\mathbf{Y}\in\mathbb{R}^{N\times D_V} \\\\
-            \end{aligned}
-            $$
         """
         (B, Q, D_QK), K, D_V, H = qs.shape, ks.shape[1], vs.shape[-1], self.num_heads
         D_QK_H, D_V_H = D_QK // H, D_V // H
