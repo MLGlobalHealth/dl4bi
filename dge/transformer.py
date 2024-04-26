@@ -117,4 +117,5 @@ class TransformerDecoderBlock(nn.Module):
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
+        # TODO(danj): implement (may not need?)
         pass
