@@ -36,6 +36,7 @@ def _pe_attn_sinusoidal(d: int):
     return _pe_sinusoidal(f, d)
 
 
+# TODO(danj): period makes a huge difference here...
 def _pe_nerf_sinusoidal(d: int):
     f = lambda i, s: 2**i * jnp.pi * s
     return _pe_sinusoidal(f, d)
