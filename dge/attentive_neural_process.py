@@ -43,7 +43,7 @@ class AttentiveNeuralProcess(nn.Module):
         vs_global_mean = vs_global.mean(axis=1)
         z_mu = self.dec_z_mu(vs_global_mean, training)
         z_log_var = self.dec_z_log_var(vs_global_mean, training)
-        zs_global = z_mu + jnp.exp(z_log_var) * random.normal(key, z_mu.shape)
+        zs_global = z_mu + jnp.exp(z_log_var / 2) * random.normal(key, z_mu.shape)
         # decoding context to (mu_f, log_var_f) for every test location
         zs_global = jnp.repeat(zs_global[:, jnp.newaxis, :], qs.shape[1], axis=1)
         ctx = jnp.concatenate([qs, ctx_local, zs_global], -1)
