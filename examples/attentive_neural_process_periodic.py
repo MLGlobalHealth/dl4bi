@@ -2,6 +2,7 @@
 import argparse
 import sys
 
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -90,7 +91,6 @@ def main(key, func, embedder, scorer, p_dropout, embed_dim, num_batches, batch_s
     _, f_test_mu, f_test_log_var = state.apply_fn(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_test
     )
-    print(jnp.exp(f_ctx_log_var / 2))
     s_all = jnp.linspace(0.0, 1000, num=10000)
     f_all = func(s_all / period)
     plt.plot(s_all.squeeze(), f_all.squeeze())
@@ -137,7 +137,8 @@ def train_step(rng_dropout, rng_sample, state, batch):
             training=True,
             rngs={"dropout": rng_dropout},
         )
-        return -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2)).mean()
+        nll = -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2))
+        return nn.relu(nll).sum()  # relu for when variance collapses
 
     grad_fn = jax.grad(loss_fn)
     grads = grad_fn(state.params)
@@ -150,8 +151,9 @@ def compute_metrics(rng_sample, state, batch):
     zs_global, f_mu, f_log_var = state.apply_fn(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_test
     )
-    nll = -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2)).mean()
-    metric_updates = state.metrics.single_from_model_output(loss=nll)
+    nll = -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2))
+    loss = nn.relu(nll).sum()
+    metric_updates = state.metrics.single_from_model_output(loss=loss)
     metrics = state.metrics.merge(metric_updates)
     return state.replace(metrics=metrics)
 
