@@ -6,10 +6,12 @@ import jax.numpy as jnp
 from jax import jit, vmap
 from jax.tree_util import Partial
 
+from .mlp import MLP
+
 
 class LearnableEmbedding(nn.Module):
-    embed_s: Callable
-    post_process: Callable
+    embed_s: Callable = lambda s: s
+    post_process: Callable = MLP([256, 256])
 
     @nn.compact
     def __call__(self, s: jax.Array, training=False):

@@ -25,10 +25,7 @@ def test_transformer_encoder():
         FixedSinusoidalEmbedding(embed_dim // feature_dim),
         NeRFEmbedding(embed_dim // feature_dim),
         GaussianFourierEmbedding(B),
-        LearnableEmbedding(
-            FixedSinusoidalEmbedding(embed_dim // feature_dim),
-            MLP([embed_dim, embed_dim]),
-        ),
+        LearnableEmbedding(post_process=MLP([embed_dim, embed_dim])),
     ]:
         s_e, _ = embedder.init_with_output(rng_init, s)
         for scorer in [AdditiveScorer(), MultiplicativeScorer(), DotScorer()]:
@@ -40,3 +37,4 @@ def test_transformer_encoder():
                 seq_len,
                 embed_dim,
             ), "Incorrect encoder output shape!"
+            assert jnp.isnan(f).sum() == 0, "Returned nans!"
