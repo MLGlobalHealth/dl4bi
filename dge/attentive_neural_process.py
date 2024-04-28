@@ -13,16 +13,16 @@ from .transformer import TransformerEncoder
 
 class AttentiveNeuralProcess(nn.Module):
     embed_s: nn.Module = LearnableEmbedding(
-        FixedSinusoidalEmbedding(128), MLP([128, 128])
+        FixedSinusoidalEmbedding(128), MLP([128 * 2, 128])
     )
     embed_s_and_f: nn.Module = LearnableEmbedding(
-        FixedSinusoidalEmbedding(128), MLP([128, 128])
+        FixedSinusoidalEmbedding(128), MLP([128 * 2, 128])
     )
     enc_ctx_local: nn.Module = TransformerEncoder()
     enc_ctx_global: nn.Module = TransformerEncoder()
     cross_attn: nn.Module = MultiheadAttention()
-    dec_z_mu: nn.Module = MLP([128, 128])
-    dec_z_log_var: nn.Module = MLP([128, 128])
+    dec_z_mu: nn.Module = MLP([128 * 2, 128], p_dropout=0.0)
+    dec_z_log_var: nn.Module = MLP([128 * 2, 128], p_dropout=0.0)
     dec_f_mu: nn.Module = MLP([128 * 3, 128 * 2, 128, 1], p_dropout=0.0)
     dec_f_log_var: nn.Module = MLP([128 * 3, 128 * 2, 128, 1], p_dropout=0.0)
 

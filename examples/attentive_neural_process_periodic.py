@@ -47,26 +47,30 @@ def main(
     num_batches,
     batch_size,
 ):
-    max_x, num_context, num_test, period = 200, 50, 50, 15
+    max_train_s, freq, num_context, num_test = 0.2, 15, 50, 50
     rng_embed, rng_data, rng_init, rng_sample, rng_train = random.split(key, 5)
     # if you don't normalize, the identity positional embedding will explode
-    s = jnp.linspace(0.0, max_x, num=max_x * 10)[..., None] / max_x
-    f = func(s / period)
-    loader = dataloader(rng_data, s, f, num_context, num_test, batch_size)
-    (s_ctx, f_ctx), (s_test, f_test) = next(loader)
+    s = jnp.linspace(0.0, 1.0, num=10000)
+    f = func(s * freq * 2 * jnp.pi)
+    s_test = jnp.array([[[0.732], [0.828], [0.987]]])
+    f_test = func(s_test * freq * 2 * jnp.pi)
+    train_idx = s < max_train_s
+    s_train, f_train = s[train_idx, None], f[train_idx, None]
+    loader = dataloader(rng_data, s_train, f_train, num_context, num_test, batch_size)
+    (s_ctx_init, f_ctx_init), (s_test_init, _) = next(loader)
     embed_s = LearnableEmbedding(
         get_embedder(pos_embed, rng_embed, embed_dim, 1),
-        MLP([embed_dim] * 6),
+        MLP([embed_dim * 2, embed_dim]),
     )
     embed_s_and_f = LearnableEmbedding(
         get_embedder(pos_embed, rng_embed, embed_dim, 2),
-        MLP([embed_dim] * 6),
+        MLP([embed_dim * 2, embed_dim]),
     )
     enc_ctx_local = TransformerEncoder(scorer.copy())
     enc_ctx_global = TransformerEncoder(scorer.copy())
     cross_attn = MultiheadAttention(scorer.copy())
-    dec_z_mu = MLP([embed_dim, embed_dim])
-    dec_z_log_var = MLP([embed_dim, embed_dim])
+    dec_z_mu = MLP([embed_dim * 2, embed_dim], p_dropout=0.0)
+    dec_z_log_var = MLP([embed_dim * 2, embed_dim], p_dropout=0.0)
     dec_f_mu = MLP([embed_dim * 3, embed_dim * 2, embed_dim, 1], p_dropout=0.0)
     dec_f_log_var = MLP([embed_dim * 3, embed_dim * 2, embed_dim, 1], p_dropout=0.0)
     m = AttentiveNeuralProcess(
@@ -82,7 +86,9 @@ def main(
     )
     state = TrainState.create(
         apply_fn=m.apply,
-        params=m.init(rng_init, rng_sample, s_ctx, f_ctx, s_test)["params"],
+        params=m.init(rng_init, rng_sample, s_ctx_init, f_ctx_init, s_test_init)[
+            "params"
+        ],
         tx=optax.adam(1e-3),
         metrics=Metrics.empty(),
     )
@@ -100,17 +106,13 @@ def main(
                 pbar.set_postfix(loss=f"{metrics['train_loss'][-1]:.3f}")
     (s_ctx, f_ctx), _ = next(loader)
     s_ctx, f_ctx = s_ctx[[0], ...], f_ctx[[0], ...]
-    s_test = jnp.array([[[732], [828], [987]]])
-    f_test = func(s_test / period)
     _, f_ctx_mu, f_ctx_log_var = state.apply_fn(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_ctx
     )
     _, f_test_mu, f_test_log_var = state.apply_fn(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_test
     )
-    s_all = jnp.linspace(0.0, 1000, num=10000)
-    f_all = func(s_all / period)
-    plt.plot(s_all.squeeze(), f_all.squeeze())
+    plt.plot(s, f)
     plt.scatter(s_ctx.squeeze(), f_ctx.squeeze(), color="black", alpha=0.5)
     plt.scatter(s_ctx.squeeze(), f_ctx_mu.squeeze(), color="red", alpha=0.5)
     plt.scatter(s_test.squeeze(), f_test.squeeze(), color="green", alpha=0.5)
