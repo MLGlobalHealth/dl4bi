@@ -15,10 +15,10 @@ from .transformer import TransformerEncoder
 # TODO(danj): try different global pooling mechanisms (max-pooling instead of mean)
 class AttentiveNeuralProcess(nn.Module):
     embed_s: nn.Module = LearnableEmbedding(
-        FixedSinusoidalEmbedding(128), MLP([128, 128], p_dropout=0.0)
+        FixedSinusoidalEmbedding(128), MLP([128, 128])
     )
     embed_s_and_f: nn.Module = LearnableEmbedding(
-        FixedSinusoidalEmbedding(128), MLP([128, 128], p_dropout=0.0)
+        FixedSinusoidalEmbedding(128), MLP([128, 128])
     )
     enc_ctx_local: nn.Module = TransformerEncoder()
     enc_ctx_global: nn.Module = TransformerEncoder()

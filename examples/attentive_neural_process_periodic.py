@@ -55,11 +55,11 @@ def main(
     (s_ctx, f_ctx), (s_test, f_test) = next(loader)
     embed_s = LearnableEmbedding(
         get_embedder(pos_embed, rng_embed, embed_dim, 1),
-        MLP([embed_dim, embed_dim], p_dropout=0.0),
+        MLP([embed_dim, embed_dim]),
     )
     embed_s_and_f = LearnableEmbedding(
         get_embedder(pos_embed, rng_embed, embed_dim, 2),
-        MLP([embed_dim, embed_dim], p_dropout=0.0),
+        MLP([embed_dim, embed_dim]),
     )
     enc_ctx_local = TransformerEncoder(scorer.copy())
     enc_ctx_global = TransformerEncoder(scorer.copy())
@@ -68,8 +68,8 @@ def main(
     # TODO(danj): original paper has these as the same network
     dec_z_mu = MLP([embed_dim, embed_dim])
     dec_z_log_var = MLP([embed_dim, embed_dim])
-    dec_f_mu = MLP([embed_dim * 3, embed_dim * 2, embed_dim, 1])
-    dec_f_log_var = MLP([embed_dim * 3, embed_dim * 2, embed_dim, 1])
+    dec_f_mu = MLP([embed_dim * 3, embed_dim * 2, embed_dim, 1], p_dropout=0.0)
+    dec_f_log_var = MLP([embed_dim * 3, embed_dim * 2, embed_dim, 1], p_dropout=0.0)
     m = AttentiveNeuralProcess(
         embed_s,
         embed_s_and_f,
