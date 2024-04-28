@@ -21,6 +21,7 @@ from dge import (
     DotScorer,
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
+    LearnableEmbedding,
     MultiheadAttention,
     NeRFEmbedding,
     TransformerEncoder,
@@ -36,16 +37,32 @@ class TrainState(train_state.TrainState):
     metrics: Metrics
 
 
-def main(key, func, embedder, scorer, p_dropout, embed_dim, num_batches, batch_size):
+def main(
+    key,
+    func,
+    pos_embed,
+    scorer,
+    p_dropout,
+    embed_dim,
+    num_batches,
+    batch_size,
+):
     max_x, num_context, num_test, period = 200, 50, 50, 15
-    rng_data, rng_init, rng_sample, rng_train = random.split(key, 4)
+    rng_embed, rng_data, rng_init, rng_sample, rng_train = random.split(key, 5)
     s = jnp.linspace(0.0, max_x, num=max_x * 10)[..., None]
     f = func(s / period)
     loader = dataloader(rng_data, s, f, num_context, num_test, batch_size)
     (s_ctx, f_ctx), (s_test, f_test) = next(loader)
-    embed_s = embedder.copy()
-    enc_s_and_f_local = TransformerEncoder(embedder.copy(), scorer.copy())
-    enc_s_and_f_global = TransformerEncoder(embedder.copy(), scorer.copy())
+    embed_s = LearnableEmbedding(
+        get_embedder(pos_embed, rng_embed, embed_dim, 1),
+        MLP([embed_dim, embed_dim], p_dropout=0.0),
+    )
+    embed_s_and_f = LearnableEmbedding(
+        get_embedder(pos_embed, rng_embed, embed_dim, 2),
+        MLP([embed_dim, embed_dim], p_dropout=0.0),
+    )
+    enc_ctx_local = TransformerEncoder(scorer.copy())
+    enc_ctx_global = TransformerEncoder(scorer.copy())
     # TODO(danj): add post cross-attn linear layer like paper?
     cross_attn = MultiheadAttention(scorer.copy())
     # TODO(danj): original paper has these as the same network
@@ -55,8 +72,9 @@ def main(key, func, embedder, scorer, p_dropout, embed_dim, num_batches, batch_s
     dec_f_log_var = MLP([embed_dim * 3, embed_dim * 2, embed_dim, 1])
     m = AttentiveNeuralProcess(
         embed_s,
-        enc_s_and_f_local,
-        enc_s_and_f_global,
+        embed_s_and_f,
+        enc_ctx_local,
+        enc_ctx_global,
         cross_attn,
         dec_z_mu,
         dec_z_log_var,
@@ -99,7 +117,7 @@ def main(key, func, embedder, scorer, p_dropout, embed_dim, num_batches, batch_s
     plt.scatter(s_test.squeeze(), f_test.squeeze(), color="green", alpha=0.5)
     plt.scatter(s_test.squeeze(), f_test_mu.squeeze(), color="red", alpha=0.5)
     plt.title("f_test vs f_test_hat samples")
-    plt.savefig(f"{embedder.__class__.__name__}.pdf")
+    plt.savefig(f"{pos_embed}.pdf")
 
 
 def dataloader(key, s, f, num_context, num_test, batch_size=128, eps=0.1):
@@ -176,14 +194,16 @@ def get_scorer(name: str):
     raise ValueError(f"Invalid scorer: {name}")
 
 
-def get_embedder(name: str, key: jax.Array, embed_dim: int = 64):
+def get_embedder(name: str, key: jax.Array, embed_dim: int = 64, feature_dim: int = 1):
     match name:
+        case "identity":
+            return jax.jit(lambda s: s)
         case "sinusoidal":
-            return FixedSinusoidalEmbedding(embed_dim)
+            return FixedSinusoidalEmbedding(embed_dim // feature_dim)
         case "nerf":
-            return NeRFEmbedding(embed_dim)
+            return NeRFEmbedding(embed_dim // feature_dim)
         case "fourier":
-            B = random.normal(key, (embed_dim, 1))
+            B = random.normal(key, (embed_dim // 2, feature_dim))
             return GaussianFourierEmbedding(B)
     raise ValueError(f"Invalid embedder: {name}")
 
@@ -196,7 +216,7 @@ def parse_args(argv):
     parser.add_argument("-k", "--key", type=int, default=42)
     parser.add_argument("-f", "--func", default="sine")
     parser.add_argument("-s", "--scorer", default="dot")
-    parser.add_argument("-e", "--embedder", default="sinusoidal")
+    parser.add_argument("-e", "--pos_embed", default="sinusoidal")
     parser.add_argument("-d", "--embed_dim", type=int, default=128)
     parser.add_argument("-p", "--p_dropout", type=float, default=0.5)
     parser.add_argument("-n", "--num_batches", type=int, default=500)
@@ -208,12 +228,11 @@ if __name__ == "__main__":
     args = parse_args(sys.argv)
     key = random.key(args.key)
     func = get_func(args.func)
-    embedder = get_embedder(args.embedder, key, args.embed_dim)
     scorer = get_scorer(args.scorer)
     main(
         key,
         func,
-        embedder,
+        args.pos_embed,
         scorer,
         args.p_dropout,
         args.embed_dim,

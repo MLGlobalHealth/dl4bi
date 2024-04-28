@@ -7,6 +7,15 @@ from jax import jit, vmap
 from jax.tree_util import Partial
 
 
+class LearnableEmbedding(nn.Module):
+    embed_s: Callable
+    post_process: Callable
+
+    @nn.compact
+    def __call__(self, s: jax.Array, training=False):
+        return self.post_process(self.embed_s(s), training)
+
+
 class FixedSinusoidalEmbedding(nn.Module):
     r"""Fixed sinusoidal positional encoding from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
@@ -69,17 +78,16 @@ class NeRFEmbedding(nn.Module):
     @nn.compact
     def __call__(self, s: jax.Array):
         B, L, D = s.shape
-        s = _pe_nerf_sinusoidal(self.embed_dim)(s).reshape(B, L, D * self.embed_dim)
-        return nn.Dense(D * self.embed_dim)(s)
+        return _pe_nerf_sinusoidal(self.embed_dim)(s).reshape(B, L, D * self.embed_dim)
 
 
-# TODO(danj): learn/optimize var?
+# TODO(danj): test optimized var?
 class GaussianFourierEmbedding(nn.Module):
     r"""Gaussian Fourier Feature (GFF) positional encoding from ["Fourier Features Let Networks Learn
         High Frequency Functions in Low Dimensional Domains"](https://arxiv.org/abs/2006.10739).
 
     Must provide a starting $\mathbf{B}$, which can be generated with `B =
-    random.normal(key, (embed_dim, input_dim))`.
+    random.normal(key, (embed_dim // 2, input_dim))`.
 
     $$
     \begin{aligned}
@@ -93,13 +101,13 @@ class GaussianFourierEmbedding(nn.Module):
     """
 
     B: jax.Array  # [embed_dim, input_dim]
-    var: float = 10.0
+    var_init: Callable = nn.initializers.constant(10.0)
 
     @nn.compact
     def __call__(self, s):
         embed_dim, input_dim = self.B.shape
-        s = _pe_gaussian_fourier(self.B, self.var)(s)
-        return nn.Dense(embed_dim)(s)
+        var = self.param("var", self.var_init, (1,))
+        return _pe_gaussian_fourier(self.B, var)(s)
 
 
 def _pe_gaussian_fourier(B, var):

@@ -65,7 +65,6 @@ class TransformerEncoder(nn.Module):
     """A transformer encoder inspired by ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
     Args:
-        embedder: Embedding module for input points.
         scorer: Scoring module used to calculate query-key attention.
         num_heads: Number of attention heads per encoder block.
         num_blks: Number of encoder blocks.
@@ -75,7 +74,6 @@ class TransformerEncoder(nn.Module):
         Input transformed by the encoder.
     """
 
-    embedder: nn.Module = FixedSinusoidalEmbedding()
     scorer: nn.Module = DotScorer()
     num_heads: int = 4
     num_blks: int = 3
@@ -88,7 +86,6 @@ class TransformerEncoder(nn.Module):
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
-        x = self.embedder(x)
         for _ in range(self.num_blks):
             x = TransformerEncoderBlock(
                 self.scorer.copy(), self.num_heads, self.p_dropout

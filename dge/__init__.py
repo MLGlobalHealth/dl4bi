@@ -7,7 +7,12 @@ from .attention import (
 )
 from .attentive_neural_process import AttentiveNeuralProcess
 from .deep_chol import DeepChol
-from .embed import FixedSinusoidalEmbedding, GaussianFourierEmbedding, NeRFEmbedding
+from .embed import (
+    FixedSinusoidalEmbedding,
+    GaussianFourierEmbedding,
+    LearnableEmbedding,
+    NeRFEmbedding,
+)
 from .kernel_regressor import KernelRegressor
 from .mlp import MLP
 from .pi_vae import Phi, PiVAE
