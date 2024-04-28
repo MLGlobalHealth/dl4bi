@@ -106,33 +106,28 @@ def main(
                 pbar.set_postfix(loss=f"{metrics['train_loss'][-1]:.3f}")
     (s_ctx, f_ctx), _ = next(loader)
     s_ctx, f_ctx = s_ctx[[0], ...], f_ctx[[0], ...]
-    _, f_ctx_mu, f_ctx_log_var = state.apply_fn(
-        {"params": state.params}, rng_sample, s_ctx, f_ctx, s_ctx
+    s_all = s[None, :, None]
+    _, f_all_mu, f_all_log_var = state.apply_fn(
+        {"params": state.params}, rng_sample, s_ctx, f_ctx, s_all
     )
     _, f_test_mu, f_test_log_var = state.apply_fn(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_test
     )
-    plt.plot(s, f)
+    plt.plot(s, f, color="black", label="f_true")
+    plt.plot(s, f_all_mu.squeeze(), color="red", label="f_mu_hat")
     plt.scatter(
         s_ctx.squeeze(),
         f_ctx.squeeze(),
         color="black",
         alpha=0.5,
-        label="noisy train samples",
-    )
-    plt.scatter(
-        s_ctx.squeeze(),
-        f_ctx_mu.squeeze(),
-        color="red",
-        alpha=0.5,
-        label="predictions",
+        label="train: f_true + eps",
     )
     plt.scatter(
         s_test.squeeze(),
         f_test.squeeze(),
         color="green",
         alpha=0.5,
-        label="test samples",
+        label="test: f_true",
     )
     plt.scatter(
         s_test.squeeze(),
@@ -145,7 +140,7 @@ def main(
         loc="upper center",
         bbox_to_anchor=(0.5, -0.05),
         fancybox=True,
-        ncol=3,
+        ncol=4,
     )
     plt.tight_layout()
     plt.savefig(f"{pos_embed}.pdf")
