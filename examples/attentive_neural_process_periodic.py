@@ -113,11 +113,41 @@ def main(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_test
     )
     plt.plot(s, f)
-    plt.scatter(s_ctx.squeeze(), f_ctx.squeeze(), color="black", alpha=0.5)
-    plt.scatter(s_ctx.squeeze(), f_ctx_mu.squeeze(), color="red", alpha=0.5)
-    plt.scatter(s_test.squeeze(), f_test.squeeze(), color="green", alpha=0.5)
-    plt.scatter(s_test.squeeze(), f_test_mu.squeeze(), color="red", alpha=0.5)
-    plt.title("f_test vs f_test_hat samples")
+    plt.scatter(
+        s_ctx.squeeze(),
+        f_ctx.squeeze(),
+        color="black",
+        alpha=0.5,
+        label="noisy train samples",
+    )
+    plt.scatter(
+        s_ctx.squeeze(),
+        f_ctx_mu.squeeze(),
+        color="red",
+        alpha=0.5,
+        label="predictions",
+    )
+    plt.scatter(
+        s_test.squeeze(),
+        f_test.squeeze(),
+        color="green",
+        alpha=0.5,
+        label="test samples",
+    )
+    plt.scatter(
+        s_test.squeeze(),
+        f_test_mu.squeeze(),
+        color="red",
+        alpha=0.5,
+    )
+    plt.title(f"{pos_embed.title()} Embeddings")
+    plt.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.05),
+        fancybox=True,
+        ncol=3,
+    )
+    plt.tight_layout()
     plt.savefig(f"{pos_embed}.pdf")
 
 
