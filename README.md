@@ -3,11 +3,12 @@
 ## TODO
 - [ ] Implement Diffusion
 - [X] Implement ANP
-    - [ ] Fix identity embedding
-    - [ ] Compare embeddings: identity, sinusidal, nerf, fourier
+    - [X] Fix identity embedding
+    - [X] Compare embeddings: identity, sinusidal, nerf, fourier
     - [ ] MLP after cross-attn
     - [ ] Use joint MLP network for mu and var (z and f)
     - [ ] Test optimized var in fourier embedding
+    - [ ] Add optimized vars to other embeddings
     - [ ] Use same self-attn network for local and global paths
     - [ ] Incorporate valid lens
     - [ ] Try different pooling mechanism for global zs, e.g. max pooling
