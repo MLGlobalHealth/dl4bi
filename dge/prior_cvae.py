@@ -5,7 +5,7 @@ from jax import Array, random
 
 
 class PriorCVAE(nn.Module):
-    r"""PriorCVAE approximates a Gaussian Process.
+    r"""[PriorCVAE](https://arxiv.org/pdf/2304.04307) approximates a Gaussian Process.
 
     Once trained, the module's `decoder` can be used as a generative
     model to simulate a GP from the samples it was trained on.

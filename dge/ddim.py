@@ -4,9 +4,7 @@ from jax import Array, random
 
 
 class DDIM(nn.Module):
-    """Denoising Diffusion Implicity Model.
-
-    Reference: https://arxiv.org/abs/2010.02502
+    """[Denoising Diffusion Implicit Model](https://arxiv.org/abs/2010.02502).
 
     Args:
         beta: Variance schedule array.

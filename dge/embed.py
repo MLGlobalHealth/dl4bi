@@ -10,12 +10,12 @@ from .mlp import MLP
 
 
 class LearnableEmbedding(nn.Module):
-    embed_s: Callable = lambda s: s
+    map: Callable = lambda x: x
     post_process: Callable = MLP([256, 256])
 
     @nn.compact
     def __call__(self, s: jax.Array, training=False):
-        return self.post_process(self.embed_s(s), training)
+        return self.post_process(self.map(s), training)
 
 
 class FixedSinusoidalEmbedding(nn.Module):
@@ -28,10 +28,11 @@ class FixedSinusoidalEmbedding(nn.Module):
     \end{aligned}
     $$
 
-    .. warning:: This maps each element of the last dimension independently and
-        then concatenates: $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times DE}$.
-        For example, a 3 dimensional point `(x,y,z)` will get mapped to a `3*embed_dim`
-        embedding.
+    .. warning::
+        This maps each element of the last dimension independently and then
+        concatenates: $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times
+        DE}$. For example, a 3 dimensional point `(x,y,z)` will get mapped to a
+        `3*embed_dim` embedding.
     """
 
     embed_dim: int = 256
@@ -69,10 +70,11 @@ class NeRFEmbedding(nn.Module):
     \end{aligned}
     $$
 
-    .. warning:: This maps each element of the last dimension independently and
-        then concatenates: $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times DE}$.
-        For example, a 3 dimensional point `(x,y,z)` will get mapped to a `3*embed_dim`
-        embedding.
+    .. warning::
+        This maps each element of the last dimension independently and then
+        concatenates: $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times
+        DE}$. For example, a 3 dimensional point `(x,y,z)` will get mapped to a
+        `3*embed_dim` embedding.
     """
 
     embed_dim: int = 256
@@ -97,8 +99,9 @@ class GaussianFourierEmbedding(nn.Module):
     \end{aligned}
     $$
 
-    .. warning:: This maps every element of the last dimension together:
-        $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times E}$.
+    .. warning::
+        This maps every element of the last dimension together: $\mathbb{R}
+        ^{\ldots\times D}\to\mathbb{R}^{\ldots\times E}$.
     """
 
     B: jax.Array  # [embed_dim, input_dim]

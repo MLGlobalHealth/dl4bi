@@ -8,7 +8,7 @@ from jax.typing import ArrayLike
 
 
 class PiVAE(nn.Module):
-    r"""PiVAE approximates a stochastic process.
+    r"""[PiVAE](https://arxiv.org/abs/2002.06873) approximates a stochastic process.
 
     Once trained, the module's `decoder` can be used as a generative
     model to simulate samples from the approximated process.

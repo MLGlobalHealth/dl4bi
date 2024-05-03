@@ -5,7 +5,10 @@ from .attention import (
     MultiheadAttention,
     MultiplicativeScorer,
 )
-from .attentive_neural_process import AttentiveNeuralProcess
+from .attentive_neural_process import (
+    AttentiveNeuralProcess,
+    neural_process_maximum_likelihood_loss,
+)
 from .deep_chol import DeepChol
 from .embed import (
     FixedSinusoidalEmbedding,

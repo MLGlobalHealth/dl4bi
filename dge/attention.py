@@ -180,11 +180,11 @@ class MultiheadAttention(nn.Module):
         )
         # [B * H, Q, D_V_H] -> [B, Q, D_V]
         ctx = ctx.reshape(B, H, Q, D_V_H).transpose(0, 2, 1, 3).reshape(B, Q, D_V)
-        return ctx, attn.reshape(B, H, Q, K)
+        return nn.Dense(D_V)(ctx), attn.reshape(B, H, Q, K)
 
 
 def masked_softmax(scores: jax.Array, valid_lens: Optional[jax.Array] = None):
-    r"""Performs softmax on a 3D logits array using an optional 1 or 2 dim `valid_lens` from [d2l](https://d2l.ai/chapter_attention-mechanisms-and-transformers/attention-scoring-functions.html).
+    r"""Performs softmax on a 3D logits array using an optional 1 or 2 dim `valid_lens` from [d2l](https://d2l.ai/ chapter_attention-mechanisms-and-transformers/attention-scoring-functions.html).
 
     Args:
         scores: Scores of dimension $\mathbb{R}^{B\times Q\times K}$

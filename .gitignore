@@ -1,2 +1,4 @@
-*.png
+*/outputs/**
 *.pdf
+*.pkl
+*.png
