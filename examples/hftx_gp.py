@@ -59,8 +59,7 @@ def main(cfg: DictConfig):
     var, ls = Prior("fixed", {"value": 1.0}), Prior("fixed", {"value": 0.2})
     periodic_task = Task(name="Periodic", kernel=periodic_0_1, var=var, ls=ls)
     matern_3_2_task = Task(name="Matern 3-2", kernel=matern_3_2, var=var, ls=ls)
-    # for task in [matern_3_2_task, periodic_task]:
-    for task in [periodic_task]:
+    for task in [matern_3_2_task, periodic_task]:
         print(task.name)
         rng_loader, rng_hmc, rng_tr, key = random.split(key, 4)
         gp = GP(task.kernel, task.var, task.ls)
@@ -82,11 +81,11 @@ def main(cfg: DictConfig):
         plot_posterior_predictive_params(
             task.name, s_ctx, f_ctx, valid_len, s_test, f_test, f_noisy, f_mu, f_log_var
         )
-        # gp_model = build_gp_model(task.kernel)
-        # pp = hmc(task, gp_model, rng_hmc, s_ctx, f_ctx, valid_len, cfg.infer)
-        # plot_posterior_predictive_samples(
-        #     task.name, s_ctx, f_ctx, valid_len, s, f, f_noisy, pp["obs"]
-        # )
+        gp_model = build_gp_model(task.kernel)
+        pp = hmc(task, gp_model, rng_hmc, s_ctx, f_ctx, valid_len, cfg.infer)
+        plot_posterior_predictive_samples(
+            task.name, s_ctx, f_ctx, valid_len, s, f, f_noisy, pp["obs"]
+        )
 
 
 def dataloader(
