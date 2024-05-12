@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from .attention import MultiheadAttention
 from .embed import LearnableEmbedding
 from .mlp import MLP
-from .transformer import TransformerEncoder
+from .transformer import TransformerDecoder, TransformerEncoder
 
 
 class HFTx(nn.Module):
@@ -17,8 +17,7 @@ class HFTx(nn.Module):
         embed_s: An embedding module for locations.
         embed_s_f: A module or combining embedded locations and function values.
         enc: An encoder module for observed points.
-        cross_attn: A cross-attention module for matching context and test points.
-        dec: A decoder module for test points.
+        dec: A decoder module for target points.
 
     Returns:
         An instance of the `HFTx` model.
@@ -30,10 +29,10 @@ class HFTx(nn.Module):
     """
 
     embed_s: nn.Module = LearnableEmbedding(lambda x: x, MLP([128] * 3))
-    embed_s_f: nn.Module = MLP([128] * 3)
+    embed_s_f: nn.Module = MLP([128])
     enc: nn.Module = TransformerEncoder()
-    cross_attn: nn.Module = MultiheadAttention()
-    dec: nn.Module = MLP([128] * 3 + [2])
+    dec: nn.Module = TransformerDecoder()
+    head: nn.Module = MLP([128] * 2 + [2])
 
     @nn.compact
     def __call__(
@@ -43,6 +42,7 @@ class HFTx(nn.Module):
         s_test: jax.Array,  # [B, S_test, D_S]
         valid_lens: Optional[jax.Array] = None,  # [B] or [B, S_ctx]
         training: bool = False,
+        **kwargs,
     ):
         r"""Run module forward.
 
@@ -65,11 +65,12 @@ class HFTx(nn.Module):
         Returns:
             $\mu_f,\log(\sigma_f^2\in\mathbb{R}^{B\times S_\text{test}\times D_F}$.
         """
-        qs, ks = self.embed_s(s_test, training), self.embed_s(s_ctx, training)
-        s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
+        s_ctx_embed = self.embed_s(s_ctx, training)
+        s_test_embed = self.embed_s(s_test, training)
+        s_f_ctx = jnp.concatenate([s_ctx_embed, f_ctx], -1)
         s_f_ctx_embed = self.embed_s_f(s_f_ctx, training)
-        vs = self.enc(s_f_ctx_embed, valid_lens, training)
-        rs, _ = self.cross_attn(qs, ks, vs, valid_lens, training)
-        params = self.dec(rs, training)
-        f_mu, f_log_var = params[..., [0]], params[..., [1]]
+        s_f_enc = self.enc(s_f_ctx_embed, valid_lens, training, **kwargs)
+        s_f_dec = self.dec(s_test_embed, s_f_enc, None, valid_lens, training, **kwargs)
+        f_mu_log_var = self.head(s_f_dec, training)
+        f_mu, f_log_var = f_mu_log_var[..., [0]], f_mu_log_var[..., [1]]
         return f_mu, f_log_var

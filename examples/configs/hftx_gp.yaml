@@ -55,12 +55,17 @@ model:
             p_dropout: 0.0
         num_blks: 3
         p_dropout: 0.2
-    cross_attn:
-      cls: MultiheadFastSoftmaxAttention
-      # cls: MultiheadAttention
-      kwargs:
-        p_dropout: 0.0
     dec:
+      cls: TransformerDecoder
+      kwargs:
+        attention:
+          cls: MultiheadFastSoftmaxAttention
+          # cls: MultiheadAttention
+          kwargs:
+            p_dropout: 0.0
+        num_blks: 3
+        p_dropout: 0.2
+    head:
       cls: MLP
       kwargs:
         dims: ${eval:'[${shared.embed_dim}]*3+[2]'}

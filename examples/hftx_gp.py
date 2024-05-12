@@ -59,7 +59,8 @@ def main(cfg: DictConfig):
     var, ls = Prior("fixed", {"value": 1.0}), Prior("fixed", {"value": 0.2})
     periodic_task = Task(name="Periodic", kernel=periodic_0_1, var=var, ls=ls)
     matern_3_2_task = Task(name="Matern 3-2", kernel=matern_3_2, var=var, ls=ls)
-    for task in [matern_3_2_task, periodic_task]:
+    # for task in [matern_3_2_task, periodic_task]:
+    for task in [periodic_task]:
         print(task.name)
         rng_loader, rng_hmc, rng_tr, key = random.split(key, 4)
         gp = GP(task.kernel, task.var, task.ls)
