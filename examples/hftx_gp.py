@@ -84,7 +84,7 @@ def main(cfg: DictConfig):
         gp_model = build_gp_model(task.kernel)
         pp = hmc(task, gp_model, rng_hmc, s_ctx, f_ctx, valid_len, cfg.infer)
         plot_posterior_predictive_samples(
-            task.name, s_ctx, f_ctx, valid_len, s, f, f_noisy, pp["obs"]
+            task.name, s_ctx, f_ctx, valid_len, s_test, f_test, f_noisy, pp["obs"]
         )
 
 

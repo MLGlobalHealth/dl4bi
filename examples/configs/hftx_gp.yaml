@@ -16,7 +16,7 @@ infer:
   num_samples: 1000
 
 train:
-  num_batches: 5000
+  num_batches: 10000
 
 shared:
   pe_dim: 16
