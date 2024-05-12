@@ -8,6 +8,8 @@ from dge import (
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
     LearnableEmbedding,
+    MultiheadAttention,
+    MultiheadFastSoftmaxAttention,
     MultiplicativeScorer,
     NeRFEmbedding,
     TransformerEncoder,
@@ -29,7 +31,8 @@ def test_transformer_encoder():
     ]:
         s_e, _ = embedder.init_with_output(rng_init, s)
         for scorer in [AdditiveScorer(), MultiplicativeScorer(), DotScorer()]:
-            f, _ = TransformerEncoder(scorer).init_with_output(
+            attention = MultiheadAttention(scorer)
+            f, _ = TransformerEncoder(attention).init_with_output(
                 rng_init, s_e, valid_lens
             )
             assert f.shape == (
@@ -38,3 +41,12 @@ def test_transformer_encoder():
                 embed_dim,
             ), "Incorrect encoder output shape!"
             assert jnp.isnan(f).sum() == 0, "Returned nans!"
+        # test fast version too
+        attention = MultiheadFastSoftmaxAttention()
+        f, _ = TransformerEncoder(attention).init_with_output(rng_init, s_e, valid_lens)
+        assert f.shape == (
+            batch_size,
+            seq_len,
+            embed_dim,
+        ), "Incorrect encoder output shape!"
+        assert jnp.isnan(f).sum() == 0, "Returned nans!"

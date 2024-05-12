@@ -40,12 +40,8 @@ class AttentiveNeuralProcess(nn.Module):
         padded.
     """
 
-    embed_s: nn.Module = LearnableEmbedding(
-        FixedSinusoidalEmbedding(128), MLP([128 * 2, 128])
-    )
-    embed_s_and_f: nn.Module = LearnableEmbedding(
-        FixedSinusoidalEmbedding(128), MLP([128 * 2, 128])
-    )
+    embed_s: nn.Module = LearnableEmbedding(lambda x: x, MLP([128 * 2, 128]))
+    embed_s_f: nn.Module = LearnableEmbedding(lambda x: x, MLP([128 * 2, 128]))
     enc_ctx_local: nn.Module = TransformerEncoder()
     enc_ctx_global: nn.Module = TransformerEncoder()
     cross_attn: nn.Module = MultiheadAttention()
@@ -93,13 +89,13 @@ class AttentiveNeuralProcess(nn.Module):
         L, mask = self.num_mc_samples, None
         # embed (s,) and (s, f)
         qs, ks = self.embed_s(s_test, training), self.embed_s(s_ctx, training)
-        s_and_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
-        s_and_f_ctx_embed = self.embed_s_and_f(s_and_f_ctx, training)
+        s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
+        s_f_ctx_embed = self.embed_s_f(s_f_ctx, training)
         # local ("deterministic") path
-        vs_local = self.enc_ctx_local(s_and_f_ctx_embed, valid_lens, training)
+        vs_local = self.enc_ctx_local(s_f_ctx_embed, valid_lens, training)
         rs_local, _ = self.cross_attn(qs, ks, vs_local, valid_lens, training)
         # global ("latent") path
-        vs_global = self.enc_ctx_global(s_and_f_ctx_embed, valid_lens, training)
+        vs_global = self.enc_ctx_global(s_f_ctx_embed, valid_lens, training)
         if isinstance(valid_lens, jax.Array):  # only pool valid values
             mask = (jnp.arange(S_ctx)[None, :] < valid_lens[:, None])[..., None]
         vs_global_pooled = self.pool_func(vs_global, axis=1, where=mask)

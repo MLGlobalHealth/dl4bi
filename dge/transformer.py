@@ -6,8 +6,7 @@ from typing import Optional
 
 import flax.linen as nn
 import jax
-
-from dge.embed import FixedSinusoidalEmbedding
+import jax.numpy as jnp
 
 from .attention import DotScorer, MultiheadAttention
 
@@ -22,7 +21,7 @@ class AddNorm(nn.Module):
         Add-and-normed input.
     """
 
-    p_dropout: float
+    p_dropout: float = 0.0
 
     @nn.compact
     def __call__(self, x: jax.Array, y: jax.Array, training: bool = False):
@@ -35,15 +34,13 @@ class TransformerEncoderBlock(nn.Module):
 
     Args:
         attention: Attention module, defaults to `MultiheadAttention`.
-        p_dropout: Dropout rate for input `y`.
 
     Returns:
         Input transformed by a single self-attention encoder block.
     """
 
-    scorer: nn.Module = DotScorer()
-    num_heads: int = 4
-    p_dropout: float = 0.3
+    attention: nn.Module = MultiheadAttention()
+    p_dropout: float = 0.0
 
     @nn.compact
     def __call__(
@@ -53,9 +50,7 @@ class TransformerEncoderBlock(nn.Module):
         training: bool = False,
     ):
         d = x.shape[-1]
-        ctx, attn = MultiheadAttention(self.scorer, self.num_heads, self.p_dropout)(
-            x, x, x, valid_lens, training
-        )
+        ctx, attn = self.attention(x, x, x, valid_lens, training)
         y = AddNorm(self.p_dropout)(x, ctx, training)
         ctx = nn.Sequential([nn.Dense(d), nn.relu, nn.Dense(d)])(y)
         return AddNorm(self.p_dropout)(y, ctx, training)
@@ -65,7 +60,7 @@ class TransformerEncoder(nn.Module):
     """A transformer encoder inspired by ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
     Args:
-        scorer: Scoring module used to calculate query-key attention.
+        attention: Attention module to use.
         num_heads: Number of attention heads per encoder block.
         num_blks: Number of encoder blocks.
         p_dropout: Dropout rate for output.
@@ -74,10 +69,9 @@ class TransformerEncoder(nn.Module):
         Input transformed by the encoder.
     """
 
-    scorer: nn.Module = DotScorer()
-    num_heads: int = 4
+    attention: nn.Module = MultiheadAttention()
     num_blks: int = 3
-    p_dropout: float = 0.3
+    p_dropout: float = 0.0
 
     @nn.compact
     def __call__(
@@ -86,33 +80,68 @@ class TransformerEncoder(nn.Module):
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
-        for _ in range(self.num_blks):
+        x = TransformerEncoderBlock(self.attention, self.p_dropout)(
+            x, valid_lens, training
+        )
+        for i in range(1, self.num_blks):
             x = TransformerEncoderBlock(
-                self.scorer.copy(), self.num_heads, self.p_dropout
+                self.attention.copy(name=f"attention_{i}"), self.p_dropout
             )(x, valid_lens, training)
         return x
 
 
+# TODO(danj): test implementation
 class TransformerDecoderBlock(nn.Module):
     """A single decoder block from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
     Args:
-        scorer: Scoring module used to calculate query-key attention.
-        p_dropout: Dropout rate for input `y`.
+        i: Identity of block.
+        attention: Attention module to use.
 
     Returns:
         Input transformed by a single decoder block.
     """
 
-    scorer: nn.Module = DotScorer()
-    p_dropout: float = 0.3
+    i: int
+    attention: nn.Module = MultiheadAttention()
+    p_dropout: float = 0.0
 
     @nn.compact
-    def __call__(
-        self,
-        x: jax.Array,
-        valid_lens: Optional[jax.Array] = None,
-        training: bool = False,
-    ):
-        # TODO(danj): implement (may not need?)
-        pass
+    def __call__(self, x, state, training=False):
+        d = x.shape[-1]
+        enc_outputs, enc_valid_lens, vs = state[0], state[1], state[2][self.i]
+        vs = x if vs is None else jnp.concatenate((vs, x), axis=1)
+        state[2][self.i] = vs
+        # TODO(danj): perhaps remove this for our case?
+        if training:
+            B, S_test, _ = x.shape
+            dec_valid_lens = jnp.tile(jnp.arange(1, S_test + 1), (B, 1))
+        else:
+            dec_valid_lens = None
+        x2, attn1 = self.attention(x, vs, vs, dec_valid_lens, training)
+        y = AddNorm(self.p_dropout)(x, x2, training)
+        y2, attn2 = self.attention.copy(name="enc_attention")(
+            y, enc_outputs, enc_outputs, enc_valid_lens, training
+        )
+        z = AddNorm(self.p_dropout)(y, y2, training)
+        z2 = nn.Sequential([nn.Dense(d), nn.relu, nn.Dense(d)])(z)
+        return AddNorm(self.p_dropout)(z, z2, training), state, attn1, attn2
+
+
+# TODO(danj): test implementation
+class TransformerDecoder(nn.Module):
+    attention: nn.Module = MultiheadAttention()
+    num_blks: int = 3
+    p_dropout: float = 0.0
+
+    @nn.compact
+    def __call__(self, x, state, training=False):
+        d = x.shape[-1]
+        x, state, _, _ = TransformerDecoderBlock(0, self.attention, self.p_dropout)(
+            x, state, training
+        )
+        for i in range(1, self.num_blks):
+            x, state, _, _ = TransformerDecoderBlock(
+                i, self.attention.copy(name=f"attention_{i}"), self.p_dropout
+            )(x, state, training)
+        return nn.Dense(d)(x), state

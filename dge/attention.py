@@ -88,7 +88,7 @@ class Attention(nn.Module):
     """
 
     scorer: nn.Module = DotScorer()
-    p_dropout: float = 0.3
+    p_dropout: float = 0.0
 
     @nn.compact
     def __call__(
@@ -97,7 +97,7 @@ class Attention(nn.Module):
         ks: jax.Array,  # [B, K, D_K]
         vs: jax.Array,  # [B, V, D_V]
         valid_lens: Optional[jax.Array] = None,  # [B] or [B, Q]
-        training=False,
+        training: bool = False,
     ):
         r"""Performs forward pass of network.
 
@@ -141,7 +141,7 @@ class MultiheadAttention(nn.Module):
 
     scorer: nn.Module = DotScorer()
     num_heads: int = 4
-    p_dropout: float = 0.3
+    p_dropout: float = 0.0
 
     @nn.compact
     def __call__(

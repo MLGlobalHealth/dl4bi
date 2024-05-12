@@ -43,8 +43,8 @@ class FixedSinusoidalEmbedding(nn.Module):
         return _pe_attn_sinusoidal(self.embed_dim)(s).reshape(B, L, D * self.embed_dim)
 
 
-def _pe_attn_sinusoidal(d: int):
-    f = lambda i, s: s / (10000 ** (2 * i / d))
+def _pe_attn_sinusoidal(d: int, max_len: float = 10000):
+    f = lambda i, s: s / (max_len ** (2 * i / d))
     return _pe_sinusoidal(f, d)
 
 
@@ -105,13 +105,11 @@ class GaussianFourierEmbedding(nn.Module):
     """
 
     B: jax.Array  # [embed_dim, input_dim]
-    var_init: Callable = nn.initializers.constant(10.0)
+    var: float = 10.0
 
     @nn.compact
     def __call__(self, s):
-        embed_dim, input_dim = self.B.shape
-        var = self.param("var", self.var_init, (1,))
-        return _pe_gaussian_fourier(self.B, var)(s)
+        return _pe_gaussian_fourier(self.B, self.var)(s)
 
 
 def _pe_gaussian_fourier(B, var):
