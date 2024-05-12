@@ -14,7 +14,7 @@ import jax.numpy as jnp
 from jax import jit, lax, random, vmap
 
 
-def gaussian_orf(key, m, d, structured=True):
+def gaussian_orf(key: jax.Array, m: int, d: int, structured: bool = True):
     r"""Generates Gaussian [Orthogonal Random Features (ORF)](https://arxiv.org/abs/1610.09072).
 
     These features are used by [FAVOR+](https://arxiv.org/abs/2009.14794).
@@ -44,7 +44,7 @@ def gaussian_orf(key, m, d, structured=True):
     return jnp.diag(multiplier) @ b
 
 
-def build_positive_softmax_phi(proj):
+def build_positive_softmax_phi(proj: jax.Array):
     r"""Builds the positive softmax kernel from equation (7) in [FAVOR+](https://arxiv.org/abs/2009.14794).
 
     Args:
@@ -61,7 +61,7 @@ def build_positive_softmax_phi(proj):
     return build_phi(h, [jnp.exp], proj)
 
 
-def build_phi(h, funcs, proj):
+def build_phi(h: Callable, funcs: list[Callable], proj: jax.Array):
     r"""Builds $phi\mathbf{x})$ from equation (5) of [FAVOR+](https://arxiv.org/abs/2009.14794).
 
     Args:
