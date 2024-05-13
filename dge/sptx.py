@@ -10,8 +10,8 @@ from .mlp import MLP
 from .transformer import TransformerDecoder, TransformerEncoder
 
 
-class HFTx(nn.Module):
-    """A High Frequency Transformer (HFTx).
+class SPTx(nn.Module):
+    """A Stochastic Process Transformer (SPTx).
 
     Args:
         embed_s: An embedding module for locations.
@@ -21,7 +21,7 @@ class HFTx(nn.Module):
         head: A prediction head for decoded output.
 
     Returns:
-        An instance of the `HFTx` model.
+        An instance of the `SPTx` model.
 
     .. warning::
         `valid_lens` applies only to input context sequences, `s_ctx`. Test

@@ -23,7 +23,7 @@ shared:
   embed_dim: 64
 
 model:
-  cls: HFTx
+  cls: SPTx
   kwargs:
     embed_s:
       cls: LearnableEmbedding

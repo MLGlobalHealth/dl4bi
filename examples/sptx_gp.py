@@ -50,7 +50,7 @@ class Task:
     ls: Prior
 
 
-@hydra.main("configs", "hftx_gp", None)
+@hydra.main("configs", "sptx_gp", None)
 def main(cfg: DictConfig):
     key = random.key(42)
     OmegaConf.register_new_resolver("eval", eval)
@@ -81,11 +81,11 @@ def main(cfg: DictConfig):
         plot_posterior_predictive_params(
             task.name, s_ctx, f_ctx, valid_len, s_test, f_test, f_noisy, f_mu, f_log_var
         )
-        gp_model = build_gp_model(task.kernel)
-        pp = hmc(task, gp_model, rng_hmc, s_ctx, f_ctx, valid_len, cfg.infer)
-        plot_posterior_predictive_samples(
-            task.name, s_ctx, f_ctx, valid_len, s_test, f_test, f_noisy, pp["obs"]
-        )
+        # gp_model = build_gp_model(task.kernel)
+        # pp = hmc(task, gp_model, rng_hmc, s_ctx, f_ctx, valid_len, cfg.infer)
+        # plot_posterior_predictive_samples(
+        #     task.name, s_ctx, f_ctx, valid_len, s_test, f_test, f_noisy, pp["obs"]
+        # )
 
 
 def dataloader(
@@ -224,8 +224,8 @@ def plot_posterior_predictive_params(
     ax = plt.gca()
     ax.set_xlabel("s")
     ax.set_ylabel("f")
-    plt.title(f"HFTx: {name} Posterior Predictive")
-    plt.savefig(f"HFTx: {name} Posterior Predictive.pdf", dpi=600)
+    plt.title(f"SPTx: {name} Posterior Predictive")
+    plt.savefig(f"SPTx: {name} Posterior Predictive.pdf", dpi=600)
     plt.clf()
 
 
