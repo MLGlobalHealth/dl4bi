@@ -37,7 +37,7 @@ def test_transformer_encoder():
                 rng_init, s_e, valid_lens
             )
             f_dec, _ = TransformerDecoder(attention).init_with_output(
-                rng_init, s_e, f_enc, None, valid_lens
+                rng_init, s_e, f_enc, valid_lens, valid_lens
             )
             for name, f in [("encoder", f_enc), ("decoder", f_dec)]:
                 assert f_enc.shape == (
@@ -52,7 +52,7 @@ def test_transformer_encoder():
             rng_init, s_e, valid_lens
         )
         f_dec, _ = TransformerDecoder(attention).init_with_output(
-            rng_init, s_e, f_enc, None, valid_lens
+            rng_init, s_e, f_enc, valid_lens, valid_lens
         )
         for name, f in [("encoder", f_enc), ("decoder", f_dec)]:
             assert f_enc.shape == (

@@ -41,7 +41,8 @@ class SPTx(nn.Module):
         s_ctx: jax.Array,  # [B, S_ctx, D_S]
         f_ctx: jax.Array,  # [B, S_ctx, D_F]
         s_test: jax.Array,  # [B, S_test, D_S]
-        valid_lens: Optional[jax.Array] = None,  # [B] or [B, S_ctx]
+        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
+        valid_lens_test: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         **kwargs,
     ):
@@ -58,8 +59,10 @@ class SPTx(nn.Module):
             s_test: A location array of shape `[B, S_test, D_S]` where `B` is
                 batch size, `S_test` is number of test locations, and `D_S`
                 is the dimension of each location.
-            valid_lens: An optional array of shape `(B,)` indicating the
+            valid_lens_ctx: An optional array of shape `(B,)` indicating the
                 valid positions for each `S_ctx` sequence in the batch.
+            valid_lens_test: An optional array of shape `(B,)` indicating the
+                valid positions for each `S_test` sequence in the batch.
             training: A boolean indicating whether this call is performed during
                 training.
 
@@ -70,8 +73,15 @@ class SPTx(nn.Module):
         s_test_embed = self.embed_s(s_test, training)
         s_f_ctx = jnp.concatenate([s_ctx_embed, f_ctx], -1)
         s_f_ctx_embed = self.embed_s_f(s_f_ctx, training)
-        s_f_enc = self.enc(s_f_ctx_embed, valid_lens, training, **kwargs)
-        s_f_dec = self.dec(s_test_embed, s_f_enc, None, valid_lens, training, **kwargs)
+        s_f_enc = self.enc(s_f_ctx_embed, valid_lens_ctx, training, **kwargs)
+        s_f_dec = self.dec(
+            s_test_embed,
+            s_f_enc,
+            valid_lens_test,
+            valid_lens_ctx,
+            training,
+            **kwargs,
+        )
         f_mu_log_var = self.head(s_f_dec, training)
         f_mu, f_log_var = f_mu_log_var[..., [0]], f_mu_log_var[..., [1]]
         return f_mu, f_log_var
