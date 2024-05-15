@@ -49,8 +49,8 @@ model:
       cls: TransformerEncoder
       kwargs:
         attention:
-          cls: MultiheadFastSoftmaxAttention
-          # cls: MultiheadAttention
+          # cls: MultiheadFastSoftmaxAttention
+          cls: MultiheadAttention
           kwargs:
             p_dropout: 0.0
         num_blks: 3
@@ -59,8 +59,8 @@ model:
       cls: TransformerDecoder
       kwargs:
         attention:
-          cls: MultiheadFastSoftmaxAttention
-          # cls: MultiheadAttention
+          # cls: MultiheadFastSoftmaxAttention
+          cls: MultiheadAttention
           kwargs:
             p_dropout: 0.0
         num_blks: 3

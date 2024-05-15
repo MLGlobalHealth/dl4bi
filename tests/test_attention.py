@@ -75,7 +75,8 @@ def test_fast_softmax_attention_speed():
     _, p_fast = fast_attn.init_with_output(rng_init, qs, ks, vs, valid_lens)
     jit_fast_attn = jax.jit(fast_attn.apply)
     t_fast_start = time()
-    jit_fast_attn(p_fast, qs, ks, vs, valid_lens)
+    for i in range(3):
+        jit_fast_attn(p_fast, qs, ks, vs, valid_lens)
     t_fast_stop = time()
     t_fast_diff = t_fast_stop - t_fast_start
     del jit_fast_attn, fast_attn, p_fast  # free up memory
@@ -85,7 +86,8 @@ def test_fast_softmax_attention_speed():
         _, p_true = attn.init_with_output(rng_init, qs, ks, vs, valid_lens)
         jit_attn = jax.jit(attn.apply)
         t_true_start = time()
-        jit_attn(p_true, qs, ks, vs, valid_lens)
+        for i in range(3):
+            jit_attn(p_true, qs, ks, vs, valid_lens)
         t_true_stop = time()
         t_true_diff = t_true_stop - t_true_start
     except XlaRuntimeError:  # OOM
