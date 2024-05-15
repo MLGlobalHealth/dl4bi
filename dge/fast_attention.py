@@ -64,22 +64,21 @@ def build_simple_positive_softmax_phi(proj: jax.Array):
     return build_phi(h, [jnp.exp], proj)
 
 
-def build_stable_positive_softmax_phi(proj: jax.Array, eps: float = 1e-4):
+def build_stable_positive_softmax_phi(proj: jax.Array):
     r"""Builds the positive softmax kernel from equation (7) in [FAVOR+](https://arxiv.org/abs/2009.14794).
 
     This version is optimized for numerical stability.
 
     Args:
         proj: A random projection to use for transforming input features.
-        eps: An epsilon used for numerical stability.
 
     Returns:
         $\phi$, a function that maps data to positive vectors used
             in kernel approximation.
     """
 
-    @partial(jit, static_argnums=(1,))
-    def phi(x: jax.Array, is_query: bool = False):
+    @jit
+    def phi(x: jax.Array):
         r"""A normalized version of Equation (5) from [FAVOR+](https://arxiv.org/abs/2009.14794).
 
         $$\frac{\frac{\exp(-\lVert x\rVert^2)}{2}}{\sqrt{m}}\exp(x\Omega)$$
@@ -87,18 +86,9 @@ def build_stable_positive_softmax_phi(proj: jax.Array, eps: float = 1e-4):
         m, d = proj.shape
         x_proj = jnp.einsum("...d,md->...m", x, proj)
         unexp_h_x = jnp.square(x).sum(-1, keepdims=True) / 2
-        # TODO(danj): Google's implementation subtracts the max value before
-        # exponentiating so the exponentiated values lie in [0, 1]. Furthermore,
-        # their queries are normalized independently since each is just a linear
-        # combination of the resulting key-values. Their keys, however, are
-        # normalized together so they are on the same scale when multiplied by
-        # an individual query. This could be done with the following commented
-        # lines, but isn't because we allow masking of keys, and taking the max
-        # over all keys would induce depencencies in the output. Implement this
-        # in the future.
-        # max_axes = (-1,) if is_query else (-2, -1)
-        # x_proj_max = jnp.max(x_proj, max_axes, keepdims=True)
-        # return 1 / jnp.sqrt(m) * jnp.exp(x_proj - unexp_h_x - x_proj_max + eps)
+        # TODO(danj): Google also normalizes by subtracting max value so that
+        # exponentiated values lie in [0, 1]. We could do that too, but need to
+        # be careful about masked keys. Could use jax.max(..., where=mask).
         return 1 / jnp.sqrt(m) * jnp.exp(x_proj - unexp_h_x)
 
     return phi
@@ -165,10 +155,7 @@ class FastSoftmaxAttention(nn.Module):
         if redraw_random_features:
             proj.value = gen_proj()
         normalizer = 1 / jnp.pow(D_QK, 0.25)
-        # phi = build_stable_positive_softmax_phi(proj.value)
-        # qs_prime = phi(qs * normalizer, is_query=True)
-        # ks_prime = phi(ks * normalizer, is_query=False)
-        phi = build_simple_positive_softmax_phi(proj.value)
+        phi = build_stable_positive_softmax_phi(proj.value)
         qs_prime = phi(qs * normalizer)
         ks_prime = phi(ks * normalizer)
         # NOTE: mask after phi in case phi maps zero to non-zero values
