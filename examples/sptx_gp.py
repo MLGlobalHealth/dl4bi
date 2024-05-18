@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import arviz as az
 import flax
@@ -73,6 +73,7 @@ def main(cfg: DictConfig):
         (s_ctx, f_ctx, valid_lens), (s_test, f_test, f_noisy) = next(loader)
         state = train(cfg, loader, rng_tr)
         # save_ckpt(state, cfg)
+        # state, cfg = load_ckpt(cfg.train.ckpt_path)
         valid_lens = valid_lens.at[0].set(cfg.data.num_test)
         f_dist = state.apply_fn(
             {"params": state.params, **state.kwargs},
@@ -137,7 +138,7 @@ def dataloader(
 
 def train(cfg: DictConfig, loader: Iterable, rng: Array):
     rng_model, rng_init, rng_train = random.split(rng, 3)
-    model = instantiate(OmegaConf.to_container(cfg.model, resolve=True), rng_model)
+    model = instantiate(cfg.model)
     (s_ctx, f_ctx, valid_lens), (s_test, _, _) = next(loader)
     kwargs = model.init(rng_init, s_ctx, f_ctx, s_test, valid_lens)
     params = kwargs.pop("params")
@@ -174,10 +175,12 @@ def train(cfg: DictConfig, loader: Iterable, rng: Array):
     return state
 
 
-def instantiate(d: dict, rng: Array):
+def instantiate(d: Union[dict, DictConfig]):
+    if isinstance(d, DictConfig):
+        d = OmegaConf.to_container(d, resolve=True)
     for k in d:
         if isinstance(d[k], dict):
-            d[k] = instantiate(d[k], rng)
+            d[k] = instantiate(d[k])
     if "cls" in d:
         cls, kwargs = d["cls"], d.get("kwargs", {})
         return globals()[cls](**kwargs)
@@ -250,7 +253,7 @@ def compute_metrics(state, batch):
 
 
 def save_ckpt(state: TrainState, cfg: DictConfig):
-    path = Path(f"ckpts/{cfg.model.cls}").absolute()
+    path = Path(cfg.train.ckpt_path).absolute()
     shutil.rmtree(path, ignore_errors=True)
     ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
     cfg_d = OmegaConf.to_container(cfg, resolve=True)
@@ -263,12 +266,16 @@ def save_ckpt(state: TrainState, cfg: DictConfig):
     )
 
 
-def load_ckpt(cfg: DictConfig):
-    key = random.key(42)
-    model = instantiate(OmegaConf.to_container(cfg.model, resolve=True), key)
+def load_ckpt(path: str):
+    p = Path(path).absolute()
+    ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
+    ckpt = ckptr.restore(p, args=ocp.args.Composite(config=ocp.args.JsonRestore()))
+    cfg = OmegaConf.create(ckpt["config"])
+    model = instantiate(cfg.model)
     B, L, D = 4, cfg.data.grid[0].num, 1
     s = f = jnp.zeros((B, L, D))
     valid_lens = jnp.repeat(L, B)
+    key = random.key(42)
     kwargs = model.init(key, s, f, s, valid_lens, valid_lens)
     params = kwargs.pop("params")
     state = TrainState.create(
@@ -278,16 +285,10 @@ def load_ckpt(cfg: DictConfig):
         metrics=Metrics.empty(),
         kwargs=kwargs,
     )
-    ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
-    path = Path(f"ckpts/{cfg.model.cls}").absolute()
     ckpt = ckptr.restore(
-        path,
-        args=ocp.args.Composite(
-            state=ocp.args.StandardRestore(state),
-            config=ocp.args.JsonRestore(),
-        ),
+        p, args=ocp.args.Composite(state=ocp.args.StandardRestore(state))
     )
-    return ckpt["state"], OmegaConf.create(ckpt["config"])
+    return ckpt["state"], cfg
 
 
 def plot_posterior_predictive_params(
