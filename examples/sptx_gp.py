@@ -126,10 +126,15 @@ def train(cfg: DictConfig, loader: Iterable, rng: Array):
     s, f, f_noisy, valid_lens = next(loader)
     kwargs = model.init(rng_init, s, f, s, valid_lens)
     params = kwargs.pop("params")
+    learning_rate_fn = create_learning_rate_fn(
+        cfg.train.num_batches,
+        cfg.train.learning_rate.peak,
+        cfg.train.learning_rate.num_cycles,
+    )
     state = TrainState.create(
         apply_fn=model.apply,
         params=params,
-        tx=optax.yogi(cfg.train.learning_rate),
+        tx=optax.yogi(learning_rate_fn),
         metrics=Metrics.empty(),
         kwargs=kwargs,
     )
@@ -144,7 +149,7 @@ def train(cfg: DictConfig, loader: Iterable, rng: Array):
             if i % cfg.train.redraw_random_features_every_n == 0:
                 rng_redraw_random_features, rng_train = random.split(rng_train)
             state = train_step(rng_dropout, state, batch, rng_redraw_random_features)
-            if i % 10 == 0:
+            if i % 100 == 0:
                 state = compute_metrics(state, batch)
                 for metric, value in state.metrics.compute().items():
                     metrics[f"train_{metric}"].append(value)
@@ -196,26 +201,17 @@ def train_step(
     return state.apply_gradients(grads=grads, kwargs=updated_state)
 
 
-def create_learning_rate_fn(
-    num_steps: int,
-    num_warmup_steps: int,
-    peak_learning_rate: float = 1e-3,
-):
-    warmup_fn = optax.linear_schedule(
-        init_value=0.0, end_value=peak_learning_rate, transition_steps=num_warmup_steps
-    )
-    decay_steps = num_steps - num_warmup_steps
-    cosine_fn = optax.cosine_decay_schedule(peak_learning_rate, decay_steps)
-    schedule_fn = optax.join_schedules(
-        [warmup_fn, cosine_fn], boundaries=[num_warmup_steps]
-    )
-    return schedule_fn
+def create_learning_rate_fn(num_steps: int, peak_lr: float, num_cycles: int = 2):
+    n = num_steps // num_cycles
+    sched = optax.cosine_onecycle_schedule(n, peak_lr)
+    boundaries = n * jnp.arange(1, num_cycles)
+    return optax.join_schedules([sched] * num_cycles, boundaries)
 
 
 @jit
 def compute_metrics(state, batch):
     s, f, f_noisy, valid_lens = batch
-    f_mu, f_log_var = state.apply_fn(
+    f_mu, f_log_var = jit(state.apply_fn)(
         {"params": state.params, **state.kwargs}, s, f, s, valid_lens
     )
     nll = -norm.logpdf(f_noisy, f_mu, jnp.exp(f_log_var / 2)).mean()
@@ -250,10 +246,15 @@ def load_ckpt(path: str):
     key = random.key(42)
     kwargs = model.init(key, s, f, s, valid_lens, valid_lens)
     params = kwargs.pop("params")
+    learning_rate_fn = create_learning_rate_fn(
+        cfg.train.num_batches,
+        cfg.train.learning_rate.peak,
+        cfg.train.learning_rate.num_cycles,
+    )
     state = TrainState.create(
         apply_fn=model.apply,
         params=params,
-        tx=optax.yogi(1e-3),
+        tx=optax.yogi(learning_rate_fn),
         metrics=Metrics.empty(),
         kwargs=kwargs,
     )

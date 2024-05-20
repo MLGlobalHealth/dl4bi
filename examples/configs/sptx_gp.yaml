@@ -17,9 +17,11 @@ infer:
 
 train:
   ckpt_path: ckpts/sptx
-  num_batches: 10000
+  num_batches: 20000
   num_warmup: 10
-  learning_rate: 1.0e-3
+  learning_rate:
+    peak: 1.0e-3
+    num_cycles: 2
   redraw_random_features_every_n: 10001
 
 shared:
@@ -33,7 +35,6 @@ model:
       cls: LearnableEmbedding
       kwargs:
         map:
-          # func: 'lambda x: x' # only learned embeddings
           cls: GaussianFourierEmbedding
           kwargs:
             embed_dim: ${shared.pe_dim}
@@ -53,7 +54,6 @@ model:
       kwargs:
         attention:
           cls: MultiheadFastSoftmaxAttention
-          # cls: MultiheadAttention
           kwargs:
             p_dropout: 0.0
         num_blks: 4
@@ -63,7 +63,6 @@ model:
       kwargs:
         attention:
           cls: MultiheadFastSoftmaxAttention
-          # cls: MultiheadAttention
           kwargs:
             p_dropout: 0.0
         num_blks: 1
