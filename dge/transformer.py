@@ -6,9 +6,8 @@ from typing import Optional
 
 import flax.linen as nn
 import jax
-import jax.numpy as jnp
 
-from .attention import DotScorer, MultiheadAttention
+from .attention import MultiheadAttention
 
 
 class AddNorm(nn.Module):
@@ -35,6 +34,8 @@ class TransformerEncoderBlock(nn.Module):
     Args:
         attention: Attention module, defaults to `MultiheadAttention`.
         p_dropout: Dropout rate `AddNorm`s.
+        d_ffn: Optional dim for feed forward, defaults to twice the last
+            dimension of input `x`.
 
     Returns:
         Input transformed by a single self-attention encoder block.
@@ -42,6 +43,7 @@ class TransformerEncoderBlock(nn.Module):
 
     attention: nn.Module = MultiheadAttention()
     p_dropout: float = 0.0
+    d_ffn: Optional[int] = None
 
     @nn.compact
     def __call__(
@@ -52,9 +54,10 @@ class TransformerEncoderBlock(nn.Module):
         **kwargs,
     ):
         d = x.shape[-1]
+        d_ffn = self.d_ffn or 2 * x.shape[-1]
         ctx, attn = self.attention(x, x, x, valid_lens, training, **kwargs)
         y = AddNorm(self.p_dropout)(x, ctx, training)
-        ctx = nn.Sequential([nn.Dense(d), nn.relu, nn.Dense(d)])(y)
+        ctx = nn.Sequential([nn.Dense(d_ffn), nn.relu, nn.Dense(d)])(y)
         return AddNorm(self.p_dropout)(y, ctx, training), attn
 
 
@@ -65,6 +68,8 @@ class TransformerEncoder(nn.Module):
         attention: Attention module to use.
         num_blks: Number of encoder blocks.
         p_dropout: Dropout rate `AddNorm`s.
+        d_ffn: Optional dim for feed forward, defaults to twice the last
+            dimension of input `x`.
 
     Returns:
         Input transformed by the encoder.
@@ -73,6 +78,7 @@ class TransformerEncoder(nn.Module):
     attention: nn.Module = MultiheadAttention()
     num_blks: int = 3
     p_dropout: float = 0.0
+    d_ffn: Optional[int] = None
 
     @nn.compact
     def __call__(
@@ -82,12 +88,13 @@ class TransformerEncoder(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        x, _ = TransformerEncoderBlock(self.attention, self.p_dropout)(
+        d_ffn = self.d_ffn or 2 * x.shape[-1]
+        x, _ = TransformerEncoderBlock(self.attention, self.p_dropout, d_ffn)(
             x, valid_lens, training, **kwargs
         )
         for i in range(1, self.num_blks):
             x, _ = TransformerEncoderBlock(
-                self.attention.copy(name=f"attention_{i}"), self.p_dropout
+                self.attention.copy(name=f"attention_{i}"), self.p_dropout, d_ffn
             )(x, valid_lens, training, **kwargs)
         return x
 
@@ -102,6 +109,8 @@ class TransformerDecoderBlock(nn.Module):
     Args:
         attention: Attention module to use.
         p_dropout: Dropout rate `AddNorm`s.
+        d_ffn: Optional dim for feed forward, defaults to twice the last
+            dimension of input `x_dec`.
 
     Returns:
         Input transformed by a single decoder block.
@@ -109,6 +118,7 @@ class TransformerDecoderBlock(nn.Module):
 
     attention: nn.Module = MultiheadAttention()
     p_dropout: float = 0.0
+    d_ffn: Optional[int] = None
 
     @nn.compact
     def __call__(
@@ -121,6 +131,7 @@ class TransformerDecoderBlock(nn.Module):
         **kwargs,
     ):
         d = x_dec.shape[-1]
+        d_ffn = self.d_ffn or 2 * x_dec.shape[-1]
         x_dec_2, attn_dec = self.attention(
             x_dec, x_dec, x_dec, valid_lens_dec, training, **kwargs
         )
@@ -129,7 +140,7 @@ class TransformerDecoderBlock(nn.Module):
             y_dec, x_enc, x_enc, valid_lens_enc, training, **kwargs
         )
         z_dec_enc = AddNorm(self.p_dropout)(y_dec, y_dec_enc, training)
-        z_dec_enc_2 = nn.Sequential([nn.Dense(d), nn.relu, nn.Dense(d)])(z_dec_enc)
+        z_dec_enc_2 = nn.Sequential([nn.Dense(d_ffn), nn.relu, nn.Dense(d)])(z_dec_enc)
         out = AddNorm(self.p_dropout)(z_dec_enc, z_dec_enc_2, training)
         return out, attn_dec, attn_enc
 
@@ -141,6 +152,8 @@ class TransformerDecoder(nn.Module):
         attention: Attention module to use.
         num_blks: Number of encoder blocks.
         p_dropout: Dropout rate `AddNorm`s.
+        d_ffn: Optional dim for feed forward, defaults to twice the last
+            dimension of input `x_dec`.
 
     Returns:
         Input transformed by the encoder.
@@ -149,6 +162,7 @@ class TransformerDecoder(nn.Module):
     attention: nn.Module = MultiheadAttention()
     num_blks: int = 3
     p_dropout: float = 0.0
+    d_ffn: Optional[int] = None
 
     @nn.compact
     def __call__(
@@ -161,11 +175,12 @@ class TransformerDecoder(nn.Module):
         **kwargs,
     ):
         d = x_dec.shape[-1]
-        x_dec, _, _ = TransformerDecoderBlock(self.attention, self.p_dropout)(
+        d_ffn = self.d_ffn or 2 * x_dec.shape[-1]
+        x_dec, _, _ = TransformerDecoderBlock(self.attention, self.p_dropout, d_ffn)(
             x_dec, x_enc, valid_lens_dec, valid_lens_enc, training, **kwargs
         )
         for i in range(1, self.num_blks):
             x_dec, _, _ = TransformerDecoderBlock(
-                self.attention.copy(name=f"attention_{i}"), self.p_dropout
+                self.attention.copy(name=f"attention_{i}"), self.p_dropout, d_ffn
             )(x_dec, x_enc, valid_lens_dec, valid_lens_enc, training, **kwargs)
         return nn.Dense(d)(x_dec)

@@ -1,19 +1,7 @@
 # Deep Generative Emulation (dge)
 
 ## TODO
-- [ ] HFTx
-    - [ ] Performer attention speed/scale test
-    - [ ] Add transformer decoder
-    - [ ] Periodically update random projections
-    - [ ] Add generalized (ReLU) Performer attention
-    - [ ] Stabilize buf_4 in fast attention
-    - [ ] Build PriorCVAE version of model
-        - [ ] Test KL loss term on global zs
-    - [ ] Test hierarchical version like wavenet
-- [ ] Implement Diffusion
-- [X] Implement piVAE
-- [X] Implement PriorVAE
-- [X] Implement DeepChol
+- [ ] Implement generic masking for attention.
 
 ## Install
 1. Install [jax](https://jax.readthedocs.io/en/latest/installation.html)

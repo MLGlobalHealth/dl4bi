@@ -5,7 +5,6 @@ Implementation based on [google-research fast attention](https://github.com/goog
 """
 
 from collections.abc import Callable
-from functools import partial
 from typing import Optional
 
 import flax.linen as nn
