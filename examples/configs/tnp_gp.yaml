@@ -42,7 +42,8 @@ model:
       cls: TransformerEncoder
       kwargs:
         attention:
-          cls: MultiheadAttention
+          cls: MultiheadFastSoftmaxAttention
+          # cls: MultiheadAttention
         num_blks: 6
         d_ffn: ${eval:'2*${shared.embed_dim}'}
     head:

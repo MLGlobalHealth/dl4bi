@@ -20,7 +20,7 @@ from clu import metrics
 from flax import struct
 from flax.core import FrozenDict
 from flax.training import train_state
-from jax import Array, jit, random
+from jax import Array, grad, jit, random
 from jax.scipy.stats import norm
 from jax.tree_util import Partial
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
@@ -170,7 +170,7 @@ def instantiate(d: Union[dict, DictConfig]):
 def train_step(rng: jax.Array, state: TrainState, batch: tuple):
     def loss_fn(params):
         s, f, f_noisy, valid_lens = batch
-        (f_mu, f_log_var), updated_state = state.apply_fn(
+        f_mu, f_log_var = state.apply_fn(
             {"params": params, **state.kwargs},
             s,
             f,
@@ -179,13 +179,9 @@ def train_step(rng: jax.Array, state: TrainState, batch: tuple):
             training=True,
             rngs={"dropout": rng},
         )
-        nll = -norm.logpdf(f_noisy, f_mu, jnp.exp(f_log_var / 2)).mean()
-        return nll, updated_state
+        return -norm.logpdf(f_noisy, f_mu, jnp.exp(f_log_var / 2)).mean()
 
-    (nll, updated_state), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-        state.params
-    )
-    return state.apply_gradients(grads=grads, kwargs=updated_state)
+    return state.apply_gradients(grads=grad(loss_fn)(state.params))
 
 
 def create_learning_rate_fn(num_steps: int, peak_lr: float, num_cycles: int = 2):

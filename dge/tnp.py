@@ -60,44 +60,15 @@ class TNPD(nn.Module):
             $\mu_f,\log(\sigma_f^2\in\mathbb{R}^{B\times S_\text{test}\times 2D_F}$.
         """
         (B, L_ctx, _), L_test = s_ctx.shape, s_test.shape[1]
-        s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
+        s_f_ctx = jnp.concatenate([s_ctx, f_ctx], axis=-1)
         f_test_z = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
-        s_f_test = jnp.concatenate([s_test, f_test_z], -1)
-        s_f = _ragged_concat(s_f_ctx, s_f_test, valid_lens_ctx)
+        s_f_test = jnp.concatenate([s_test, f_test_z], axis=-1)
+        s_f = jnp.concatenate([s_f_ctx, s_f_test], axis=1)
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(L_ctx, B)
-        if valid_lens_test is None:
-            valid_lens_test = jnp.repeat(L_test, B)
-        valid_lens = valid_lens_ctx + valid_lens_test
         s_f_embed = self.embed_s_f(s_f, training)
-        s_f_enc = self.enc(s_f_embed, valid_lens, training, **kwargs)
-        f_dist = self.head(s_f_enc, training)
-        f_dist = _ragged_extract(f_dist, valid_lens_ctx, L_test)
+        s_f_enc = self.enc(s_f_embed, valid_lens_ctx, training, **kwargs)
+        s_f_test_enc = s_f_enc[:, -L_test:, ...]
+        f_dist = self.head(s_f_test_enc, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
         return f_mu, f_log_var
-
-
-def _ragged_concat(
-    a: jax.Array,
-    b: jax.Array,
-    valid_lens_a: Optional[jax.Array] = None,
-):
-    if valid_lens_a is None:
-        return jnp.concatenate([a, b], 1)
-    L = b.shape[1]
-    c = jnp.pad(a, ((0, 0), (0, L), (0, 0)))
-    for i, j in enumerate(valid_lens_a):
-        c = c.at[i, j : j + L, ...].set(b[i, ...])
-    return c
-
-
-def _ragged_extract(
-    a: jax.Array,
-    start_idx: jax.Array,
-    width: int,
-):
-    B, _, D = a.shape
-    b = jnp.zeros((B, width, D))
-    for i, s in enumerate(start_idx):
-        b = b.at[i, ...].set(a[i, s : s + width, ...])
-    return b
