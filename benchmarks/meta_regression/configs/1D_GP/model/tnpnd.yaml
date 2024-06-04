@@ -1,0 +1,34 @@
+cls: TNPND
+kwargs:
+  embed_s_f:
+    cls: LearnableEmbedding
+    kwargs:
+      map:
+        func: 'lambda x: x'
+      post_process:
+        cls: MLP
+        kwargs:
+          dims: [64, 64, 64, 64]
+  enc:
+    cls: TransformerEncoder
+    kwargs:
+      attention:
+        cls: MultiheadAttention
+      num_blks: 6
+      d_ffn: 128
+  dec_f_mu:
+    cls: MLP
+    kwargs:
+      dims: [128, 1]
+  dec_f_std:
+    cls: TransformerEncoder
+    kwargs:
+      attention:
+        cls: MultiheadAttention
+      num_blks: 2
+      d_ffn: 128
+  proj_f_std:
+    cls: MLP
+    kwargs:
+      dims: [128, 128, 128, 20]
+  bound_std: False

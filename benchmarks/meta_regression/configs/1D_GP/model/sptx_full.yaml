@@ -1,0 +1,33 @@
+cls: SPTx
+kwargs:
+  embed_s:
+    cls: LearnableEmbedding
+    kwargs:
+      map:
+        cls: GaussianFourierEmbedding
+        kwargs:
+          embed_dim: 16
+          var: 10.0
+      post_process:
+        cls: MLP
+        kwargs:
+          dims: [64, 64]
+          act_fn: elu
+  embed_s_f:
+    cls: MLP
+    kwargs:
+      dims: [64]
+      act_fn: elu
+  dec:
+    cls: KRStack
+    kwargs:
+      attn:
+        cls: MultiheadAttention
+      num_blks: 6
+      skip_every_n: 2
+      d_ffn: 64
+  head:
+    cls: MLP
+    kwargs:
+      dims: [64, 64, 2]
+      act_fn: elu

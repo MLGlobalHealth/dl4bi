@@ -5,15 +5,13 @@ import jax.numpy as jnp
 from jax import random
 from jaxlib.xla_client import XlaRuntimeError
 
-from dge import (
+from dge.core import (
     AdditiveScorer,
     Attention,
     DotScorer,
     FastAttention,
     MultiheadAttention,
     MultiplicativeScorer,
-)
-from dge.fast_attention import (
     build_generalized_kernel_phi,
     build_stable_positive_softmax_phi,
 )

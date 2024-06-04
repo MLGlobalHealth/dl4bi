@@ -1,6 +1,8 @@
-*/outputs/**
+**/outputs/**
+**/wandb/**
 *.pdf
 *.pkl
 *.png
 *.npy
-*/ckpts/**
+**/ckpts/**
+*.nu

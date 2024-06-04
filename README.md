@@ -1,5 +1,19 @@
 # Deep Generative Emulation (dge)
 
+## TODO
+- [ ] Meta Regression
+    - [ ] Add diagnostic plot comparison
+        - [ ] Diagnose TNP-ND uncertainty?
+        - [ ] Diagnose NP, ANP large losses
+    - [ ] Test self-attn decoder to test locs
+    - [ ] Add HMC baseline
+    - [ ] Add BNP/BANP
+    - [ ] Add ConvNP
+    - [ ] Test larger jumps in residual connections
+    - [ ] Add s directly to GFF PE embedding
+- [ ] Clean up VAE benchmarks
+
+
 ## Install
 1. Install [jax](https://jax.readthedocs.io/en/latest/installation.html)
 2. Install [numpyro](https://num.pyro.ai/en/stable/getting_started.html)
@@ -24,5 +38,5 @@ Example scripts can be found [here](https://github.com/MLGlobalHealth/dge/tree/m
     - Install Python 3.12: `pyenv install 3.12`
     - Make Python 3.12 your default: `pyenv global 3.12`
 - Install `poetry`: `curl -sSL https://install.python-poetry.org | python3 -`
-- Setup env: `cd dge && poetry install [--with examples]`
+- Setup env: `cd dge && poetry install`
 - Run tests: `poetry run pytest`

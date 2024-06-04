@@ -1,0 +1,5 @@
+cls: ANP
+kwargs:
+  d_ffn: 128
+  d_z: 128
+  n_z: 1

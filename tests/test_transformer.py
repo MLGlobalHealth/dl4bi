@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 from jax import random
 
-from dge import (
+from dge.core import (
     MLP,
     AdditiveScorer,
     DotScorer,
@@ -12,9 +12,9 @@ from dge import (
     MultiheadFastAttention,
     MultiplicativeScorer,
     NeRFEmbedding,
+    TransformerDecoder,
     TransformerEncoder,
 )
-from dge.transformer import TransformerDecoder
 
 
 def test_transformer_encoder():
