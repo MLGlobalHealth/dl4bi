@@ -52,7 +52,7 @@ def train(
     validate_every_n: int = 50000,
     log_every_n: int = 100,
     lr_peak: float = 1e-3,
-    lr_pct_warmup: float = 0.1,
+    lr_pct_warmup: float = 0.3,
     lr_num_cycles: int = 1,
 ):
     rng_data, rng_params, rng_latent_z, rng_train = random.split(rng, 4)
@@ -259,7 +259,7 @@ def dataloader(rng: jax.Array, gp: GP):
     """Generates batches of GP samples."""
     batch_size = 16
     s_min, s_max = -2, 2
-    num_ctx_min, num_ctx_max, num_linear = 3, 50, 50
+    num_ctx_min, num_ctx_max, num_linear = 3, 50, 100
     s_linear = jnp.linspace(s_min, s_max, num_linear)
     valid_lens_test = jnp.repeat(num_ctx_max + num_linear, batch_size)
 

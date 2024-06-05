@@ -86,11 +86,11 @@ def train_step_tril_cov(
             training=True,
             rngs={"dropout": rng},
         )
-        B = f_test.shape[0]
+        B, L_test, _ = f_test.shape
         f_test_flat, f_mu_flat = f_test.reshape(B, -1), f_mu.reshape(B, -1)
         nll = -mvn_logpdf_tril_cov(f_test_flat, f_mu_flat, f_L).mean()
         # average over L_test to be comparable to diagonal train step loss
-        return nll / s_test.shape[1]
+        return nll / L_test
 
     nll, grads = jax.value_and_grad(loss_fn)(state.params)
     return state.apply_gradients(grads=grads), nll
