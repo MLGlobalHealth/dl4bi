@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jax import random
 from jaxlib.xla_client import XlaRuntimeError
 
-from dge.core import (
+from dsp.core import (
     AdditiveScorer,
     Attention,
     DotScorer,

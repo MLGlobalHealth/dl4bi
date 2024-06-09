@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 from jax import random
 
-from dge.core import (
+from dsp.core import (
     MLP,
     AdditiveScorer,
     DotScorer,

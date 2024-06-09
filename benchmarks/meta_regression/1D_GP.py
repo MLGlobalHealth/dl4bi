@@ -22,8 +22,8 @@ from sps.kernels import matern_3_2, periodic, rbf
 from sps.priors import Prior
 from tqdm import tqdm
 
-from dge.core import *
-from dge.meta_regression import (
+from dsp.core import *  # noqa: F403
+from dsp.meta_regression import (
     ANP,
     CANP,
     CNP,

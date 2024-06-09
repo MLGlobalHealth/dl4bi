@@ -14,7 +14,7 @@ from jax.scipy.stats.multivariate_normal import logpdf as mvn_logp
 from sps.gp import GP
 from tqdm import tqdm
 
-from dge import MLP, Phi, PiVAE
+from dsp import MLP, Phi, PiVAE
 
 
 @struct.dataclass

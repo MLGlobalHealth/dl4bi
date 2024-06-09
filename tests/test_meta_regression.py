@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 from jax import random
 
-from dge.meta_regression import NP
+from dsp.meta_regression import NP
 
 
 def test_vanilla_neural_process():

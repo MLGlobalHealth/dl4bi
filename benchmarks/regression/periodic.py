@@ -9,7 +9,7 @@ import optax
 from jax import jit, random
 from tqdm import tqdm
 
-from dge.core import (
+from dsp.core import (
     AdditiveScorer,
     DotScorer,
     FixedSinusoidalEmbedding,
@@ -17,7 +17,7 @@ from dge.core import (
     NeRFEmbedding,
     TrainState,
 )
-from dge.regression import KernelRegressor
+from dsp.regression import KernelRegressor
 
 
 def main(key, func, embedder, scorer, p_dropout):

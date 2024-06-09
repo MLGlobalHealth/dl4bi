@@ -12,7 +12,7 @@ pip install git+ssh://git@github.com/MLGlobalHealth/dsp.git
 ```bash
 pip install pdoc
 git clone git@github.com:MLGlobalHealth/dsp.git
-cd dge
+cd dsp
 pdoc --docformat google --math dsp
 ```
 Example scripts can be found [here](https://github.com/MLGlobalHealth/dsp/tree/main/benchmarks).
@@ -34,7 +34,7 @@ such degeneracy.
     - Install Python 3.12: `pyenv install 3.12`
     - Make Python 3.12 your default: `pyenv global 3.12`
 - Install `poetry`: `curl -sSL https://install.python-poetry.org | python3 -`
-- Setup env: `cd dge && poetry install`
+- Setup env: `cd dsp && poetry install`
 - Run tests: `poetry run pytest`
 
 ## TODO

@@ -14,7 +14,7 @@ from sps.gp import GP
 from sps.utils import build_grid
 from tqdm import tqdm
 
-from dge import MLP, DeepChol
+from dsp import MLP, DeepChol
 
 
 @struct.dataclass

@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import norm, ttest_rel
 
-from dge.core import mvn_logpdf_tril_cov
-from dge.core.utils import mask_from_valid_lens
+from dsp.core import mvn_logpdf_tril_cov
+from dsp.core.utils import mask_from_valid_lens
 
 
 def plot_diff(args):

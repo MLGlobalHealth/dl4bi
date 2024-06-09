@@ -4,9 +4,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-from dge.core.attention import MultiheadAttention
-
-from ..core import MLP, KRStack, LearnableEmbedding, MultiheadFastAttention
+from ..core import MLP, KRStack, LearnableEmbedding
 
 
 class SPTx(nn.Module):

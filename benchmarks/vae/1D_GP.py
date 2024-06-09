@@ -15,8 +15,8 @@ from sps.gp import GP
 from sps.utils import build_grid
 from tqdm import tqdm
 
-from dge.core import MLP
-from dge.vae import PriorCVAE
+from dsp.core import MLP
+from dsp.vae import PriorCVAE
 
 
 @struct.dataclass
