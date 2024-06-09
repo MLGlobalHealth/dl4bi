@@ -1,2 +1,2 @@
 # Testing
-`python 1D_GP.py +kernel=rbf +model=sptx +seed=0 [+wandb=True] [+run_gp_baseline=True]`
+`python 1D_GP.py +kernel=rbf +model=sptx +seed=0 [+wandb=True]`
