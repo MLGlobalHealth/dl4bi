@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "dge"
+name = "dsp"
 version = "0.1.0"
-description = "Deep Generative Emulation"
+description = "Deep Stochastic Processes"
 authors = ["Daniel Jenson <daniel.a.jenson@gmail.com>"]
 readme = "README.md"
 

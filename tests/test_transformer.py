@@ -31,11 +31,11 @@ def test_transformer_encoder():
     ]:
         s_e, _ = embedder.init_with_output(rng_init, s)
         for scorer in [AdditiveScorer(), MultiplicativeScorer(), DotScorer()]:
-            attention = MultiheadAttention(scorer)
-            f_enc, _ = TransformerEncoder(attention).init_with_output(
+            attn = MultiheadAttention(scorer)
+            f_enc, _ = TransformerEncoder(attn).init_with_output(
                 rng_init, s_e, valid_lens
             )
-            f_dec, _ = TransformerDecoder(attention).init_with_output(
+            f_dec, _ = TransformerDecoder(attn).init_with_output(
                 rng_init, s_e, f_enc, valid_lens, valid_lens
             )
             for name, f in [("encoder", f_enc), ("decoder", f_dec)]:
@@ -46,11 +46,9 @@ def test_transformer_encoder():
                 ), f"Incorrect {name} output shape!"
                 assert not jnp.isnan(f).any(), f"{name.title()} returned nans!"
         # test fast version too
-        attention = MultiheadFastAttention()
-        f_enc, _ = TransformerEncoder(attention).init_with_output(
-            rng_init, s_e, valid_lens
-        )
-        f_dec, _ = TransformerDecoder(attention).init_with_output(
+        attn = MultiheadFastAttention()
+        f_enc, _ = TransformerEncoder(attn).init_with_output(rng_init, s_e, valid_lens)
+        f_dec, _ = TransformerDecoder(attn).init_with_output(
             rng_init, s_e, f_enc, valid_lens, valid_lens
         )
         for name, f in [("encoder", f_enc), ("decoder", f_dec)]:

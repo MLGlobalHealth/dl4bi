@@ -33,7 +33,7 @@ class TransformerEncoderBlock(nn.Module):
     """A single encoder block from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
     Args:
-        attention: Attention module, defaults to `MultiheadAttention`.
+        attn: Attention module, defaults to `MultiheadAttention`.
         p_dropout: Dropout rate `AddNorm`s.
         d_ffn: Optional dim for feed forward, defaults to twice the last
             dimension of input `x`.
@@ -42,7 +42,7 @@ class TransformerEncoderBlock(nn.Module):
         Input transformed by a single self-attention encoder block.
     """
 
-    attention: nn.Module = MultiheadAttention()
+    attn: nn.Module = MultiheadAttention()
     p_dropout: float = 0.0
     d_ffn: Optional[int] = None
     act_fn: Callable = nn.relu
@@ -57,7 +57,7 @@ class TransformerEncoderBlock(nn.Module):
     ):
         d = x.shape[-1]
         d_ffn = self.d_ffn or 2 * d
-        ctx, attn = self.attention(x, x, x, valid_lens, training, **kwargs)
+        ctx, attn = self.attn(x, x, x, valid_lens, training, **kwargs)
         y = AddNorm(self.p_dropout)(x, ctx, training)
         ctx = nn.Sequential([nn.Dense(d_ffn), self.act_fn, nn.Dense(d)])(y)
         return AddNorm(self.p_dropout)(y, ctx, training), attn
@@ -67,7 +67,7 @@ class TransformerEncoder(nn.Module):
     """A transformer encoder inspired by ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
     Args:
-        attention: Attention module to use.
+        attn: Attention module to use.
         num_blks: Number of encoder blocks.
         p_dropout: Dropout rate `AddNorm`s.
         d_ffn: Optional dim for feed forward, defaults to twice the last
@@ -77,7 +77,7 @@ class TransformerEncoder(nn.Module):
         Input transformed by the encoder.
     """
 
-    attention: nn.Module = MultiheadAttention()
+    attn: nn.Module = MultiheadAttention()
     num_blks: int = 3
     p_dropout: float = 0.0
     d_ffn: Optional[int] = None
@@ -92,12 +92,12 @@ class TransformerEncoder(nn.Module):
         **kwargs,
     ):
         d_ffn = self.d_ffn or 2 * x.shape[-1]
-        x, _ = TransformerEncoderBlock(
-            self.attention, self.p_dropout, d_ffn, self.act_fn
-        )(x, valid_lens, training, **kwargs)
+        x, _ = TransformerEncoderBlock(self.attn, self.p_dropout, d_ffn, self.act_fn)(
+            x, valid_lens, training, **kwargs
+        )
         for i in range(1, self.num_blks):
             x, _ = TransformerEncoderBlock(
-                self.attention.copy(name=f"attention_{i}"),
+                self.attn.copy(name=f"attn_{i}"),
                 self.p_dropout,
                 d_ffn,
                 self.act_fn,
@@ -113,7 +113,7 @@ class TransformerDecoderBlock(nn.Module):
         a time.
 
     Args:
-        attention: Attention module to use.
+        attn: Attention module to use.
         p_dropout: Dropout rate `AddNorm`s.
         d_ffn: Optional dim for feed forward, defaults to twice the last
             dimension of input `x_dec`.
@@ -122,7 +122,7 @@ class TransformerDecoderBlock(nn.Module):
         Input transformed by a single decoder block.
     """
 
-    attention: nn.Module = MultiheadAttention()
+    attn: nn.Module = MultiheadAttention()
     p_dropout: float = 0.0
     d_ffn: Optional[int] = None
     act_fn: Callable = nn.relu
@@ -139,11 +139,11 @@ class TransformerDecoderBlock(nn.Module):
     ):
         d = x_dec.shape[-1]
         d_ffn = self.d_ffn or 2 * d
-        x_dec_2, attn_dec = self.attention(
+        x_dec_2, attn_dec = self.attn(
             x_dec, x_dec, x_dec, valid_lens_dec, training, **kwargs
         )
         y_dec = AddNorm(self.p_dropout)(x_dec, x_dec_2, training)
-        y_dec_enc, attn_enc = self.attention.copy(name="enc_attention")(
+        y_dec_enc, attn_enc = self.attn.copy(name="enc_attn")(
             y_dec, x_enc, x_enc, valid_lens_enc, training, **kwargs
         )
         z_dec_enc = AddNorm(self.p_dropout)(y_dec, y_dec_enc, training)
@@ -158,7 +158,7 @@ class TransformerDecoder(nn.Module):
     """A transformer decoder inspired by ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
     Args:
-        attention: Attention module to use.
+        attn: Attention module to use.
         num_blks: Number of encoder blocks.
         p_dropout: Dropout rate `AddNorm`s.
         d_ffn: Optional dim for feed forward, defaults to twice the last
@@ -168,7 +168,7 @@ class TransformerDecoder(nn.Module):
         Input transformed by the encoder.
     """
 
-    attention: nn.Module = MultiheadAttention()
+    attn: nn.Module = MultiheadAttention()
     num_blks: int = 3
     p_dropout: float = 0.0
     d_ffn: Optional[int] = None
@@ -187,11 +187,11 @@ class TransformerDecoder(nn.Module):
         d = x_dec.shape[-1]
         d_ffn = self.d_ffn or 2 * d
         x_dec, _, _ = TransformerDecoderBlock(
-            self.attention, self.p_dropout, d_ffn, self.act_fn
+            self.attn, self.p_dropout, d_ffn, self.act_fn
         )(x_dec, x_enc, valid_lens_dec, valid_lens_enc, training, **kwargs)
         for i in range(1, self.num_blks):
             x_dec, _, _ = TransformerDecoderBlock(
-                self.attention.copy(name=f"attention_{i}"),
+                self.attn.copy(name=f"attn_{i}"),
                 self.p_dropout,
                 d_ffn,
                 self.act_fn,
@@ -248,7 +248,7 @@ class KRStack(nn.Module):
             dimension of input `kvs`.
 
     Returns:
-        An instnace of a `KRStack`.
+        An instance of a `KRStack`.
     """
 
     attn: nn.Module = Attention()
@@ -256,7 +256,7 @@ class KRStack(nn.Module):
     p_dropout: float = 0.0
     d_ffn: Optional[int] = None
     act_fn: Callable = nn.relu
-    skip_every_n: int = 3
+    skip_every_n: Optional[int] = None
 
     @nn.compact
     def __call__(
@@ -276,7 +276,7 @@ class KRStack(nn.Module):
         )(qvs, kvs, valid_lens, training)
         skip_qvs, skip_kvs = qvs, kvs
         for i in range(1, self.num_blks):
-            is_skip = i % self.skip_every_n == 0
+            is_skip = self.skip_every_n and i % self.skip_every_n == 0
             if is_skip:
                 qvs = add_norm(skip_qvs, qvs)
                 kvs = add_norm(skip_kvs, kvs)

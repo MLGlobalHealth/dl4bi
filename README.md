@@ -1,35 +1,31 @@
-# Deep Generative Emulation (dge)
-
-## TODO
-- [ ] Meta Regression
-    - [ ] Add diagnostic plot comparison
-        - [ ] Diagnose TNP-ND uncertainty? - check for nans
-        - [ ] Diagnose NP, ANP large losses
-    - [ ] Test self-attn decoder to test locs
-    - [ ] Add HMC baseline
-    - [ ] Add BNP/BANP
-    - [ ] Add ConvNP
-    - [ ] Test larger jumps in residual connections
-    - [ ] Add s directly to GFF PE embedding
-- [ ] Clean up VAE benchmarks
-
+# Deep Stochastic Processses (dsp)
 
 ## Install
 1. Install [jax](https://jax.readthedocs.io/en/latest/installation.html)
 2. Install [numpyro](https://num.pyro.ai/en/stable/getting_started.html)
-3. Install the `dge` package from git:
+3. Install the `dsp` package from git:
 ```bash
-pip install git+ssh://git@github.com/MLGlobalHealth/dge.git
+pip install git+ssh://git@github.com/MLGlobalHealth/dsp.git
 ```
 
 ## View Documentation (Locally)
 ```bash
 pip install pdoc
-git clone git@github.com:MLGlobalHealth/dge.git
+git clone git@github.com:MLGlobalHealth/dsp.git
 cd dge
-pdoc --docformat google --math dge
+pdoc --docformat google --math dsp
 ```
-Example scripts can be found [here](https://github.com/MLGlobalHealth/dge/tree/main/examples).
+Example scripts can be found [here](https://github.com/MLGlobalHealth/dsp/tree/main/benchmarks).
+
+## Warnings & Caveats
+- When using high precision models, i.e. transformer-based models, we recommend
+using the `min_std` or `bound_std` arguments because the optimizer can learn to
+"hack" rewards by arbitrarily decreasing standard deviation at observed context
+points (where the standard deviation is theoretically 0) creating arbitrarily
+large negative log likelihood scores, which destabilizes training. The only
+exception to this is when using a model with `MultiheadFastAttention` as the
+softmax approximation provides a measure of regularization which often prevents
+such degeneracy.
 
 ## Development Setup
 - Install Python 3.12:
@@ -40,3 +36,18 @@ Example scripts can be found [here](https://github.com/MLGlobalHealth/dge/tree/m
 - Install `poetry`: `curl -sSL https://install.python-poetry.org | python3 -`
 - Setup env: `cd dge && poetry install`
 - Run tests: `poetry run pytest`
+
+## TODO
+- [ ] Meta Regression
+    - [ ] TNP authors with patch demonstrating TNP-A pathology
+        - Also, speak to bounded std-dev on other NP models
+    - [ ] Fix TNP-ND (likely MVN logpdf tril cov calculation)
+    - [ ] Write 2D GP benchmark
+    - [ ] Finetune 2D GP model on Heaton benchmark
+    - [ ] Predict ls, var with model and use it to parameterize off-diagonal
+        covariance values for the posterior
+    - [ ] Add HMC baseline
+    - [ ] Add BNP/BANP
+    - [ ] Add ConvNP
+    - [ ] SPTx/KRStacks: test larger jumps in residual connections
+- [ ] Clean up VAE benchmarks

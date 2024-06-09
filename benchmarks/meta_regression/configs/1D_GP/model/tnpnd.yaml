@@ -23,7 +23,7 @@ kwargs:
   dec_f_std:
     cls: TransformerEncoder
     kwargs:
-      attention:
+      attn:
         cls: MultiheadAttention
       num_blks: 2
       d_ffn: 128

@@ -19,6 +19,7 @@ class NP(nn.Module):
         d_ffn: The hidden dimension for all MLPs.
         d_z: The latent hidden dimension.
         n_z: Number of latent `z` samples to use.
+        min_std: Bounds standard deviation, default 0.0 (original 0.1).
 
     Returns:
         An instance of `NP`.
@@ -27,6 +28,7 @@ class NP(nn.Module):
     d_ffn: int = 128
     d_z: int = 128
     n_z: int = 1
+    min_std: float = 0.0
 
     @nn.compact
     def __call__(
@@ -100,6 +102,5 @@ class NP(nn.Module):
         q = jnp.concatenate([r_z, s], -1)  # [B, n_z, L_test, d_ffn + d_z + D_s]
         f_dist = MLP([self.d_ffn] * 4 + [2 * d_f])(q, training)
         f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-        # used in original implementation to prevent collapse
-        f_std = 0.1 + 0.9 * nn.softplus(f_std)
+        f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
         return f_mu.mean(axis=1), f_std.mean(axis=1)  # [B, L_test, d_f]

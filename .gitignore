@@ -1,8 +1,10 @@
+**/ckpts/**
+*.npy
+*.nu
 **/outputs/**
-**/wandb/**
 *.pdf
 *.pkl
 *.png
-*.npy
-**/ckpts/**
-*.nu
+**/results/**
+**/wandb/**
+**/data/**

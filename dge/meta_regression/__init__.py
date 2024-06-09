@@ -5,4 +5,5 @@ from .cnp import CNP
 from .np import NP
 from .sptx import SPTx
 from .tnpd import TNPD
+from .tnpds import TNPDS
 from .tnpnd import TNPND

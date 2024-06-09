@@ -6,8 +6,8 @@ kwargs:
       map:
         cls: GaussianFourierEmbedding
         kwargs:
-          embed_dim: 16
-          var: 10.0
+          embed_dim: 8
+          var: 4.0
       post_process:
         cls: MLP
         kwargs:
@@ -23,7 +23,7 @@ kwargs:
     kwargs:
       attn:
         cls: MultiheadFastAttention
-      num_blks: 6
+      num_blks: 5
       skip_every_n: 2
       d_ffn: 64
   head:

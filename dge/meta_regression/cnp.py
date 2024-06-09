@@ -3,7 +3,6 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import random
 
 from ..core import MLP, mask_from_valid_lens
 
@@ -20,12 +19,14 @@ class CNP(nn.Module):
 
     Args:
         d_ffn: The hidden dimension for all MLPs.
+        min_std: Bounds standard deviation, default 0.0 (original 0.1).
 
     Returns:
         An instance of `CNP`.
     """
 
     d_ffn: int = 128
+    min_std: float = 0.0
 
     @nn.compact
     def __call__(
@@ -70,6 +71,5 @@ class CNP(nn.Module):
         q = jnp.concatenate([r, s_test], -1)  # [B, L_test, d_ffn + D_s]
         f_dist = MLP([self.d_ffn] * 4 + [2 * d_f])(q, training)
         f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-        # used in original implementation to prevent collapse
-        f_std = 0.1 + 0.9 * nn.softplus(f_std)
-        return f_mu, f_std  # [B, n_z, L_test, d_f]
+        f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
+        return f_mu, f_std  # [B, L_test, d_f]

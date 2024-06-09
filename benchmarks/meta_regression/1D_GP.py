@@ -15,9 +15,7 @@ import orbax.checkpoint as ocp
 import wandb
 from hydra.core.hydra_config import HydraConfig
 from jax import jit, random
-from jax.scipy.stats import multivariate_normal as mvnorm
 from jax.scipy.stats import norm
-from jax.tree_util import Partial
 from omegaconf import DictConfig, OmegaConf
 from sps.gp import GP
 from sps.kernels import matern_3_2, periodic, rbf
@@ -25,23 +23,41 @@ from sps.priors import Prior
 from tqdm import tqdm
 
 from dge.core import *
-from dge.meta_regression import ANP, CANP, CNP, NP, TNPD, TNPND, SPTx, train_steps
+from dge.meta_regression import (
+    ANP,
+    CANP,
+    CNP,
+    NP,
+    TNPD,
+    TNPDS,
+    TNPND,
+    SPTx,
+    train_steps,
+)
 
 
 @hydra.main("configs/1D_GP", version_base=None)
 def main(cfg: DictConfig):
-    choices = HydraConfig.get().runtime.choices
+    d = HydraConfig.get().runtime.choices
+    kernel_name, model_name, seed = d["kernel"], d["model"], cfg.seed
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if "wandb" in cfg else "disabled",
-        name=choices["kernel"] + " - " + choices["model"],
+        name=f"{kernel_name} - {model_name} - seed {seed}",
     )
     rng = random.key(cfg.seed)
     rng_train, rng_eval = random.split(rng)
     gp, model = instantiate(cfg.kernel), instantiate(cfg.model)
     state = train(rng_train, gp, model)
-    validate(rng_eval, gp, state, wandb_key="Final Model Samples", save=True)
-    save_ckpt(state, cfg)
+    path = Path(f"results/1D_GP/{kernel_name}/{model_name}-seed-{seed}")
+    validate(
+        rng_eval,
+        gp,
+        state,
+        wandb_key="Final Model Samples",
+        results_path=path.with_suffix(".pkl"),
+    )
+    save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
 def train(
@@ -110,7 +126,7 @@ def validate(
     num_batches: int = 5000,
     num_plots: int = 16,
     wandb_key: str = "",
-    save: bool = False,
+    results_path: Optional[Path] = None,
 ):
     rng_data, rng_latent_z, rng_plots = random.split(rng, 3)
     loader = dataloader(rng_data, gp)
@@ -134,11 +150,11 @@ def validate(
         else:  # f_std is a lower triangular covariance matrix
             # WARNING: This ignores `valid_lens_test` because
             # mvn_logpdf_tril_cov does yet support masks with `where`.
-            B = f_test.shape[0]
+            B, L_test, _ = f_test.shape
             f_test_flat, f_mu_flat = f_test.reshape(B, -1), f_mu.reshape(B, -1)
             nll = -mvn_logpdf_tril_cov(f_test_flat, f_mu_flat, f_std).mean()
-            losses[i] = nll / s_test.shape[1]  # average over L_test
-        if save:
+            losses[i] = nll / L_test
+        if results_path:
             b = [np.array(v) for v in batch]
             p = [np.array(v) for v in [f_mu, f_std]]
             results += [(b, p)]
@@ -146,9 +162,8 @@ def validate(
     print(f"validation loss: {loss:.3f}")
     wandb.log({"validation_loss": loss})
     log_plots(rng_plots, wandb_key, num_plots, batch, f_mu, f_std)
-    if save:
-        path = _results_path()
-        with open(path, "wb") as f:
+    if results_path:
+        with open(results_path, "wb") as f:
             pickle.dump(results, f)
 
 
@@ -230,10 +245,8 @@ def plot_posterior_predictive(
     return path
 
 
-def _results_path():
-    choices = HydraConfig.get().runtime.choices
-    kernel, model = choices["kernel"], choices["model"]
-    path = Path(f"results/1D_GP/{kernel}/{model}.pkl")
+def _results_path(kernel: str, model: str, seed: int):
+    path = Path(f"results/1D_GP/{kernel}/{model}-seed-{seed}.pkl")
     path.parent.mkdir(parents=True, exist_ok=True)
     return path.absolute()
 
@@ -259,13 +272,14 @@ def dataloader(rng: jax.Array, gp: GP):
     """Generates batches of GP samples."""
     batch_size = 16
     s_min, s_max = -2, 2
+    obs_noise = 0.1
     num_ctx_min, num_ctx_max, num_linear = 3, 50, 100
     s_linear = jnp.linspace(s_min, s_max, num_linear)
     valid_lens_test = jnp.repeat(num_ctx_max + num_linear, batch_size)
 
     @jit
     def gen_batch(rng: jax.Array):
-        rng_s_random, rng_valid_lens_ctx, rng_gp, rng = random.split(rng, 4)
+        rng_s_random, rng_valid_lens_ctx, rng_gp, rng_eps, rng = random.split(rng, 5)
         s_random = random.uniform(rng_s_random, (num_ctx_max,), float, s_min, s_max)
         s = jnp.hstack([s_random, s_linear])[:, None]  # [num_ctx_max + num_linear, 1]
         var, ls, _z, f = gp.simulate(rng_gp, s, batch_size)
@@ -273,7 +287,8 @@ def dataloader(rng: jax.Array, gp: GP):
             rng_valid_lens_ctx, (batch_size,), num_ctx_min, num_ctx_max
         )
         s = jnp.repeat(s[None, ...], batch_size, axis=0)
-        return s, f, valid_lens_ctx, s, f, valid_lens_test, var, ls
+        f_noisy = f + obs_noise * random.normal(rng_eps, f.shape)
+        return s, f_noisy, valid_lens_ctx, s, f, valid_lens_test, var, ls
 
     while True:
         rng_batch, rng = random.split(rng)
@@ -306,19 +321,18 @@ def custom_learning_rate_fn(num_steps: int, peak_lr: float):
     return optax.join_schedules([q_sched, q_sched, h_sched], boundaries)
 
 
-def save_ckpt(state: TrainState, cfg: DictConfig):
+def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
     """Saves a checkpoint.
 
     .. warning::
         This uses the current runtime settings in Hydra to resolve the
         checkpoint path.
     """
-    path = _ckpt_path()
     shutil.rmtree(path, ignore_errors=True)
     ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
     cfg_d = OmegaConf.to_container(cfg, resolve=True)
     ckptr.save(
-        path,
+        path.absolute(),
         args=ocp.args.Composite(
             state=ocp.args.StandardSave(state),
             config=ocp.args.JsonSave(cfg_d),
@@ -326,22 +340,13 @@ def save_ckpt(state: TrainState, cfg: DictConfig):
     )
 
 
-def _ckpt_path():
-    choices = HydraConfig.get().runtime.choices
-    kernel, model = choices["kernel"], choices["model"]
-    path = Path(f"ckpts/1D_GP/{kernel}/{model}.ckpt")
-    path.mkdir(parents=True, exist_ok=True)
-    return path.absolute()
-
-
-def load_ckpt(cfg: DictConfig):
+def load_ckpt(path: Path):
     """Loads a checkpoint.
 
     .. warning::
         This uses the current runtime settings in Hydra to resolve the
         checkpoint path.
     """
-    path = _ckpt_path()
     ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
     # restore config and use it to create model template
     ckpt = ckptr.restore(path, args=ocp.args.Composite(config=ocp.args.JsonRestore()))

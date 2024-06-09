@@ -12,7 +12,7 @@ def test_vanilla_neural_process():
     s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, S, D_s=1]
     valid_lens = jnp.array([2, 4, 9, 3])
     f = random.normal(rng_data, s.shape)
-    (f_mu, f_log_var, z_mu_ctx, z_std_ctx, z_mu_test, z_std_test), params = NP(
+    (f_mu, f_log_var, z_mu_ctx, z_std_ctx), params = NP(
         d_ffn, d_z, n_z
     ).init_with_output(
         {"params": rng_params, "dropout": rng_dropout, "latent_z": rng_latent_z},
@@ -22,6 +22,5 @@ def test_vanilla_neural_process():
         valid_lens_ctx=valid_lens,
         valid_lens_test=valid_lens,
         training=True,
-        f_test=f,
     )
-    assert f_mu.shape == (B, n_z, L, 1)
+    assert f_mu.shape == (B, L, 1)
