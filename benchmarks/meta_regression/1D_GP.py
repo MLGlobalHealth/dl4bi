@@ -50,6 +50,7 @@ def main(cfg: DictConfig):
     gp, model = instantiate(cfg.kernel), instantiate(cfg.model)
     state = train(rng_train, gp, model)
     path = Path(f"results/1D_GP/{kernel_name}/{model_name}-seed-{seed}")
+    path.parent.mkdir(parents=True, exist_ok=True)
     validate(
         rng_eval,
         gp,

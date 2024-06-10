@@ -268,25 +268,21 @@ class KRStack(nn.Module):
     ):
         d_ffn = self.d_ffn or 2 * kvs.shape[-1]
         add_norm = AddNorm(self.p_dropout)
+        skip_qvs, skip_kvs = qvs, kvs
         qvs, kvs = KRBlock(
             self.attn,
             self.p_dropout,
             d_ffn,
             self.act_fn,
         )(qvs, kvs, valid_lens, training)
-        skip_qvs, skip_kvs = qvs, kvs
         for i in range(1, self.num_blks):
-            is_skip = self.skip_every_n and i % self.skip_every_n == 0
-            if is_skip:
-                qvs = add_norm(skip_qvs, qvs)
-                kvs = add_norm(skip_kvs, kvs)
+            if self.skip_every_n and i % self.skip_every_n == 0:
+                qvs = skip_qvs = add_norm(skip_qvs, qvs)
+                kvs = skip_kvs = add_norm(skip_kvs, kvs)
             qvs, kvs = KRBlock(
                 self.attn.copy(name=f"attn_{i}"),
                 self.p_dropout,
                 d_ffn,
                 self.act_fn,
             )(qvs, kvs, valid_lens, training)
-            if is_skip:
-                skip_qvs = qvs
-                skip_kvs = kvs
         return qvs, kvs
