@@ -117,7 +117,7 @@ def build_generalized_kernel_phi(
 
 
 def build_phi(h: Callable, funcs: list[Callable], proj: jax.Array):
-    r"""Builds $phi\mathbf{x})$ from equation (5) of [FAVOR+](https://arxiv.org/abs/2009.14794).
+    r"""Builds $\phi\mathbf{x})$ from equation (5) of [FAVOR+](https://arxiv.org/abs/2009.14794).
 
     Args:
         h: A coefficient function.
