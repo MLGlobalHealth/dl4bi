@@ -85,6 +85,7 @@ class TNPND(nn.Module):
         f_std = self.proj_f_std(f_std, training).reshape(B, L_test * d_f, -1)
         f_L = jnp.tril(f_std @ f_std.transpose(0, 2, 1))
         if self.bound_std:
+            # NOTE: tanh works since diag(f_std @ f_std.T) > 0
             d = jnp.arange(L_test * d_f)
-            f_L = f_L.at[:, d, d].set(0.05 + 0.95 * nn.softplus(f_L[:, d, d]))
+            f_L = f_L.at[:, d, d].set(0.05 + 0.95 * nn.tanh(f_L[:, d, d]))
         return f_mu, f_L

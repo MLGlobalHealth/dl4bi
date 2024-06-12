@@ -151,7 +151,7 @@ def validate(
         else:  # f_std is a lower triangular covariance matrix
             # WARNING: This ignores `valid_lens_test` because
             # mvn_logpdf does yet support masks with `where`.
-            B, L_test, _ = f_test.shape[0]
+            B = f_test.shape[0]
             f_test_flat, f_mu_flat = f_test.reshape(B, -1), f_mu.reshape(B, -1)
             nlls = -mvn_logpdf(f_test_flat, f_mu_flat, f_std, is_tril=True)
             losses[i] = (nlls / valid_lens_test).mean()
@@ -183,8 +183,8 @@ def log_plots(
     for i in random.choice(rng, batch_size, (num_plots,), replace=False):
         f_std_i = f_std[i].squeeze()
         # TODO(danj): is this legitimate?
-        if f_mu[i].shape != f_std[i].shape:  # f_std L in Sigma=LL^T
-            f_std_i = jnp.diag(f_std_i @ f_std_i.T)
+        if f_mu[i].shape != f_std[i].shape:
+            f_std_i = jnp.diag(f_std_i)
         sample_path = plot_posterior_predictive(
             i,
             s_ctx[i].squeeze(),

@@ -31,4 +31,3 @@ kwargs:
     cls: MLP
     kwargs:
       dims: [128, 128, 128, 20]
-  bound_std: True

@@ -40,6 +40,8 @@ such degeneracy.
 ## TODO
 - [ ] Meta Regression
     - [ ] TNP authors with patch demonstrating TNP-A pathology
+        - TNP-ND tanh -> negative values (performance dips when using softplus)
+        - TNP-ND large number of points in test set
         - Also, speak to bounded std-dev on other NP models
     - [ ] Fix TNP-ND (likely MVN logpdf tril cov calculation)
     - [ ] Write 2D GP benchmark
