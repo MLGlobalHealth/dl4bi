@@ -12,7 +12,7 @@ kwargs:
   enc:
     cls: TransformerEncoder
     kwargs:
-      attention:
+      attn:
         cls: MultiheadAttention
       num_blks: 6
       d_ffn: 128
@@ -31,4 +31,4 @@ kwargs:
     cls: MLP
     kwargs:
       dims: [128, 128, 128, 20]
-  bound_std: False
+  bound_std: True

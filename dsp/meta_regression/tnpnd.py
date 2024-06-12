@@ -86,5 +86,5 @@ class TNPND(nn.Module):
         f_L = jnp.tril(f_std @ f_std.transpose(0, 2, 1))
         if self.bound_std:
             d = jnp.arange(L_test * d_f)
-            f_L = f_L.at[:, d, d].set(0.05 + 0.95 * jnp.tanh(f_L[:, d, d]))
+            f_L = f_L.at[:, d, d].set(0.05 + 0.95 * nn.softplus(f_L[:, d, d]))
         return f_mu, f_L
