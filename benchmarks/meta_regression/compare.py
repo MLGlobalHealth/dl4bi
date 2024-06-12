@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import norm, ttest_rel
 
-from dsp.core import mvn_logpdf_tril_cov
+from dsp.core import mvn_logpdf
 from dsp.core.utils import mask_from_valid_lens
 
 
@@ -163,8 +163,8 @@ def plot_posterior_predictive(
         else:  # f_std is a lower triangular covariance matrix
             f_mu = f_mu[i, :valid_len_test, 0]
             f_std = f_std[i, :valid_len_test, :valid_len_test]
-            nll = -mvn_logpdf_tril_cov(
-                f_test[None, ...], f_mu[None, ...], f_std[None, ...]
+            nll = -mvn_logpdf(
+                f_test[None, ...], f_mu[None, ...], f_std[None, ...], is_tril=True
             ).mean()
             nll = nll / L_test  # average over L_test
             f_std = np.diag(f_std @ f_std.T)

@@ -31,6 +31,6 @@ from .utils import (
     TrainState,
     l2_dist_sq,
     mask_from_valid_lens,
-    mvn_logpdf_tril_cov,
+    mvn_logpdf,
     prepare_dims,
 )

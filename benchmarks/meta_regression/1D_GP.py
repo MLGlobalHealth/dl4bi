@@ -136,7 +136,6 @@ def validate(
     for i in (pbar := tqdm(range(num_batches), unit="batch")):
         batch = next(loader)
         s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls = batch
-        mask_test = mask_from_valid_lens(s_test.shape[1], valid_lens_test)
         f_mu, f_std, *_ = jit(state.apply_fn)(
             {"params": state.params, **state.kwargs},
             s_ctx,
@@ -147,14 +146,15 @@ def validate(
             rngs={"latent_z": rng_latent_z},  # used by NP family
         )
         if f_mu.shape == f_std.shape:  # f_std is independent/diagonal
+            mask_test = mask_from_valid_lens(s_test.shape[1], valid_lens_test)
             losses[i] = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
         else:  # f_std is a lower triangular covariance matrix
             # WARNING: This ignores `valid_lens_test` because
-            # mvn_logpdf_tril_cov does yet support masks with `where`.
-            B, L_test, _ = f_test.shape
+            # mvn_logpdf does yet support masks with `where`.
+            B, L_test, _ = f_test.shape[0]
             f_test_flat, f_mu_flat = f_test.reshape(B, -1), f_mu.reshape(B, -1)
-            nll = -mvn_logpdf_tril_cov(f_test_flat, f_mu_flat, f_std).mean()
-            losses[i] = nll / L_test
+            nlls = -mvn_logpdf(f_test_flat, f_mu_flat, f_std, is_tril=True)
+            losses[i] = (nlls / valid_lens_test).mean()
         if results_path:
             b = [np.array(v) for v in batch]
             p = [np.array(v) for v in [f_mu, f_std]]
@@ -183,7 +183,7 @@ def log_plots(
     for i in random.choice(rng, batch_size, (num_plots,), replace=False):
         f_std_i = f_std[i].squeeze()
         # TODO(danj): is this legitimate?
-        if f_mu.shape != f_std.shape:  # f_std L in Sigma=LL^T
+        if f_mu[i].shape != f_std[i].shape:  # f_std L in Sigma=LL^T
             f_std_i = jnp.diag(f_std_i @ f_std_i.T)
         sample_path = plot_posterior_predictive(
             i,

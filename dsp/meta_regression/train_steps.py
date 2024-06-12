@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jax import jit, random
 from jax.scipy.stats import norm
 
-from ..core import TrainState, mask_from_valid_lens, mvn_logpdf_tril_cov
+from ..core import TrainState, mask_from_valid_lens, mvn_logpdf
 
 
 @jit
@@ -86,11 +86,11 @@ def train_step_tril_cov(
             training=True,
             rngs={"dropout": rng},
         )
-        B, L_test, _ = f_test.shape
+        B = f_test.shape[0]
         f_test_flat, f_mu_flat = f_test.reshape(B, -1), f_mu.reshape(B, -1)
-        nll = -mvn_logpdf_tril_cov(f_test_flat, f_mu_flat, f_L).mean()
+        nlls = -mvn_logpdf(f_test_flat, f_mu_flat, f_L, is_tril=True)
         # average over L_test to be comparable to diagonal train step loss
-        return nll / L_test
+        return (nlls / valid_lens_test).mean()
 
     nll, grads = jax.value_and_grad(loss_fn)(state.params)
     return state.apply_gradients(grads=grads), nll

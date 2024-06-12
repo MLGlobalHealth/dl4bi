@@ -143,11 +143,11 @@ def validate(
         if f_mu.shape == f_std.shape:  # f_std is independent/diagonal
             losses[i] = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
         else:  # f_std is a lower triangular covariance matrix
-            # WARNING: This ignores `valid_lens_test` because
-            # mvn_logpdf_tril_cov does yet support masks with `where`.
+            # WARNING: This ignores `valid_lens_test` because mvn_logpdf does
+            # yet support masks with `where`.
             B, L_test, _ = f_test.shape
             f_test_flat, f_mu_flat = f_test.reshape(B, -1), f_mu.reshape(B, -1)
-            nll = -mvn_logpdf_tril_cov(f_test_flat, f_mu_flat, f_std).mean()
+            nll = -mvn_logpdf(f_test_flat, f_mu_flat, f_std, is_tril=True).mean()
             losses[i] = nll / L_test
         if results_path:
             b = [np.array(v) for v in batch]
