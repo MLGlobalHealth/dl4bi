@@ -40,10 +40,10 @@ such degeneracy.
 ## TODO
 - [ ] Meta Regression
     - [ ] TNP authors with patch demonstrating TNP-A pathology
-        - TNP-ND tanh -> negative values (performance dips when using softplus)
         - TNP-ND large number of points in test set
         - Also, speak to bounded std-dev on other NP models
-    - [ ] Fix TNP-ND (likely MVN logpdf tril cov calculation)
+    - [ ] Validate TNP-ND plotting (does original implementation do the same?)
+    - [ ] Create plot of Calibration Error by number of observed points
     - [ ] Write 2D GP benchmark
     - [ ] Finetune 2D GP model on Heaton benchmark
     - [ ] Predict ls, var with model and use it to parameterize off-diagonal
