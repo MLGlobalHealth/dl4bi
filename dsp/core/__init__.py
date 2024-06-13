@@ -18,6 +18,12 @@ from .fast_attention import (
     build_simple_positive_softmax_phi,
     build_stable_positive_softmax_phi,
 )
+from .metrics import (
+    l2_dist_sq,
+    mean_absolute_calibration_error,
+    mvn_logpdf,
+    prepare_dims,
+)
 from .mlp import MLP
 from .transformer import (
     KRBlock,
@@ -29,8 +35,5 @@ from .transformer import (
 )
 from .utils import (
     TrainState,
-    l2_dist_sq,
     mask_from_valid_lens,
-    mvn_logpdf,
-    prepare_dims,
 )

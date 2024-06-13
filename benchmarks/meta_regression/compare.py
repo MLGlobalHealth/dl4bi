@@ -6,10 +6,13 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+from jax import vmap
 from scipy.stats import norm, ttest_rel
 
+from dsp.core import mean_absolute_calibration_error as mace
 from dsp.core import mvn_logpdf
 from dsp.core.utils import mask_from_valid_lens
 
@@ -17,7 +20,7 @@ from dsp.core.utils import mask_from_valid_lens
 def plot_diff(args):
     dir = Path(args.directory)
     m1, m2 = args.model_1, args.model_2
-    nlls, data = {m1: [], m2: []}, {m1: [], m2: []}
+    nlls, maces, data = {m1: [], m2: []}, {m1: [], m2: []}, {m1: [], m2: []}
     keys = [
         "s_ctx",
         "f_ctx",
@@ -37,26 +40,40 @@ def plot_diff(args):
                 if d["f_mu"].shape == d["f_std"].shape:
                     L_test = d["s_test"].shape[1]
                     mask = mask_from_valid_lens(L_test, d["valid_lens_test"])
-                    nll = -norm.logpdf(d["f_test"], d["f_mu"], d["f_std"]).mean(
-                        where=mask
+                    batch_nlls = -norm.logpdf(d["f_test"], d["f_mu"], d["f_std"]).mean(
+                        where=mask, axis=(1, 2)
                     )
-                else:
+                    batch_maces = mace(
+                        d["f_test"].squeeze(), d["f_mu"].squeeze(), d["f_std"].squeeze()
+                    ).mean(axis=-1)
+                else:  # f_std is a lower cholesky L
                     B = d["f_test"].shape[0]
-                    mvn_nlls = -mvn_logpdf(
-                        d["f_test"].reshape(B, -1),
-                        d["f_mu"].reshape(B, -1),
-                        d["f_std"],
-                        is_tril=True,
+                    batch_nlls = (
+                        -mvn_logpdf(
+                            d["f_test"].reshape(B, -1),
+                            d["f_mu"].reshape(B, -1),
+                            d["f_std"],
+                            is_tril=True,
+                        )
+                        / d["valid_lens_test"]
                     )
-                    nll = (mvn_nlls / d["valid_lens_test"]).mean()
-                nlls[m] += [nll]
+                    batch_maces = mace(
+                        d["f_test"].squeeze(),
+                        d["f_mu"].squeeze(),
+                        # TODO(danj): verify this
+                        vmap(jnp.diag)(d["f_std"]).squeeze(),
+                    ).mean(axis=-1)
+                nlls[m] += [batch_nlls]
+                maces[m] += [batch_maces]
                 data[m] += [d]
-    nlls_m1 = np.hstack(nlls[m1])
-    nlls_m2 = np.hstack(nlls[m2])
-    diff = nlls_m1 - nlls_m2
+    nlls_m1, nlls_m2 = np.hstack(nlls[m1]), np.hstack(nlls[m2])
+    maces_m1, maces_m2 = np.hstack(maces[m1]), np.hstack(maces[m2])
+    nll_diffs = nlls_m1 - nlls_m2
     p_value = ttest_rel(nlls_m1, nlls_m2).pvalue
-    print(f"Mean diff: {diff.mean():0.3f}, paired t-test p-value: {p_value:0.3f}")
-    n_idxs = np.argsort(diff)[: args.worst_n]
+    print(f"{m1} MACE: {maces_m1.mean():0.3f}")
+    print(f"{m2} MACE: {maces_m2.mean():0.3f}")
+    print(f"Mean diff: {nll_diffs.mean():0.3f}, paired t-test p-value: {p_value:0.3f}")
+    n_idxs = np.argsort(nll_diffs)[: args.worst_n]
     batch_size = data[m1][0]["s_test"].shape[0]
     batch_idxs, sample_idxs = n_idxs // batch_size, n_idxs % batch_size
     for i, (n_idx, b_idx, s_idx) in enumerate(zip(n_idxs, batch_idxs, sample_idxs)):
@@ -74,7 +91,10 @@ def plot_diff(args):
         f_std_2 = np.diag(f_std_2[:vt, :vt]) if f_std_2.ndim > 1 else f_std_2[:vt]
         title = f"Diff {i+1}: Batch {b_idx}, Sample {s_idx}"
         title += f", var: {var:0.2f}, ls {ls:0.2f}"
-        title += f", NLL({m1})-NLL({m2})={diff[n_idx]:0.3f}"
+        title += f", NLL({m1})-NLL({m2})={nll_diffs[n_idx]:0.3f}"
+        title += (
+            f"\nMACE({m1})={maces_m1[n_idx]:0.3f}, MACE({m2})={maces_m2[n_idx]:0.3f}"
+        )
         path = dir / f"{title}.pdf"
         plot_pp_comparison(
             path,

@@ -38,12 +38,11 @@ such degeneracy.
 - Run tests: `poetry run pytest`
 
 ## TODO
+- [ ] Clean up VAE benchmarks
 - [ ] Meta Regression
+    - [ ] Parameterize L for SPTx
     - [ ] TNP authors with patch demonstrating TNP-A pathology
-        - TNP-ND large number of points in test set
-        - Also, speak to bounded std-dev on other NP models
-    - [ ] Validate TNP-ND plotting (does original implementation do the same?)
-    - [ ] Create plot of Calibration Error by number of observed points
+    - [ ] Create plot of MACE by number of observed points
     - [ ] Write 2D GP benchmark
     - [ ] Finetune 2D GP model on Heaton benchmark
     - [ ] Predict ls, var with model and use it to parameterize off-diagonal
@@ -51,5 +50,3 @@ such degeneracy.
     - [ ] Add HMC baseline
     - [ ] Add BNP/BANP
     - [ ] Add ConvNP
-    - [ ] SPTx/KRStacks: test larger jumps in residual connections
-- [ ] Clean up VAE benchmarks
