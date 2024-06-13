@@ -77,13 +77,26 @@ def plot_diff(args):
         title += f", NLL({m1})-NLL({m2})={diff[n_idx]:0.3f}"
         path = dir / f"{title}.pdf"
         plot_pp_comparison(
-            path, title, s_ctx, f_ctx, s_test, f_test, f_mu_1, f_std_1, f_mu_2, f_std_2
+            path,
+            title,
+            m1,
+            m2,
+            s_ctx,
+            f_ctx,
+            s_test,
+            f_test,
+            f_mu_1,
+            f_std_1,
+            f_mu_2,
+            f_std_2,
         )
 
 
 def plot_pp_comparison(
     path: Path,
     title: str,
+    model_1_name: str,
+    model_2_name: str,
     s_ctx: np.ndarray,
     f_ctx: np.ndarray,
     s_test: np.ndarray,
@@ -103,14 +116,14 @@ def plot_pp_comparison(
     f_lower_1, f_upper_1 = f_mu_1 - z * f_std_1, f_mu_1 + z * f_std_1
     f_lower_2, f_upper_2 = f_mu_2 - z * f_std_2, f_mu_2 + z * f_std_2
     plt.plot(s_test[idx], f_test[idx], color="black")
-    plt.plot(s_test[idx], f_mu_1[idx], color="steelblue")
-    plt.plot(s_test[idx], f_mu_2[idx], color="darkorange")
+    plt.plot(s_test[idx], f_mu_1[idx], color="steelblue", label=model_1_name)
+    plt.plot(s_test[idx], f_mu_2[idx], color="darkorange", label=model_2_name)
     plt.scatter(s_ctx, f_ctx, color="black")
     plt.fill_between(
         s_test[idx],
         f_lower_1[idx],
         f_upper_1[idx],
-        alpha=0.3,
+        alpha=0.5,
         color="steelblue",
         interpolate=True,
     )
@@ -118,12 +131,13 @@ def plot_pp_comparison(
         s_test[idx],
         f_lower_2[idx],
         f_upper_2[idx],
-        alpha=0.3,
+        alpha=0.25,
         color="darkorange",
         interpolate=True,
     )
     plt.ylabel("f")
     plt.xlabel("s")
+    plt.legend()
     plt.title(title)
     plt.gcf().set_size_inches(10, 5)
     plt.savefig(path, dpi=150)
