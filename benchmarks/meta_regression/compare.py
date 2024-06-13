@@ -43,9 +43,7 @@ def plot_diff(args):
                     batch_nlls = -norm.logpdf(d["f_test"], d["f_mu"], d["f_std"]).mean(
                         where=mask, axis=(1, 2)
                     )
-                    batch_maces = mace(
-                        d["f_test"].squeeze(), d["f_mu"].squeeze(), d["f_std"].squeeze()
-                    ).mean(axis=-1)
+                    batch_maces = mace(d["f_test"], d["f_mu"], d["f_std"]).mean(axis=-1)
                 else:  # f_std is a lower cholesky L
                     B = d["f_test"].shape[0]
                     batch_nlls = (
@@ -57,11 +55,9 @@ def plot_diff(args):
                         )
                         / d["valid_lens_test"]
                     )
+                    # TODO(danj): verify this
                     batch_maces = mace(
-                        d["f_test"].squeeze(),
-                        d["f_mu"].squeeze(),
-                        # TODO(danj): verify this
-                        vmap(jnp.diag)(d["f_std"]).squeeze(),
+                        d["f_test"], d["f_mu"], vmap(jnp.diag)(d["f_std"])
                     ).mean(axis=-1)
                 nlls[m] += [batch_nlls]
                 maces[m] += [batch_maces]

@@ -89,9 +89,9 @@ def mvn_logpdf(
 
 @partial(jit, static_argnames=["num_bins"])
 def mean_absolute_calibration_error(
-    f_true: jax.Array,
-    f_mu: jax.Array,
-    f_std: jax.Array,
+    f_true: jax.Array,  # [B, ..., D]
+    f_mu: jax.Array,  # [B, ..., D]
+    f_std: jax.Array,  # [B, ..., D]
     num_bins: int = 100,
 ):
     """
@@ -113,8 +113,8 @@ def mean_absolute_calibration_error(
     """
     p = jnp.linspace(0, 1, num_bins)
     lower = norm.ppf(0.5 - p / 2.0)
-    upper = norm.ppf(0.5 + p / 2.0)
+    upper = -lower
     z = ((f_mu - f_true) / f_std)[..., None]
     covered = jnp.logical_and(z >= lower, z <= upper)
     p_covered = jnp.mean(covered, axis=range(1, covered.ndim - 2))
-    return jnp.mean(jnp.abs(p_covered - p), -1)
+    return jnp.mean(jnp.abs(p - p_covered), axis=-1)
