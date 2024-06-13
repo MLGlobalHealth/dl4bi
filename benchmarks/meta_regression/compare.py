@@ -56,7 +56,7 @@ def plot_diff(args):
                         / d["valid_lens_test"]
                     )
                     # TODO(danj): verify this
-                    f_std = vmap(jnp.diag)(d["f_std"])[..., None]  # pointwise
+                    f_std = vmap(jnp.diag)(d["f_std"])[..., None]  # marginal f_std
                     batch_maces = mace(d["f_test"], d["f_mu"], f_std).mean(axis=-1)
                 nlls[m] += [batch_nlls]
                 maces[m] += [batch_maces]
@@ -81,7 +81,6 @@ def plot_diff(args):
         var, ls = d1["var"], d1["ls"]
         s_ctx, f_ctx = d1["s_ctx"][s_idx, :vc], d1["f_ctx"][s_idx, :vc]
         s_test, f_test = d1["s_test"][s_idx, :vt], d1["f_test"][s_idx, :vt]
-        # TODO(danj): fix NLL calculation here
         f_mu_1, f_mu_2 = d1["f_mu"][s_idx, :vt], d2["f_mu"][s_idx, :vt]
         f_std_1, f_std_2 = d1["f_std"][s_idx], d2["f_std"][s_idx]
         f_std_1 = np.diag(f_std_1[:vt, :vt]) if f_std_1.ndim > 1 else f_std_1[:vt]
