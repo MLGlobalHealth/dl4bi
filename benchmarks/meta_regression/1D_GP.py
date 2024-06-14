@@ -61,6 +61,23 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
+def instantiate(d: Union[dict, DictConfig]):
+    """Convenience function to instantiate an object from a config."""
+    if isinstance(d, DictConfig):
+        d = OmegaConf.to_container(d, resolve=True)
+    if "cls" in d:
+        cls, kwargs = d["cls"], d.get("kwargs", {})
+        for k in kwargs:
+            if k == "act_fn":
+                kwargs[k] = getattr(nn, kwargs[k])
+            elif isinstance(kwargs[k], dict):
+                kwargs[k] = instantiate(kwargs[k])
+        return globals()[cls](**kwargs)
+    elif "func" in d:
+        return eval(d["func"])
+    return d
+
+
 def train(
     rng: jax.Array,
     gp: GP,
@@ -118,6 +135,59 @@ def train(
             rng_valid, rng_train = random.split(rng_train)
             validate(rng_valid, gp, state, wandb_key=f"Step {i}")
     return state
+
+
+def dataloader(rng: jax.Array, gp: GP):
+    """Generates batches of GP samples."""
+    batch_size = 16
+    s_min, s_max = -2, 2
+    obs_noise = 0.1
+    num_ctx_min, num_ctx_max, num_linear = 3, 50, 100
+    s_linear = jnp.linspace(s_min, s_max, num_linear)
+    valid_lens_test = jnp.repeat(num_ctx_max + num_linear, batch_size)
+
+    @jit
+    def gen_batch(rng: jax.Array):
+        rng_s_random, rng_valid_lens_ctx, rng_gp, rng_eps, rng = random.split(rng, 5)
+        s_random = random.uniform(rng_s_random, (num_ctx_max,), float, s_min, s_max)
+        s = jnp.hstack([s_random, s_linear])[:, None]  # [num_ctx_max + num_linear, 1]
+        var, ls, _z, f = gp.simulate(rng_gp, s, batch_size)
+        valid_lens_ctx = random.randint(
+            rng_valid_lens_ctx, (batch_size,), num_ctx_min, num_ctx_max
+        )
+        s = jnp.repeat(s[None, ...], batch_size, axis=0)
+        f_noisy = f + obs_noise * random.normal(rng_eps, f.shape)
+        return s, f_noisy, valid_lens_ctx, s, f, valid_lens_test, var, ls
+
+    while True:
+        rng_batch, rng = random.split(rng)
+        yield gen_batch(rng_batch)
+
+
+def create_learning_rate_fn(
+    num_steps: int,
+    peak_lr: float,
+    pct_warmup: float = 0.3,
+    num_cycles: int = 1,
+):
+    """Create an n-cycle cosine annealing schedule."""
+    n = num_steps // num_cycles
+    sched = optax.cosine_onecycle_schedule(n, peak_lr, pct_start=pct_warmup)
+    boundaries = n * jnp.arange(1, num_cycles)
+    return optax.join_schedules([sched] * num_cycles, boundaries)
+
+
+def custom_learning_rate_fn(num_steps: int, peak_lr: float):
+    """Create a 3-cycle cosine annealing schedule.
+
+    There are two cosine schedules each consisting of a quarter of `num_steps`
+    and then a third single cosine schedule consisting of half of `num_steps`.
+    """
+    q, r = num_steps // 4, num_steps % 4
+    q_sched = optax.cosine_onecycle_schedule(q, peak_lr, pct_start=0.2)
+    h_sched = optax.cosine_onecycle_schedule(2 * q + r, peak_lr, pct_start=0.2)
+    boundaries = [0, q, 2 * q]
+    return optax.join_schedules([q_sched, q_sched, h_sched], boundaries)
 
 
 def validate(
@@ -246,89 +316,8 @@ def plot_posterior_predictive(
     return path
 
 
-def _results_path(kernel: str, model: str, seed: int):
-    path = Path(f"results/1D_GP/{kernel}/{model}-seed-{seed}.pkl")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path.absolute()
-
-
-def instantiate(d: Union[dict, DictConfig]):
-    """Convenience function to instantiate an object from a config."""
-    if isinstance(d, DictConfig):
-        d = OmegaConf.to_container(d, resolve=True)
-    if "cls" in d:
-        cls, kwargs = d["cls"], d.get("kwargs", {})
-        for k in kwargs:
-            if k == "act_fn":
-                kwargs[k] = getattr(nn, kwargs[k])
-            elif isinstance(kwargs[k], dict):
-                kwargs[k] = instantiate(kwargs[k])
-        return globals()[cls](**kwargs)
-    elif "func" in d:
-        return eval(d["func"])
-    return d
-
-
-def dataloader(rng: jax.Array, gp: GP):
-    """Generates batches of GP samples."""
-    batch_size = 16
-    s_min, s_max = -2, 2
-    obs_noise = 0.1
-    num_ctx_min, num_ctx_max, num_linear = 3, 50, 100
-    s_linear = jnp.linspace(s_min, s_max, num_linear)
-    valid_lens_test = jnp.repeat(num_ctx_max + num_linear, batch_size)
-
-    @jit
-    def gen_batch(rng: jax.Array):
-        rng_s_random, rng_valid_lens_ctx, rng_gp, rng_eps, rng = random.split(rng, 5)
-        s_random = random.uniform(rng_s_random, (num_ctx_max,), float, s_min, s_max)
-        s = jnp.hstack([s_random, s_linear])[:, None]  # [num_ctx_max + num_linear, 1]
-        var, ls, _z, f = gp.simulate(rng_gp, s, batch_size)
-        valid_lens_ctx = random.randint(
-            rng_valid_lens_ctx, (batch_size,), num_ctx_min, num_ctx_max
-        )
-        s = jnp.repeat(s[None, ...], batch_size, axis=0)
-        f_noisy = f + obs_noise * random.normal(rng_eps, f.shape)
-        return s, f_noisy, valid_lens_ctx, s, f, valid_lens_test, var, ls
-
-    while True:
-        rng_batch, rng = random.split(rng)
-        yield gen_batch(rng_batch)
-
-
-def create_learning_rate_fn(
-    num_steps: int,
-    peak_lr: float,
-    pct_warmup: float = 0.3,
-    num_cycles: int = 1,
-):
-    """Create an n-cycle cosine annealing schedule."""
-    n = num_steps // num_cycles
-    sched = optax.cosine_onecycle_schedule(n, peak_lr, pct_start=pct_warmup)
-    boundaries = n * jnp.arange(1, num_cycles)
-    return optax.join_schedules([sched] * num_cycles, boundaries)
-
-
-def custom_learning_rate_fn(num_steps: int, peak_lr: float):
-    """Create a 3-cycle cosine annealing schedule.
-
-    There are two cosine schedules each consisting of a quarter of `num_steps`
-    and then a third single cosine schedule consisting of half of `num_steps`.
-    """
-    q, r = num_steps // 4, num_steps % 4
-    q_sched = optax.cosine_onecycle_schedule(q, peak_lr, pct_start=0.2)
-    h_sched = optax.cosine_onecycle_schedule(2 * q + r, peak_lr, pct_start=0.2)
-    boundaries = [0, q, 2 * q]
-    return optax.join_schedules([q_sched, q_sched, h_sched], boundaries)
-
-
 def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
-    """Saves a checkpoint.
-
-    .. warning::
-        This uses the current runtime settings in Hydra to resolve the
-        checkpoint path.
-    """
+    """Saves a checkpoint."""
     shutil.rmtree(path, ignore_errors=True)
     ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
     cfg_d = OmegaConf.to_container(cfg, resolve=True)
@@ -342,12 +331,7 @@ def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
 
 
 def load_ckpt(path: Path):
-    """Loads a checkpoint.
-
-    .. warning::
-        This uses the current runtime settings in Hydra to resolve the
-        checkpoint path.
-    """
+    """Loads a checkpoint."""
     ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
     # restore config and use it to create model template
     ckpt = ckptr.restore(path, args=ocp.args.Composite(config=ocp.args.JsonRestore()))

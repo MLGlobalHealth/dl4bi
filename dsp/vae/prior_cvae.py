@@ -29,11 +29,10 @@ class PriorCVAE(nn.Module):
     z_dim: int
 
     @nn.compact
-    def __call__(self, rng: Array, f: Array, var: float, ls: float):
+    def __call__(self, f: Array, var: float, ls: float):
         r"""Run module forward.
 
         Args:
-            rng: A psuedo-random number generator.
             f: The function values, an array of shape `(B, K, 1)`.
             var: The variance for the GP.
             ls: The lengthscale for the GP.
@@ -43,22 +42,17 @@ class PriorCVAE(nn.Module):
             along with $\mu$ and $\log(\sigma^2)$, which are often used
             to calculate losses involving KL divergence.
         """
-        z_mu, z_std = self.encode(f, var, ls)
-        eps = random.normal(rng, z_std.shape)
-        z = z_mu + z_std * eps
-        f_hat = self.decode(z, var, ls)
-        return f_hat.reshape(f.shape), z_mu, z_std
-
-    def encode(self, f: Array, var: float, ls: float):
         B = f.shape[0]
         var = jnp.full((B, 1), var)
         ls = jnp.full((B, 1), ls)
-        f_flat = f.reshape(f.shape[0], -1)
-        latents = self.encoder(jnp.hstack([f_flat, var, ls]))
+        latents = self.encoder(jnp.hstack([f.reshape(B, -1), var, ls]))
         z_mu = nn.Dense(self.z_dim)(latents)
         z_log_var = nn.Dense(self.z_dim)(latents)
         z_std = jnp.exp(z_log_var / 2)
-        return z_mu, z_std
+        eps = random.normal(self.make_rng("latent_z"), z_std.shape)
+        z = z_mu + z_std * eps
+        f_hat = self.decoder(jnp.hstack([z, var, ls]))
+        return f_hat.reshape(f.shape), z_mu, z_std
 
     def decode(self, z: Array, var: float, ls: float):
         B = z.shape[0]

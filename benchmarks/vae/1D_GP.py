@@ -20,14 +20,11 @@ from omegaconf import DictConfig, OmegaConf
 from sps.gp import GP
 from sps.kernels import matern_3_2, periodic, rbf
 from sps.priors import Prior
+from sps.utils import build_grid
 from tqdm import tqdm
 
 from dsp.core import *  # noqa: F403
-from dsp.meta_regression import (
-    DeepChol,
-    PiVAE,
-    PriorCVAE,
-)
+from dsp.vae import DeepChol, PriorCVAE, train_steps
 
 
 @hydra.main("configs/1D_GP", version_base=None)
@@ -41,209 +38,21 @@ def main(cfg: DictConfig):
     )
     rng = random.key(cfg.seed)
     rng_train, rng_eval = random.split(rng)
+    s = build_grid([{"start": 0.0, "stop": 1.0, "num": 128}])
     gp, model = instantiate(cfg.kernel), instantiate(cfg.model)
-    state = train(rng_train, gp, model)
+    state = train(rng_train, gp, s, model)
     path = Path(f"results/1D_GP/{kernel_name}/{model_name}-seed-{seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
     validate(
         rng_eval,
         gp,
+        s,
         state,
+        is_decoder_only=isinstance(model, (DeepChol,)),
         wandb_key="Final Model Samples",
         results_path=path.with_suffix(".pkl"),
     )
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
-
-
-def train(
-    rng: jax.Array,
-    gp: GP,
-    model: nn.Module,
-    num_steps: int = 200000,
-    validate_every_n: int = 50000,
-    log_every_n: int = 100,
-    lr_peak: float = 1e-3,
-    lr_pct_warmup: float = 0.3,
-    lr_num_cycles: int = 1,
-):
-    rng_data, rng_params, rng_latent_z, rng_train = random.split(rng, 4)
-    loader = dataloader(rng_data, gp)
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls = next(
-        loader
-    )
-    kwargs = model.init(
-        {"params": rng_params, "latent_z": rng_latent_z},
-        s_ctx,
-        f_ctx,
-        s_test,
-        valid_lens_ctx,
-        valid_lens_test,
-    )
-    params = kwargs.pop("params")
-    learning_rate_fn = create_learning_rate_fn(
-        num_steps,
-        lr_peak,
-        lr_pct_warmup,
-        lr_num_cycles,
-    )
-    state = TrainState.create(
-        apply_fn=model.apply,
-        params=params,
-        tx=optax.yogi(learning_rate_fn),
-        kwargs=kwargs,
-    )
-    param_count = sum(x.size for x in jax.tree_util.tree_leaves(state.params))
-    print(f"{model}\n\nParam count: {param_count}")
-    train_step = train_steps.train_step
-    if isinstance(model, (NP, ANP)):
-        train_step = train_steps.npf_elbo_train_step
-    elif isinstance(model, (TNPND,)):
-        train_step = train_steps.train_step_tril_cov
-    losses = np.zeros((num_steps,))
-    for i in (pbar := tqdm(range(num_steps), unit="batch")):
-        rng_step, rng_train = random.split(rng_train)
-        batch = next(loader)
-        state, losses[i] = train_step(rng_step, state, batch)
-        if i > 0 and i % log_every_n == 0:
-            avg = jnp.mean(losses[i - log_every_n : i])
-            pbar.set_postfix(loss=f"{avg:.3f}")
-            wandb.log({"loss": avg})
-        if i > 0 and i % validate_every_n == 0:
-            rng_valid, rng_train = random.split(rng_train)
-            validate(rng_valid, gp, state, wandb_key=f"Step {i}")
-    return state
-
-
-def validate(
-    rng: jax.Array,
-    gp: GP,
-    state: TrainState,
-    num_batches: int = 5000,
-    num_plots: int = 16,
-    wandb_key: str = "",
-    results_path: Optional[Path] = None,
-):
-    rng_data, rng_latent_z, rng_plots = random.split(rng, 3)
-    loader = dataloader(rng_data, gp)
-    losses = np.zeros((num_batches,))
-    results = []
-    for i in (pbar := tqdm(range(num_batches), unit="batch")):
-        batch = next(loader)
-        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls = batch
-        mask_test = mask_from_valid_lens(s_test.shape[1], valid_lens_test)
-        f_mu, f_std, *_ = jit(state.apply_fn)(
-            {"params": state.params, **state.kwargs},
-            s_ctx,
-            f_ctx,
-            s_test,
-            valid_lens_ctx,
-            valid_lens_test,
-            rngs={"latent_z": rng_latent_z},  # used by NP family
-        )
-        if f_mu.shape == f_std.shape:  # f_std is independent/diagonal
-            losses[i] = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
-        else:  # f_std is a lower triangular covariance matrix
-            # WARNING: This ignores `valid_lens_test` because mvn_logpdf does
-            # yet support masks with `where`.
-            B, L_test, _ = f_test.shape
-            f_test_flat, f_mu_flat = f_test.reshape(B, -1), f_mu.reshape(B, -1)
-            nll = -mvn_logpdf(f_test_flat, f_mu_flat, f_std, is_tril=True).mean()
-            losses[i] = nll / L_test
-        if results_path:
-            b = [np.array(v) for v in batch]
-            p = [np.array(v) for v in [f_mu, f_std]]
-            results += [(b, p)]
-    loss = losses.mean()
-    print(f"validation loss: {loss:.3f}")
-    wandb.log({"validation_loss": loss})
-    log_plots(rng_plots, wandb_key, num_plots, batch, f_mu, f_std)
-    if results_path:
-        with open(results_path, "wb") as f:
-            pickle.dump(results, f)
-
-
-def log_plots(
-    rng: jax.Array,
-    wandb_key: str,
-    num_plots: int,
-    batch: tuple,
-    f_mu: jax.Array,
-    f_std: jax.Array,
-):
-    """Logs `num_plots` from the given batch."""
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls = batch
-    batch_size = s_test.shape[0]
-    sample_paths = []
-    for i in random.choice(rng, batch_size, (num_plots,), replace=False):
-        f_std_i = f_std[i].squeeze()
-        # TODO(danj): is this legitimate?
-        if f_mu.shape != f_std.shape:  # f_std L in Sigma=LL^T
-            f_std_i = jnp.diag(f_std_i @ f_std_i.T)
-        sample_path = plot_posterior_predictive(
-            i,
-            s_ctx[i].squeeze(),
-            f_ctx[i].squeeze(),
-            valid_lens_ctx[i],
-            s_test[i].squeeze(),
-            f_test[i].squeeze(),
-            valid_lens_test[i],
-            f_mu[i].squeeze(),
-            f_std_i,
-            var,
-            ls,
-        )
-        sample_paths += [sample_path]
-    wandb.log({wandb_key: [wandb.Image(p) for p in sample_paths]})
-
-
-def plot_posterior_predictive(
-    id: int,
-    s_ctx: jax.Array,
-    f_ctx: jax.Array,
-    valid_len_ctx: jax.Array,
-    s_test: jax.Array,
-    f_test: jax.Array,
-    valid_len_test: jax.Array,
-    f_mu: jax.Array,
-    f_std: jax.Array,
-    var: np.ndarray,
-    ls: np.ndarray,
-    hdi_prob=0.95,
-):
-    """Plots the posterior predictive alongside true values."""
-    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
-    f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
-    s_ctx, f_ctx = s_ctx[:valid_len_ctx], f_ctx[:valid_len_ctx]
-    s_test, f_test = s_test[:valid_len_test], f_test[:valid_len_test]
-    f_mu = f_mu[:valid_len_test]
-    f_lower, f_upper = f_lower[:valid_len_test], f_upper[:valid_len_test]
-    idx = jnp.argsort(s_test)
-    plt.plot(s_test[idx], f_test[idx], color="black")
-    plt.plot(s_test[idx], f_mu[idx], color="steelblue")
-    plt.scatter(s_ctx, f_ctx, color="black")
-    plt.fill_between(
-        s_test[idx],
-        f_lower[idx],
-        f_upper[idx],
-        alpha=0.4,
-        color="steelblue",
-        interpolate=True,
-    )
-    ax = plt.gca()
-    ax.set_xlabel("s")
-    ax.set_ylabel("f")
-    title = f"Sample {id} (var: {var[0]:0.2f}, ls: {ls[0]:0.2f})"
-    path = f"/tmp/{title}.png"
-    plt.title(title)
-    plt.savefig(path, dpi=150)
-    plt.clf()
-    return path
-
-
-def _results_path(kernel: str, model: str, seed: int):
-    path = Path(f"results/1D_GP/{kernel}/{model}-seed-{seed}.pkl")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path.absolute()
 
 
 def instantiate(d: Union[dict, DictConfig]):
@@ -263,31 +72,64 @@ def instantiate(d: Union[dict, DictConfig]):
     return d
 
 
-def dataloader(rng: jax.Array, gp: GP):
-    """Generates batches of GP samples."""
-    batch_size = 16
-    s_min, s_max = -2, 2
-    obs_noise = 0.1
-    num_ctx_min, num_ctx_max, num_linear = 3, 50, 100
-    s_linear = jnp.linspace(s_min, s_max, num_linear)
-    valid_lens_test = jnp.repeat(num_ctx_max + num_linear, batch_size)
+def train(
+    rng: jax.Array,
+    gp: GP,
+    s: jax.Array,
+    model: nn.Module,
+    num_steps: int = 100000,
+    validate_every_n: int = 25000,
+    batch_size: int = 1024,
+    log_every_n: int = 100,
+    lr_peak: float = 1e-3,
+    lr_pct_warmup: float = 0.3,
+    lr_num_cycles: int = 1,
+):
+    rng_data, rng_params, rng_latent_z, rng_train = random.split(rng, 4)
+    loader = dataloader(rng_data, gp, s, batch_size)
+    var, ls, z, f = next(loader)
+    rngs = {"params": rng_params, "latent_z": rng_latent_z}
+    x = f if isinstance(model, PriorCVAE) else z  # decoder-only, e.g. DeepChol
+    kwargs = model.init(rngs, x, var, ls)
+    params = kwargs.pop("params")
+    learning_rate_fn = create_learning_rate_fn(
+        num_steps,
+        lr_peak,
+        lr_pct_warmup,
+        lr_num_cycles,
+    )
+    state = TrainState.create(
+        apply_fn=model.apply,
+        params=params,
+        tx=optax.yogi(learning_rate_fn),
+        kwargs=kwargs,
+    )
+    param_count = sum(x.size for x in jax.tree_util.tree_leaves(state.params))
+    print(f"{model}\n\nParam count: {param_count}")
+    is_decoder_only = False
+    train_step = train_steps.elbo_train_step
+    if isinstance(model, (DeepChol,)):
+        is_decoder_only = True
+        train_step = train_steps.mse_train_step
+    losses = np.zeros((num_steps,))
+    for i in (pbar := tqdm(range(num_steps), unit="batch")):
+        rng_step, rng_train = random.split(rng_train)
+        batch = next(loader)
+        state, losses[i] = train_step(rng_step, state, batch)
+        if i > 0 and i % log_every_n == 0:
+            avg = jnp.mean(losses[i - log_every_n : i])
+            pbar.set_postfix(loss=f"{avg:.3f}")
+            wandb.log({"loss": avg})
+        if i > 0 and i % validate_every_n == 0:
+            rng_valid, rng_train = random.split(rng_train)
+            validate(rng_valid, gp, s, state, is_decoder_only, wandb_key=f"Step {i}")
+    return state
 
-    @jit
-    def gen_batch(rng: jax.Array):
-        rng_s_random, rng_valid_lens_ctx, rng_gp, rng_eps, rng = random.split(rng, 5)
-        s_random = random.uniform(rng_s_random, (num_ctx_max,), float, s_min, s_max)
-        s = jnp.hstack([s_random, s_linear])[:, None]  # [num_ctx_max + num_linear, 1]
-        var, ls, _z, f = gp.simulate(rng_gp, s, batch_size)
-        valid_lens_ctx = random.randint(
-            rng_valid_lens_ctx, (batch_size,), num_ctx_min, num_ctx_max
-        )
-        s = jnp.repeat(s[None, ...], batch_size, axis=0)
-        f_noisy = f + obs_noise * random.normal(rng_eps, f.shape)
-        return s, f_noisy, valid_lens_ctx, s, f, valid_lens_test, var, ls
 
+def dataloader(rng, gp, s, batch_size=1024, approx=True):
     while True:
         rng_batch, rng = random.split(rng)
-        yield gen_batch(rng_batch)
+        yield gp.simulate(rng, s, batch_size, approx)
 
 
 def create_learning_rate_fn(
@@ -316,13 +158,72 @@ def custom_learning_rate_fn(num_steps: int, peak_lr: float):
     return optax.join_schedules([q_sched, q_sched, h_sched], boundaries)
 
 
-def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
-    """Saves a checkpoint.
+def validate(
+    rng: jax.Array,
+    gp: GP,
+    s: jax.Array,
+    state: TrainState,
+    is_decoder_only: bool = False,
+    num_batches: int = 5000,
+    num_plots: int = 16,
+    wandb_key: str = "",
+    results_path: Optional[Path] = None,
+):
+    rng_data, rng_latent_z, rng_plots = random.split(rng, 3)
+    loader = dataloader(rng_data, gp, s)
+    losses = np.zeros((num_batches,))
+    results = []
+    for i in (pbar := tqdm(range(num_batches), unit="batch")):
+        batch = next(loader)
+        var, ls, z, f = batch
+        params = {"params": state.params, **state.kwargs}
+        rngs = {"latent_z": rng_latent_z}
+        if is_decoder_only:
+            f_hat = jit(state.apply_fn)(params, z, var, ls)
+            losses[i] = optax.squared_error(f_hat, f.squeeze()).mean()
+        else:
+            f_hat, z_mu, z_std = jit(state.apply_fn)(params, f, var, ls, rngs=rngs)
+            kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
+            logp = norm.logpdf(f, f_hat, 1.0).mean()
+            losses[i] = -logp + kl_div.mean()
+        if results_path:
+            b = [np.array(v) for v in batch]
+            p = np.array(f_hat)
+            results += [(b, p)]
+    loss = losses.mean()
+    print(f"validation loss: {loss:.3f}")
+    wandb.log({"validation_loss": loss})
+    log_plots(rng_plots, wandb_key, num_plots, batch, s, f_hat)
+    if results_path:
+        with open(results_path, "wb") as f:
+            pickle.dump(results, f)
 
-    .. warning::
-        This uses the current runtime settings in Hydra to resolve the
-        checkpoint path.
-    """
+
+def log_plots(
+    rng: jax.Array,
+    wandb_key: str,
+    num_plots: int,
+    batch: tuple,
+    s: jax.Array,
+    f_hat: jax.Array,
+):
+    """Logs `num_plots` from the given batch."""
+    (var, ls, _z, f), s_flat = batch, s.squeeze()
+    sample_paths = []
+    for i in random.choice(rng, f.shape[0], (num_plots,), replace=False):
+        plt.plot(s_flat, f[i].squeeze().T, color="black")
+        plt.plot(s_flat, f_hat[i].squeeze().T, color="red")
+        title = f"Sample {i} (var: {var[0]:0.2f}, ls: {ls[0]:0.2f})"
+        path = f"/tmp/{title}.png"
+        sample_paths += [path]
+        plt.title(title)
+        plt.savefig(path, dpi=150)
+        plt.clf()
+    wandb.log({wandb_key: [wandb.Image(p) for p in sample_paths]})
+
+
+def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
+    """Saves a checkpoint."""
     shutil.rmtree(path, ignore_errors=True)
     ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
     cfg_d = OmegaConf.to_container(cfg, resolve=True)
@@ -336,24 +237,21 @@ def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
 
 
 def load_ckpt(path: Path):
-    """Loads a checkpoint.
-
-    .. warning::
-        This uses the current runtime settings in Hydra to resolve the
-        checkpoint path.
-    """
+    """Loads a checkpoint."""
     ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
     # restore config and use it to create model template
     ckpt = ckptr.restore(path, args=ocp.args.Composite(config=ocp.args.JsonRestore()))
     cfg = OmegaConf.create(ckpt["config"])
-    model = instantiate(cfg.model)
-    num_steps = 100000
+    num_steps, batch_size = 100000, 1024
     lr_peak, lr_pct_warmup, lr_num_cycles = 1e-3, 0.1, 1
-    B, L, D = 4, 10, 1  # these are arbitrary
-    s = f = jnp.zeros((B, L, D))
-    valid_lens = jnp.repeat(L, B)
-    key = random.key(42)
-    kwargs = model.init(key, s, f, s, valid_lens, valid_lens)
+    rng = random.key(42)
+    rng_gp, rng_params, rng_latent_z = random.split(rng, 3)
+    s = build_grid([{"start": 0, "stop": 1.0, "num": 128}])
+    gp, model = instantiate(cfg.kernel), instantiate(cfg.model)
+    var, ls, z, f = gp.simulate(rng_gp, s, batch_size)
+    x = f if isinstance(model, PriorCVAE) else z  # decoder-only, e.g. DeepChol
+    rngs = {"params": rng_params, "latent_z": rng_latent_z}
+    kwargs = model.init(rngs, x, var, ls)
     params = kwargs.pop("params")
     learning_rate_fn = create_learning_rate_fn(
         num_steps,
@@ -370,7 +268,7 @@ def load_ckpt(path: Path):
     ckpt = ckptr.restore(
         path, args=ocp.args.Composite(state=ocp.args.StandardRestore(state))
     )
-    return ckpt["state"], cfg
+    return ckpt["state"], model, cfg
 
 
 if __name__ == "__main__":

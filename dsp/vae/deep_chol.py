@@ -17,8 +17,8 @@ class DeepChol(nn.Module):
     size is `num_locations`.
 
     Args:
-        z: Standard normal samples with one `z` for each location. The first
-            dimension is assumed to be the batch dimension.
+        z: Standard normal samples. The first dimension is assumed to be the
+            batch dimension.
         var: Variance to use when calculating `f`.
         ls: lengthscale to use when calculating `f`.
 
@@ -33,15 +33,14 @@ class DeepChol(nn.Module):
         r"""Run module forward.
 
         Args:
-            rng: A psuedo-random number generator.
+            z: A psuedo-random number generator.
             var: The variance for the GP.
             ls: The lengthscale for the GP.
 
         Returns:
             $\hat{\mathbf{f}}$, an approximation of $\mathbf{Lz}$.
         """
-        batch_size = z.shape[0]
-        var = jnp.full((batch_size, 1), var)
-        ls = jnp.full((batch_size, 1), ls)
-        x = jnp.hstack([z, var, ls])
-        return self.decoder(x)
+        B = z.shape[0]
+        var = jnp.full((B, 1), var)
+        ls = jnp.full((B, 1), ls)
+        return self.decoder(jnp.hstack([z, var, ls]))

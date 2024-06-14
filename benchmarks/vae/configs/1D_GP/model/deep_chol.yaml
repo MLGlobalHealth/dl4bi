@@ -1,0 +1,6 @@
+cls: DeepChol
+kwargs:
+  decoder:
+    cls: MLP
+    kwargs:
+      dims: [128, 128]

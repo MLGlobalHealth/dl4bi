@@ -39,10 +39,10 @@ such degeneracy.
 
 ## TODO
 - [ ] Clean up VAE benchmarks
-- [ ] Parameterize L for SPTx vs. predict (ls, var) and use GP
+- [ ] Code up ConvNP
 - [ ] Create a calibration plot / can LL be higher but MACE be lower
-- [ ] Create git patch demonstrating incorrect LL calc for TNP-A
+- [ ] Create git patch demonstrating incorrect LL calc for TNP-A & TNP-ND miscalibration
 - [ ] Create a 2D GP benchmark
 - [ ] Test Heaton et al benchmark
-- [ ] Code up ConvNP
 - [ ] Code up BNP/BANP
+- [ ] SPTx sampling: predict L vs. predict (ls, var) and use GP

@@ -3,6 +3,8 @@ import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
 
+# WARNING: this model does not work very well, and it not fully supported
+
 
 class SPVAE(nn.Module):
     r"""SPVAE approximates any stochastic process.
@@ -39,7 +41,7 @@ class SPVAE(nn.Module):
     p_holdout: float = 0.2
 
     @nn.compact
-    def __call__(self, rng: Array, s: Array, f: Array, training: bool = False):
+    def __call__(self, s: Array, f: Array, training: bool = False):
         r"""Run module forward.
 
         Args:
@@ -56,6 +58,7 @@ class SPVAE(nn.Module):
             losses involving KL divergence.
         """
         B, L, _ = s.shape
+        rng = self.make_rng("latent_z")
         rng_keep, rng_z = random.split(rng)
         num_keep = L - int(L * self.p_holdout)
         keep_idx = random.choice(rng_keep, jnp.arange(L), (num_keep,), replace=False)
@@ -63,11 +66,11 @@ class SPVAE(nn.Module):
         s_keep_flat = s[:, keep_idx, :].reshape(B, -1)
         f_keep_flat = f[:, keep_idx, :].reshape(B, -1)
         latents = self.encoder(jnp.hstack([f_keep_flat, s_keep_flat]), training)
-        mu = nn.Dense(self.z_dim)(latents)
-        log_var = nn.Dense(self.z_dim)(latents)
-        std = jnp.exp(log_var / 2)
-        eps = random.normal(rng_z, log_var.shape)
-        z = mu + std * eps
+        z_mu = nn.Dense(self.z_dim)(latents)
+        z_log_var = nn.Dense(self.z_dim)(latents)
+        z_std = jnp.exp(z_log_var / 2)
+        eps = random.normal(rng_z, z_log_var.shape)
+        z = z_mu + z_std * eps
         # use all locations in the decoder
         s_holdout_flat = jnp.delete(
             s, keep_idx, axis=1, assume_unique_indices=True
@@ -84,6 +87,6 @@ class SPVAE(nn.Module):
             s_flat.reshape(s.shape),
             f_flat.reshape(f.shape),
             f_hat_flat.reshape(f.shape),
-            mu,
-            log_var,
+            z_mu,
+            z_std,
         )

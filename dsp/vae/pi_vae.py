@@ -34,11 +34,10 @@ class PiVAE(nn.Module):
     z_dim: int
 
     @nn.compact
-    def __call__(self, rng: jax.Array, s: jax.Array, f: jax.Array):
+    def __call__(self, s: jax.Array, f: jax.Array):
         r"""Run module forward.
 
         Args:
-            rng: A psuedo-random number generator.
             s: A location array of shape `(B,L,D)` where
                 `B` is batch size, `L` is number of locations,
                 and `D` is the dimension of each location.
@@ -60,14 +59,14 @@ class PiVAE(nn.Module):
         # to use the frozen beta parameters, not the traced jax arrays.
         betas_fixed = self.variables["params"]["betas"]
         latents = self.encoder(betas_fixed)
-        mu = nn.Dense(self.z_dim)(latents)
-        log_var = nn.Dense(self.z_dim)(latents)
-        std = jnp.exp(log_var / 2)
-        eps = random.normal(rng, log_var.shape)
-        z = mu + std * eps
+        z_mu = nn.Dense(self.z_dim)(latents)
+        z_log_var = nn.Dense(self.z_dim)(latents)
+        z_std = jnp.exp(z_log_var / 2)
+        eps = random.normal(self.make_rng("latent_z"), z_std.shape)
+        z = z_mu + z_std * eps
         beta_hats = self.decoder(z)
         f_hat_beta_hat = jnp.einsum("BF,BLF->BL", beta_hats, phi_s)
-        return f_hat_beta, f_hat_beta_hat, mu, log_var
+        return f_hat_beta, f_hat_beta_hat, z_mu, z_std
 
 
 class Phi(nn.Module):

@@ -1,0 +1,11 @@
+cls: PriorCVAE
+kwargs:
+  encoder:
+    cls: MLP
+    kwargs:
+      dims: [128, 128]
+  decoder:
+    cls: MLP
+    kwargs:
+      dims: [128, 128]
+  z_dim: 128

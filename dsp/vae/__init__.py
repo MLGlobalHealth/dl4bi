@@ -1,3 +1,4 @@
+from . import train_steps
 from .deep_chol import DeepChol
 from .pi_vae import Phi, PiVAE
 from .prior_cvae import PriorCVAE

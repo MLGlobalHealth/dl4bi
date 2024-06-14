@@ -1,0 +1,17 @@
+cls: GP
+kwargs: 
+  kernel:
+    func: matern_3_2
+  var:
+    cls: Prior
+    kwargs:
+      dist: fixed
+      kwargs:
+        value: 1.0
+  ls:
+    cls: Prior
+    kwargs:
+      dist: beta
+      kwargs:
+        a: 3.0
+        b: 7.0
