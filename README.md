@@ -1,4 +1,4 @@
-# Deep Stochastic Processses (dsp)
+# Deep Stochastic Processes (dsp)
 
 ## Install
 1. Install [jax](https://jax.readthedocs.io/en/latest/installation.html)
