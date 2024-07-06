@@ -38,7 +38,7 @@ such degeneracy.
 - Run tests: `poetry run pytest`
 
 ## TODO
-- [ ] Unit test to check for data leaks via valid_lens_ctx
+- [ ] Build a pytorch version of SPTx with Flash Attention v2
 - [ ] Why do conditional NP variants outperform latent NP variants?
 - [ ] Create a 2D GP benchmark
 - [ ] Test Heaton et al benchmark
