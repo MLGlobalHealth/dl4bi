@@ -3,6 +3,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from jax import jit
 
 from .mlp import MLP
 
@@ -191,6 +192,7 @@ class MultiheadAttention(nn.Module):
         return self.proj_out(ctx), attn.reshape(B, H, Q, K)
 
 
+@jit
 def masked_softmax(scores: jax.Array, valid_lens: Optional[jax.Array] = None):
     r"""Performs softmax on a 3D logits array using an optional 1 or 2 dim `valid_lens` from [d2l](https://d2l.ai/ chapter_attention-mechanisms-and-transformers/attention-scoring-functions.html).
 
