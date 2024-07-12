@@ -48,13 +48,14 @@ def main(cfg: DictConfig):
     )
     path = Path(f"results/mnist/{model_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    validate(
+    loss = validate(
         rng_valid,
         state,
         valid_dataloader,
         valid_num_steps,
         path.with_suffix(".pkl"),
     )
+    wandb.log({"test_loss", loss})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 

@@ -50,7 +50,8 @@ def main(cfg: DictConfig):
     )
     path = Path(f"results/gp/{exp}/{kernel}/{model_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    validate(rng_valid, state, dataloader, valid_num_steps, path.with_suffix(".pkl"))
+    loss = validate(rng_valid, state, dataloader, valid_num_steps, path.with_suffix(".pkl"))
+    wandb.log({"test_loss", loss})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
