@@ -238,7 +238,8 @@ class KRStack(nn.Module):
         num_blks: Number of blocks to use.
         num_reps: Number of times to repeat each block.
         resid_blk: Add a residual connection between blocks.
-        resid_rep: Add a residual connection between block repeats.
+        resid_rep: Add a residual connection between block repeats. This is
+            useful when using one or only a few blocks with repeats.
         blk: An instance of the block module.
         add_norm: An `AddNorm` module applied between blocks.
 
