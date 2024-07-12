@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import itertools as it
 from pathlib import Path
 
 import hydra
@@ -7,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+import optax
 import wandb
 from hydra.core.hydra_config import HydraConfig
 from jax import jit, random
@@ -17,6 +17,7 @@ from sps.utils import build_grid
 from dsp.meta_regression.train_utils import (
     Callback,
     TrainState,
+    cosine_annealing_lr,
     instantiate,
     save_ckpt,
     train,
@@ -39,9 +40,13 @@ def main(cfg: DictConfig):
     dataloader = build_dataloader(cfg.exp, cfg.kernel)
     train_num_steps, valid_num_steps = 100000, 5000
     valid_interval, plot_interval = 25000, 50000
+    lr_peak, lr_pct_warmup = 1e-3, 0.3
+    lr_schedule = cosine_annealing_lr(train_num_steps, lr_peak, lr_pct_warmup)
+    optimizer = optax.yogi(lr_schedule)
     state = train(
         rng_train,
         cfg.model,
+        optimizer,
         dataloader,
         dataloader,
         train_num_steps,
@@ -51,7 +56,9 @@ def main(cfg: DictConfig):
     )
     path = Path(f"results/gp/{exp}/{kernel}/{model_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    loss = validate(rng_valid, state, dataloader, valid_num_steps, path.with_suffix(".pkl"))
+    loss = validate(
+        rng_valid, state, dataloader, valid_num_steps, path.with_suffix(".pkl")
+    )
     wandb.log({"test_loss", loss})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 

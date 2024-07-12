@@ -5,6 +5,7 @@ import hydra
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import optax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import wandb
@@ -37,9 +38,11 @@ def main(cfg: DictConfig):
     train_dataloader, valid_dataloader = build_dataloaders()
     train_num_steps, valid_num_steps = 100000, None  # exhaust valid dataloader
     valid_interval, plot_interval = 25000, 25000
+    optimizer = optax.yogi(1e-4)
     state = train(
         rng_train,
         cfg.model,
+        optimizer,
         train_dataloader,
         valid_dataloader,
         train_num_steps,

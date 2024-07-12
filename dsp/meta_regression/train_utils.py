@@ -51,6 +51,7 @@ class Callback:
 def train(
     rng: jax.Array,
     model_cfg: DictConfig,
+    optimizer: optax.GradientTransformation,
     train_dataloader: Callable,
     valid_dataloader: Callable,
     train_num_steps: int = 100000,
@@ -76,16 +77,10 @@ def train(
         valid_lens_ctx,
         valid_lens_test,
     )
-    learning_rate_fn = create_learning_rate_fn(
-        train_num_steps,
-        lr_peak,
-        lr_pct_warmup,
-        lr_num_cycles,
-    )
     state = TrainState.create(
         apply_fn=model.apply,
         params=params,
-        tx=optax.yogi(learning_rate_fn),
+        tx=optimizer,
         kwargs=kwargs,
     )
     print(f"{model}\n\n{param_count}")
@@ -245,7 +240,7 @@ def load_ckpt(path: Path, sample_batch: tuple):
     return ckpt["state"], cfg
 
 
-def create_learning_rate_fn(
+def cosine_annealing_lr(
     num_steps: int = 100000,
     peak_lr: float = 1e-3,
     pct_warmup: float = 0.3,
@@ -258,7 +253,7 @@ def create_learning_rate_fn(
     return optax.join_schedules([sched] * num_cycles, boundaries)
 
 
-def custom_learning_rate_fn(num_steps: int, peak_lr: float):
+def custom_cosine_annealing_lr(num_steps: int, peak_lr: float):
     """Create a 3-cycle cosine annealing schedule.
 
     There are two cosine schedules each consisting of a quarter of `num_steps`
