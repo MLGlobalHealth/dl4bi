@@ -62,7 +62,6 @@ def main(cfg: DictConfig):
 
 def build_dataloaders(
     batch_size: int = 16,
-    buffer_size: int = 1024,
     num_ctx_min: int = 3,
     num_ctx_max: int = 200,
     num_test_max: int = 200,
@@ -71,7 +70,7 @@ def build_dataloaders(
     normalize = lambda sample: tf.cast(sample["image"], tf.float32) / 255.0
     train_ds = tfds.load("mnist", split="train").map(normalize)
     valid_ds = tfds.load("mnist", split="test").map(normalize)
-    train_ds = train_ds.repeat().shuffle(buffer_size).batch(batch_size).prefetch(1)
+    train_ds = train_ds.repeat().batch(batch_size).prefetch(1)
     valid_ds = valid_ds.batch(batch_size).prefetch(1)
     s_test = build_grid([dict(start=-1.0, stop=1.0, num=28)] * 2).reshape(L, 2)
     s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
