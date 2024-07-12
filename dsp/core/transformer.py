@@ -235,25 +235,23 @@ class KRStack(nn.Module):
     """A stack of `KRBlock`s.
 
     Args:
-        num_blks: Number of times to repeat a single `KRBlock`.
-        skip_every_n: Add a skip connection every n.
-        share_attn: Share attention module between blocks.
-        share_ffn: Share ffn module between blocks.
-        attn: An attention module.
-        add_norm: An add and norm module.
-        ffn: A feedforward module.
+        num_blks: Number of blocks to use.
+        num_reps: Number of times to repeat each block.
+        resid_blk: Add a residual connection between blocks.
+        resid_rep: Add a residual connection between block repeats.
+        blk: An instance of the block module.
+        add_norm: An `AddNorm` module applied between blocks.
 
     Returns:
         An instance of a `KRStack`.
     """
 
-    num_blks: int = 5
-    skip_every_n: Optional[int] = 2
-    share_attn: bool = True
-    share_ffn: bool = False
-    attn: nn.Module = Attention()
+    num_blks: int = 3
+    num_reps: int = 2
+    resid_blk: bool = True
+    resid_rep: bool = False
+    blk: nn.Module = KRBlock()
     add_norm: nn.Module = AddNorm(0.0)
-    ffn: nn.Module = MLP([64, 64], nn.elu)
 
     @nn.compact
     def __call__(
@@ -263,19 +261,18 @@ class KRStack(nn.Module):
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
-        skip_qvs, skip_kvs = qvs, kvs
-        qvs, kvs = KRBlock(
-            self.attn,
-            self.add_norm,
-            self.ffn,
-        )(qvs, kvs, valid_lens, training)
-        for i in range(1, self.num_blks):
-            if self.skip_every_n and i % self.skip_every_n == 0:
-                qvs = skip_qvs = self.add_norm(skip_qvs, qvs)
-                kvs = skip_kvs = self.add_norm(skip_kvs, kvs)
-            qvs, kvs = KRBlock(
-                self.attn if self.share_attn else self.attn.copy(name=f"attn_{i}"),
-                self.add_norm,
-                self.ffn if self.share_ffn else self.ffn.copy(name=f"ffn_{i}"),
-            )(qvs, kvs, valid_lens, training)
+        for i in range(self.num_blks):
+            blk = self.blk.copy()
+            if self.resid_blk:
+                blk_qvs, blk_kvs = qvs, kvs
+            for j in range(self.num_reps):
+                if self.resid_rep:
+                    rep_qvs, rep_kvs = qvs, kvs
+                qvs, kvs = blk(qvs, kvs, valid_lens, training)
+                if self.resid_rep and (j + 1) != self.num_reps:
+                    qvs = self.add_norm(rep_qvs, qvs)
+                    kvs = self.add_norm(rep_kvs, kvs)
+            if self.resid_blk and i + 1 != self.num_blks:
+                qvs = self.add_norm(blk_qvs, qvs)
+                kvs = self.add_norm(blk_kvs, kvs)
         return qvs, kvs

@@ -1,10 +1,14 @@
 import jax
 import jax.numpy as jnp
 import optax
+from flax.core import FrozenDict
+from flax.training import train_state
 from jax import jit, value_and_grad
 from jax.scipy.stats import norm
 
-from ..core import TrainState
+
+class TrainState(train_state.TrainState):
+    kwargs: FrozenDict = FrozenDict({})
 
 
 @jit

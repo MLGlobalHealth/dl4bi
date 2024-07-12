@@ -9,9 +9,7 @@ from dsp.core.attention import MultiheadAttention
 from ..core import (
     MLP,
     AddNorm,
-    GaussianFourierEmbedding,
     LearnableEmbedding,
-    MultiheadFastAttention,
 )
 
 
@@ -19,23 +17,25 @@ class DKR(nn.Module):
     """Deep Kernel Regression.
 
     Args:
-        depth: Number of times to apply kernel regression.
+        num_layers: Number of attention layers.
+        num_repeats: Number of times to repeat each attention layer.
         embed_s: An embedding module for locations.
         embed_s_f: A module or combining embedded locations and function values.
         attn: An attention module.
         head: A prediction head for decoded output.
+        add_norm: An `AddNorm` module applied between layers.
 
     Returns:
         An instance of the `DKR` model.
     """
 
-    depth: int = 5
-    embed_s: nn.Module = LearnableEmbedding(
-        GaussianFourierEmbedding(8, 4), MLP([64, 64], nn.elu)
-    )
+    num_layers: int = 3
+    num_repeats: int = 2
+    embed_s: nn.Module = LearnableEmbedding(post_process=MLP([64, 64]))
     embed_s_f: nn.Module = MLP([64])
-    # attn: nn.Module = MultiheadFastAttention()
+    attn: nn.Module = MultiheadAttention()
     head: nn.Module = MLP([64] * 2 + [2])
+    add_norm: nn.Module = AddNorm(0.0)
 
     @nn.compact
     def __call__(
@@ -71,18 +71,18 @@ class DKR(nn.Module):
         Returns:
             $\mu_f,\sigma_f\in\mathbb{R}^{B\times S_\text{test}\times 2D_F}$.
         """
-        add_norm = AddNorm(0.0)
         ks = self.embed_s(s_ctx, training)
         qvs = self.embed_s(s_test, training)
         kvs = self.embed_s_f(jnp.concatenate([ks, f_ctx], -1), training)
-        proj_qs = MLP([64])
-        proj_ks = MLP([64])
-        proj_vs = MLP([64])
-        for i in range(self.depth):
-            attn = MultiheadAttention(proj_qs, proj_ks, proj_vs, MLP([64, 64], nn.elu))
-            qvs_i, _ = attn(qvs, kvs, kvs, valid_lens_ctx)
-            kvs_i, _ = attn(kvs, kvs, kvs, valid_lens_ctx)
-            qvs, kvs = add_norm(qvs, qvs_i), add_norm(kvs, kvs_i)
+        for i in range(self.num_layers):
+            attn = self.attn.copy()
+            _qvs, _kvs = qvs, kvs
+            for _ in range(self.num_repeats):
+                qvs, _ = attn(qvs, kvs, kvs, valid_lens_ctx, training)
+                kvs, _ = attn(kvs, kvs, kvs, valid_lens_ctx, training)
+            if i + 1 != self.num_layers:  # add_norm all but last layer
+                qvs = self.add_norm(_qvs, qvs)
+                kvs = self.add_norm(_kvs, kvs)
         f_dist = self.head(qvs, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
         f_std = jnp.exp(f_log_var / 2)

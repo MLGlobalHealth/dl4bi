@@ -8,3 +8,4 @@
 **/results/**
 **/wandb/**
 **/data/**
+__pycache__

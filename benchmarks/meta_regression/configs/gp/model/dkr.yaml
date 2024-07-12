@@ -1,33 +1,24 @@
-cls: SPTx
+cls: DKR
 kwargs:
+  num_layers: 3
+  num_repeats: 2
   embed_s:
     cls: LearnableEmbedding
     kwargs:
-      map:
-        cls: GaussianFourierEmbedding
-        kwargs:
-          embed_dim: 8
-          var: 4.0
       post_process:
         cls: MLP
         kwargs:
-          dims: [64, 64]
+          dims: [64, 64, 64, 64]
           act_fn: elu
   embed_s_f:
     cls: MLP
     kwargs:
       dims: [64]
       act_fn: elu
-  dec:
-    cls: KRStack
+  attn:
+    cls: MultiheadAttention
     kwargs:
-      num_blks: 7
-      skip_every_n: 2
-      share_attn: True
-      share_ffn: True
-      attn: 
-        cls: MultiheadAttention
-      ffn:
+      proj_out:
         cls: MLP
         kwargs:
           dims: [64, 64]

@@ -1,0 +1,9 @@
+s:
+  - start: -2
+    stop: 2
+    num: 100
+num_ctx:
+  min: 3
+  max: 50
+batch_size: 16
+obs_noise: 0.1

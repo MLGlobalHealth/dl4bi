@@ -50,7 +50,6 @@ from .transformer import (
     TransformerEncoderBlock,
 )
 from .utils import (
-    TrainState,
     bootstrap,
     mask_from_valid_lens,
     pad_concat,

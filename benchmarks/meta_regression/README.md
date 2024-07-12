@@ -1,2 +1,2 @@
 # Testing
-`python 1D_GP.py +kernel=rbf +model=sptx +seed=0 [+wandb=True]`
+`python gp.py --config-path=configs/gp_2D +kernel=rbf +model=sptx_full +seed=7 [+wandb=True] [+name="My run name"]`

@@ -1,0 +1,37 @@
+cls: SPTx
+kwargs:
+  embed_s:
+    cls: LearnableEmbedding
+    kwargs:
+      post_process:
+        cls: MLP
+        kwargs:
+          dims: [64, 64, 64, 64]
+          act_fn: elu
+  embed_s_f:
+    cls: MLP
+    kwargs:
+      dims: [64]
+      act_fn: elu
+  dec:
+    cls: KRStack
+    kwargs:
+      num_blks: 3
+      num_reps: 2
+      resid_blk: True
+      resid_rep: True
+      blk:
+        cls: KRBlock
+        kwargs:
+          attn:
+            cls: MultiheadAttention
+          ffn:
+            cls: MLP
+            kwargs:
+              dims: [64, 64]
+              act_fn: elu
+  head:
+    cls: MLP
+    kwargs:
+      dims: [64, 64, 2]
+      act_fn: elu

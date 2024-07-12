@@ -23,8 +23,8 @@ class FixedSinusoidalEmbedding(nn.Module):
 
     $$
     \begin{aligned}
-        \text{pe}(s,2i)&=\frac{s}{10000^{2i/d}} \\\\
-        \text{pe}(s,2i+1)&=\frac{s}{10000^{2i/d}}
+        \text{pe}(s,2i)&=\frac{s}{\text{max-len}^{2i/d}} \\\\
+        \text{pe}(s,2i+1)&=\frac{s}{\text{max-len}^{2i/d}}
     \end{aligned}
     $$
 
@@ -36,11 +36,15 @@ class FixedSinusoidalEmbedding(nn.Module):
     """
 
     embed_dim: int = 256
+    max_len: int = 10000
 
     @nn.compact
-    def __call__(self, s: jax.Array):
+    def __call__(self, s: jax.Array, training: bool = False):
         B, L, D = s.shape
-        return _pe_attn_sinusoidal(self.embed_dim)(s).reshape(B, L, D * self.embed_dim)
+        return _pe_attn_sinusoidal(
+            self.embed_dim,
+            self.max_len,
+        )(s).reshape(B, L, D * self.embed_dim)
 
 
 def _pe_attn_sinusoidal(d: int, max_len: float = 10000):
@@ -80,7 +84,7 @@ class NeRFEmbedding(nn.Module):
     embed_dim: int = 256
 
     @nn.compact
-    def __call__(self, s: jax.Array):
+    def __call__(self, s: jax.Array, training: bool = False):
         B, L, D = s.shape
         return _pe_nerf_sinusoidal(self.embed_dim)(s).reshape(B, L, D * self.embed_dim)
 
@@ -97,16 +101,17 @@ class GaussianFourierEmbedding(nn.Module):
     $$
 
     .. warning::
-        This maps every element of the last dimension together: $\mathbb{R}
-        ^{\ldots\times D}\to\mathbb{R}^{\ldots\times E}$.
+        This maps every element of the last dimension together and produces
+        both a sine and cosine feature: $\mathbb{R}^{\ldots\times D}
+        \to\mathbb{R}^{\ldots\times E}$.
     """
 
     embed_dim: int = 256
     var: float = 10.0
 
     @nn.compact
-    def __call__(self, s):
-        gen_B = lambda rng: random.normal(rng, (self.embed_dim, s.shape[-1]))
+    def __call__(self, s, training: bool = False):
+        gen_B = lambda rng: random.normal(rng, (self.embed_dim // 2, s.shape[-1]))
         B = self.variable("projections", "B", lambda: gen_B(self.make_rng("params")))
         return _pe_gaussian_fourier(B.value, self.var)(s)
 

@@ -1,0 +1,12 @@
+s:
+  - start: -2
+    stop: 2
+    num: 16
+  - start: -2
+    stop: 2
+    num: 16
+num_ctx:
+  min: 12 # ~5%
+  max: 128 # ~50%
+batch_size: 16
+obs_noise: 0.1

@@ -24,7 +24,7 @@ from sps.utils import build_grid
 from tqdm import tqdm
 
 from dsp.core import *  # noqa: F403
-from dsp.vae import DeepChol, PriorCVAE, train_steps
+from dsp.vae import DeepChol, PriorCVAE, train_utils
 
 
 @hydra.main("configs/1D_GP", version_base=None)
@@ -99,7 +99,7 @@ def train(
         lr_pct_warmup,
         lr_num_cycles,
     )
-    state = TrainState.create(
+    state = train_utils.TrainState.create(
         apply_fn=model.apply,
         params=params,
         tx=optax.yogi(learning_rate_fn),
@@ -107,10 +107,10 @@ def train(
     )
     print(f"{model}\n\n{param_count}")
     is_decoder_only = False
-    train_step = train_steps.elbo_train_step
+    train_step = train_utils.elbo_train_step
     if isinstance(model, (DeepChol,)):
         is_decoder_only = True
-        train_step = train_steps.mse_train_step
+        train_step = train_utils.mse_train_step
     losses = np.zeros((num_steps,))
     for i in (pbar := tqdm(range(num_steps), unit="batch", dynamic_ncols=True)):
         rng_step, rng_train = random.split(rng_train)
@@ -162,7 +162,7 @@ def validate(
     rng: jax.Array,
     gp: GP,
     s: jax.Array,
-    state: TrainState,
+    state: train_utils.TrainState,
     is_decoder_only: bool = False,
     num_batches: int = 5000,
     num_plots: int = 16,
@@ -222,7 +222,7 @@ def log_plots(
     wandb.log({wandb_key: [wandb.Image(p) for p in sample_paths]})
 
 
-def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
+def save_ckpt(state: train_utils.TrainState, cfg: DictConfig, path: Path):
     """Saves a checkpoint."""
     shutil.rmtree(path, ignore_errors=True)
     ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
@@ -259,7 +259,7 @@ def load_ckpt(path: Path):
         lr_pct_warmup,
         lr_num_cycles,
     )
-    state = TrainState.create(
+    state = train_utils.TrainState.create(
         apply_fn=model.apply,
         params=params,
         tx=optax.yogi(learning_rate_fn),

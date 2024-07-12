@@ -3,14 +3,8 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import numpy as np
-from flax.core import FrozenDict
-from flax.training import train_state
 from jax import jit, random, vmap
 from jax.tree_util import Partial
-
-
-class TrainState(train_state.TrainState):
-    kwargs: FrozenDict = FrozenDict({})
 
 
 def mask_from_valid_lens(max_len: int, valid_lens: jax.Array):
