@@ -30,7 +30,7 @@ def main(cfg: DictConfig):
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if "wandb" in cfg else "disabled",
-        name=cfg.get("name", f"mnist - {model_cfg_name} - seed {cfg.seed}"),
+        name=cfg.get("name", model_cfg_name),
         project="SPTx - MNIST",
     )
     rng = random.key(cfg.seed)

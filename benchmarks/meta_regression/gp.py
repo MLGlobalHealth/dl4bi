@@ -32,7 +32,7 @@ def main(cfg: DictConfig):
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if "wandb" in cfg else "disabled",
-        name=cfg.get("name", f"{exp} {kernel} - {model_cfg_name} - seed {cfg.seed}"),
+        name=cfg.get("name", model_cfg_name),
         project="SPTx - GPs",
     )
     rng = random.key(cfg.seed)
@@ -54,7 +54,7 @@ def main(cfg: DictConfig):
         valid_interval,
         callbacks=[Callback(log_plots, plot_interval)],
     )
-    path = Path(f"results/gp/{exp}/{kernel}/{model_cfg_name}-seed-{cfg.seed}")
+    path = Path(f"results/gp/{exp}-{kernel}-{model_cfg_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
     loss = validate(
         rng_valid,
