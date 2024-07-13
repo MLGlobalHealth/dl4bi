@@ -26,11 +26,11 @@ from dsp.meta_regression.train_utils import (
 @hydra.main("configs/mnist", version_base=None)
 def main(cfg: DictConfig):
     d = HydraConfig.get().runtime.choices
-    model_name = d["model"]
+    model_cfg_name = d["model"]
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if "wandb" in cfg else "disabled",
-        name=cfg.get("name", f"mnist - {model_name} - seed {cfg.seed}"),
+        name=cfg.get("name", f"mnist - {model_cfg_name} - seed {cfg.seed}"),
         project="SPTx - MNIST",
     )
     rng = random.key(cfg.seed)
@@ -50,7 +50,7 @@ def main(cfg: DictConfig):
         valid_interval,
         callbacks=[Callback(log_plots, plot_interval)],
     )
-    path = Path(f"results/mnist/{model_name}-seed-{cfg.seed}")
+    path = Path(f"results/mnist/{model_cfg_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
     loss = validate(
         rng_valid,

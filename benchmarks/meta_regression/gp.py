@@ -28,11 +28,11 @@ from dsp.meta_regression.train_utils import (
 @hydra.main("configs/gp", version_base=None)
 def main(cfg: DictConfig):
     d = HydraConfig.get().runtime.choices
-    exp, kernel, model_name = d["exp"], d["kernel"], d["model"]
+    exp, kernel, model_cfg_name = d["exp"], d["kernel"], d["model"]
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if "wandb" in cfg else "disabled",
-        name=cfg.get("name", f"{exp} {kernel} - {model_name} - seed {cfg.seed}"),
+        name=cfg.get("name", f"{exp} {kernel} - {model_cfg_name} - seed {cfg.seed}"),
         project="SPTx - GPs",
     )
     rng = random.key(cfg.seed)
@@ -54,10 +54,14 @@ def main(cfg: DictConfig):
         valid_interval,
         callbacks=[Callback(log_plots, plot_interval)],
     )
-    path = Path(f"results/gp/{exp}/{kernel}/{model_name}-seed-{cfg.seed}")
+    path = Path(f"results/gp/{exp}/{kernel}/{model_cfg_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
     loss = validate(
-        rng_valid, state, dataloader, valid_num_steps, path.with_suffix(".pkl")
+        rng_valid,
+        state,
+        dataloader,
+        valid_num_steps,
+        path.with_suffix(".pkl"),
     )
     wandb.log({"test_loss": loss})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
