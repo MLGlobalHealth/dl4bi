@@ -33,7 +33,7 @@ kwargs:
           ffn:
             cls: MLP
             kwargs:
-              dims: [256, 64]
+              dims: [128, 64]
               act_fn: elu
   head:
     cls: MLP
