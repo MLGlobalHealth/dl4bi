@@ -59,7 +59,7 @@ def main(cfg: DictConfig):
         valid_num_steps,
         path.with_suffix(".pkl"),
     )
-    wandb.log({"test_loss", loss})
+    wandb.log({"test_loss": loss})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
