@@ -50,7 +50,7 @@ def main(cfg: DictConfig):
         valid_interval,
         callbacks=[Callback(partial(log_img_plots, shape=(32, 32, 3)), plot_interval)],
     )
-    path = Path(f"results/mnist/{model_cfg_name}-seed-{cfg.seed}")
+    path = Path(f"results/celeba/{model_cfg_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
     loss = validate(
         rng_valid,
@@ -69,13 +69,17 @@ def build_dataloaders(
     num_ctx_max: int = 200,
     num_test_max: int = 200,
 ):
-    B, L = batch_size, 28 * 28
-    normalize = lambda sample: tf.cast(sample["image"], tf.float32) / 255.0
-    train_ds = tfds.load("mnist", split="train").map(normalize)
-    valid_ds = tfds.load("mnist", split="test").map(normalize)
-    train_ds = train_ds.repeat().batch(batch_size).prefetch(1)
-    valid_ds = valid_ds.batch(batch_size).prefetch(1)
-    s_test = build_grid([dict(start=-1.0, stop=1.0, num=28)] * 2).reshape(L, 2)
+    B, L = batch_size, 32 * 32
+
+    def prepare_img(sample):
+        img = tf.image.crop_to_bounding_box(sample["image"], 40, 15, 148, 148)
+        return tf.image.resize(img, [32, 32], tf.image.ResizeMethod.BILINEAR) / 255.0
+
+    train_ds = tfds.load("celeb_a", split="train").map(prepare_img)
+    valid_ds = tfds.load("celeb_a", split="test").map(prepare_img)
+    train_ds = train_ds.repeat().batch(batch_size, drop_remainder=True).prefetch(1)
+    valid_ds = valid_ds.batch(batch_size, drop_remainder=True).prefetch(1)
+    s_test = build_grid([dict(start=-1.0, stop=1.0, num=32)] * 2).reshape(L, 2)
     s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
     valid_lens_test = jnp.repeat(num_test_max, B)  # similar to ANP, Appendix D
 
