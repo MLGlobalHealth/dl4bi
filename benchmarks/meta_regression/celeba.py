@@ -21,6 +21,7 @@ from tqdm import tqdm
 
 from dsp.meta_regression.train_utils import (
     Callback,
+    cosine_annealing_lr,
     evaluate,
     log_img_plots,
     save_ckpt,
@@ -41,9 +42,13 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader, valid_dataloader, test_dataloader = build_dataloaders()
-    train_num_steps, valid_num_steps, test_num_steps = 100000, None, None
+    # TODO(danj): fix
+    # train_num_steps, valid_num_steps, test_num_steps = 100000, None, None
+    train_num_steps, valid_num_steps, test_num_steps = 100000, 5000, 5000
     valid_interval, plot_interval = 25000, 50000
-    optimizer = optax.yogi(1e-4)
+    lr_peak, lr_pct_warmup = 5e-4, 0.3
+    lr_schedule = cosine_annealing_lr(train_num_steps, lr_peak, lr_pct_warmup)
+    optimizer = optax.yogi(lr_schedule)
     state = train(
         rng_train,
         cfg.model,
@@ -86,6 +91,7 @@ def build_dataloaders(
     def build_dataloader(dataset):
         N = dataset.shape[0]
 
+        # TODO(danj): update for valid/test
         def dataloader(rng: jax.Array):
             while True:
                 rng_batch, rng_permute, rng_valid, rng = random.split(rng, 4)

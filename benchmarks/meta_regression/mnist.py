@@ -17,10 +17,10 @@ from sps.utils import build_grid
 from dsp.meta_regression.train_utils import (
     Callback,
     cosine_annealing_lr,
+    evaluate,
     log_img_plots,
     save_ckpt,
     train,
-    evaluate,
 )
 
 
