@@ -64,10 +64,10 @@ def main(cfg: DictConfig):
 
 
 def build_dataloaders(
-    batch_size: int = 16,
+    batch_size: int = 32,
     num_ctx_min: int = 3,
     num_ctx_max: int = 200,
-    num_test_max: int = 200,
+    num_test_max: int = 400,
 ):
     B, L = batch_size, 28 * 28
     normalize = lambda sample: tf.cast(sample["image"], tf.float32) / 255.0
