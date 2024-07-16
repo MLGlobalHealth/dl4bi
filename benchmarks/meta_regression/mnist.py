@@ -20,6 +20,7 @@ from dsp.meta_regression.train_utils import (
     save_ckpt,
     train,
     validate,
+    cosine_annealing_lr,
 )
 
 
@@ -36,9 +37,11 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_valid = random.split(rng)
     train_dataloader, valid_dataloader = build_dataloaders()
-    train_num_steps, valid_num_steps = 100000, None  # exhaust valid dataloader
+    train_num_steps, valid_num_steps = 200000, None  # exhaust valid dataloader
     valid_interval, plot_interval = 25000, 50000
-    optimizer = optax.yogi(1e-4)
+    lr_peak, lr_pct_warmup = 5e-4, 0.3
+    lr_schedule = cosine_annealing_lr(train_num_steps, lr_peak, lr_pct_warmup)
+    optimizer = optax.yogi(lr_schedule)
     state = train(
         rng_train,
         cfg.model,
@@ -64,7 +67,7 @@ def main(cfg: DictConfig):
 
 
 def build_dataloaders(
-    batch_size: int = 32,
+    batch_size: int = 64,
     num_ctx_min: int = 3,
     num_ctx_max: int = 200,
     num_test_max: int = 400,
