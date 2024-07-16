@@ -48,7 +48,7 @@ def main(cfg: DictConfig):
         train_num_steps,
         valid_num_steps,
         valid_interval,
-        callbacks=[Callback(partial(log_img_plots, shape=(32, 32)), plot_interval)],
+        callbacks=[Callback(partial(log_img_plots, shape=(32, 32, 3)), plot_interval)],
     )
     path = Path(f"results/mnist/{model_cfg_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)

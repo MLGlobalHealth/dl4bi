@@ -523,7 +523,7 @@ def log_img_plots(
     rng_step: int,
     state: TrainState,
     batch: tuple,
-    shape: tuple[int, int],
+    shape: tuple[int, int, int],
     num_plots: int = 16,
 ):
     """Logs `num_plots` from the given batch."""
@@ -565,7 +565,7 @@ def log_img_plots(
 
 def plot_img(
     id: int,
-    shape: tuple[int, int],
+    shape: tuple[int, int, int],
     f_ctx: jax.Array,  # [L_ctx, 1]
     f_mu: jax.Array,  # [L, 1]
     f_test: jax.Array,  # [L, 1]
@@ -591,19 +591,22 @@ def plot_img(
 
 
 def f_ctx_to_img_task(
-    shape: tuple[int, int],
+    shape: tuple[int, int, int],
     f_ctx: jax.Array,
     inv_permute_idx: jax.Array,
 ):
-    L, L_ctx = math.prod(shape), f_ctx.shape[0]
+    H, W, D = shape
+    L, L_ctx = H * W, f_ctx.shape[0]
     task = jnp.pad(f_ctx, ((0, L - L_ctx), (0, 0)))  # [L_ctx, 1] -> [L, 1]
-    task = jnp.repeat(task, 3, axis=-1)  # [L, 1] -> [L, 3]
+    if D == 1:  # if black/white, convert to RGB
+        task = jnp.repeat(task, 3, axis=-1)  # [L, 1] -> [L, 3]
     task = task.at[L_ctx:, 2].set(1.0)  # set non-context points to blue
     task = task[inv_permute_idx, :]  # permute back to original ordering
-    return task.reshape(28, 28, 3)  # reshape to [28, 28, 3] image
+    return task.reshape(*shape[:-1], 3)  # reshape to [H, W, 3] image
 
 
-def f_to_img_task(shape: tuple[int, int], f: jax.Array):
-    task = f.reshape(*shape, 1)  # [H, W, 1]
-    task = jnp.repeat(task, 3, axis=-1)  # [H, W, 3]
+def f_to_img_task(shape: tuple[int, int, int], f: jax.Array):
+    task = f.reshape(shape)  # [H, W, D]
+    if shape[-1] == 1:  # if black/white, convert to RGB
+        task = jnp.repeat(task, 3, axis=-1)  # [H, W, 3]
     return jnp.clip(task, 0, 1)  # to avoid matplotlib warnings

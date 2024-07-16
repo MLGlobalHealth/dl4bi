@@ -16,11 +16,11 @@ from sps.utils import build_grid
 
 from dsp.meta_regression.train_utils import (
     Callback,
+    cosine_annealing_lr,
     log_img_plots,
     save_ckpt,
     train,
     validate,
-    cosine_annealing_lr,
 )
 
 
@@ -51,7 +51,7 @@ def main(cfg: DictConfig):
         train_num_steps,
         valid_num_steps,
         valid_interval,
-        callbacks=[Callback(partial(log_img_plots, shape=(28, 28)), plot_interval)],
+        callbacks=[Callback(partial(log_img_plots, shape=(28, 28, 1)), plot_interval)],
     )
     path = Path(f"results/mnist/{model_cfg_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,10 +67,10 @@ def main(cfg: DictConfig):
 
 
 def build_dataloaders(
-    batch_size: int = 64,
+    batch_size: int = 16,
     num_ctx_min: int = 3,
     num_ctx_max: int = 200,
-    num_test_max: int = 400,
+    num_test_max: int = 200,
 ):
     B, L = batch_size, 28 * 28
     normalize = lambda sample: tf.cast(sample["image"], tf.float32) / 255.0
