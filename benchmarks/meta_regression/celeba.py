@@ -41,7 +41,7 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader, valid_dataloader, test_dataloader = build_dataloaders()
-    train_num_steps, valid_num_steps = 100000, None  # exhaust valid dataloader
+    train_num_steps, valid_num_steps, test_num_steps = 100000, None, None
     valid_interval, plot_interval = 25000, 50000
     optimizer = optax.yogi(1e-4)
     state = train(
@@ -61,7 +61,7 @@ def main(cfg: DictConfig):
         rng_test,
         state,
         test_dataloader,
-        valid_num_steps,
+        test_num_steps,
         path.with_suffix(".pkl"),
     )
     wandb.log({"test_loss": loss})
