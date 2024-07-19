@@ -36,3 +36,6 @@ such degeneracy.
 - Install `poetry`: `curl -sSL https://install.python-poetry.org | python3 -`
 - Setup env: `cd dsp && poetry install`
 - Run tests: `poetry run pytest`
+- [Optional]: Install the package locally using `pip install -e .` from the git
+    root directory so that the version you're using in the current environment
+    is "live."
