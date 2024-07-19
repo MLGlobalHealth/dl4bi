@@ -42,8 +42,6 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader, valid_dataloader, test_dataloader = build_dataloaders()
-    # TODO(danj): fix
-    # train_num_steps, valid_num_steps, test_num_steps = 100000, None, None
     train_num_steps, valid_num_steps, test_num_steps = 100000, 5000, 5000
     valid_interval, plot_interval = 25000, 50000
     lr_peak, lr_pct_warmup = 5e-4, 0.3
@@ -74,16 +72,17 @@ def main(cfg: DictConfig):
 
 
 def build_dataloaders(
-    batch_size: int = 16,
+    batch_size: int = 32,
     num_ctx_min: int = 3,
     num_ctx_max: int = 200,
     num_test_max: int = 200,
 ):
     prepare_data()
     B, L = batch_size, 32 * 32
-    train_ds = np.load("cache/celeba/train.npy")
-    valid_ds = np.load("cache/celeba/valid.npy")
-    test_ds = np.load("cache/celeba/test.npy")
+    # load & convert from [0, 255] -> [0, 1]
+    train_ds = np.load("cache/celeba/train.npy") / 255.0
+    valid_ds = np.load("cache/celeba/valid.npy") / 255.0
+    test_ds = np.load("cache/celeba/test.npy") / 255.0
     s_test = build_grid([dict(start=-1.0, stop=1.0, num=32)] * 2).reshape(L, 2)
     s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
     valid_lens_test = jnp.repeat(num_test_max, B)  # similar to ANP, Appendix D
@@ -91,7 +90,6 @@ def build_dataloaders(
     def build_dataloader(dataset):
         N = dataset.shape[0]
 
-        # TODO(danj): update for valid/test
         def dataloader(rng: jax.Array):
             while True:
                 rng_batch, rng_permute, rng_valid, rng = random.split(rng, 4)

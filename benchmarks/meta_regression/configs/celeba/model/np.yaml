@@ -15,5 +15,5 @@ kwargs:
   dec:
     cls: MLP
     kwargs:
-      dims: [128, 128, 128, 128, 2]
+      dims: [128, 128, 128, 128, 6]
   n_z: 1

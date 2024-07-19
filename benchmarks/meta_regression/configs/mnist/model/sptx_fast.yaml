@@ -3,6 +3,11 @@ kwargs:
   embed_s:
     cls: LearnableEmbedding
     kwargs:
+      map:
+        cls: GaussianFourierEmbedding
+        kwargs:
+          embed_dim: 256
+          var: 4.0
       post_process:
         cls: MLP
         kwargs:

@@ -14,7 +14,6 @@ numpy = "^1.26.4"
 optax = "^0.2.1"
 pandas = "^2.2.2"
 pillow = "^10.4.0"
-plotly = "^5.22.0"
 python = "^3.12"
 sps = {git = "ssh://git@github.com/MLGlobalHealth/sps.git"}
 tensorflow = "^2.16.2"

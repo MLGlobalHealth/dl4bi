@@ -19,4 +19,4 @@ kwargs:
   head:
     cls: MLP
     kwargs:
-      dims: [64, 64, 2]
+      dims: [64, 64, 6]

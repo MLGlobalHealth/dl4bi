@@ -1,4 +1,3 @@
-import math
 import pickle
 import shutil
 from collections.abc import Callable
@@ -23,6 +22,7 @@ from omegaconf import DictConfig, OmegaConf
 from sps.gp import GP
 from sps.kernels import matern_3_2, periodic, rbf
 from sps.priors import Prior
+from sps.utils import build_grid
 from tqdm import tqdm
 
 from ..core import *
@@ -198,6 +198,44 @@ def instantiate(d: Union[dict, DictConfig]):
     return d
 
 
+def build_gp_dataloader(exp: DictConfig, kernel: DictConfig):
+    """Generates batches of GP samples."""
+    gp = instantiate(kernel)
+    s_dim = len(exp.s)
+    s_grid = build_grid(exp.s).reshape(-1, s_dim)  # flatten spatial dims
+    obs_noise, batch_size = exp.obs_noise, exp.batch_size
+    valid_lens_test = jnp.repeat(exp.num_ctx.max + s_grid.shape[0], batch_size)
+    min_s = jnp.array([axis["start"] for axis in exp.s])
+    max_s = jnp.array([axis["stop"] for axis in exp.s])
+
+    @jit
+    def gen_s_random(rng: jax.Array):
+        return random.uniform(rng, (exp.num_ctx.max, s_dim), minval=min_s, maxval=max_s)
+
+    @jit
+    def gen_batch(rng: jax.Array):
+        rng_s_random, rng_valid_lens_ctx, rng_gp, rng_eps, rng = random.split(rng, 5)
+        s_random = gen_s_random(rng_s_random)
+        s = jnp.vstack([s_random, s_grid])
+        var, ls, _z, f = gp.simulate(rng_gp, s, batch_size)
+        valid_lens_ctx = random.randint(
+            rng_valid_lens_ctx,
+            (batch_size,),
+            exp.num_ctx.min,
+            exp.num_ctx.max,
+        )
+        s = jnp.repeat(s[None, ...], batch_size, axis=0)
+        f_noisy = f + obs_noise * random.normal(rng_eps, f.shape)
+        return s, f_noisy, valid_lens_ctx, s, f, valid_lens_test, var, ls
+
+    def dataloader(rng: jax.Array):
+        while True:
+            rng_batch, rng = random.split(rng)
+            yield gen_batch(rng_batch)
+
+    return dataloader
+
+
 def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
     """Saves a checkpoint."""
     shutil.rmtree(path, ignore_errors=True)
@@ -216,7 +254,10 @@ def load_ckpt(path: Path, sample_batch: tuple):
     """Loads a checkpoint."""
     ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
     # restore config and use it to create model template
-    ckpt = ckptr.restore(path, args=ocp.args.Composite(config=ocp.args.JsonRestore()))
+    ckpt = ckptr.restore(
+        path.absolute(),
+        args=ocp.args.Composite(config=ocp.args.JsonRestore()),
+    )
     cfg = OmegaConf.create(ckpt["config"])
     rng, num_steps = random.key(42), 100000
     lr_peak, lr_pct_warmup, lr_num_cycles = 1e-3, 0.1, 1
@@ -224,7 +265,7 @@ def load_ckpt(path: Path, sample_batch: tuple):
     model = instantiate(cfg.model)
     kwargs = model.init(rng, s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test)
     params = kwargs.pop("params")
-    learning_rate_fn = create_learning_rate_fn(
+    learning_rate_fn = cosine_annealing_lr(
         num_steps,
         lr_peak,
         lr_pct_warmup,
@@ -237,7 +278,8 @@ def load_ckpt(path: Path, sample_batch: tuple):
         kwargs=kwargs,
     )
     ckpt = ckptr.restore(
-        path, args=ocp.args.Composite(state=ocp.args.StandardRestore(state))
+        path.absolute(),
+        args=ocp.args.Composite(state=ocp.args.StandardRestore(state)),
     )
     return ckpt["state"], cfg
 
@@ -518,6 +560,92 @@ def npf_elbo_train_step(
     return state.apply_gradients(grads=grads), elbo
 
 
+def log_posterior_predictive_plots(
+    step: int,
+    rng_step: int,
+    state: TrainState,
+    batch: tuple,
+    num_plots: int = 16,
+):
+    """Logs `num_plots` from the given batch."""
+    rng_dropout, rng_extra = random.split(rng_step)
+    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls = batch
+    f_mu, f_std, *_ = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        s_ctx,
+        f_ctx,
+        s_test,
+        valid_lens_ctx,
+        valid_lens_test,
+        rngs={"dropout": rng_dropout, "extra": rng_extra},
+    )
+    if s_ctx.shape[-1] > 1:  # TODO(danj): implement 2D plot logging
+        return
+    paths = []
+    for i in range(num_plots):
+        v_ctx = valid_lens_ctx[i]
+        s_ctx_i = s_ctx[i, :v_ctx].squeeze()
+        f_ctx_i = f_ctx[i, :v_ctx].squeeze()
+        v_test = valid_lens_test[i]
+        s_test_i = s_test[i, :v_test].squeeze()
+        f_test_i = f_test[i, :v_test].squeeze()
+        f_mu_i = f_mu[i, :v_test].squeeze()
+        f_std_i = f_std[i, :v_test].squeeze()
+        if f_mu[i].shape != f_std[i].shape:  # marginal from tril cov
+            f_std_i = jnp.diag(f_std[i]).squeeze()  # TODO(danj): is this valid?
+        if f_mu.shape != f_test.shape:  # bootstrapped
+            K = f_mu.shape[0] // f_test.shape[0]
+            s = i * K
+            f_mu_i = f_mu[s : s + K].squeeze()
+            f_std_i = f_std[s : s + K].squeeze()
+        title = f"Sample {i} (var: {var[i]:0.2f}, ls: {ls[i]:0.2f})"
+        fig = plot_posterior_predictive(
+            s_ctx_i, f_ctx_i, s_test_i, f_test_i, f_mu_i, f_std_i
+        )
+        fig.suptitle(title)
+        paths += [f"/tmp/{title}.png"]
+        fig.savefig(paths[-1], dpi=125)
+        plt.clf()
+        plt.close(fig)
+    wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
+
+
+def plot_posterior_predictive(
+    s_ctx: jax.Array,
+    f_ctx: jax.Array,
+    s_test: jax.Array,
+    f_test: jax.Array,
+    f_mu: jax.Array,
+    f_std: jax.Array,
+    hdi_prob: float = 0.95,
+):
+    """Plots the posterior predictive alongside true values."""
+    f_mu = f_mu[None, ...] if f_mu.ndim == 1 else f_mu
+    f_std = f_std[None, ...] if f_std.ndim == 1 else f_std
+    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
+    f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
+    idx = jnp.argsort(s_test)
+    plt.plot(s_test[idx], f_test[idx], color="black")
+    plt.scatter(s_ctx, f_ctx, color="black", alpha=0.75)
+    K = f_mu.shape[0]
+    for i in range(K):
+        f_mu_i = f_mu[i]
+        plt.plot(s_test[idx], f_mu_i[idx], color="steelblue")
+        f_lower_i, f_upper_i = f_lower[i], f_upper[i]
+        plt.fill_between(
+            s_test[idx],
+            f_lower_i[idx],
+            f_upper_i[idx],
+            alpha=0.4 / K,
+            color="steelblue",
+            interpolate=True,
+        )
+    ax = plt.gca()
+    ax.set_xlabel("s")
+    ax.set_ylabel("f")
+    return plt.gcf()
+
+
 def log_img_plots(
     step: int,
     rng_step: int,
@@ -558,8 +686,11 @@ def log_img_plots(
             K = f_mu.shape[0] // f_test.shape[0]
             s = i * K
             f_mu_i = f_mu[s : s + K].mean(axis=0)  # TODO(danj): legitimate?
-        path = plot_img(i, shape, f_ctx_i, f_mu_i, f_test_full_i, inv_permute_idx)
-        paths += [path]
+        fig = plot_img(i, shape, f_ctx_i, f_mu_i, f_test_full_i, inv_permute_idx)
+        paths += [f"/tmp/sample_{i}.png"]
+        fig.savefig(paths[-1], dpi=125)
+        plt.clf()
+        plt.close(fig)
     wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
 
 
@@ -582,12 +713,8 @@ def plot_img(
     axs[1].set_title("Predicted")
     axs[2].imshow(task_true)
     axs[2].set_title("Ground Truth")
-    path = f"/tmp/mnist_sample_{id}.png"
     plt.tight_layout()
-    plt.savefig(path, dpi=150)
-    plt.clf()
-    plt.close(fig)
-    return path
+    return plt.gcf()
 
 
 def f_ctx_to_img_task(
@@ -610,3 +737,9 @@ def f_to_img_task(shape: tuple[int, int, int], f: jax.Array):
     if shape[-1] == 1:  # if black/white, convert to RGB
         task = jnp.repeat(task, 3, axis=-1)  # [H, W, 3]
     return jnp.clip(task, 0, 1)  # to avoid matplotlib warnings
+
+
+def log_wandb_line(vec: jax.Array, title: str):
+    wandb_key = title.lower().replace(" ", "_")
+    tbl = wandb.Table(data=[[i, v] for i, v in enumerate(vec)], columns=["i", "v"])
+    wandb.log({wandb_key: wandb.plot.line(tbl, "i", "v", title=title)})

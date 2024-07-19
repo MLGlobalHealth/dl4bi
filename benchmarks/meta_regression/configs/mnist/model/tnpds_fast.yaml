@@ -1,4 +1,4 @@
-cls: TNPD
+cls: TNPDS
 kwargs:
   embed_s_f:
     cls: LearnableEmbedding
@@ -10,13 +10,13 @@ kwargs:
         kwargs:
           dims: [64, 64, 64, 64]
   enc:
-    cls: TransformerEncoder
+    cls: KRStack
     kwargs:
       attn:
-        cls: MultiheadAttention
+        cls: MultiheadFastAttention
       num_blks: 6
       d_ffn: 128
   head:
     cls: MLP
     kwargs:
-      dims: [128, 6]
+      dims: [64, 64, 2]

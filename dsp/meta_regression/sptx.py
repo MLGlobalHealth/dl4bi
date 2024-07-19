@@ -4,7 +4,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-from ..core import MLP, GaussianFourierEmbedding, KRStack, LearnableEmbedding
+from ..core import MLP, KRStack, LearnableEmbedding
 
 
 class SPTx(nn.Module):
@@ -20,7 +20,7 @@ class SPTx(nn.Module):
         An instance of the `SPTx` model.
     """
 
-    embed_s: nn.Module = LearnableEmbedding(post_process=MLP([256, 64, 64, 64]))
+    embed_s: nn.Module = LearnableEmbedding(post_process=MLP([64, 64, 64, 64]))
     embed_s_f: nn.Module = MLP([64])
     dec: nn.Module = KRStack()
     head: nn.Module = MLP([64, 64, 2])

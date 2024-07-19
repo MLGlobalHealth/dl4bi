@@ -1,19 +1,19 @@
-cls: BNP
+cls: NP
 kwargs:
-  num_samples: 4 # as specified in paper
   enc_det:
     cls: MLP
     kwargs:
       dims: [128, 128, 128, 128, 128, 128]
-  dec_hid:
+  enc_lat:
     cls: MLP
     kwargs:
-      dims: [128]
-  dec_boot:
+      dims: [128, 128, 128]
+  z_dist:
     cls: MLP
     kwargs:
-      dims: [128]
-  dec_dist:
+      dims: [128, 256]
+  dec:
     cls: MLP
     kwargs:
-      dims: [128, 128, 128, 6]
+      dims: [128, 128, 128, 128, 2]
+  n_z: 1

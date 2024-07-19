@@ -7,7 +7,7 @@ kwargs:
         cls: GaussianFourierEmbedding
         kwargs:
           embed_dim: 256
-          var: 10.0
+          var: 4.0
       post_process:
         cls: MLP
         kwargs:
@@ -21,19 +21,19 @@ kwargs:
   dec:
     cls: KRStack
     kwargs:
-      num_blks: 6
-      num_reps: 1
-      resid_blk: False
-      resid_rep: False
+      num_blks: 1
+      num_reps: 7
+      resid_blk: True
+      resid_rep: True
       blk:
         cls: KRBlock
         kwargs:
           attn:
-            cls: MultiheadAttention
+            cls: MultiheadFastAttention
           ffn:
             cls: MLP
             kwargs:
-              dims: [128, 64]
+              dims: [64, 64]
               act_fn: elu
   head:
     cls: MLP

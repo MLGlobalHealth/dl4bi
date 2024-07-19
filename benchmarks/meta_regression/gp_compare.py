@@ -54,8 +54,7 @@ def plot_diff(args):
                             is_tril=True,
                         )
                         / d["valid_lens_test"]
-                    )
-                    # TODO(danj): verify this
+                    )  # average point-wise log likelihood like other methods
                     f_std = vmap(jnp.diag)(d["f_std"])[..., None]  # marginal f_std
                     batch_maces = mace(d["f_test"], d["f_mu"], f_std).mean(axis=-1)
                 nlls[m] += [batch_nlls]

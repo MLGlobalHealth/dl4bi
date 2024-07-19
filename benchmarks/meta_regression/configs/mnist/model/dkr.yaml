@@ -1,5 +1,7 @@
-cls: SPTx
+cls: DKR
 kwargs:
+  num_layers: 3
+  num_repeats: 2
   embed_s:
     cls: LearnableEmbedding
     kwargs:
@@ -13,23 +15,14 @@ kwargs:
     kwargs:
       dims: [64]
       act_fn: elu
-  dec:
-    cls: KRStack
+  attn:
+    cls: MultiheadAttention
     kwargs:
-      num_blks: 1
-      num_reps: 7
-      resid_blk: True
-      resid_rep: True
-      blk:
-        cls: KRBlock
+      proj_out:
+        cls: MLP
         kwargs:
-          attn:
-            cls: MultiheadAttention
-          ffn:
-            cls: MLP
-            kwargs:
-              dims: [64, 64]
-              act_fn: elu
+          dims: [64, 64]
+          act_fn: elu
   head:
     cls: MLP
     kwargs:

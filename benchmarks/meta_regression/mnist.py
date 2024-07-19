@@ -66,22 +66,19 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-# WARNING: Setting the batch size too high will cause the speed of processing
-# to drop dramatically due to memory thrash. For example, you might notice that
-# for batch sizes of 16 or 32, you process ~30 batches/second, but when you set
-# it to 64, it drops to ~6 batches/second. This is because you've  exceeded the
-# GPUs memory and is constantly loading and unloading partial batches.
 def build_dataloaders(
     batch_size: int = 32,
+    buffer_size: int = 1024,
     num_ctx_min: int = 3,
     num_ctx_max: int = 200,
     num_test_max: int = 200,
 ):
     B, L = batch_size, 28 * 28
     normalize = lambda sample: tf.cast(sample["image"], tf.float32) / 255.0
-    train_ds = tfds.load("mnist", split="train").map(normalize)
+    train_ds = tfds.load("mnist", split="train").map(normalize).repeat()
     valid_ds = tfds.load("mnist", split="test").map(normalize)
-    train_ds = train_ds.repeat().batch(batch_size, drop_remainder=True).prefetch(1)
+    train_ds = train_ds.shuffle(buffer_size, seed=42, reshuffle_each_iteration=True)
+    train_ds = train_ds.batch(batch_size, drop_remainder=True).prefetch(1)
     valid_ds = valid_ds.batch(batch_size, drop_remainder=True).prefetch(1)
     s_test = build_grid([dict(start=-1.0, stop=1.0, num=28)] * 2).reshape(L, 2)
     s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
