@@ -67,9 +67,9 @@ def main(cfg: DictConfig):
 
 def build_dataloader(
     batch_size: int = 32,
-    num_ctx_min: int = 3,
-    num_ctx_max: int = 200,
-    num_test_max: int = 200,
+    num_ctx_min: int = 100,
+    num_ctx_max: int = 300,
+    num_test_max: int = 400,
 ):
     B, L = batch_size, 32 * 32
     data = np.load("cache/popgen/n1000_mu_1e-5_m_5e-3.npy", allow_pickle=True).item()
