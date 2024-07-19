@@ -5,7 +5,7 @@
 2. Install [numpyro](https://num.pyro.ai/en/stable/getting_started.html)
 3. Install the `dsp` package from git:
 ```bash
-pip install git+ssh://git@github.com/MLGlobalHealth/dsp.git
+pip install -U --force-reinstall git+ssh://git@github.com/MLGlobalHealth/dsp.git
 ```
 
 ## View Documentation (Locally)
