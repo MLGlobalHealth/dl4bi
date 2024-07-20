@@ -105,11 +105,7 @@ def build_valid_lens_ctx_schedule(
 
 def build_scheduled_dataloader(batch_size: int, valid_lens_ctx_schedule: jax.Array):
     B, L = batch_size, 32 * 32
-    data = np.load(
-        "cache/popgen/n1000_mu_1e-5_m_5e-3.npy",
-        mmap_mode="r",
-        allow_pickle=True,
-    ).item()
+    data = np.load("cache/popgen/f_test_n1000_mu_1e-5_m_5e-3.npy", mmap_mode="r")
     train_ds = data["f_test"]
     s_test = build_grid([dict(start=-2.0, stop=2.0, num=32)] * 2).reshape(L, 2)
     s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
@@ -156,11 +152,7 @@ def build_dataloader(
     num_test_max: int = 1024,
 ):
     B, L = batch_size, 32 * 32
-    data = np.load(
-        "cache/popgen/n1000_mu_1e-5_m_5e-3.npy",
-        mmap_mode="r",
-        allow_pickle=True,
-    ).item()
+    data = np.load("cache/popgen/f_test_n1000_mu_1e-5_m_5e-3.npy", mmap_mode="r")
     train_ds = data["f_test"]
     s_test = build_grid([dict(start=-2.0, stop=2.0, num=32)] * 2).reshape(L, 2)
     s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
