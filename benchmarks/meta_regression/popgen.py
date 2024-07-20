@@ -34,19 +34,27 @@ def main(cfg: DictConfig):
         project="SPTx - Population Genetics",
     )
     rng = random.key(cfg.seed)
-    rng_train, rng_test = random.split(rng)
-    dataloader = build_dataloader()
+    rng_sched, rng_train, rng_test = random.split(rng, 3)
+    train_num_steps, train_num_warmup, train_num_random = 100000, 10000, 10000
     train_num_steps, valid_num_steps, test_num_steps = 100000, 5000, 5000
     valid_interval, plot_interval = 25000, 50000
     lr_peak, lr_pct_warmup = 5e-4, 0.3
+    valid_lens_ctx_schedule = build_valid_lens_ctx_schedule(
+        rng_sched,
+        train_num_steps,
+        train_num_warmup,
+        train_num_random,
+    )
     lr_schedule = cosine_annealing_lr(train_num_steps, lr_peak, lr_pct_warmup)
+    train_dataloader = build_scheduled_dataloader(16, valid_lens_ctx_schedule)
+    valid_dataloader = build_dataloader()
     optimizer = optax.yogi(lr_schedule)
     state = train(
         rng_train,
         cfg.model,
         optimizer,
-        dataloader,
-        dataloader,
+        train_dataloader,
+        valid_dataloader,
         train_num_steps,
         valid_num_steps,
         valid_interval,
@@ -57,12 +65,76 @@ def main(cfg: DictConfig):
     loss = evaluate(
         rng_test,
         state,
-        dataloader,
+        valid_dataloader,
         test_num_steps,
         path.with_suffix(".pkl"),
     )
     wandb.log({"test_loss": loss})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
+
+
+def build_valid_lens_ctx_schedule(
+    rng: jax.Array,
+    num_steps: int = 100000,
+    num_warmup: int = 10000,
+    num_random: int = 10000,
+    num_ctx_min: int = 64,
+    num_ctx_max: int = 1024,
+):
+    s_warmup = jnp.repeat(num_ctx_max, num_warmup)
+    s_random = random.randint(rng, (num_random,), num_ctx_min, num_ctx_max)
+    num_remaining = num_steps - num_warmup - num_random
+    num_descend = num_remaining // 2
+    s_descend = jnp.linspace(num_ctx_max, num_ctx_min, num_descend, dtype=jnp.int32)
+    num_remaining -= num_descend
+    num_ascend = int(num_remaining * 2 / 3)
+    s_ascend = jnp.linspace(num_ctx_min, num_ctx_max, num_ascend, dtype=jnp.int32)
+    num_remaining -= num_ascend
+    num_ctx_mid = (num_ctx_max - num_ctx_min) / 2
+    s_mid = jnp.linspace(num_ctx_max, num_ctx_mid, num_remaining, dtype=jnp.int32)
+    return jnp.hstack([s_warmup, s_descend, s_ascend, s_mid, s_random])
+
+
+def build_scheduled_dataloader(batch_size: int, valid_lens_ctx_schedule: jax.Array):
+    B, L = batch_size, 32 * 32
+    data = np.load("cache/popgen/n1000_mu_1e-5_m_5e-3.npy", allow_pickle=True).item()
+    train_ds = data["f_test"]
+    s_test = build_grid([dict(start=-1.0, stop=1.0, num=32)] * 2).reshape(L, 2)
+    s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
+    valid_lens_test = jnp.repeat(L, B)
+
+    def build_dataloader(dataset):
+        N = dataset.shape[0]
+
+        def dataloader(rng: jax.Array):
+            i = 0
+            while True:
+                rng_batch, rng_permute, rng_valid, rng = random.split(rng, 4)
+                batch_idx = random.choice(rng_batch, N, (B,), replace=False)
+                permute_idx = random.choice(rng_permute, L, (L,), replace=False)
+                f_test = dataset[batch_idx]
+                f_test = f_test.reshape(B, -1, 1)  # [B, H, W, 1] -> [B, L, 1]
+                inv_permute_idx = jnp.argsort(permute_idx)
+                # permute the order and select the first valid_lens_ctx for context
+                s_test_permuted = s_test[:, permute_idx, :]
+                f_test_permuted = f_test[:, permute_idx, :]
+                valid_lens_ctx = jnp.repeat(valid_lens_ctx_schedule[i], B)
+                i += 1
+                yield (
+                    s_test_permuted,  # s_ctx (permuted)
+                    f_test_permuted,  # f_ctx (permuted)
+                    valid_lens_ctx,  # only the first valid lens are used/observed
+                    s_test_permuted,  # s_test (permuted)
+                    f_test_permuted,  # f_test (permuted)
+                    valid_lens_test,
+                    s_test,  # add full originals for use in callbacks, e.g. log_plots
+                    f_test,
+                    inv_permute_idx,
+                )
+
+        return dataloader
+
+    return build_dataloader(train_ds)
 
 
 def build_dataloader(
