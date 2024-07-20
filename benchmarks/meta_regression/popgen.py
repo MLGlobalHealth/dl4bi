@@ -38,17 +38,18 @@ def main(cfg: DictConfig):
     train_num_steps, train_num_warmup, train_num_random = 100000, 10000, 10000
     train_num_steps, valid_num_steps, test_num_steps = 100000, 5000, 5000
     valid_interval, plot_interval = 25000, 50000
-    lr_peak, lr_pct_warmup = 5e-4, 0.3
+    # lr_peak, lr_pct_warmup = 5e-4, 0.3
     valid_lens_ctx_schedule = build_valid_lens_ctx_schedule(
         rng_sched,
         train_num_steps,
         train_num_warmup,
         train_num_random,
     )
-    lr_schedule = cosine_annealing_lr(train_num_steps, lr_peak, lr_pct_warmup)
+    # lr_schedule = cosine_annealing_lr(train_num_steps, lr_peak, lr_pct_warmup)
     train_dataloader = build_scheduled_dataloader(16, valid_lens_ctx_schedule)
     valid_dataloader = build_dataloader()
-    optimizer = optax.yogi(lr_schedule)
+    # optimizer = optax.yogi(lr_schedule)
+    optimizer = optax.yogi(1e-3)
     state = train(
         rng_train,
         cfg.model,
@@ -99,7 +100,7 @@ def build_scheduled_dataloader(batch_size: int, valid_lens_ctx_schedule: jax.Arr
     B, L = batch_size, 32 * 32
     data = np.load("cache/popgen/n1000_mu_1e-5_m_5e-3.npy", allow_pickle=True).item()
     train_ds = data["f_test"]
-    s_test = build_grid([dict(start=-1.0, stop=1.0, num=32)] * 2).reshape(L, 2)
+    s_test = build_grid([dict(start=-2.0, stop=2.0, num=32)] * 2).reshape(L, 2)
     s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
     valid_lens_test = jnp.repeat(L, B)
 
