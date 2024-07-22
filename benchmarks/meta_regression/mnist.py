@@ -18,6 +18,7 @@ from dsp.meta_regression.train_utils import (
     Callback,
     cosine_annealing_lr,
     evaluate,
+    instantiate,
     log_img_plots,
     save_ckpt,
     train,
@@ -42,9 +43,10 @@ def main(cfg: DictConfig):
     lr_peak, lr_pct_warmup = 5e-4, 0.3
     lr_schedule = cosine_annealing_lr(train_num_steps, lr_peak, lr_pct_warmup)
     optimizer = optax.yogi(lr_schedule)
+    model = instantiate(cfg.model)
     state = train(
         rng_train,
-        cfg.model,
+        model,
         optimizer,
         train_dataloader,
         valid_dataloader,
@@ -53,16 +55,10 @@ def main(cfg: DictConfig):
         valid_interval,
         callbacks=[Callback(partial(log_img_plots, shape=(28, 28, 1)), plot_interval)],
     )
+    loss = evaluate(rng_test, state, valid_dataloader, valid_num_steps)
+    wandb.log({"test_loss": loss})
     path = Path(f"results/mnist/{model_cfg_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    loss = evaluate(
-        rng_test,
-        state,
-        valid_dataloader,
-        valid_num_steps,
-        path.with_suffix(".pkl"),
-    )
-    wandb.log({"test_loss": loss})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 

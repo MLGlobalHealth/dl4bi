@@ -46,7 +46,7 @@ def test_multihead_attention():
 
 
 def test_fast_attention():
-    B, L, D = 4, 128, 64
+    B, L, D = 4, 128, 16
     key = random.key(42)
     rng_qkvs, rng_valid, rng_init = random.split(key, 3)
     data = random.normal(rng_qkvs, (3, B, L, D))
@@ -62,9 +62,9 @@ def test_fast_attention():
     max_error = jnp.max(jnp.abs(ctx_true - ctx_fast))
     assert ctx_true.shape == (B, L, D), "Incorrect context output shape!"
     assert ctx_fast.shape == (B, L, D), "Incorrect context output shape!"
-    assert mse < 0.2, "Large MSE error in approximation"
-    # TODO(danj): this max error feels large...
-    assert max_error < 3.5, "Large max error in approximation!"
+    # Source: https://tinyurl.com/google-fast-attn
+    assert mse < 0.03, "Large MSE error in approximation"
+    assert max_error < 2.0, "Large max error in approximation!"
 
 
 def test_fast_softmax_attention_speed():

@@ -3,11 +3,6 @@ kwargs:
   embed_s:
     cls: LearnableEmbedding
     kwargs:
-      map:
-        cls: GaussianFourierEmbedding
-        kwargs:
-          embed_dim: 256
-          var: 4.0
       post_process:
         cls: MLP
         kwargs:
@@ -21,8 +16,8 @@ kwargs:
   dec:
     cls: KRStack
     kwargs:
-      num_blks: 6
-      num_reps: 1
+      num_blks: 3
+      num_reps: 2
       resid_blk: True
       blk:
         cls: KRBlock

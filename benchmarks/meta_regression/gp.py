@@ -13,6 +13,7 @@ from dsp.meta_regression.train_utils import (
     build_gp_dataloader,
     cosine_annealing_lr,
     evaluate,
+    instantiate,
     log_posterior_predictive_plots,
     save_ckpt,
     train,
@@ -37,9 +38,10 @@ def main(cfg: DictConfig):
     lr_peak, lr_pct_warmup = 1e-3, 0.3
     lr_schedule = cosine_annealing_lr(train_num_steps, lr_peak, lr_pct_warmup)
     optimizer = optax.yogi(lr_schedule)
+    model = instantiate(cfg.model)
     state = train(
         rng_train,
-        cfg.model,
+        model,
         optimizer,
         dataloader,
         dataloader,
@@ -48,16 +50,10 @@ def main(cfg: DictConfig):
         valid_interval,
         callbacks=[Callback(log_posterior_predictive_plots, plot_interval)],
     )
+    loss = evaluate(rng_test, state, dataloader, valid_num_steps)
+    wandb.log({"test_loss": loss})
     path = Path(f"results/gp/{exp}-{kernel}-{model_cfg_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    loss = evaluate(
-        rng_test,
-        state,
-        dataloader,
-        valid_num_steps,
-        path.with_suffix(".pkl"),
-    )
-    wandb.log({"test_loss": loss})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 

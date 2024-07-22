@@ -165,6 +165,7 @@ class FastAttention(nn.Module):
 
     p_dropout: float = 0.0
     build_phi: Callable = build_stable_positive_softmax_phi
+    num_ortho_features: int = 64
 
     @nn.compact
     def __call__(
@@ -193,7 +194,7 @@ class FastAttention(nn.Module):
             since the attention matrix is never materialized in FAVOR+.
         """
         B, K, D_QK = ks.shape
-        gen_proj = lambda rng: gaussian_orf(rng, D_QK, D_QK)
+        gen_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_QK)
         init_proj = lambda: gen_proj(self.make_rng("params"))
         proj = self.variable("projections", "random", init_proj)
         if rng_redraw_random_features is not None:
@@ -271,9 +272,10 @@ class MultiheadFastAttention(nn.Module):
     proj_ks: nn.Module = MLP([64])
     proj_vs: nn.Module = MLP([64])
     proj_out: nn.Module = MLP([64])
-    num_heads: int = 4
     p_dropout: float = 0.0
     build_phi: Callable = build_stable_positive_softmax_phi
+    num_heads: int = 4
+    num_ortho_features: int = 64
 
     @nn.compact
     def __call__(
@@ -310,8 +312,8 @@ class MultiheadFastAttention(nn.Module):
         vs = vs.reshape(B, K, H, D_V_H).transpose(0, 2, 1, 3).reshape(-1, K, D_V_H)
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
-        ctx, attn = FastAttention(self.p_dropout, self.build_phi)(
-            qs, ks, vs, valid_lens, training, rng_redraw_random_features
-        )
+        ctx, attn = FastAttention(
+            self.p_dropout, self.build_phi, self.num_ortho_features
+        )(qs, ks, vs, valid_lens, training, rng_redraw_random_features)
         ctx = ctx.reshape(B, H, Q, D_V_H).transpose(0, 2, 1, 3).reshape(B, Q, D_V)
         return self.proj_out(ctx), attn

@@ -6,7 +6,7 @@ kwargs:
       post_process:
         cls: MLP
         kwargs:
-          dims: [64, 64, 64, 64]
+          dims: [256, 64, 64, 64]
           act_fn: elu
   embed_s_f:
     cls: MLP
@@ -16,20 +16,18 @@ kwargs:
   dec:
     cls: KRStack
     kwargs:
-      num_blks: 3
-      num_reps: 2
+      num_blks: 6
+      num_reps: 1
       resid_blk: True
       blk:
         cls: KRBlock
         kwargs:
           attn:
             cls: MultiheadFastAttention
-            kwargs:
-              num_ortho_features: 64
           ffn:
             cls: MLP
             kwargs:
-              dims: [64, 64]
+              dims: [256, 64]
               act_fn: elu
   head:
     cls: MLP

@@ -41,6 +41,8 @@ from .tnpnd import TNPND
 
 
 class TrainState(train_state.TrainState):
+    # kwargs stores any extra information associated with training,
+    # i.e. batch norm stats or fixed (random) projections
     kwargs: FrozenDict = FrozenDict({})
 
 
@@ -52,7 +54,7 @@ class Callback:
 
 def train(
     rng: jax.Array,
-    model_cfg: DictConfig,
+    model: nn.Module,
     optimizer: optax.GradientTransformation,
     train_dataloader: Callable,
     valid_dataloader: Callable,
@@ -60,12 +62,8 @@ def train(
     valid_num_steps: Optional[int] = None,
     valid_interval: int = 25000,
     log_loss_interval: int = 100,
-    lr_peak: float = 1e-3,
-    lr_pct_warmup: float = 0.3,
-    lr_num_cycles: int = 1,
     callbacks: list[Callback] = [],
 ):
-    model = instantiate(model_cfg)
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
     batches = train_dataloader(rng_data)
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = next(batches)
