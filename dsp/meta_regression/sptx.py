@@ -15,6 +15,7 @@ class SPTx(nn.Module):
         embed_s_f: A module or combining embedded locations and function values.
         dec: A decoder module, e.g. a `KRStack`.
         head: A prediction head for decoded output.
+        min_std: Minimum standard deviation.
 
     Returns:
         An instance of the `SPTx` model.
@@ -24,6 +25,7 @@ class SPTx(nn.Module):
     embed_s_f: nn.Module = MLP([64])
     dec: nn.Module = KRStack()
     head: nn.Module = MLP([64, 64, 2])
+    min_std: float = 0.0
 
     @nn.compact
     def __call__(
@@ -72,4 +74,5 @@ class SPTx(nn.Module):
         f_dist = self.head(s_f_test_enc, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
         f_std = jnp.exp(f_log_var / 2)
+        f_std = self.min_std + (1 - self.min_std) * f_std
         return f_mu, f_std
