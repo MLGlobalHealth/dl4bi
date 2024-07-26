@@ -290,7 +290,13 @@ def cosine_annealing_lr(
 ):
     """Create an n-cycle cosine annealing schedule."""
     n = num_steps // num_cycles
-    sched = optax.cosine_onecycle_schedule(n, peak_lr, pct_start=pct_warmup)
+    sched = optax.cosine_onecycle_schedule(
+        n,
+        peak_lr,
+        pct_warmup,
+        div_factor=10,
+        final_div_factor=10,
+    )
     boundaries = n * jnp.arange(1, num_cycles)
     return optax.join_schedules([sched] * num_cycles, boundaries)
 
