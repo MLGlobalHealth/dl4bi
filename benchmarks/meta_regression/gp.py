@@ -37,7 +37,8 @@ def main(cfg: DictConfig):
     valid_interval, plot_interval = 25000, 50000
     lr_peak, lr_pct_warmup = 5e-4, 0.3
     lr_schedule = cosine_annealing_lr(train_num_steps, lr_peak, lr_pct_warmup)
-    optimizer = optax.yogi(lr_schedule)
+    # optimizer = optax.chain(optax.clip_by_global_norm(2.0), optax.yogi(lr_schedule))
+    optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.yogi(lr_peak))
     model = instantiate(cfg.model)
     state = train(
         rng_train,
