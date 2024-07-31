@@ -31,5 +31,14 @@ such degeneracy.
     - Install `pyenv`: `curl https://pyenv.run | bash`
     - Copy the lines it says to your `~/.bashrc` and reload `source ~/.bashrc`
     - Install Python 3.12: `pyenv install 3.12`
-- Create a virtualenv called `dsp`: `pyenv virtualenv 3.12 dsp`
-- Install the package locally in this virtualenv: `pip install -e .`
+- Create a virtualenv called `sps` using Python 3.12: `pyenv virtualenv 3.12 sps-dev`
+- Clone the repository and `cd` into it: `git clone git@github.com:MLGlobalHealth/sps.git && cd sps`
+- Inside the `sps` repository, tell `pyenv` to use the `sps-dev` virtualenv: `pyenv local sps-dev`
+    - `pyenv local sps-dev` creates a `.python-version` file that tells `pyenv`
+        to automatically activate the `sps-dev` virtualenv whenever you are
+        working in the `sps` repository, so all `python` and `pip` commands will
+        execute within the `sps-dev` virtualenv
+- Inside the `sps` directory, install the package to the `sps-dev` virtualenv: `pip install -e .`
+    - Installing this package locally means it is installed "live", i.e. it
+        immediately reflects any changes you make (this only needs to be done
+        once)
