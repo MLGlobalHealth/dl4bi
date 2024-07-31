@@ -3,7 +3,7 @@ kwargs:
   embed_s:
     cls: GaussianFourierEmbedding
     kwargs:
-      embed_dim: 64
+      embed_dim: 256
       var: 4.0
   embed_s_f:
     cls: MLP
@@ -12,7 +12,7 @@ kwargs:
   dec:
     cls: KRStack
     kwargs:
-      num_blks: 4
+      num_blks: 3
       num_reps: 2
       resid_blk: True
       blk:

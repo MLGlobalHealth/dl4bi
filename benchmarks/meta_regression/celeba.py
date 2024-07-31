@@ -20,7 +20,6 @@ from tqdm import tqdm
 from dsp.meta_regression.train_utils import (
     Callback,
     cfg_to_run_name,
-    cosine_annealing_lr,
     evaluate,
     instantiate,
     log_img_plots,
@@ -43,15 +42,7 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader, valid_dataloader, test_dataloader = build_dataloaders()
-    lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps,
-        cfg.lr_peak,
-        cfg.lr_pct_warmup,
-    )
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(cfg.clip_max_norm),
-        optax.yogi(lr_schedule),
-    )
+    optimizer = optax.yogi(cfg.lr_peak)
     model = instantiate(cfg.model)
     state = train(
         rng_train,
