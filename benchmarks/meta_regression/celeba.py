@@ -39,6 +39,7 @@ def main(cfg: DictConfig):
         project="SPTx - CelebA",
         reinit=True,  # allows reinitialization for multiple runs
     )
+    print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader, valid_dataloader, test_dataloader = build_dataloaders()

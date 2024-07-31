@@ -17,7 +17,6 @@ from gp import main as gp_main
 from hydra import compose, initialize
 from jax import random
 from mnist import main as mnist_main
-from omegaconf import OmegaConf
 
 
 def sptx_paper(seeds: jax.Array, dry_run: bool = False):
@@ -97,7 +96,6 @@ def gp_benchmark(
                             + _overrides,
                         )
                         print("=" * 100)
-                        print(OmegaConf.to_yaml(cfg))
                         main_fn(cfg)
 
 
@@ -121,7 +119,6 @@ def img_benchmark(
                         + _overrides,
                     )
                     print("=" * 100)
-                    print(OmegaConf.to_yaml(cfg))
                     main_fn(cfg)
 
 

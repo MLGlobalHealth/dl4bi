@@ -79,13 +79,13 @@ def train(
         valid_lens_ctx,
         valid_lens_test,
     )
+    print(param_count)
     state = TrainState.create(
         apply_fn=model.apply,
         params=params,
         tx=optimizer,
         kwargs=kwargs,
     )
-    print(f"{model}\n\n{param_count}")
     train_step = vanilla_train_step
     if isinstance(model, (NP, ANP)):
         train_step = npf_elbo_train_step

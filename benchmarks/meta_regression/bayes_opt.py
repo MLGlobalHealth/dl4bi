@@ -36,8 +36,9 @@ def main(cfg: DictConfig):
         project="SPTx - Bayesian Optimization",
         reinit=True,  # allows reinitialization for multiple runs
     )
-    num_tasks, budget, num_init = 100, 50, 10
     cfg.data.batch_size = 1  # override GP batch argument
+    print(OmegaConf.to_yaml(cfg))
+    num_tasks, budget, num_init = 100, 50, 10
     rng = random.key(cfg.seed)
     rng_data, rng_opt = random.split(rng)
     dataloader = build_gp_dataloader(cfg.data, cfg.kernel)

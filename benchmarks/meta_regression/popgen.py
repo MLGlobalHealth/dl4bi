@@ -34,6 +34,7 @@ def main(cfg: DictConfig):
         name=cfg.get("name", run_name),
         project="SPTx - Population Genetics",
     )
+    print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader = build_dataloader(cfg.batch_size)
