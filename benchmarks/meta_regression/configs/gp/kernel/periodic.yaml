@@ -20,5 +20,5 @@ kwargs:
     kwargs:
       dist: uniform
       kwargs:
-        minval: 1.57 # ~4 cycles on unit interval (2π / 4)
-        maxval: 6.28 # ~1 cycle on unit interval (2π / 1)
+        minval: 0.5 # ~8 cycles on [-2, 2]
+        maxval: 1.5 # ~3 cycles on [-2, 2]
