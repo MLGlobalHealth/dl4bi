@@ -186,7 +186,8 @@ def cfg_to_run_name(cfg: DictConfig):
     if model == "SPTx":
         is_fast = "Fast" in cfg.model.kwargs.dec.kwargs.blk.kwargs.attn.cls
         model += " Fast" if is_fast else " Full"
-        if cfg.model.kwargs.embed_s in [
+        embed_s = cfg.model.wkargs.embed_s
+        if "cls" in embed_s and embed_s.cls in [
             "GaussianFourierEmbedding",
             "NeRFEmbedding",
             "FixedSinusoidalEmbedding",
