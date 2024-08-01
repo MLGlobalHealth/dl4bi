@@ -14,6 +14,7 @@ kwargs:
     kwargs:
       num_blks: 3
       num_reps: 2
+      resid_blk: True
       blk:
         cls: KRBlock
         kwargs:

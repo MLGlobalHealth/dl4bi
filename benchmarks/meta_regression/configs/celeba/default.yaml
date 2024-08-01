@@ -7,6 +7,6 @@ train_num_steps: 100000
 valid_num_steps: 5000
 valid_interval: 25000
 plot_interval: 50000
-lr_peak: 5.0e-4
+lr_peak: 2.0e-3
 lr_pct_warmup: 0.3
 clip_max_norm: 2.0
