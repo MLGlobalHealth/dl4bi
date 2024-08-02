@@ -11,7 +11,6 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from jax import jit, lax, random, vmap
-from jax.tree_util import Partial
 
 from .mlp import MLP
 

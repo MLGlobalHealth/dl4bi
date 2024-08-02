@@ -68,7 +68,7 @@ def test_fast_attention():
 
 
 def test_fast_softmax_attention_speed():
-    B, L, D = 1, 20480, 16
+    B, L, D = 1, 32768, 16
     key = random.key(42)
     rng_qkvs, rng_valid, rng_init = random.split(key, 3)
     data = random.normal(rng_qkvs, (3, B, L, D))
@@ -101,29 +101,20 @@ def test_fast_softmax_attention_speed():
 
 
 def test_fast_softmax_attention_scale():
-    B, L, L_init, D = 1, 45000, 3, 16
+    B, L_ctx, L_test, L_init, D = 1, 250000, 50000, 3, 64
     key = random.key(42)
-    rng_qkvs_init, rng_qkvs, rng_valid, rng_init = random.split(key, 4)
-    data = random.normal(rng_qkvs, (3, B, L, D))
-    data_init = random.normal(rng_qkvs_init, (3, B, L_init, D))
-    qs, ks, vs = data[0], data[1], data[2]
-    qs_init, ks_init, vs_init = data_init[0], data_init[1], data_init[2]
-    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L)
-    valid_lens_init = random.randint(rng_valid, (B,), 0, maxval=L_init)
+    rng_init, rng_qs, rng_kvs = random.split(key, 3)
+    x = random.normal(rng_init, (B, L_init, D))
+    qs = random.normal(rng_qs, (B, L_test, D))
+    kvs = random.normal(rng_kvs, (B, L_ctx, D))
 
     fast_attn = FastAttention()
-    (ctx_fast_init, _), p_fast = fast_attn.init_with_output(
-        rng_init, qs_init, ks_init, vs_init, valid_lens_init
-    )
+    (ctx_fast_init, _), p_fast = fast_attn.init_with_output(rng_init, x, x, x)
 
-    jit_fast_attn = jax.jit(fast_attn.apply)
+    # to view results: tensorboard --logdir /tmp/tensorboard/
     with jax.profiler.trace("/tmp/tensorboard"):
-        ctx_fast, _ = jit_fast_attn(p_fast, qs, ks, vs, valid_lens)
-        ctx_fast.block_until_ready()
+        jit_fast_attn = jax.jit(fast_attn.apply)
+        ctx_fast, _ = jit_fast_attn(p_fast, qs, kvs, kvs)
 
     assert not jnp.isnan(ctx_fast_init).any(), "NaNs produced during initialization!"
     assert not jnp.isnan(ctx_fast).any(), "NaNs produced!"
-
-    # TODO(danj): add Heaton benchmark test
-    # tensorboard --logdir /tmp/tensorboard/
-    L_ctx_heaton, L_test_heaton = 105569, 44431  # Heaton et al benchmark
