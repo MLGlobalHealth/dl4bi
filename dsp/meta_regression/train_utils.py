@@ -189,7 +189,7 @@ def cfg_to_run_name(cfg: DictConfig):
         embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.cls")
         if embed_cls == "ResidualEmbedding":
             name += " Resid"
-            embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.kwargs.cls")
+            embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.kwargs.embed.cls")
         if embed_cls in [
             "GaussianFourierEmbedding",
             "NeRFEmbedding",

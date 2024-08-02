@@ -101,16 +101,25 @@ def test_fast_softmax_attention_speed():
 
 
 def test_fast_softmax_attention_scale():
-    B, L, D = 1, 32768, 16
+    B, L, L_init, D = 1, 32768, 3, 16
     key = random.key(42)
-    rng_qkvs, rng_valid, rng_init = random.split(key, 3)
+    rng_qkvs_init, rng_qkvs, rng_valid, rng_init = random.split(key, 4)
     data = random.normal(rng_qkvs, (3, B, L, D))
+    data_init = random.normal(rng_qkvs_init, (3, B, L_init, D))
     qs, ks, vs = data[0], data[1], data[2]
+    qs_init, ks_init, vs_init = data_init[0], data_init[1], data_init[2]
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L)
+    valid_lens_init = random.randint(rng_valid, (B,), 0, maxval=L_init)
 
     fast_attn = FastAttention()
-    (ctx_fast, _), p_fast = fast_attn.init_with_output(rng_init, qs, ks, vs, valid_lens)
+    (ctx_fast_init, _), p_fast = fast_attn.init_with_output(
+        rng_init, qs_init, ks_init, vs_init, valid_lens_init
+    )
+
+    jit_fast_attn = jax.jit(fast_attn.apply)
+    ctx_fast, _ = jit_fast_attn(p_fast, qs, ks, vs, valid_lens)
 
     # NOTE: regular attention OOMs around L=20480
 
+    assert not jnp.isnan(ctx_fast_init).any(), "NaNs produced during initialization!"
     assert not jnp.isnan(ctx_fast).any(), "NaNs produced!"
