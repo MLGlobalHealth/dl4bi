@@ -3,7 +3,7 @@ kwargs:
   embed_s_f:
     cls: MLP
     kwargs:
-      dims: [256, 64, 64, 64]
+      dims: [256, 128, 64, 64]
   dec:
     cls: KRStack
     kwargs:
