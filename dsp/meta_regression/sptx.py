@@ -64,8 +64,9 @@ class SPTx(nn.Module):
             $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
         f_test_zeros = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
-        s_f_ctx = jnp.concatenate([self.embed_s(s_ctx), f_ctx], axis=-1)
-        s_f_test = jnp.concatenate([self.embed_s(s_test), f_test_zeros], axis=-1)
+        s_ctx_embed, s_test_embed = self.embed_s(s_ctx), self.embed_s(s_test)
+        s_f_ctx = jnp.concatenate([s_ctx_embed, s_ctx, f_ctx], axis=-1)
+        s_f_test = jnp.concatenate([s_test_embed, s_test, f_test_zeros], axis=-1)
         s_f_test_enc, _ = self.dec(
             self.embed_s_f(s_f_test),
             self.embed_s_f(s_f_ctx),

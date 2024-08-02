@@ -13,3 +13,4 @@ __pycache__
 *.sh
 **/wandb/**
 *log.txt
+.python-version
