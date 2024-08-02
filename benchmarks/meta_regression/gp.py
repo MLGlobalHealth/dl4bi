@@ -4,7 +4,7 @@ from pathlib import Path
 import hydra
 import optax
 import wandb
-from jax import config, random
+from jax import random
 from omegaconf import DictConfig, OmegaConf
 
 from dsp.meta_regression.train_utils import (
@@ -18,8 +18,6 @@ from dsp.meta_regression.train_utils import (
     save_ckpt,
     train,
 )
-
-config.update("jax_debug_nans", True)
 
 
 @hydra.main("configs/gp", config_name="default", version_base=None)

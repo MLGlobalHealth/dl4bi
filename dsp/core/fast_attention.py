@@ -231,7 +231,7 @@ def apply_mask(x: jax.Array, valid_lens: Optional[jax.Array] = None):
         return x
     _B, L, _D = x.shape
     mask = (jnp.arange(L) < valid_lens[..., None])[..., None]
-    return mask * x
+    return jnp.float32(mask) * x
 
 
 def breakpoint_if_nonfinite(x):
