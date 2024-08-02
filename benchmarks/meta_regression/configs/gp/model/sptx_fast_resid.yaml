@@ -1,10 +1,13 @@
 cls: SPTx
 kwargs:
   embed_s:
-    cls: GaussianFourierEmbedding
+    cls: ResidualEmbedding
     kwargs:
-      embed_dim: 64
-      var: 4.0
+      embed:
+        cls: GaussianFourierEmbedding
+        kwargs:
+          embed_dim: 64
+          var: 4.0
   embed_s_f:
     cls: MLP
     kwargs:

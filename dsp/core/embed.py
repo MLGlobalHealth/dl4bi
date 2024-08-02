@@ -10,7 +10,7 @@ from jax.tree_util import Partial
 class ResidualEmbedding(nn.Module):
     """Returns [x, embed(x)]."""
 
-    embed: nn.Module
+    embed: Callable
 
     @nn.compact
     def __call__(self, x: jax.Array, training: bool = False):
