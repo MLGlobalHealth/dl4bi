@@ -12,14 +12,15 @@ class SPTx(nn.Module):
     """A Stochastic Process Transformer (SPTx).
 
     Args:
-        embed_s: A module that embeds locations prior to embedding with
+        embed_s: A module that embeds the index set prior to embedding with
             function values.
-        embed_f: A module that embeds function values prior to embedding
-            with locations.
-        embed_s_f: A module that embeds positions and function values.
+        embed_f: A module that embeds function values prior to embedding with
+            the index set.
+        embed_s_f: A module that jointly embeds the (embedded) index set and
+            function values.
         dec: A decoder module, e.g. a `KRStack`.
         head: A prediction head for decoded output.
-        min_std: Minimum standard deviation.
+        min_std: Minimum pointwise standard deviation.
 
     Returns:
         An instance of the `SPTx` model.
@@ -47,9 +48,9 @@ class SPTx(nn.Module):
 
         Args:
             rng: A psuedo-random number generator.
-            s_ctx: A location array of shape `[B, L_ctx, D_S]` where
+            s_ctx: An index set array of shape `[B, L_ctx, D_S]` where
                 `B` is batch size, `L_ctx` is number of context
-                locations, and `D_S` is the dimension of each location.
+                locations, and `L_ctx` is the dimension of each location.
             f_ctx: A function value array of shape `[B, L_ctx, D_F]` where `B` is
                 batch size, `L_ctx` is number of context locations, and `D_F` is
                 the dimension of each function value.
@@ -68,8 +69,8 @@ class SPTx(nn.Module):
         """
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
-        s_f_ctx = stack(s_ctx, self.embed_s(s_ctx), f_ctx, self.embed_f(f_ctx))
-        s_f_test = stack(s_test, self.embed_s(s_test), f_test, self.embed_f(f_test))
+        s_f_ctx = stack(self.embed_s(s_ctx), self.embed_f(f_ctx))
+        s_f_test = stack(self.embed_s(s_test), self.embed_f(f_test))
         s_f_test_enc, _ = self.dec(
             self.embed_s_f(s_f_test),
             self.embed_s_f(s_f_ctx),

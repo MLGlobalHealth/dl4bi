@@ -20,6 +20,7 @@ from .embed import (
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
     NeRFEmbedding,
+    ResidualEmbedding,
 )
 from .fast_attention import (
     FastAttention,

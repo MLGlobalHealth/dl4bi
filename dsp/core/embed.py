@@ -7,6 +7,16 @@ from jax import jit, random, vmap
 from jax.tree_util import Partial
 
 
+class ResidualEmbedding(nn.Module):
+    """Returns [x, embed(x)]."""
+
+    embed: nn.Module
+
+    @nn.compact
+    def __call__(self, x: jax.Array, training: bool = False):
+        return jnp.concatenate([x, self.embed(x, training)], axis=-1)
+
+
 class FixedSinusoidalEmbedding(nn.Module):
     r"""Fixed sinusoidal positional encoding from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
