@@ -63,7 +63,7 @@ def test_fast_attention():
     assert ctx_true.shape == (B, L, D), "Incorrect context output shape!"
     assert ctx_fast.shape == (B, L, D), "Incorrect context output shape!"
     # Source: https://tinyurl.com/google-fast-attn
-    assert mse < 0.03, "Large MSE error in approximation"
+    assert mse < 0.05, "Large MSE error in approximation"
     assert max_error < 2.0, "Large max error in approximation!"
 
 

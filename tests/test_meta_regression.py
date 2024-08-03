@@ -1,9 +1,10 @@
+import os
+
 import jax
 import jax.numpy as jnp
 import optax
 from jax import jit, random
 
-from dsp.core import KRBlock, KRStack, MultiheadFastAttention
 from dsp.meta_regression import (
     ANP,
     BANP,
@@ -21,6 +22,9 @@ from dsp.meta_regression import (
 from dsp.meta_regression import (
     train_utils as tu,
 )
+
+# https://jax.readthedocs.io/en/latest/gpu_performance_tips.html#code-generation-flags
+os.environ["XLA_FLAGS"] = "--xla_gpu_triton_gemm_any=True"
 
 
 def test_models():

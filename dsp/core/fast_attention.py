@@ -10,7 +10,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import jit, lax, random, vmap
+from jax import jit, lax, random
 
 from .mlp import MLP
 
@@ -221,8 +221,8 @@ def _attend(
     buf_2 = qs_prime @ buf_1
     buf_3, buf_4 = buf_2[..., :-1], buf_2[..., -1]
     buf_4 = jnp.where(buf_4 < eps, eps, buf_4)  # numerical stabilization
-    d_inv = vmap(jnp.diag)(1 / buf_4)
-    return d_inv @ buf_3
+    d_inv = (1 / buf_4)[..., None]
+    return d_inv * buf_3
 
 
 def apply_mask(x: jax.Array, valid_lens: Optional[jax.Array] = None):
@@ -231,7 +231,7 @@ def apply_mask(x: jax.Array, valid_lens: Optional[jax.Array] = None):
         return x
     _B, L, _D = x.shape
     mask = (jnp.arange(L) < valid_lens[..., None])[..., None]
-    return jnp.float32(mask) * x
+    return mask * x
 
 
 def breakpoint_if_nonfinite(x):
