@@ -15,8 +15,6 @@ kwargs:
         kwargs:
           attn:
             cls: MultiheadFastAttention
-            kwargs:
-              num_ortho_features: 256
   head:
     cls: MLP
     kwargs:

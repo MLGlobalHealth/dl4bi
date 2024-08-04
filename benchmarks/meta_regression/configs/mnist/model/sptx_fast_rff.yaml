@@ -1,5 +1,6 @@
 cls: SPTx
 kwargs:
+  min_std: 0.05
   embed_s:
     cls: GaussianFourierEmbedding
     kwargs:
@@ -19,8 +20,6 @@ kwargs:
         kwargs:
           attn:
             cls: MultiheadFastAttention
-            kwargs:
-              num_ortho_features: 256
   head:
     cls: MLP
     kwargs:
