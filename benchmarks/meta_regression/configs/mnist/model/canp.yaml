@@ -1,5 +1,6 @@
 cls: CANP
 kwargs:
+  min_std: 0.05
   embed_s:
     cls: MLP
     kwargs:
