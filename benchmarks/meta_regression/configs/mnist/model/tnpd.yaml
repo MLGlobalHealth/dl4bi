@@ -1,5 +1,6 @@
 cls: TNPD
 kwargs:
+  min_std: 0.05
   embed_s_f:
     cls: MLP
     kwargs:

@@ -14,6 +14,7 @@ class TNPD(nn.Module):
         embed_s_f: A module that embeds positions and function values.
         enc: An encoder module for observed points.
         head: A prediction head for decoded output.
+        min_std: Minimum pointwise standard deviation.
 
     Returns:
         An instance of the `TNP-D` model.
@@ -22,6 +23,7 @@ class TNPD(nn.Module):
     embed_s_f: nn.Module = MLP([64] * 4)
     enc: nn.Module = TransformerEncoder(num_blks=6, d_ffn=128)
     head: nn.Module = MLP([128, 2])
+    min_std: float = 0.0
 
     @nn.compact
     def __call__(
@@ -67,4 +69,8 @@ class TNPD(nn.Module):
         s_f_test_enc = s_f_enc[:, -L_test:, ...]
         f_dist = self.head(s_f_test_enc, training)
         f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-        return f_mu, jnp.exp(f_std)
+        if self.min_std:
+            f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
+        else:
+            f_std = jnp.exp(f_std)
+        return f_mu, f_std
