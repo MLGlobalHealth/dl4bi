@@ -93,6 +93,8 @@ def sptx_paper(seeds: jax.Array, dry_run: bool = False):
         "SPTx - CelebA",
     )
     # TODO(danj): add MACE by Lengthscale plots
+    # TODO(danj): add 2D ConvCNP if it isn't terrible
+    # TODO(danj): Manua Loa CO2 extrapolation
 
 
 def lore_paper(seeds: jax.Array, dry_run: bool = False):
@@ -102,7 +104,7 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
     gp_kernels_1d = ["rbf", "periodic", "matern_3_2"]
     models = ["sptx_full"]
     overrides = []
-    for num_blks, num_reps in [(6, 1), (3, 2), (2, 3), (1, 6)]:
+    for num_blks, num_reps in [(6, 1), (3, 2), (3, 1), (2, 3), (2, 1), (1, 6), (1, 1)]:
         blk_str = f"model.kwargs.dec.kwargs.num_blks={num_blks}"
         rep_str = f"model.kwargs.dec.kwargs.num_reps={num_reps}"
         override = [blk_str, rep_str]

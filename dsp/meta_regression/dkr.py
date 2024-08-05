@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Optional
 
 import flax.linen as nn
@@ -18,11 +19,15 @@ class DKR(nn.Module):
     Args:
         num_layers: Number of attention layers.
         num_repeats: Number of times to repeat each attention layer.
-        embed_s: An embedding module for locations.
-        embed_s_f: A module that embeds positions and function values.
+        embed_s: A module that embeds the index set prior to embedding with
+            function values.
+        embed_f: A module that embeds function values prior to embedding with
+            the index set.
+        embed_s_f: A module that jointly embeds the (embedded) index set and
+            function values.
         attn: An attention module.
         head: A prediction head for decoded output.
-        add_norm: An `AddNorm` module applied between layers.
+        min_std: Minimum pointwise standard deviation.
 
     Returns:
         An instance of the `DKR` model.
@@ -30,11 +35,12 @@ class DKR(nn.Module):
 
     num_layers: int = 3
     num_repeats: int = 2
-    embed_s: nn.Module = MLP([64, 64])
-    embed_s_f: nn.Module = MLP([64])
+    embed_s: Callable = lambda x: x
+    embed_f: Callable = lambda x: x
+    embed_s_f: nn.Module = MLP([256, 128, 64])
     attn: nn.Module = MultiheadAttention()
-    head: nn.Module = MLP([64] * 2 + [2])
-    add_norm: nn.Module = AddNorm(0.0)
+    head: nn.Module = MLP([128, 2])
+    min_std: float = 0.0
 
     @nn.compact
     def __call__(
@@ -70,19 +76,22 @@ class DKR(nn.Module):
         Returns:
             $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
-        ks = self.embed_s(s_ctx, training)
-        qvs = self.embed_s(s_test, training)
-        kvs = self.embed_s_f(jnp.concatenate([ks, f_ctx], -1), training)
+        add_norm = AddNorm(0.0)
+        stack = lambda *args: jnp.concatenate(args, axis=-1)
+        f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
+        qvs = stack(self.embed_s(s_ctx), self.embed_f(f_ctx))
+        kvs = stack(self.embed_s(s_test), self.embed_f(f_test))
         for i in range(self.num_layers):
             attn = self.attn.copy()
             _qvs, _kvs = qvs, kvs
             for _ in range(self.num_repeats):
                 qvs, _ = attn(qvs, kvs, kvs, valid_lens_ctx, training)
                 kvs, _ = attn(kvs, kvs, kvs, valid_lens_ctx, training)
-            if i + 1 != self.num_layers:  # add_norm all but last layer
-                qvs = self.add_norm(_qvs, qvs)
-                kvs = self.add_norm(_kvs, kvs)
+            if i + 1 != self.num_layers:  # only add_norm between layers
+                qvs = add_norm(_qvs, qvs)
+                kvs = add_norm(_kvs, kvs)
         f_dist = self.head(qvs, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
         f_std = jnp.exp(f_log_var / 2)
+        f_std = self.min_std + (1 - self.min_std) * f_std
         return f_mu, f_std

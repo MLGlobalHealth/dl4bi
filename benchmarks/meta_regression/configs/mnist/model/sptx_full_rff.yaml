@@ -14,7 +14,7 @@ kwargs:
     cls: KRStack
     kwargs:
       num_blks: 3
-      num_reps: 2
+      num_reps: 3
       resid_blk: True
       blk:
         cls: KRBlock
