@@ -33,7 +33,7 @@ class DKR(nn.Module):
         An instance of the `DKR` model.
     """
 
-    num_layers: int = 4
+    num_layers: int = 3
     num_repeats: int = 2
     embed_s: Callable = lambda x: x
     embed_f: Callable = lambda x: x
@@ -85,14 +85,12 @@ class DKR(nn.Module):
         kvs = self.embed_s_f(s_f_ctx)
         for i in range(self.num_layers):
             attn = self.attn.copy()
-            ffn = MLP([128, 64])
             _qvs, _kvs = qvs, kvs
             for _ in range(self.num_repeats):
                 qvs, _ = attn(qvs, kvs, kvs, valid_lens_ctx, training)
                 kvs, _ = attn(kvs, kvs, kvs, valid_lens_ctx, training)
                 qvs = add_norm(_qvs, qvs)
                 kvs = add_norm(_kvs, kvs)
-                qvs, kvs = add_norm(qvs, ffn(qvs)), add_norm(kvs, ffn(kvs))
         f_dist = self.head(qvs, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
         f_std = jnp.exp(f_log_var / 2)
