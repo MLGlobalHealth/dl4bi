@@ -79,8 +79,10 @@ class DKR(nn.Module):
         add_norm = AddNorm(0.0)
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
-        qvs = stack(self.embed_s(s_ctx), self.embed_f(f_ctx))
-        kvs = stack(self.embed_s(s_test), self.embed_f(f_test))
+        s_f_ctx = stack(self.embed_s(s_ctx), self.embed_f(f_ctx))
+        s_f_test = stack(self.embed_s(s_test), self.embed_f(f_test))
+        qvs = self.embed_s_f(s_f_test)
+        kvs = self.embed_s_f(s_f_ctx)
         for i in range(self.num_layers):
             attn = self.attn.copy()
             _qvs, _kvs = qvs, kvs
