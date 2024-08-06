@@ -16,6 +16,7 @@ from sps.utils import build_grid
 from dsp.meta_regression.train_utils import (
     Callback,
     cfg_to_run_name,
+    cosine_annealing_lr,
     evaluate,
     instantiate,
     log_img_plots,
@@ -36,14 +37,22 @@ def main(cfg: DictConfig):
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
         name=cfg.get("name", run_name),
-        project="SPTx - Population Genetics",
+        project=cfg.project,
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader = build_dataloader(cfg.batch_size)
     valid_dataloader = build_dataloader(cfg.batch_size)
-    optimizer = optax.yogi(cfg.max_lr)
+    lr_schedule = cosine_annealing_lr(
+        cfg.train_num_steps,
+        cfg.lr_peak,
+        cfg.lr_pct_warmup,
+    )
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(cfg.clip_max_norm),
+        optax.yogi(lr_schedule),
+    )
     model = instantiate(cfg.model)  # TODO(danj): adapt for continue training
     img_cbk = Callback(partial(log_img_plots, shape=(32, 32, 1)), cfg.plot_interval)
     save_cbk = Callback(
