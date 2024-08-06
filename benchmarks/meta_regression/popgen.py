@@ -84,7 +84,9 @@ def build_dataloader(
     num_test_max: int = 1024,
 ):
     B, L = batch_size, 32 * 32
-    train_ds = np.load("cache/popgen/f_test_n1000_mu_1e-5_m_5e-3.npy", mmap_mode="r")
+    # load & convert from [0, 1] -> [-1, 1]
+    path = "cache/popgen/f_test_n1000_mu_1e-5_m_5e-3.npy"
+    train_ds = 2 * (np.load(path, mmap_mode="r") - 0.5)
     s_test = build_grid([dict(start=-2.0, stop=2.0, num=32)] * 2).reshape(L, 2)
     s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
     valid_lens_test = jnp.repeat(num_test_max, B)
