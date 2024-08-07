@@ -22,8 +22,7 @@ class TNPND(nn.Module):
         proj_f_std: A module for projecting embeddings into a smaller
             vector space for use in computing a lower triangular covariance
             matrix.
-        bound_std: Bound the diagonal of the lower triangular covariance
-            matrix using tanh.
+        min_std: Used to bound the diagonal of the lower triangular covariance.
 
     Returns:
         An instance of the `TNP-ND` model.
@@ -34,7 +33,7 @@ class TNPND(nn.Module):
     dec_f_mu: nn.Module = MLP([128, 1])
     dec_f_std: nn.Module = TransformerEncoder(num_blks=2, d_ffn=128)
     proj_f_std: nn.Module = MLP([128] * 3 + [20])
-    bound_std: bool = False
+    min_std: float = 0.0
 
     @nn.compact
     def __call__(
@@ -82,10 +81,12 @@ class TNPND(nn.Module):
         f_std = self.dec_f_std(s_f_test_enc, valid_lens_test, training)
         f_std = self.proj_f_std(f_std, training).reshape(B, L_test * d_f, -1)
         f_L = jnp.tril(f_std @ f_std.transpose(0, 2, 1))
-        # WARNING: bounding here seems to cause instability when solving the
+        # WARNING: using min_std here to cause instability when solving the
         # system of equations in order to calculate the log pdf of the MVN
-        if self.bound_std:
-            # NOTE: tanh works since diag(f_std @ f_std.T) > 0
+        if self.min_std:
             d = jnp.arange(L_test * d_f)
-            f_L = f_L.at[:, d, d].set(0.05 + 0.95 * nn.tanh(f_L[:, d, d]))
+            f_L = f_L.at[:, d, d].set(
+                # NOTE: tanh works since diag(f_std @ f_std.T) > 0
+                self.min_std + (1 - self.min_std) * nn.tanh(f_L[:, d, d])
+            )
         return f_mu, f_L

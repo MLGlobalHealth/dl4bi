@@ -18,13 +18,12 @@ Example scripts can be found [here](https://github.com/MLGlobalHealth/dsp/tree/m
 
 ## Warnings & Caveats
 - When using high precision models, i.e. transformer-based models, we recommend
-using the `min_std` or `bound_std` arguments because the optimizer can learn to
-"hack" rewards by arbitrarily decreasing standard deviation at observed context
-points (where the standard deviation is theoretically 0) creating arbitrarily
-large negative log likelihood scores, which destabilize training. The only
-exception to this is when using a model with `MultiheadFastAttention` as the
-softmax approximation provides a measure of regularization which often prevents
-such degeneracy.
+using the `min_std` argument because the optimizer can learn to "hack" rewards
+by arbitrarily decreasing standard deviation at observed context points (where
+the standard deviation is theoretically 0) creating arbitrarily large negative
+log likelihood scores, which destabilizes training. The only exception to this
+is when using a model with `MultiheadFastAttention` as the softmax approximation
+provides a measure of regularization which often prevents such degeneracy.
 
 ## Development Setup
 - Install Python 3.12 with `pyenv`:
