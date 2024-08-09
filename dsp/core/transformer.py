@@ -248,8 +248,8 @@ class KRStack(nn.Module):
         An instance of a `KRStack`.
     """
 
-    num_blks: int = 4
-    num_reps: int = 2
+    num_blks: int = 6
+    num_reps: int = 1
     resid_blk: bool = False
     resid_rep: bool = False
     blk: nn.Module = KRBlock()
