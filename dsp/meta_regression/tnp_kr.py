@@ -28,7 +28,7 @@ class TNPKR(nn.Module):
 
     embed_s: Callable = lambda x: x
     embed_f: Callable = lambda x: x
-    embed_s_f: nn.Module = MLP([64] * 4)
+    embed_s_f: nn.Module = MLP([256, 64])
     dec: nn.Module = KRStack()
     head: nn.Module = MLP([128, 2])
     min_std: float = 0.0
