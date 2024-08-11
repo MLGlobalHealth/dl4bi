@@ -1,22 +1,21 @@
 cls: SPTx
 kwargs:
+  min_std: 0.05
   embed_s:
-    cls: ResidualEmbedding
+    cls: GaussianFourierEmbedding
     kwargs:
-      embed:
-        cls: GaussianFourierEmbedding
-        kwargs:
-          embed_dim: 64
-          var: 4.0
+      embed_dim: 256
+      var: 4.0
   embed_s_f:
     cls: MLP
     kwargs:
-      dims: [64, 64, 64]
+      dims: [64]
   dec:
     cls: KRStack
     kwargs:
-      num_blks: 4
-      num_reps: 2
+      num_blks: 6
+      num_reps: 1
+      resid_blk: True
       blk:
         cls: KRBlock
         kwargs:

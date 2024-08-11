@@ -76,7 +76,7 @@ def parse_args(argv):
     parser.add_argument(
         "-k",
         "--ckpt",
-        default="results/2D_GP/rbf/sptx_fast-seed-42.pkl",
+        default="results/gp/2d/rbf/42/TNPKR.pkl",
         help="Path to model checkpoint.",
     )
     return parser.parse_args(argv[1:])

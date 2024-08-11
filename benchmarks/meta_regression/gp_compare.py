@@ -268,13 +268,13 @@ def parse_args(argv):
     diff_p.add_argument(
         "model_1",
         type=str,
-        default="tnpd",
+        default="tnp_d",
         help="Model 1 for comparison.",
     )
     diff_p.add_argument(
         "model_2",
         type=str,
-        default="sptx_fast",
+        default="tnp_kr_fast",
         help="Model 2 for comparison.",
     )
     diff_p.add_argument(

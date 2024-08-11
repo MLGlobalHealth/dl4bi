@@ -4,17 +4,18 @@ kwargs:
   embed_s_f:
     cls: MLP
     kwargs:
-      dims: [64, 64, 64, 64]
+      dims: [256, 64]
   dec:
     cls: KRStack
     kwargs:
-      num_blks: 4
-      num_reps: 2
+      num_blks: 6
+      num_reps: 1
+      resid_blk: True
       blk:
         cls: KRBlock
         kwargs:
           attn:
-            cls: MultiheadFastAttention
+            cls: MultiheadAttention
   head:
     cls: MLP
     kwargs:

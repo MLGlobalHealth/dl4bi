@@ -1,6 +1,5 @@
 cls: SPTx
 kwargs:
-  min_std: 0.05
   embed_s:
     cls: GaussianFourierEmbedding
     kwargs:
@@ -9,19 +8,19 @@ kwargs:
   embed_s_f:
     cls: MLP
     kwargs:
-      dims: [128, 64, 64]
+      dims: [64]
   dec:
     cls: KRStack
     kwargs:
-      num_blks: 3
-      num_reps: 3
-      resid_blk: True
+      num_blks: 6
+      num_reps: 1
       blk:
         cls: KRBlock
         kwargs:
           attn:
-            cls: MultiheadFastAttention
+            cls: MultiheadAttention
   head:
     cls: MLP
     kwargs:
       dims: [128, 2]
+      act_fn: silu

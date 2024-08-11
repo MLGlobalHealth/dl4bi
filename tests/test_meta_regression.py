@@ -15,9 +15,9 @@ from dsp.meta_regression import (
     NP,
     TNPD,
     TNPDS,
+    TNPKR,
     TNPND,
     ConvCNP,
-    SPTx,
 )
 from dsp.meta_regression import (
     train_utils as tu,
@@ -35,7 +35,7 @@ def test_models():
     s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, S, D_s=1]
     valid_lens = jnp.array([2, 4, 9, 3])
     f = random.normal(rng_data, s.shape)
-    for np in [ANP, BNP, BANP, CANP, CNP, DKR, NP, TNPD, TNPDS, TNPND, ConvCNP, SPTx]:
+    for np in [NP, CNP, BNP, ANP, CANP, BANP, DKR, TNPD, TNPDS, TNPND, TNPKR, ConvCNP]:
         m = np()
         (f_mu, f_std, *_), params = m.init_with_output(
             {"params": rng_params, "dropout": rng_dropout, "extra": rng_extra},
@@ -50,7 +50,7 @@ def test_models():
         assert f_mu.shape == (B * K, L, 1)
 
 
-def test_sptx_scale():
+def test_tnp_kr_scale():
     B, D_f, L_init, L_ctx, L_test = 1, 1, 3, 1000000, 100000
     rng = random.key(42)
     rng_ctx, rng_init, rng_model = random.split(rng, 3)
@@ -59,7 +59,7 @@ def test_sptx_scale():
     s_test = jnp.linspace(0, 1.0, L_test)[None, :, None]  # [1, L_test, 1]
     f_init = random.normal(rng_init, (B, L_init, D_f))
     f_ctx = random.normal(rng_ctx, (B, L_ctx, D_f))
-    m = SPTx()
+    m = TNPKR()
     params = m.init(rng_init, s_init, f_init, s_init)
     jit_m = jit(lambda *args: m.apply(params, *args))
     jit_m(s_init, f_init, s_init)  # dummy run to compile
@@ -82,7 +82,7 @@ def test_context_data_leaks():
     # set second half to 0s (different from using half the array because of attn)
     s2 = s.at[:, N:, :].set(jnp.zeros((B, L - N, 1)))
     f2 = f.at[:, N:, :].set(jnp.zeros((B, L - N, 1)))
-    for np in [ANP, BNP, BANP, CANP, CNP, DKR, NP, TNPD, TNPDS, TNPND, ConvCNP, SPTx]:
+    for np in [NP, CNP, BNP, ANP, CANP, BANP, DKR, TNPD, TNPDS, TNPND, TNPKR, ConvCNP]:
         print(np)
         m = np()
         (f_mu, f_std, *_), params = m.init_with_output(
@@ -118,7 +118,7 @@ def test_train_step_loss():
     f = 10 * random.normal(rng_data, s.shape)
     batch_1 = (s, f, valid_lens_ctx, s, f, valid_lens_test_1)
     batch_2 = (s, f, valid_lens_ctx, s, f, valid_lens_test_2)
-    for np in [ANP, BNP, BANP, CANP, CNP, DKR, NP, TNPD, TNPDS, TNPND, ConvCNP, SPTx]:
+    for np in [NP, CNP, BNP, ANP, CANP, BANP, DKR, TNPD, TNPDS, TNPND, TNPKR, ConvCNP]:
         print(np)
         model = np()
         train_step = tu.vanilla_train_step

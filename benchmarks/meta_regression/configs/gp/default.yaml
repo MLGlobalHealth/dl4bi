@@ -1,7 +1,7 @@
 defaults:
   - _self_ # use default global values below
   - data: 1d
-  - model: sptx_fast
+  - model: tnp_kr_fast
   - kernel: rbf
 seed: 42
 wandb: True

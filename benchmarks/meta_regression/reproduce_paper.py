@@ -19,8 +19,8 @@ from jax import random
 from mnist import main as mnist_main
 
 
-def sptx_paper(seeds: jax.Array, dry_run: bool = False):
-    """Reproduces the SPTx: Stochastic Process Transformer."""
+def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
+    """Reproduces the Transformer Neural Process - Kernel Regresssion (TNP-KR) paper."""
     overrides = []
     if dry_run:
         seeds = seeds[:2]  # no need for more than 2 runs each in dry run
@@ -34,11 +34,11 @@ def sptx_paper(seeds: jax.Array, dry_run: bool = False):
     gp_kernels_1d = ["periodic", "rbf", "matern_3_2"]
     gp_kernels_2d = ["rbf"]
     models = [
-        "tnpd",
-        "sptx_full_rff",
-        "sptx_fast_rff",
-        "sptx_full",
-        "sptx_fast",
+        "tnp_d",
+        "tnp_kr_full_rff",
+        "tnp_kr_fast_rff",
+        "tnp_kr_full",
+        "tnp_kr_fast",
         "np",
         "bnp",
         "cnp",
@@ -56,7 +56,7 @@ def sptx_paper(seeds: jax.Array, dry_run: bool = False):
         models,
         gp_main,
         overrides,
-        "SPTx - Gaussian Processes",
+        "TNP-KR - Gaussian Processes",
     )
     gp_benchmark(
         seeds,
@@ -65,7 +65,7 @@ def sptx_paper(seeds: jax.Array, dry_run: bool = False):
         models,
         bayes_opt_main,
         overrides,
-        "SPTx - Bayesian Optimization",
+        "TNP-KR - Bayesian Optimization",
     )
     gp_benchmark(
         seeds,
@@ -74,7 +74,7 @@ def sptx_paper(seeds: jax.Array, dry_run: bool = False):
         models_2d,
         gp_main,
         overrides,
-        "SPTx - Gaussian Processes",
+        "TNP-KR - Gaussian Processes",
     )
     img_benchmark(
         seeds,
@@ -82,7 +82,7 @@ def sptx_paper(seeds: jax.Array, dry_run: bool = False):
         models_2d,
         mnist_main,
         overrides,
-        "SPTx - MNIST",
+        "TNP-KR - MNIST",
     )
     img_benchmark(
         seeds,
@@ -90,7 +90,7 @@ def sptx_paper(seeds: jax.Array, dry_run: bool = False):
         models_2d,
         celeba_main,
         overrides,
-        "SPTx - CelebA",
+        "TNP-KR - CelebA",
     )
     # TODO(danj): add MACE by Lengthscale plots
     # TODO(danj): add 2D ConvCNP if it isn't terrible
@@ -102,7 +102,7 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
     if dry_run:
         seeds = seeds[:2]  # no need for more than 2 runs each in dry run
     gp_kernels_1d = ["rbf", "periodic", "matern_3_2"]
-    models = ["sptx_full"]
+    models = ["tnp_kr_full"]
     overrides = []
     for num_blks, num_reps in [(6, 1), (3, 2), (3, 1), (2, 3), (2, 1), (1, 6), (1, 1)]:
         blk_str = f"model.kwargs.dec.kwargs.num_blks={num_blks}"
@@ -147,8 +147,8 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
 def gp_benchmark(
     seeds: jax.Array,
     dim: int = 1,
-    kernels: list[str] = ["rbf", "periodic", "sptx"],
-    models: list[str] = ["sptx_fast"],
+    kernels: list[str] = ["rbf", "periodic", "tnp_kr"],
+    models: list[str] = ["tnp_kr_fast"],
     main_fn: Callable = gp_main,
     overrides: list[list[str]] = [[]],
     project: str = "",
@@ -176,7 +176,7 @@ def gp_benchmark(
 def img_benchmark(
     seeds: jax.Array,
     cfg_dir: str = "configs/mnist",
-    models: list[str] = ["sptx_fast"],
+    models: list[str] = ["tnp_kr_fast"],
     main_fn: Callable = mnist_main,
     overrides: list[list[str]] = [[]],
     project: str = "",
@@ -205,8 +205,8 @@ def parse_args(argv):
     )
     parser.add_argument(
         "paper",
-        choices=["sptx", "lore"],
-        default="sptx",
+        choices=["tnp_kr", "lore"],
+        default="tnp_kr",
         help="Select which paper to reproduce.",
     )
     parser.add_argument(
@@ -236,8 +236,8 @@ if __name__ == "__main__":
     args = parse_args(sys.argv)
     seeds = random.randint(random.key(args.seed), (args.num_runs,), 0, 100)
     match args.paper:
-        case "sptx":
-            sptx_paper(seeds, args.dry_run)
+        case "tnp_kr":
+            tnp_kr_paper(seeds, args.dry_run)
         case "lore":
             lore_paper(seeds, args.dry_run)
         case _:

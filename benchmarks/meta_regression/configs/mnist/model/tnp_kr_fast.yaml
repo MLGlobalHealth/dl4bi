@@ -1,14 +1,15 @@
 cls: SPTx
 kwargs:
+  min_std: 0.05
   embed_s_f:
     cls: MLP
     kwargs:
-      dims: [256, 128, 64, 64]
+      dims: [256, 64]
   dec:
     cls: KRStack
     kwargs:
-      num_blks: 3
-      num_reps: 2
+      num_blks: 6
+      num_reps: 1
       resid_blk: True
       blk:
         cls: KRBlock
@@ -18,4 +19,4 @@ kwargs:
   head:
     cls: MLP
     kwargs:
-      dims: [128, 6]
+      dims: [128, 2]

@@ -7,7 +7,7 @@ from .cnp import CNP
 from .convcnp import ConvCNP
 from .dkr import DKR
 from .np import NP
-from .sptx import SPTx
-from .tnpd import TNPD
-from .tnpds import TNPDS
-from .tnpnd import TNPND
+from .tnp_d import TNPD
+from .tnp_ds import TNPDS
+from .tnp_kr import TNPKR
+from .tnp_nd import TNPND

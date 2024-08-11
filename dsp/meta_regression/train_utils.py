@@ -35,10 +35,10 @@ from .cnp import CNP
 from .convcnp import ConvCNP
 from .dkr import DKR
 from .np import NP
-from .sptx import SPTx
-from .tnpd import TNPD
-from .tnpds import TNPDS
-from .tnpnd import TNPND
+from .tnp_d import TNPD
+from .tnp_ds import TNPDS
+from .tnp_kr import TNPKR
+from .tnp_nd import TNPND
 
 
 @flax.struct.dataclass
@@ -183,7 +183,7 @@ def evaluate(
 
 def cfg_to_run_name(cfg: DictConfig):
     name = cfg.model.cls
-    if name == "SPTx":
+    if name == "TNP-KR":
         attn_cls = OmegaConf.select(cfg, "model.kwargs.dec.kwargs.blk.kwargs.attn.cls")
         name += " Fast" if attn_cls and "Fast" in attn_cls else " Full"
         embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.cls")

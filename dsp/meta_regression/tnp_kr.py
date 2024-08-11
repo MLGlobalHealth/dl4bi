@@ -8,8 +8,8 @@ import jax.numpy as jnp
 from ..core import MLP, KRStack
 
 
-class SPTx(nn.Module):
-    """A Stochastic Process Transformer (SPTx).
+class TNPKR(nn.Module):
+    """Transformer Neural Process - Kernel Regression (TNP-KR).
 
     Args:
         embed_s: A module that embeds the index set prior to embedding with
@@ -23,7 +23,7 @@ class SPTx(nn.Module):
         min_std: Minimum pointwise standard deviation.
 
     Returns:
-        An instance of the `SPTx` model.
+        An instance of the `TNP-KR` model.
     """
 
     embed_s: Callable = lambda x: x
