@@ -50,26 +50,6 @@ class MultiplicativeScorer(nn.Module):
         return DotScorer()(qs, ks)
 
 
-# TODO(danj): implement https://github.com/YannDubs/Neural-Process-Family/blob/master/npf/architectures/attention.py
-class CosineSimilarityScorer(nn.Module):
-    """Performs cosine similarity attention scoring."""
-
-    @nn.compact
-    def __call__(self, qs: jax.Array, ks: jax.Array):
-        pass
-
-
-# TODO(danj): implement https://github.com/YannDubs/Neural-Process-Family/blob/master/npf/architectures/attention.py
-class DistanceScorer(nn.Module):
-    """Performs `p_norm` distance-based attention scoring."""
-
-    p_norm: int = 1
-
-    @nn.compact
-    def __call__(self, qs: jax.Array, ks: jax.Array):
-        pass
-
-
 class Attention(nn.Module):
     r"""Performs (masked) query-key-value attention with dropout.
 
