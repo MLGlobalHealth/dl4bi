@@ -18,8 +18,8 @@ kwargs:
         cls: KRBlock
         kwargs:
           attn:
-            cls: MultiheadFastAttention
+            cls: MultiheadAttention
   head:
     cls: MLP
     kwargs:
-      dims: [128, 6]
+      dims: [128, 2]

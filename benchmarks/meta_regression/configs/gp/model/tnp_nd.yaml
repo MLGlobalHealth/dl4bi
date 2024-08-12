@@ -1,6 +1,5 @@
 cls: TNPND
 kwargs:
-  # min_std: 0.05 # WARNING: unstable
   embed_s_f:
     cls: MLP
     kwargs:

@@ -183,7 +183,7 @@ def evaluate(
 
 def cfg_to_run_name(cfg: DictConfig):
     name = cfg.model.cls
-    if name == "TNP-KR":
+    if name == "TNPKR":
         attn_cls = OmegaConf.select(cfg, "model.kwargs.dec.kwargs.blk.kwargs.attn.cls")
         name += " Fast" if attn_cls and "Fast" in attn_cls else " Full"
         embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.cls")

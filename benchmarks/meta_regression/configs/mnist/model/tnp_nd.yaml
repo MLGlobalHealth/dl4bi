@@ -1,0 +1,29 @@
+cls: TNPND
+kwargs:
+  min_std: 0.05
+  embed_s_f:
+    cls: MLP
+    kwargs:
+      dims: [64, 64, 64, 64]
+  enc:
+    cls: TransformerEncoder
+    kwargs:
+      attn:
+        cls: MultiheadAttention
+      num_blks: 6
+      d_ffn: 128
+  dec_f_mu:
+    cls: MLP
+    kwargs:
+      dims: [128, 1]
+  dec_f_std:
+    cls: TransformerEncoder
+    kwargs:
+      attn:
+        cls: MultiheadAttention
+      num_blks: 2
+      d_ffn: 128
+  proj_f_std:
+    cls: MLP
+    kwargs:
+      dims: [128, 128, 128, 20]

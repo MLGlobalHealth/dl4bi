@@ -80,9 +80,9 @@ class TNPND(nn.Module):
         f_mu = self.dec_f_mu(s_f_test_enc, training)
         f_std = self.dec_f_std(s_f_test_enc, valid_lens_test, training)
         f_std = self.proj_f_std(f_std, training).reshape(B, L_test * d_f, -1)
-        f_L = jnp.tril(f_std @ f_std.transpose(0, 2, 1))
-        # WARNING: using min_std here to cause instability when solving the
-        # system of equations in order to calculate the log pdf of the MVN
+        f_L = jnp.tril(jnp.einsum("bid,bjd->bij", f_std, f_std))
+        # WARNING: using min_std can cause instability when solving the system
+        # of equations in order to calculate the log pdf of the MVN
         if self.min_std:
             d = jnp.arange(L_test * d_f)
             f_L = f_L.at[:, d, d].set(

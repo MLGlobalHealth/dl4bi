@@ -23,4 +23,3 @@ kwargs:
     cls: MLP
     kwargs:
       dims: [128, 2]
-      act_fn: silu
