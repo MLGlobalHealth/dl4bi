@@ -106,17 +106,17 @@ class GaussianFourierEmbedding(nn.Module):
     """
 
     embed_dim: int = 256
-    var: float = 10.0
+    std: float = 10.0
 
     @nn.compact
     def __call__(self, s, training: bool = False):
         gen_B = lambda rng: random.normal(rng, (self.embed_dim // 2, s.shape[-1]))
         B = self.variable("projections", "B", lambda: gen_B(self.make_rng("params")))
-        return _pe_gaussian_fourier(B.value, self.var)(s)
+        return _pe_gaussian_fourier(B.value, self.std)(s)
 
 
-def _pe_gaussian_fourier(B: jax.Array, var: float):
-    s_proj = lambda s: (2.0 * jnp.pi * s) @ (var * B).T
+def _pe_gaussian_fourier(B: jax.Array, std: float):
+    s_proj = lambda s: (2.0 * jnp.pi * s) @ (std * B).T
     return jit(
         lambda s: jnp.concatenate([jnp.sin(s_proj(s)), jnp.cos(s_proj(s))], axis=-1)
     )

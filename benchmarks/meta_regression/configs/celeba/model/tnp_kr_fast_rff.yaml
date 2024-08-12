@@ -4,7 +4,7 @@ kwargs:
     cls: GaussianFourierEmbedding
     kwargs:
       embed_dim: 256
-      var: 2.0
+      std: 2.0
   embed_s_f:
     cls: MLP
     kwargs:
