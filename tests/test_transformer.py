@@ -12,7 +12,9 @@ from dsp.core import (
     MultiplicativeScorer,
     NeRFEmbedding,
     TransformerDecoder,
+    TransformerDecoderBlock,
     TransformerEncoder,
+    TransformerEncoderBlock,
 )
 
 
@@ -31,10 +33,12 @@ def test_transformer_encoder():
         s_e, _ = embedder.init_with_output(rng_init, s)
         for scorer in [AdditiveScorer(), MultiplicativeScorer(), DotScorer()]:
             attn = MultiheadAttention(scorer=scorer)
-            f_enc, _ = TransformerEncoder(attn).init_with_output(
+            enc_blk = TransformerEncoderBlock(attn)
+            f_enc, _ = TransformerEncoder(blk=enc_blk).init_with_output(
                 rng_init, s_e, valid_lens
             )
-            f_dec, _ = TransformerDecoder(attn).init_with_output(
+            dec_blk = TransformerDecoderBlock(attn)
+            f_dec, _ = TransformerDecoder(blk=dec_blk).init_with_output(
                 rng_init, s_e, f_enc, valid_lens, valid_lens
             )
             for name, f in [("encoder", f_enc), ("decoder", f_dec)]:
@@ -46,8 +50,12 @@ def test_transformer_encoder():
                 assert not jnp.isnan(f).any(), f"{name.title()} returned nans!"
         # test fast version too
         attn = MultiheadFastAttention()
-        f_enc, _ = TransformerEncoder(attn).init_with_output(rng_init, s_e, valid_lens)
-        f_dec, _ = TransformerDecoder(attn).init_with_output(
+        enc_blk = TransformerEncoderBlock(attn)
+        dec_blk = TransformerDecoderBlock(attn)
+        f_enc, _ = TransformerEncoder(blk=enc_blk).init_with_output(
+            rng_init, s_e, valid_lens
+        )
+        f_dec, _ = TransformerDecoder(blk=dec_blk).init_with_output(
             rng_init, s_e, f_enc, valid_lens, valid_lens
         )
         for name, f in [("encoder", f_enc), ("decoder", f_dec)]:
