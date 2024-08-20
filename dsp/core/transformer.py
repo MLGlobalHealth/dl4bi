@@ -45,7 +45,7 @@ class TransformerEncoderBlock(nn.Module):
         x_1 = self.norm(x)
         x_2, attn = self.attn(x_1, x_1, x_1, valid_lens, training, **kwargs)
         x_3 = x + drop(x_2)
-        x_4 = self.norm(x_3)
+        x_4 = self.norm.copy()(x_3)
         x_5 = self.ffn(x_4)
         return x_3 + drop(x_5), attn
 
@@ -131,7 +131,7 @@ class TransformerDecoderBlock(nn.Module):
             **kwargs,
         )
         x_dec_3 = x_dec + drop(x_dec_2)
-        x_dec_4 = self.norm(x_dec_3)
+        x_dec_4 = self.norm.copy()(x_dec_3)
         x_dec_5, cross_attn = self.attn.copy(name="cross_attn")(
             x_dec_4,
             x_enc,
@@ -224,7 +224,8 @@ class KRBlock(nn.Module):
         qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, valid_lens, training)
         kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, valid_lens, training)
         qvs_3, kvs_3 = qvs + drop(qvs_2), kvs + drop(kvs_2)
-        qvs_4, kvs_4 = self.norm(qvs_3), self.norm(kvs_3)
+        norm_2 = self.norm.copy()
+        qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)
         qvs_5, kvs_5 = self.ffn(qvs_4, training), self.ffn(kvs_4, training)
         return qvs_3 + drop(qvs_5), kvs_3 + drop(kvs_5)
 
@@ -253,9 +254,9 @@ class KRStack(nn.Module):
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
-        layer_norm = nn.LayerNorm()
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
                 qvs, kvs = blk(qvs, kvs, valid_lens, training)
-        return layer_norm(qvs), layer_norm(kvs)
+        norm = nn.LayerNorm()
+        return norm(qvs), norm(kvs)
