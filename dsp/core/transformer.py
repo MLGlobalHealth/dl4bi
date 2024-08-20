@@ -260,8 +260,9 @@ class KRStack(nn.Module):
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
+        layer_norm = nn.LayerNorm()
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
                 qvs, kvs = blk(qvs, kvs, valid_lens, training)
-        return qvs, kvs
+        return layer_norm(qvs), layer_norm(kvs)
