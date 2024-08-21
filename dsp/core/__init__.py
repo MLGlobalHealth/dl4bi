@@ -50,6 +50,8 @@ from .transformer import (
 )
 from .utils import (
     bootstrap,
+    causal_mask,
+    mask,
     mask_from_valid_lens,
     pad_concat,
 )

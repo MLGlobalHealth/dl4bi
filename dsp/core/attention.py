@@ -3,9 +3,9 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import jit
 
 from .mlp import MLP
+from .utils import causal_mask, mask
 
 
 class DotScorer(nn.Module):
@@ -56,6 +56,8 @@ class Attention(nn.Module):
     Args:
         scorer: A module used to provide similarity scores between queries and keys.
         p_dropout: A dropout rate.
+        is_causal: A boolean indicating whether attention is causal. If true,
+            `valid_lens` is ignored and a causal mask is applied.
 
     Returns:
         An `Attention` module.
@@ -72,6 +74,7 @@ class Attention(nn.Module):
 
     scorer: nn.Module = DotScorer()
     p_dropout: float = 0.0
+    is_causal: bool = False
 
     @nn.compact
     def __call__(
@@ -96,10 +99,14 @@ class Attention(nn.Module):
         Returns:
             `ctx` and `attn`, the updated values and attention weights.
         """
+        drop = nn.Dropout(self.p_dropout, deterministic=not training)
         scores = self.scorer(qs, ks)
-        attn = masked_softmax(scores, valid_lens)
-        attn = nn.Dropout(self.p_dropout, deterministic=not training)(attn)
-        ctx = attn @ vs
+        if self.is_causal:
+            scores = causal_mask(scores)
+        elif valid_lens is not None:
+            scores = mask(scores, valid_lens)
+        attn = nn.softmax(scores, axis=-1)
+        ctx = drop(attn) @ vs
         return ctx, attn
 
 
@@ -109,6 +116,8 @@ class MultiheadAttention(nn.Module):
     Args:
         num_heads: Number of heads for attention module.
         p_dropout: A dropout rate for attention.
+        is_causal: A boolean indicating whether attention is causal. If true,
+            `valid_lens` is ignored and a causal mask is applied.
 
     Returns:
         A `MultiheadAttention` module.
@@ -130,6 +139,7 @@ class MultiheadAttention(nn.Module):
     scorer: nn.Module = DotScorer()
     num_heads: int = 4
     p_dropout: float = 0.0
+    is_causal: bool = False
 
     @nn.compact
     def __call__(
@@ -164,38 +174,9 @@ class MultiheadAttention(nn.Module):
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
         # [B * H, Q, D_V_H], [B * H, Q, K]
-        ctx, attn = Attention(self.scorer, self.p_dropout)(
+        ctx, attn = Attention(self.scorer, self.p_dropout, self.is_causal)(
             qs, ks, vs, valid_lens, training
         )
         # [B * H, Q, D_V_H] -> [B, Q, D_V]
         ctx = ctx.reshape(B, H, Q, D_V_H).transpose(0, 2, 1, 3).reshape(B, Q, D_V)
         return self.proj_out(ctx), attn.reshape(B, H, Q, K)
-
-
-@jit
-def masked_softmax(scores: jax.Array, valid_lens: Optional[jax.Array] = None):
-    r"""Performs softmax on a 3D logits array using an optional 1 or 2 dim `valid_lens` from [d2l](https://d2l.ai/ chapter_attention-mechanisms-and-transformers/attention-scoring-functions.html).
-
-    Args:
-        scores: Scores of dimension $\mathbb{R}^{B\times Q\times K}$
-        valid_lens: Mask consisting of valid length per sequence of dimension
-            $\mathbb{R}^B$ or $\mathbb{R}^{B\times K}$
-
-    Returns:
-       `attn`, the attention weights.
-    """
-    if valid_lens is None:
-        return nn.softmax(scores, axis=-1)
-
-    def _sequence_mask(logits: jax.Array, valid_len: jax.Array):
-        max_len = logits.shape[1]
-        mask = jnp.arange(max_len)[None, :] < valid_len[:, None]
-        return jnp.where(mask, logits, -jnp.inf)
-
-    B, Q, K = scores.shape
-    if valid_lens.ndim == 1:
-        valid_lens = jnp.repeat(valid_lens, Q)
-    else:
-        valid_lens = valid_lens.reshape(-1)
-    logits = _sequence_mask(scores.reshape(-1, K), valid_lens)
-    return nn.softmax(logits.reshape((B, Q, K)), axis=-1)

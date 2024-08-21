@@ -7,7 +7,41 @@ from jax import jit, random, vmap
 from jax.tree_util import Partial
 
 
+@jit
+def mask(x: jax.Array, valid_lens: jax.Array, fill=-jnp.inf):
+    r"""Mask `x` with `fill` using `valid_lens`.
+
+    Args:
+        x: Values of dimension $\mathbb{R}^{B\times Q\times K}$
+        valid_lens: Mask consisting of valid length per sequence
+            $\mathbb{R}^{B}$ or $\mathbb{R}^{B\times Q}.
+
+    Returns:
+       `x` with filled values according to mask.
+    """
+    B, Q, K = x.shape
+    if valid_lens.ndim == 1:
+        valid_lens = jnp.repeat(valid_lens, Q)
+    x = x.reshape(B * Q, K)
+    m = jnp.arange(K) < valid_lens.reshape(-1, 1)
+    return jnp.where(m, x, fill).reshape(B, Q, K)
+
+
+@jit
+def causal_mask(x: jax.Array):
+    """A simple causal mask."""
+    B, L, L = x.shape
+    m = jnp.tri(L)
+    return jnp.where(m, x, -jnp.inf)
+
+
 def mask_from_valid_lens(max_len: int, valid_lens: jax.Array):
+    """Return a boolean mask using `valid_lens`.
+
+    .. note::
+        Adds a final dimension of 1, which is often used to broadcast across the
+        final tensor dimension.
+    """
     return (jnp.arange(max_len) < valid_lens[..., None])[..., None]
 
 
