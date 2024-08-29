@@ -27,7 +27,7 @@ from dsp.core import *  # noqa: F403
 from dsp.vae import DeepChol, PriorCVAE, train_utils
 
 
-@hydra.main("configs/1D_GP", version_base=None)
+@hydra.main("configs/gp", version_base=None)
 def main(cfg: DictConfig):
     d = HydraConfig.get().runtime.choices
     kernel_name, model_name, seed = d["kernel"], d["model"], cfg.seed
