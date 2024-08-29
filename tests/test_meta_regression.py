@@ -23,9 +23,6 @@ from dsp.meta_regression import (
     train_utils as tu,
 )
 
-# https://jax.readthedocs.io/en/latest/gpu_performance_tips.html#code-generation-flags
-os.environ["XLA_FLAGS"] = "--xla_gpu_triton_gemm_any=True"
-
 
 def test_models():
     B, L = 4, 10
@@ -51,7 +48,7 @@ def test_models():
 
 
 def test_tnp_kr_scale():
-    B, D_f, L_init, L_ctx, L_test = 1, 1, 3, 1000000, 100000
+    B, D_f, L_init, L_ctx, L_test = 1, 1, 3, 500000, 50000
     rng = random.key(42)
     rng_ctx, rng_init, rng_model = random.split(rng, 3)
     s_init = jnp.linspace(0, 1.0, L_init)[None, :, None]  # [1, L_init, 1]

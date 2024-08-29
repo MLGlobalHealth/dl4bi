@@ -3,12 +3,12 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import jit, random, vmap
+from jax import jit, lax, random, vmap
 from jax.tree_util import Partial
 
 
 @jit
-def mask(x: jax.Array, valid_lens: jax.Array, fill=-jnp.inf):
+def mask_attn(x: jax.Array, valid_lens: jax.Array, fill=-jnp.inf):
     r"""Mask `x` with `fill` using `valid_lens`.
 
     Args:
@@ -86,3 +86,16 @@ def bootstrap(
     ord_idx = jnp.repeat(jnp.arange(L)[None, :], B * K, axis=0)
     boot_idx = mask * rnd_idx + ~mask * ord_idx
     return vmap(lambda row, idx: row[idx], (0, 0))(x, boot_idx), valid_lens
+
+
+def breakpoint_if_nonfinite(x):
+    """Create a breakpoint when non-finite values in `x`."""
+    is_finite = jnp.isfinite(x).all()
+
+    def true_fn(x):
+        pass
+
+    def false_fn(x):
+        jax.debug.breakpoint()
+
+    lax.cond(is_finite, true_fn, false_fn, x)

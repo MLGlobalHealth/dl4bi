@@ -4,11 +4,12 @@ from jax import random
 from dsp.core import (
     MLP,
     AdditiveScorer,
+    Attention,
     DotScorer,
+    FastAttention,
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
     MultiheadAttention,
-    MultiheadFastAttention,
     MultiplicativeScorer,
     NeRFEmbedding,
     TransformerDecoder,
@@ -18,7 +19,7 @@ from dsp.core import (
 )
 
 
-def test_transformer_encoder():
+def test_transformer():
     batch_size, seq_len, embed_dim, feature_dim = 4, 7, 64, 2
     key = random.key(42)
     rng_data, rng_init = random.split(key)
@@ -32,7 +33,7 @@ def test_transformer_encoder():
     ]:
         s_e, _ = embedder.init_with_output(rng_init, s)
         for scorer in [AdditiveScorer(), MultiplicativeScorer(), DotScorer()]:
-            attn = MultiheadAttention(scorer=scorer)
+            attn = MultiheadAttention(Attention(scorer))
             enc_blk = TransformerEncoderBlock(attn)
             f_enc, _ = TransformerEncoder(blk=enc_blk).init_with_output(
                 rng_init, s_e, valid_lens
@@ -49,9 +50,9 @@ def test_transformer_encoder():
                 ), f"Incorrect {name} output shape!"
                 assert not jnp.isnan(f).any(), f"{name.title()} returned nans!"
         # test fast version too
-        attn = MultiheadFastAttention()
-        enc_blk = TransformerEncoderBlock(attn)
-        dec_blk = TransformerDecoderBlock(attn)
+        mh_attn = MultiheadAttention(attn=FastAttention())
+        enc_blk = TransformerEncoderBlock(mh_attn)
+        dec_blk = TransformerDecoderBlock(mh_attn)
         f_enc, _ = TransformerEncoder(blk=enc_blk).init_with_output(
             rng_init, s_e, valid_lens
         )

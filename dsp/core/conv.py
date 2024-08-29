@@ -22,6 +22,7 @@ class ConvDeepSet(nn.Module):
     Args:
         d_out: Dimension of output, i.e. number of output channels.
         use_density: Use a density channel for normalization.
+        dtype: Data type to use for calculations.
 
     Returns:
         An instance of `ConvDeepSet`.
@@ -29,6 +30,7 @@ class ConvDeepSet(nn.Module):
 
     d_out: int = 8
     use_density: bool = True
+    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(
@@ -59,21 +61,27 @@ class ConvDeepSet(nn.Module):
             density, conv = f_test[..., :1], f_test[..., 1:]
             normed_conv = conv / (density + 1e-8)
             f_test = jnp.concatenate([density, normed_conv], axis=-1)
-        return nn.Dense(self.d_out)(f_test)  # [B, L_test, d_out]
+        return nn.Dense(self.d_out, dtype=self.dtype)(f_test)  # [B, L_test, d_out]
 
 
 class SimpleConv(nn.Module):
     """A 4-layer convoultional network with fixed stride and channels.
 
     This implementation is based on the original [here](https://github.com/cambridge-mlg/convcnp/blob/master/convcnp/architectures.py).
+
+    Args:
+        dtype: Data type to use for calculations.
+
+    Returns:
+        An instance of `SimpleConv`.
     """
 
-    num_halving_layers: int = 0
+    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, x: jax.Array):
         d_x = x.shape[-1]
-        Conv = Partial(nn.Conv, kernel_size=5, strides=1)
+        Conv = Partial(nn.Conv, kernel_size=5, strides=1, dtype=self.dtype)
         for n in [16, 32, 16, d_x]:
             x = nn.relu(Conv(n)(x))
         return x
@@ -83,15 +91,35 @@ class UNet(nn.Module):
     """A 12-layer residual network with skip connections using concatenation.
 
     This implementation is based on the original [here](https://github.com/cambridge-mlg/convcnp/blob/master/convcnp/architectures.py).
+
+    Args:
+        num_halving_layers: Number of layers to halve.
+        dtype: Data type to use for calculations.
+
+    Returns:
+        An instance of `Unet`.
     """
 
     num_halving_layers: int = 6
+    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, x):
         d_x = x.shape[-1]
-        Conv = Partial(nn.Conv, kernel_size=5, strides=2, padding=2)
-        ConvT = Partial(nn.ConvTranspose, kernel_size=5, strides=2, padding=2)
+        Conv = Partial(
+            nn.Conv,
+            kernel_size=5,
+            strides=2,
+            padding=2,
+            dtype=self.dtype,
+        )
+        ConvT = Partial(
+            nn.ConvTranspose,
+            kernel_size=5,
+            strides=2,
+            padding=2,
+            dtype=self.dtype,
+        )
         h, hs = x, [x]
         for n in [1, 2, 2, 4, 4, 8]:
             h = nn.relu(Conv(n * d_x)(h))
@@ -104,12 +132,24 @@ class UNet(nn.Module):
 
 
 class ResNetBlock(nn.Module):
-    """A ResNetBlock based on Flax [example](https://github.com/google/flax/blob/main/examples/imagenet/models.py)."""
+    """A ResNetBlock based on Flax [example](https://github.com/google/flax/blob/main/examples/imagenet/models.py).
+
+    Args:
+        num_features: Number of features for convolutions.
+        kernel: Tuple of kernel dimensions.
+        strides: Tuple of stride dimenions.
+        act_fn: Activation function to use.
+        dtype: Data type to use for calculations.
+
+    Returns:
+        An instance of `ResNetBlock`.
+    """
 
     num_features: int
     kernel: tuple = (3, 3)
     strides: tuple = (1, 1)
     act_fn: Callable = nn.relu
+    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(
@@ -119,34 +159,47 @@ class ResNetBlock(nn.Module):
     ):
         r = x  # residual
         d = len(self.strides)  # num spatial dims
-        bn = Partial(
+        Bn = Partial(
             nn.BatchNorm,
             use_running_average=not training,
             axis_name="batch",
+            dtype=self.dtype,
         )
-        conv = Partial(
+        Conv = Partial(
             nn.Conv,
             features=self.num_features,
             strides=self.strides,
             use_bias=False,
+            dtype=self.dtype,
         )
-        x = conv(self.kernel)(x)
-        x = bn()(x)
+        x = Conv(self.kernel)(x)
+        x = Bn()(x)
         x = self.act_fn(x)
-        x = conv(self.kernel)(x)
-        x = bn(scale_init=nn.initializers.zeros_init())(x)
+        x = Conv(self.kernel)(x)
+        x = Bn(scale_init=nn.initializers.zeros_init())(x)
         if r.shape != x.shape:
-            r = conv(kernel_size=(1,) * d, name="conv_proj")(r)
-            r = bn(name="norm_proj")(r)
+            r = Conv(kernel_size=(1,) * d, name="conv_proj")(r)
+            r = Bn(name="norm_proj")(r)
         return self.act_fn(r + x)
 
 
 class ConvCNPBlock(nn.Module):
-    """A depthwise-separable pre-activation ResNetBlock based on Yann Dubois' implementation [here](https://github.com/YannDubs/Neural-Process-Family/blob/master/npf/architectures/cnn.py)."""
+    """A depthwise-separable pre-activation ResNetBlock based on Yann Dubois' implementation [here](https://github.com/YannDubs/Neural-Process-Family/blob/master/npf/architectures/cnn.py).
+
+    Args:
+        num_features: Number of features for convolutions.
+        kernel: Tuple of kernel dimensions.
+        act_fn: Activation function to use.
+        dtype: Data type to use for calculations.
+
+    Returns:
+        An instance of `ConvCNPBlock`.
+    """
 
     num_features: int
     kernel: tuple = (3, 3)
     act_fn: Callable = nn.relu
+    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(
@@ -157,39 +210,53 @@ class ConvCNPBlock(nn.Module):
         r = x
         n = x.shape[-1]
         d = len(self.kernel)  # num spatial dims
-        bn = Partial(
+        Bn = Partial(
             nn.BatchNorm,
             use_running_average=not training,
             axis_name="batch",
+            dtype=self.dtype,
         )
-        depth_conv = Partial(
+        DepthConv = Partial(
             nn.Conv,
             features=n,
             feature_group_count=n,
             kernel_size=self.kernel,
             use_bias=True,
+            dtype=self.dtype,
         )
-        point_conv = Partial(
+        PointConv = Partial(
             nn.Conv,
             kernel_size=(1,) * d,
             use_bias=True,
+            dtype=self.dtype,
         )
-        x = bn()(x)
+        x = Bn()(x)
         x = self.act_fn(x)
-        x = depth_conv()(x)
-        x = point_conv(n)(x)
-        x = bn()(x)
+        x = DepthConv()(x)
+        x = PointConv(n)(x)
+        x = Bn()(x)
         x = self.act_fn(x)
-        x = depth_conv()(x)
-        return point_conv(self.num_features)(x + r)
+        x = DepthConv()(x)
+        return PointConv(self.num_features)(x + r)
 
 
 class ConvCNPNet(nn.Module):
-    """A CNN using ConvCNP blocks based on on Yann Dubois' implementation [here](https://github.com/YannDubs/Neural-Process-Family/blob/master/npf/architectures/cnn.py)."""
+    """A CNN using ConvCNP blocks based on on Yann Dubois' implementation [here](https://github.com/YannDubs/Neural-Process-Family/blob/master/npf/architectures/cnn.py).
+
+    Args:
+        r_out: Dimension of latent dim, r.
+        kernel: A tuple of kernel dimensions.
+        num_blks: Number of `ConvCNPBlock`s to use.
+        dtype: Data type to use for calculations.
+
+    Returns:
+        An instance of `ConvDeepSet`.
+    """
 
     r_dim: int = 128
     kernel: tuple = (3, 3)
     num_blks: int = 5
+    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(
@@ -197,18 +264,32 @@ class ConvCNPNet(nn.Module):
         x: jax.Array,  # [B, ...spatial dims..., C]
         training: bool = False,
     ):
-        layers = [ConvCNPBlock(self.r_dim, self.kernel) for _ in range(self.num_blks)]
-        return nn.Sequential(layers)(x, training)
+        for _ in range(self.num_blks):
+            x = ConvCNPBlock(self.dim, self.kernel, dtype=self.dtype)(x, training)
+        return x
 
 
 class ResNeXtBlock(nn.Module):
-    """ResNeXtBlock based on [d2l](https://d2l.ai/chapter_convolutional-modern/ resnet.html)'s implementation and the Flax [example](https://github.com/google/ flax/blob/main/examples/imagenet/models.py)."""
+    """ResNeXtBlock based on [d2l](https://d2l.ai/chapter_convolutional-modern/ resnet.html)'s implementation and the Flax [example](https://github.com/google/ flax/blob/main/examples/imagenet/models.py).
+
+    Args:
+        num_features: Number of features for convolutions.
+        num_groups: Number of groups to convolute.
+        kernel: Tuple of kernel dimensions.
+        strides: Tuple of stride dimenions.
+        act_fn: Activation function to use.
+        dtype: Data type to use for calculations.
+
+    Returns:
+        An instance of `ResNeXtBlock`.
+    """
 
     num_features: int
     num_groups: int = 16
     kernel: tuple = (3, 3)
     strides: tuple = (1, 1)
     act_fn: Callable = nn.relu
+    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(
@@ -218,42 +299,54 @@ class ResNeXtBlock(nn.Module):
     ):
         r = x  # residual
         d = len(self.kernel)  # num spatial dims
-        bn = Partial(
+        Bn = Partial(
             nn.BatchNorm,
             use_running_average=not training,
             axis_name="batch",
+            dtype=self.dtype,
         )
-        conv = Partial(nn.Conv, use_bias=False)
-        x = conv(self.num_features, (1,) * d)(x)
-        x = bn()(x)
+        Conv = Partial(nn.Conv, use_bias=False, dtype=self.dtype)
+        x = Conv(self.num_features, (1,) * d)(x)
+        x = Bn()(x)
         x = self.act_fn(x)
-        x = conv(
+        x = Conv(
             self.num_features,
             self.kernel,
             self.strides,
             feature_group_count=self.num_features // self.num_groups,
         )(x)
-        x = bn()(x)
+        x = Bn()(x)
         x = self.act_fn(x)
-        x = conv(self.num_features * 4, (1,) * d)(x)
-        x = bn(scale_init=nn.initializers.zeros_init())(x)
+        x = Conv(self.num_features * 4, (1,) * d)(x)
+        x = Bn(scale_init=nn.initializers.zeros_init())(x)
         if r.shape != x.shape:
-            r = conv(
+            r = Conv(
                 self.num_features * 4,
                 (1,) * d,
                 self.strides,
                 name="conv_proj",
             )(r)
-            r = bn(name="norm_proj")(r)
+            r = Bn(name="norm_proj")(r)
         return self.act_fn(r + x)
 
 
 class ConvBlock(nn.Module):
-    """A ConvBlock based on [d2l's implementation](https://d2l.ai/chapter_convolutional-modern/densenet.html)"""
+    """A ConvBlock based on [d2l's implementation](https://d2l.ai/chapter_convolutional-modern/densenet.html).
+
+    Args:
+        num_features: Number of features for convolutions.
+        kernel: Tuple of kernel dimensions.
+        act_fn: Activation function to use.
+        dtype: Data type to use for calculations.
+
+    Returns:
+        An instance of `ConvBlock`.
+    """
 
     num_features: int
     kernel: tuple = (3, 3)
     act_fn: Callable = nn.relu
+    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(
@@ -261,19 +354,31 @@ class ConvBlock(nn.Module):
         x: jax.Array,  # [B, ...spatial dims..., C]
         training: bool = False,
     ):
-        y = nn.BatchNorm(not training)(x)
+        y = nn.BatchNorm(not training, dtype=self.dtype)(x)
         y = self.act_fn(y)
-        y = nn.Conv(self.num_features, self.kernel)(y)
+        y = nn.Conv(self.num_features, self.kernel, dtype=self.dtype)(y)
         return jnp.concatenate([x, y], -1)
 
 
 class DenseBlock(nn.Module):
-    """A DenseBlock based on [d2l's implementation](https://d2l.ai/chapter_convolutional-modern/densenet.html)"""
+    """A DenseBlock based on [d2l's implementation](https://d2l.ai/chapter_convolutional-modern/densenet.html).
+
+    Args:
+        num_blks: Number of convolution blocks to use.
+        num_features: Number of features for convolutions.
+        kernel: Tuple of kernel dimensions.
+        act_fn: Activation function to use.
+        dtype: Data type to use for calculations.
+
+    Returns:
+        An instance of `DenseBlock`.
+    """
 
     num_blks: int
     num_features: int
     kernel: tuple = (3, 3)
     act_fn: Callable = nn.relu
+    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(
@@ -281,16 +386,27 @@ class DenseBlock(nn.Module):
         x: jax.Array,  # [B, ...spatial dims..., C]
         training: bool = False,
     ):
+        blk = ConvBlock(self.num_features, self.kernel, self.act_fn, self.dtype)
         for _ in range(self.num_blks):
-            x = ConvBlock(self.num_features, self.kernel, self.act_fn)(x, training)
+            x = blk.copy()(x, training)
         return x
 
 
 class TransitionBlock(nn.Module):
-    """A TransitionBlock based on [d2l's implementation](https://d2l.ai/chapter_convolutional-modern/densenet.html)"""
+    """A TransitionBlock based on [d2l's implementation](https://d2l.ai/chapter_convolutional-modern/densenet.html).
+
+    Args:
+        num_features: Number of features for convolutions.
+        act_fn: Activation function to use.
+        dtype: Data type to use for calculations.
+
+    Returns:
+        An instance of `DenseBlock`.
+    """
 
     num_features: int
     act_fn: Callable = nn.relu
+    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(
@@ -299,7 +415,7 @@ class TransitionBlock(nn.Module):
         training: bool = False,
     ):
         d = x.ndim - 2  # num spatial dims
-        x = nn.BatchNorm(not training)(x)
+        x = nn.BatchNorm(not training, dtype=self.dtype)(x)
         x = self.act_fn(x)
-        x = nn.Conv(self.num_features, (1,) * d)(x)
+        x = nn.Conv(self.num_features, (1,) * d, dtype=self.dtype)(x)
         return nn.avg_pool(x, (2,) * d, (2,) * d)

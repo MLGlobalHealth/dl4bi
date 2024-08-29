@@ -1,5 +1,6 @@
 from collections.abc import Callable
 
+import jax.numpy as jnp
 from flax import linen as nn
 
 
@@ -7,11 +8,12 @@ class MLP(nn.Module):
     dims: list[int]
     act_fn: Callable = nn.relu
     p_dropout: float = 0.0
+    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, x, training: bool = False):
         for dim in self.dims[:-1]:
-            x = nn.Dense(dim)(x)
+            x = nn.Dense(dim, dtype=self.dtype)(x)
             x = self.act_fn(x)
             x = nn.Dropout(self.p_dropout, deterministic=not training)(x)
-        return nn.Dense(self.dims[-1])(x)
+        return nn.Dense(self.dims[-1], dtype=self.dtype)(x)

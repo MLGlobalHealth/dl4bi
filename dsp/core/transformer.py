@@ -8,7 +8,6 @@ import flax.linen as nn
 import jax
 
 from .attention import MultiheadAttention
-from .fast_attention import MultiheadFastAttention
 from .mlp import MLP
 
 
@@ -59,6 +58,7 @@ class TransformerEncoder(nn.Module):
     Args:
         num_blks: The number of blocks to use.
         blk: An encoder block.
+        norm: Final normalization module used before output.
 
     Returns:
         Input transformed by the encoder.
@@ -66,6 +66,7 @@ class TransformerEncoder(nn.Module):
 
     num_blks: int = 6
     blk: nn.Module = TransformerEncoderBlock()
+    norm: nn.Module = nn.LayerNorm()
 
     @nn.compact
     def __call__(
@@ -77,7 +78,7 @@ class TransformerEncoder(nn.Module):
     ):
         for _ in range(self.num_blks):
             x, _ = self.blk.copy()(x, valid_lens, training, **kwargs)
-        return nn.LayerNorm()(x)
+        return self.norm(x)
 
 
 class TransformerDecoderBlock(nn.Module):
@@ -103,7 +104,7 @@ class TransformerDecoderBlock(nn.Module):
 
     attn: nn.Module = MultiheadAttention()
     norm: nn.Module = nn.LayerNorm()
-    ffn: nn.Module = MLP([128, 64], nn.relu)
+    ffn: nn.Module = MLP([128, 64])
     p_dropout: float = 0.0
 
     @nn.compact
@@ -198,7 +199,7 @@ class KRBlock(nn.Module):
         An instance of the `KRBlock` model.
     """
 
-    attn: nn.Module = MultiheadFastAttention()
+    attn: nn.Module = MultiheadAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([128, 64], nn.relu)
     p_dropout: float = 0.0
@@ -229,6 +230,7 @@ class KRStack(nn.Module):
         num_blks: Number of blocks to use.
         num_reps: Number of times to repeat each block.
         blk: An instance of the block module.
+        norm: Final normalization module used before output.
 
     Returns:
         An instance of a `KRStack`.
@@ -237,6 +239,7 @@ class KRStack(nn.Module):
     num_blks: int = 6
     num_reps: int = 1
     blk: nn.Module = KRBlock()
+    norm: nn.Module = nn.LayerNorm()
 
     @nn.compact
     def __call__(
@@ -250,5 +253,4 @@ class KRStack(nn.Module):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
                 qvs, kvs = blk(qvs, kvs, valid_lens, training)
-        norm = nn.LayerNorm()
-        return norm(qvs), norm(kvs)
+        return self.norm(qvs), self.norm(kvs)
