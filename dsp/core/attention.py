@@ -385,7 +385,7 @@ class FusedAttention(nn.Module):
             ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
             valid_lens: Mask consisting of valid length per sequence of dimension
-                $\mathbb{R}^B$ or $\mathbb{R}^{B\times K}$
+                $\mathbb{R}^B$.
             training: Boolean indicating whether currently training. Unused here.
 
         Returns:
