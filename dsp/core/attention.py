@@ -418,8 +418,8 @@ class MultiheadAttention(nn.Module):
 
     """
 
-    num_heads: int = 4
     attn: nn.Module = Attention()
+    num_heads: int = 4
     proj_qs: nn.Module = MLP([64])
     proj_ks: nn.Module = MLP([64])
     proj_vs: nn.Module = MLP([64])
