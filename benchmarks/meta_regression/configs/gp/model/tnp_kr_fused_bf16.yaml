@@ -1,0 +1,58 @@
+cls: TNPKR
+kwargs:
+  embed_s_f:
+    cls: MLP
+    kwargs:
+      dims: [256, 64]
+      dtype: bfloat16
+  dec:
+    cls: KRStack
+    kwargs:
+      num_blks: 6
+      num_reps: 1
+      blk:
+        cls: KRBlock
+        kwargs:
+          attn:
+            cls: MultiheadAttention
+            kwargs:
+              attn:
+                cls: FusedAttention
+              proj_qs:
+                cls: MLP
+                kwargs:
+                  dims: [64]
+                  dtype: bfloat16
+              proj_ks:
+                cls: MLP
+                kwargs:
+                  dims: [64]
+                  dtype: bfloat16
+              proj_vs:
+                cls: MLP
+                kwargs:
+                  dims: [64]
+                  dtype: bfloat16
+              proj_out:
+                cls: MLP
+                kwargs:
+                  dims: [64]
+                  dtype: bfloat16
+          norm:
+            cls: LayerNorm
+            kwargs:
+              dtype: bfloat16
+          ffn:
+            cls: MLP
+            kwargs:
+              dims: [128, 64]
+              dtype: bfloat16
+      norm:
+        cls: LayerNorm
+        kwargs:
+          dtype: bfloat16
+  head:
+    cls: MLP
+    kwargs:
+      dims: [128, 2]
+      dtype: bfloat16

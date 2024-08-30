@@ -184,8 +184,10 @@ def evaluate(
 def cfg_to_run_name(cfg: DictConfig):
     name = cfg.model.cls
     if name == "TNPKR":
-        attn_cls = OmegaConf.select(cfg, "model.kwargs.dec.kwargs.blk.kwargs.attn.cls")
-        name += " Fast" if attn_cls and "Fast" in attn_cls else " Full"
+        attn_cls = OmegaConf.select(
+            cfg, "model.kwargs.dec.kwargs.blk.kwargs.attn.kwargs.attn.cls"
+        )
+        name += " " + attn_cls.replace("Attention", "")
         embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.cls")
         if embed_cls == "ResidualEmbedding":
             name += " Resid"
@@ -210,7 +212,7 @@ def instantiate(d: Union[dict, DictConfig]):
                 kwargs[k] = getattr(nn, kwargs[k])
             elif isinstance(kwargs[k], dict):
                 kwargs[k] = instantiate(kwargs[k])
-        return globals()[cls](**kwargs)
+        return globals().get(cls, getattr(nn, cls, None))(**kwargs)
     elif "func" in d:
         return eval(d["func"])
     return d

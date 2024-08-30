@@ -201,7 +201,7 @@ class KRBlock(nn.Module):
 
     attn: nn.Module = MultiheadAttention(FastAttention())
     norm: nn.Module = nn.LayerNorm()
-    ffn: nn.Module = MLP([128, 64], nn.relu)
+    ffn: nn.Module = MLP([128, 64])
     p_dropout: float = 0.0
 
     @nn.compact
