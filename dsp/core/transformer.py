@@ -7,7 +7,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 
-from .attention import MultiheadAttention
+from .attention import FastAttention, MultiheadAttention
 from .mlp import MLP
 
 
@@ -199,7 +199,7 @@ class KRBlock(nn.Module):
         An instance of the `KRBlock` model.
     """
 
-    attn: nn.Module = MultiheadAttention()
+    attn: nn.Module = MultiheadAttention(FastAttention())
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([128, 64], nn.relu)
     p_dropout: float = 0.0
@@ -227,19 +227,19 @@ class KRStack(nn.Module):
     """A stack of `KRBlock`s.
 
     Args:
-        num_blks: Number of blocks to use.
-        num_reps: Number of times to repeat each block.
         blk: An instance of the block module.
         norm: Final normalization module used before output.
+        num_blks: Number of blocks to use.
+        num_reps: Number of times to repeat each block.
 
     Returns:
         An instance of a `KRStack`.
     """
 
-    num_blks: int = 6
-    num_reps: int = 1
     blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
+    num_blks: int = 6
+    num_reps: int = 1
 
     @nn.compact
     def __call__(
