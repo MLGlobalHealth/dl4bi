@@ -20,7 +20,7 @@ from dsp.meta_regression.train_utils import (
     train,
 )
 
-# NOTE: uncomment to speed up on some architectures
+# NOTE: uncomment to speed up on NVIDIA GPUs
 # https://jax.readthedocs.io/en/latest/gpu_performance_tips.html#code-generation-flags
 # os.environ['XLA_FLAGS'] = (
 #     '--xla_gpu_enable_triton_softmax_fusion=true '
