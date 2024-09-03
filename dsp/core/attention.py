@@ -396,11 +396,13 @@ class FusedAttention(nn.Module):
             `ctx` and `attn`, the updated values and attention weights, which are
             `None` for this implementation.
         """
+        B, L, _ = qs.shape
         # As of 2024-08-29, the CUDA kernel requires bfloat16
         return dot_product_attention(
             jnp.bfloat16(qs),
             jnp.bfloat16(ks),
             jnp.bfloat16(vs),
+            query_seq_lengths=jnp.repeat(L, B),
             key_value_seq_lengths=valid_lens,
             implementation="cudnn",
         ), None
