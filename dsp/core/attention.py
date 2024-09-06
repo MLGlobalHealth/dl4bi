@@ -392,7 +392,7 @@ class FusedAttention(nn.Module):
             `ctx` and `attn`, the updated values and attention weights, which are
             `None` for this implementation.
         """
-        B, L, _ = qs.shape
+        B, L, H, D = qs.shape
         if valid_lens is None:
             valid_lens = jnp.repeat(L, B)
         # As of 2024-08-29, the CUDA kernel requires bfloat16
