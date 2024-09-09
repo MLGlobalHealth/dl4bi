@@ -189,7 +189,10 @@ def cfg_to_run_name(cfg: DictConfig):
         attn_cls = OmegaConf.select(
             cfg, "model.kwargs.dec.kwargs.blk.kwargs.attn.kwargs.attn.cls"
         )
-        name += " " + attn_cls.replace("Attention", "")
+        if attn_cls == "Attention":
+            name += " Full"
+        else:
+            name += " " + attn_cls.replace("Attention", "")  # i.e. Fused, Fast
         embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.cls")
         if embed_cls == "ResidualEmbedding":
             name += " Resid"
