@@ -601,6 +601,17 @@ def sample(
     return s_ctx, f_ctx
 
 
+# TODO(danj): create two plotting gif functions
+# Plot HDI of samples vs. original HDI:
+# 1. Create a sample and calculate posterior predictive.
+# 2. Create a fixed plot and add posterior predictive.
+# 3. Create batch of samples.
+# 4. Add samples one at a time in bold, then remove and add with alpha=0.2.
+# 5. Update the posterior predictive HDI from samples at each iteration.
+# Plot showing that adding a point to context is Bayesian Updating:
+# 1. Create a sample and calculate posterior preditive.
+# 2. Add one point from linear interpolation and generate new posterior predictive.
+# 3. Update the plot, keeping dimensions fixed.
 def sample_gif(
     rng: jax.Array,
     state: TrainState,
