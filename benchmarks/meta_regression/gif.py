@@ -63,7 +63,7 @@ def save_samples_gif(
     f_mu: jax.Array,
     f_std: jax.Array,
     path: str = "samples_hdi.gif",
-    num_samples: int = 1024,
+    num_samples: int = 512,
     hdi_prob: float = 0.95,
 ):
     paths = []
@@ -73,7 +73,7 @@ def save_samples_gif(
     s_test, f_test = s_test.squeeze(), f_test.squeeze()
     f_mu, f_std = f_mu.squeeze(), f_std.squeeze()
     z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
-    for i in tqdm(range(num_samples), desc="Samples"):
+    for i in tqdm(range(num_samples + 1), desc="Samples"):
         f_mu_samples, f_std_samples = f[:i].mean(axis=0), f[:i].std(axis=0)
         fig = tu.plot_posterior_predictive(
             s_ctx, f_ctx, s_test, f_test, f_mu, f_std, hdi_prob
@@ -88,7 +88,10 @@ def save_samples_gif(
             interpolate=True,
         )
         ax.set_ylim(-3.0, 3.0)
-        ax.plot(s[i], f[i], color="darkorange")
+        if i < num_samples:
+            ax.plot(s[i], f[i], color="darkorange")
+        else:
+            ax.plot(s_test, f_mu_samples, color="darkorange")
         fig.suptitle("Samples")
         paths += [f"/tmp/sample_{i}.png"]
         save(fig, paths[-1])
