@@ -40,7 +40,17 @@ def main(args):
         s_test[None, ...],
         rngs={"extra": rng_extra},
     )
-    save_samples_gif(rng, state, s_ctx, f_ctx, s_test, f_test, f_mu, f_std)
+    save_samples_gif(
+        rng,
+        state,
+        s_ctx,
+        f_ctx,
+        s_test,
+        f_test,
+        f_mu,
+        f_std,
+        f"samples_{args.seed}.gif",
+    )
 
 
 def save_samples_gif(
@@ -106,6 +116,7 @@ def parse_args(argv):
         "-s",
         "--seed",
         default=7,
+        type=int,
         help="Root seed for all random operations.",
     )
     return parser.parse_args(argv[1:])
