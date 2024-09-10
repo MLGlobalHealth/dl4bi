@@ -44,7 +44,10 @@ def main(args):
     for i in range(num_layers):
         for h in range(num_heads):
             k = i * num_heads + h
-            attn_head = attns[i][0, h, :v, :v]
+            attn_head = attns[i][0, h, :, :v]
+            # valid_lens apply to queries and keys in self_attn
+            if args.attn_key == "self_attn":
+                attn_head = attn_head[:v, :]
             attn_head = attn_head[:, idx][idx, :]
             im = grid[k].imshow(attn_head, cmap="inferno")
             grid[k].set_ylabel(f"Layer {i+1}")

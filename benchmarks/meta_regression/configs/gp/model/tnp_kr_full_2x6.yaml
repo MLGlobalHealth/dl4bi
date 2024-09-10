@@ -1,0 +1,23 @@
+cls: TNPKR
+kwargs:
+  embed_s_f:
+    cls: MLP
+    kwargs:
+      dims: [256, 64]
+  dec:
+    cls: KRStack
+    kwargs:
+      num_blks: 2
+      num_reps: 6
+      blk:
+        cls: KRBlock
+        kwargs:
+          attn:
+            cls: MultiheadAttention
+            kwargs:
+              attn:
+                cls: Attention
+  head:
+    cls: MLP
+    kwargs:
+      dims: [128, 2]
