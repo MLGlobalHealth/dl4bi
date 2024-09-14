@@ -8,6 +8,7 @@ img_align_celeba
 *.pdf
 *.pkl
 *.png
+*.gif
 __pycache__
 **/results/**
 *.sh

@@ -157,3 +157,30 @@ def test_train_step_loss():
         _, loss_1 = train_step(rng_step, state, batch_1)
         _, loss_2 = train_step(rng_step, state, batch_2)
         assert jnp.not_equal(loss_1, loss_2)
+
+
+def test_sample():
+    rng = random.key(42)
+    rng_params, rng_dropout, rng_extra, rng_sample = random.split(rng, 4)
+    s_ctx = jnp.linspace(0, 0.90, 90)[:, None]  # [L_ctx, 1]
+    s_test = jnp.linspace(0.90, 1.0, 10)[:, None]  # [L_test, 1]
+    f_ctx = s_ctx  # [L_ctx, 1] : just a line
+    for np in [NP, CNP, ANP, CANP, DKR, TNPD, TNPDS, TNPKR, ConvCNP]:
+        print(np)
+        model = np()
+        kwargs = model.init(
+            {"params": rng_params, "dropout": rng_dropout, "extra": rng_extra},
+            s_ctx[None, ...],
+            f_ctx[None, ...],
+            s_test[None, ...],
+            valid_lens_ctx=jnp.array(s_ctx.shape[0])[None, ...],
+        )
+        params = kwargs.pop("params")
+        learning_rate_fn = tu.cosine_annealing_lr()
+        state = tu.TrainState.create(
+            apply_fn=model.apply,
+            params=params,
+            tx=optax.yogi(learning_rate_fn),
+            kwargs=kwargs,
+        )
+        tu.sample(rng_sample, state, s_ctx, f_ctx, s_test, batch_size=32)

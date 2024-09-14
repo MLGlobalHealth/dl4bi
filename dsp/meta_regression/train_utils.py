@@ -1,7 +1,9 @@
 import pickle
 import shutil
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
 
@@ -187,7 +189,10 @@ def cfg_to_run_name(cfg: DictConfig):
         attn_cls = OmegaConf.select(
             cfg, "model.kwargs.dec.kwargs.blk.kwargs.attn.kwargs.attn.cls"
         )
-        name += " " + attn_cls.replace("Attention", "")
+        if attn_cls == "Attention":
+            name += " Full"
+        else:
+            name += " " + attn_cls.replace("Attention", "")  # i.e. Fused, Fast
         embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.cls")
         if embed_cls == "ResidualEmbedding":
             name += " Resid"
@@ -564,29 +569,56 @@ def npf_elbo_train_step(
     return state.apply_gradients(grads=grads), elbo
 
 
-def log_posterior_predictive_plots(
-    step: int,
-    rng_step: int,
+def sample(
+    rng: jax.Array,
     state: TrainState,
-    batch: tuple,
+    s_ctx: jax.Array,  # [L_ctx, D_S]
+    f_ctx: jax.Array,  # [L_ctx, D_F]
+    s_test: jax.Array,  # [L_test, D_S]
+    batch_size: int = 32,
+):
+    @jit
+    def apply(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra):
+        return state.apply_fn(
+            {"params": state.params, **state.kwargs},
+            s_ctx,
+            f_ctx,
+            s_test,
+            valid_lens_ctx,
+            training=False,
+            rngs={"extra": rng_extra},
+        )
+
+    B, L_ctx, L_test = batch_size, s_ctx.shape[0], s_test.shape[0]
+    s_ctx = jnp.repeat(jnp.vstack([s_ctx, s_test])[None, ...], B, axis=0)
+    f_ctx = jnp.repeat(jnp.pad(f_ctx, ((0, L_test), (0, 0)))[None, ...], B, axis=0)
+    s_test = jnp.repeat(s_test[None, ...], B, axis=0)
+    valid_lens_ctx = jnp.repeat(L_ctx, B)
+    for i in range(L_test):
+        rng_extra, rng_eps, rng = random.split(rng, 3)
+        f_mu, f_std, *_ = apply(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
+        f_mu_i, f_std_i = f_mu[:, i, :], f_std[:, i, :]
+        f_test_i = f_mu_i + f_std_i * random.normal(rng_eps, f_std_i.shape)
+        f_ctx = f_ctx.at[:, L_ctx + i, :].set(f_test_i)
+        valid_lens_ctx += 1
+    return s_ctx[:, L_ctx:, :], f_ctx[:, L_ctx:, :]  # only return test locations
+
+
+def plot_posterior_predictives(
+    s_ctx: jax.Array,
+    f_ctx: jax.Array,
+    valid_lens_ctx: jax.Array,
+    s_test: jax.Array,
+    f_test: jax.Array,
+    valid_lens_test: jax.Array,
+    var: jax.Array,
+    ls: jax.Array,
+    period: jax.Array | None,
+    f_mu: jax.Array,
+    f_std: jax.Array,
     num_plots: int = 16,
 ):
-    """Logs `num_plots` from the given batch."""
-    rng_dropout, rng_extra = random.split(rng_step)
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls, period = (
-        batch
-    )
-    f_mu, f_std, *_ = state.apply_fn(
-        {"params": state.params, **state.kwargs},
-        s_ctx,
-        f_ctx,
-        s_test,
-        valid_lens_ctx,
-        valid_lens_test,
-        rngs={"dropout": rng_dropout, "extra": rng_extra},
-    )
-    if s_ctx.shape[-1] > 1:  # TODO(danj): implement 2D plot logging
-        return
+    """Plots `num_plots` from the given batch."""
     paths = []
     for i in range(num_plots):
         v_ctx = valid_lens_ctx[i]
@@ -610,11 +642,11 @@ def log_posterior_predictive_plots(
             s_ctx_i, f_ctx_i, s_test_i, f_test_i, f_mu_i, f_std_i
         )
         fig.suptitle(title)
-        paths += [f"/tmp/{title}.png"]
+        paths += [f"/tmp/{datetime.now().isoformat()} - {title}.png"]
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
         plt.close(fig)
-    wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
+    return paths
 
 
 def plot_posterior_predictive(
@@ -651,6 +683,43 @@ def plot_posterior_predictive(
     ax.set_xlabel("s")
     ax.set_ylabel("f")
     return plt.gcf()
+
+
+def log_posterior_predictive_plots(
+    step: int,
+    rng_step: int,
+    state: TrainState,
+    batch: tuple,
+    num_plots: int = 16,
+):
+    rng_dropout, rng_extra = random.split(rng_step)
+    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls, period = (
+        batch
+    )
+    f_mu, f_std, *_ = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        s_ctx,
+        f_ctx,
+        s_test,
+        valid_lens_ctx,
+        valid_lens_test,
+        rngs={"dropout": rng_dropout, "extra": rng_extra},
+    )
+    paths = plot_posterior_predictives(
+        s_ctx,
+        f_ctx,
+        valid_lens_ctx,
+        s_test,
+        f_test,
+        valid_lens_test,
+        var,
+        ls,
+        period,
+        f_mu,
+        f_std,
+        num_plots,
+    )
+    wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
 
 
 def log_img_plots(

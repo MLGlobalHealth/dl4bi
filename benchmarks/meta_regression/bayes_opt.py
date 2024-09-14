@@ -33,7 +33,7 @@ def main(cfg: DictConfig):
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
         name=cfg.get("name", run_name),
-        project=cfg.project,
+        project=cfg.get("project", "Bayesian Optimization"),
         reinit=True,  # allows reinitialization for multiple runs
     )
     cfg.data.batch_size = 1  # override GP batch argument

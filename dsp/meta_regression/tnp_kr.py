@@ -82,19 +82,3 @@ class TNPKR(nn.Module):
         f_std = jnp.exp(f_log_var / 2)
         f_std = self.min_std + (1 - self.min_std) * f_std
         return f_mu, f_std
-
-    def sample(
-        self,
-        s_ctx: jax.Array,  # [B, L_ctx, D_S]
-        f_ctx: jax.Array,  # [B, L_ctx, D_F]
-        s_test: jax.Array,  # [B, L_test, D_S]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
-        training: bool = False,
-        **kwargs,
-    ):
-        # TODO(danj): use jax.lax.scan to autoregressively sample
-        # insert s_test at valid_lens_ctx in s_ctx
-        # insert f_test_hat into f_ctx at every iteration
-        # increment valid_lens_ctx every pass
-        pass
