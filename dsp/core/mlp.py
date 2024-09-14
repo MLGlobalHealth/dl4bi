@@ -38,18 +38,30 @@ class MLPMixerBlock(nn.Module):
 class MLPMixer(nn.Module):
     num_cls: int
     num_blks: int
-    patch_size: int
-    hidden_dim: int
-    ffn_dims: list[int]
-    mix_dims: list[int]
+    blk: nn.Module = MLPMixerBlock([128, 128], [128, 128])
+    conv: nn.Module = nn.Conv(128, (16, 16), strides=(16, 16))
 
     @nn.compact
     def __call__(self, x):
-        s = self.patch_size
-        x = nn.Conv(self.hidden_dim, (s, s), strides=(s, s), name="stem")(x)
-        x = einops.rearrange(x, "n h w c -> n (h w) c")
+        x = self.conv(x)
+        x = einops.rearrange(x, "B H W C -> B (H W) C")
         for _ in range(self.num_blks):
-            x = MLPMixerBlock(self.ffn_dims, self.mix_dims)(x)
-        x = nn.LayerNorm(name="pre_head_layer_norm")(x)
+            x = self.blk.copy()(x)
+        x = nn.LayerNorm()(x)
         x = jnp.mean(x, axis=1)
-        return nn.Dense(self.num_cls, name="head", kernel_init=nn.initializers.zeros)(x)
+        return nn.Dense(self.num_cls, kernel_init=nn.initializers.zeros)(x)
+
+    @classmethod
+    def build(
+        cls,
+        patch_size: int,
+        conv_dim: int,
+        ffn_dim: int,
+        mix_dim: int,
+        num_blks: int,
+        num_cls: int,
+    ):
+        s = patch_size
+        conv = nn.Conv(conv_dim, (s, s), strides=(s, s))
+        blk = MLPMixerBlock([ffn_dim] * 2, [mix_dim] * 2)
+        return cls(num_cls, num_blks, blk, conv)
