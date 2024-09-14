@@ -37,7 +37,7 @@ from .metrics import (
     mvn_logpdf,
     prepare_dims,
 )
-from .mlp import MLP
+from .mlp import MLP, MLPMixer, MLPMixerBlock
 from .transformer import (
     KRBlock,
     KRStack,
