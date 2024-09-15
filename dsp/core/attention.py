@@ -544,6 +544,43 @@ class KernelAttention(nn.Module):
         return self.proj_out(ctx), attn
 
 
+class ProductKernelAttention(nn.Module):
+    r"""Performs product-kernel query-key-value attention.
+
+    Each kernel is responsible for projecting its own input and output.
+    `proj_out` projects the concatenated output of all kernels.
+
+    Args:
+        kernels: A list of kernel modules to multiply.
+        proj_out: A module for projecting output.
+
+    Returns:
+        A `MultikernelAttention` module.
+    """
+
+    kernels: Sequence[nn.Module]
+    proj_out: nn.Module = MLP([64])
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, D_QK]
+        ks: jax.Array,  # [B, K, D_QK]
+        vs: jax.Array,  # [B, K, D_V]
+        valid_lens: Optional[jax.Array] = None,
+        training: bool = False,
+        **kwargs,
+    ):
+        (B, Q, _), K = qs.shape, ks.shape[1]
+        ctx = jnp.ones((B, Q, K))
+        attns = []
+        for kernel in self.kernels:
+            k_ctx, attn = kernel(qs, ks, vs, valid_lens, training)
+            ctx *= k_ctx
+            attns += [attn]  # list of [B, Q, K]
+        return self.proj_out(ctx), attns
+
+
 class MultikernelAttention(nn.Module):
     r"""Performs multikernel query-key-value attention.
 
