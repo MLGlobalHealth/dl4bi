@@ -21,8 +21,8 @@ class MLP(nn.Module):
 
 
 class MLPMixerBlock(nn.Module):
-    token_dims: list[int] = [512, 128]
-    channel_dims: list[int] = [512, 128]
+    token_dims: list[int]
+    channel_dims: list[int]
 
     @nn.compact
     def __call__(self, x):
@@ -37,9 +37,9 @@ class MLPMixerBlock(nn.Module):
 
 class MLPMixer(nn.Module):
     num_cls: int
-    num_blks: int = 2
-    token_dims: list[int] = [256, 128]
-    channel_dims: list[int] = [512, 128]
+    num_blks: int
+    token_dims: list[int]
+    channel_dims: list[int]
     patch_size: int = 1
     conv_dim: int = 128
 

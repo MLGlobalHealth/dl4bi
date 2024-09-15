@@ -4,7 +4,9 @@ from .attention import (
     DotScorer,
     FastAttention,
     FusedAttention,
+    KernelAttention,
     MultiheadAttention,
+    MultikernelAttention,
     MultiplicativeScorer,
     build_elu_phi,
     build_exp_phi,
@@ -13,6 +15,8 @@ from .attention import (
     build_relu_phi,
     build_simple_positive_softmax_phi,
     build_stable_positive_softmax_phi,
+    exponential,
+    rbf,
 )
 from .conv import (
     ConvCNPBlock,

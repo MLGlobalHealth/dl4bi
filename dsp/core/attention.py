@@ -1,10 +1,10 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Optional
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import jit, lax, random
+from jax import jit, lax, random, vmap
 from jax.nn import dot_product_attention
 
 from .mlp import MLP
@@ -461,3 +461,118 @@ class MultiheadAttention(nn.Module):
         vs = vs.reshape(B, K, H, D_V // H)
         ctx, attn = self.attn(qs, ks, vs, valid_lens, training, **kwargs)
         return self.proj_out(ctx.reshape(B, Q, D_V)), attn
+
+
+@jit
+def rbf(qs: jax.Array, ks: jax.Array):  # [B, L, D]
+    r"""Calculates $\exp\left(-\frac{\lVert xW_x - yW_y\rVert^2}{\sqrt{d_k}}\right)$."""
+    d_sq = jnp.square(vmap(outer_subtract)(qs, ks)).sum(axis=-1)
+    return jnp.exp(-d_sq / jnp.sqrt(ks.shape[-1]))
+
+
+@jit
+def exponential(qs: jax.Array, ks: jax.Array):  # [B, L, D]
+    r"""Calculates $\exp\left(-\frac{\lVert xW_x - yW_y\rVert^2}{\sqrt{d_k}}\right)$."""
+    scores = jnp.einsum("bqd,bkd->bqk", qs, ks)
+    return jnp.exp(scores / jnp.sqrt(ks.shape[-1]))
+
+
+@jit
+def outer_subtract(x: jax.Array, y: jax.Array):
+    """Outer subtracts two arrays: `[L, D] x [K, D] -> [L, K, D]`"""
+    return vmap(vmap(jnp.subtract, (None, 0)), (0, None))(x, y)
+
+
+# TODO(danj): add learnable variance and lengthscale?
+class KernelAttention(nn.Module):
+    r"""Performs query-key-value attention with the given kernel.
+
+    .. note::
+        To make a kernel symmetric, provide the same dense projection
+        matrix for `proj_qs` and `proj_ks`.
+
+    Args:
+        kernel: A kernel function that operates on two `[L, D]` arrays and
+            returns a score for every pair.
+        proj_qs: A module for projecting queries.
+        proj_ks: A module for projecting keys.
+        proj_vs: A module for projecting values.
+        proj_out: A module for projecting output.
+        dtype: A data type to use for calculations.
+
+    Returns:
+        An `KernelAttention` module.
+    """
+
+    kernel: Callable = rbf
+    proj_qs: nn.Module = MLP([64])
+    proj_ks: nn.Module = MLP([64])
+    proj_vs: nn.Module = MLP([64])
+    proj_out: nn.Module = MLP([64])
+    dtype: jnp.dtype = jnp.float32
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,
+        ks: jax.Array,
+        vs: jax.Array,
+        valid_lens: Optional[jax.Array] = None,
+        training: bool = False,
+        **kwargs,
+    ):
+        r"""Performs forward pass of network.
+
+        Args:
+            qs: Queries of dimension $\mathbb{R}^{B\times Q\times D_QK}$
+            ks: Keys of dimension $\mathbb{R}^{B\times K\times D_QK}$
+            vs: Values of dimension $\mathbb{R}^{B\times K\times D_V}$
+            valid_lens: Mask consisting of valid length per sequence of dimension
+                $\mathbb{R}^B$ or $\mathbb{R}^{B\times K}$.
+            training: Boolean indicating whether currently training.
+            kwargs: Additional kwargs passed on to attention module.
+
+        Returns:
+            `ctx` and `attn`, the updated values and attention weights.
+        """
+        qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
+        attn = self.kernel(qs.astype(self.dtype), ks.astype(self.dtype))
+        if valid_lens is not None:
+            attn = mask_attn(attn, valid_lens, fill=0.0)
+        ctx = attn @ vs  # [B, Q, D_V]
+        return self.proj_out(ctx), attn
+
+
+class MultikernelAttention(nn.Module):
+    r"""Performs multikernel query-key-value attention.
+
+    Each kernel is responsible for projecting its own input and output.
+    `proj_out` projects the concatenated output of all kernels.
+
+    Args:
+        kernels: A list of kernel modules to use.
+        proj_out: A module for projecting output.
+
+    Returns:
+        A `MultikernelAttention` module.
+    """
+
+    kernels: Sequence[nn.Module]
+    proj_out: nn.Module = MLP([64])
+
+    @nn.compact
+    def __call__(
+        self,
+        qs,
+        ks,
+        vs,
+        valid_lens: Optional[jax.Array] = None,
+        training: bool = False,
+        **kwargs,
+    ):
+        ctxs, attns = [], []
+        for kernel in self.kernels:
+            ctx, attn = kernel(qs, ks, vs, valid_lens, training)
+            ctxs += [ctx]  # list of [B, Q, D_V]
+            attns += [attn]  # list of [B, Q, K]
+        return self.proj_out(jnp.concatenate(ctxs, axis=-1)), attns

@@ -6,13 +6,18 @@ from jax import random
 from jaxlib.xla_client import XlaRuntimeError
 
 from dsp.core import (
+    MLP,
     AdditiveScorer,
     Attention,
     DotScorer,
     FastAttention,
     FusedAttention,
+    KernelAttention,
     MultiheadAttention,
+    MultikernelAttention,
     MultiplicativeScorer,
+    exponential,
+    rbf,
 )
 
 
@@ -139,3 +144,33 @@ def test_fast_softmax_attention_scale():
 
     assert jnp.isfinite(ctx_fast_init).all(), "Non-finite values produced!"
     assert jnp.isfinite(ctx_fast).all(), "Non-finite values produced!"
+
+
+def test_kernel_attention():
+    B, L, D = 4, 128, 16
+    key = random.key(42)
+    rng_qkvs, rng_valid, rng_init = random.split(key, 3)
+    data = random.normal(rng_qkvs, (3, B, L, D))
+    qs, ks, vs = data[0], data[1], data[2]
+    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
+    for kernel in [rbf, exponential]:
+        (ctx, _), _ = KernelAttention(rbf, proj_out=MLP([D])).init_with_output(
+            rng_init, qs, ks, vs, valid_lens
+        )
+        assert jnp.isfinite(ctx).all(), "KernelAttention produced non-finite values!"
+        assert ctx.shape == (B, L, D), "Incorrect context output shape!"
+
+
+def test_multikernel_attention():
+    B, L, D = 4, 128, 16
+    key = random.key(42)
+    rng_qkvs, rng_valid, rng_init = random.split(key, 3)
+    data = random.normal(rng_qkvs, (3, B, L, D))
+    qs, ks, vs = data[0], data[1], data[2]
+    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
+    kernels = [KernelAttention(k) for k in [rbf, exponential]]
+    (ctx, _), _ = MultikernelAttention(kernels, proj_out=MLP([D])).init_with_output(
+        rng_init, qs, ks, vs, valid_lens
+    )
+    assert jnp.isfinite(ctx).all(), "MultikernelAttention produced non-finite values!"
+    assert ctx.shape == (B, L, D), "Incorrect context output shape!"
