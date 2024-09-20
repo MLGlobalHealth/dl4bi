@@ -464,14 +464,14 @@ class MultiheadAttention(nn.Module):
 
 
 @jit
-def rbf(qs: jax.Array, ks: jax.Array):  # [B, L, D]
+def rbf_scorer(qs: jax.Array, ks: jax.Array):  # [B, L, D]
     r"""Calculates $\exp\left(-\frac{\lVert xW_x - yW_y\rVert^2}{\sqrt{d_k}}\right)$."""
     d_sq = jnp.square(vmap(outer_subtract)(qs, ks)).sum(axis=-1)
     return jnp.exp(-d_sq / jnp.sqrt(ks.shape[-1]))
 
 
 @jit
-def exponential(qs: jax.Array, ks: jax.Array):  # [B, L, D]
+def exponential_scorer(qs: jax.Array, ks: jax.Array):  # [B, L, D]
     r"""Calculates $\exp\left(-\frac{\lVert xW_x - yW_y\rVert^2}{\sqrt{d_k}}\right)$."""
     scores = jnp.einsum("bqd,bkd->bqk", qs, ks)
     return jnp.exp(scores / jnp.sqrt(ks.shape[-1]))
@@ -492,7 +492,7 @@ class KernelAttention(nn.Module):
         matrix for `proj_qs` and `proj_ks`.
 
     Args:
-        kernel: A kernel function that operates on two `[L, D]` arrays and
+        kernel_scorer: A kernel function that operates on two `[L, D]` arrays and
             returns a score for every pair.
         proj_qs: A module for projecting queries.
         proj_ks: A module for projecting keys.
@@ -504,7 +504,7 @@ class KernelAttention(nn.Module):
         An `KernelAttention` module.
     """
 
-    kernel: Callable = rbf
+    kernel_scorer: Callable = rbf_scorer
     proj_qs: nn.Module = MLP([64])
     proj_ks: nn.Module = MLP([64])
     proj_vs: nn.Module = MLP([64])
@@ -536,7 +536,7 @@ class KernelAttention(nn.Module):
             `ctx` and `attn`, the updated values and attention weights.
         """
         qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
-        attn = self.kernel(qs.astype(self.dtype), ks.astype(self.dtype))
+        attn = self.kernel_scorer(qs.astype(self.dtype), ks.astype(self.dtype))
         if valid_lens is not None:
             attn = mask_attn(attn, valid_lens, fill=0.0)
         attn = attn / attn.sum(axis=-1)[..., None]  # [B, Q, K]
@@ -551,14 +551,14 @@ class ProductKernelAttention(nn.Module):
     `proj_out` projects the concatenated output of all kernels.
 
     Args:
-        kernels: A list of kernel modules to multiply.
+        kernel_scorers: A list of kernel scorers to multiply.
         proj_out: A module for projecting output.
 
     Returns:
         A `MultikernelAttention` module.
     """
 
-    kernels: Sequence[nn.Module]
+    kernel_scorers: Sequence[nn.Module]
     proj_out: nn.Module = MLP([64])
 
     @nn.compact
@@ -574,14 +574,14 @@ class ProductKernelAttention(nn.Module):
         (B, Q, _), K = qs.shape, ks.shape[1]
         ctx = jnp.ones((B, Q, K))
         attns = []
-        for kernel in self.kernels:
-            k_ctx, attn = kernel(qs, ks, vs, valid_lens, training)
+        for kernel_scorer in self.kernel_scorers:
+            k_ctx, attn = kernel_scorer(qs, ks, vs, valid_lens, training)
             ctx *= k_ctx
             attns += [attn]  # list of [B, Q, K]
         return self.proj_out(ctx), attns
 
 
-class MultikernelAttention(nn.Module):
+class MultiKernelAttention(nn.Module):
     r"""Performs multikernel query-key-value attention.
 
     Each kernel is responsible for projecting its own input and output.

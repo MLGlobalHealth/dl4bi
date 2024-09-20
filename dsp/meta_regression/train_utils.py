@@ -1,6 +1,5 @@
 import pickle
 import shutil
-from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime

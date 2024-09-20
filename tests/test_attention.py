@@ -14,10 +14,10 @@ from dsp.core import (
     FusedAttention,
     KernelAttention,
     MultiheadAttention,
-    MultikernelAttention,
+    MultiKernelAttention,
     MultiplicativeScorer,
-    exponential,
-    rbf,
+    exponential_scorer,
+    rbf_scorer,
 )
 
 
@@ -153,8 +153,8 @@ def test_kernel_attention():
     data = random.normal(rng_qkvs, (3, B, L, D))
     qs, ks, vs = data[0], data[1], data[2]
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
-    for kernel in [rbf, exponential]:
-        (ctx, _), _ = KernelAttention(rbf, proj_out=MLP([D])).init_with_output(
+    for kernel in [rbf_scorer, exponential_scorer]:
+        (ctx, _), _ = KernelAttention(kernel, proj_out=MLP([D])).init_with_output(
             rng_init, qs, ks, vs, valid_lens
         )
         assert jnp.isfinite(ctx).all(), "KernelAttention produced non-finite values!"
@@ -168,8 +168,8 @@ def test_multikernel_attention():
     data = random.normal(rng_qkvs, (3, B, L, D))
     qs, ks, vs = data[0], data[1], data[2]
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
-    kernels = [KernelAttention(k) for k in [rbf, exponential]]
-    (ctx, _), _ = MultikernelAttention(kernels, proj_out=MLP([D])).init_with_output(
+    kernels = [KernelAttention(k) for k in [rbf_scorer, exponential_scorer]]
+    (ctx, _), _ = MultiKernelAttention(kernels, proj_out=MLP([D])).init_with_output(
         rng_init, qs, ks, vs, valid_lens
     )
     assert jnp.isfinite(ctx).all(), "MultikernelAttention produced non-finite values!"
