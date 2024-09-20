@@ -5,7 +5,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-from dsp.core.attention import MultiHeadAttention
+from dl4bi.core.attention import MultiHeadAttention
 
 from ..core import MLP
 

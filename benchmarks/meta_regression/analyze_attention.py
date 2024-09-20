@@ -20,7 +20,7 @@ import imageio.v3 as iio
 import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
-import matplotlib.gridspec as gridspec
+import matplotlib.gridl4biec as gridl4biec
 import matplotlib.pyplot as plt
 from jax import random
 from pygifsicle import optimize
@@ -28,7 +28,7 @@ from sps.gp import GP
 from sps.kernels import rbf
 from sps.priors import Prior
 
-import dsp.meta_regression.train_utils as tu
+import dl4bi.meta_regression.train_utils as tu
 
 
 def main(args):
@@ -112,7 +112,7 @@ def plot_attn(attn: jax.Array, title: str):
     attn -= attn.min()  # normalize values to [0, 1] across layers
     attn /= attn.max()
     fig = plt.figure(figsize=(H * 2 + 1, N * 2))
-    gs = gridspec.GridSpec(N, H + 1, width_ratios=[*[1] * H, 0.1])
+    gs = gridl4biec.GridSpec(N, H + 1, width_ratios=[*[1] * H, 0.1])
     for n in range(N):
         for h in range(H):
             ax = fig.add_subplot(gs[n, h])
@@ -133,7 +133,7 @@ def plot_embed(x: jax.Array, title: str):
     x -= x.min()  # normalize values to [0, 1] across layers
     x /= x.max()
     fig = plt.figure(figsize=(6, 12))
-    gs = gridspec.GridSpec(N, 2, width_ratios=[1, 0.05])
+    gs = gridl4biec.GridSpec(N, 2, width_ratios=[1, 0.05])
     for n in range(N):
         ax = fig.add_subplot(gs[n, 0])
         ax.set_ylabel(f"Layer {n}")

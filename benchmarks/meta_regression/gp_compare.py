@@ -12,9 +12,9 @@ import numpy as np
 from jax import vmap
 from scipy.stats import norm, ttest_rel
 
-from dsp.core import mean_absolute_calibration_error as mace
-from dsp.core import mvn_logpdf
-from dsp.core.utils import mask_from_valid_lens
+from dl4bi.core import mean_absolute_calibration_error as mace
+from dl4bi.core import mvn_logpdf
+from dl4bi.core.utils import mask_from_valid_lens
 
 # NOTE: First run gp_evaluate.py to save a *_eval.pkl file.
 

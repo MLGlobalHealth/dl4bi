@@ -3,8 +3,8 @@ import jax.numpy as jnp
 import optax
 from jax import jit, random
 
-from dsp.core import KRStack
-from dsp.meta_regression import (
+from dl4bi.core import KRStack
+from dl4bi.meta_regression import (
     ANP,
     BANP,
     BNP,
@@ -18,7 +18,7 @@ from dsp.meta_regression import (
     TNPND,
     ConvCNP,
 )
-from dsp.meta_regression import (
+from dl4bi.meta_regression import (
     train_utils as tu,
 )
 

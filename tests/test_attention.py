@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jax import random
 from jaxlib.xla_client import XlaRuntimeError
 
-from dsp.core import (
+from dl4bi.core import (
     MLP,
     AdditiveScorer,
     Attention,

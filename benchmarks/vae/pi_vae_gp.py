@@ -11,8 +11,8 @@ from sps import kernels
 from sps.gp import GP
 from tqdm import tqdm
 
-from dsp.core import MLP
-from dsp.vae import Phi, PiVAE
+from dl4bi.core import MLP
+from dl4bi.vae import Phi, PiVAE
 
 
 def main(kernel_name: str, num_batches: int):

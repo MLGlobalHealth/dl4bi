@@ -15,7 +15,7 @@ from sps.kernels import rbf
 from sps.priors import Prior
 from tqdm import tqdm
 
-import dsp.meta_regression.train_utils as tu
+import dl4bi.meta_regression.train_utils as tu
 
 # TODO(danj): Plot showing that adding a point to context is Bayesian Updating:
 # 1. Create a sample and calculate posterior preditive.

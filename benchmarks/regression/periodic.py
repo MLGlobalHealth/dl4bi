@@ -10,14 +10,14 @@ from flax.training.train_state import TrainState
 from jax import jit, random
 from tqdm import tqdm
 
-from dsp.core import (
+from dl4bi.core import (
     AdditiveScorer,
     DotScorer,
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
     NeRFEmbedding,
 )
-from dsp.regression import KernelRegressor
+from dl4bi.regression import KernelRegressor
 
 
 def main(key, func, embedder, scorer, p_dropout):

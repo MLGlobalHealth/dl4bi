@@ -23,8 +23,8 @@ from sps.priors import Prior
 from sps.utils import build_grid
 from tqdm import tqdm
 
-from dsp.core import *  # noqa: F403
-from dsp.vae import DeepChol, PriorCVAE, train_utils
+from dl4bi.core import *  # noqa: F403
+from dl4bi.vae import DeepChol, PriorCVAE, train_utils
 
 
 @hydra.main("configs/gp", version_base=None)

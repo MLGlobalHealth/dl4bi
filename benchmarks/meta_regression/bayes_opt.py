@@ -12,8 +12,8 @@ from jax.scipy import stats
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-from dsp.core import mask_from_valid_lens
-from dsp.meta_regression.train_utils import (
+from dl4bi.core import mask_from_valid_lens
+from dl4bi.meta_regression.train_utils import (
     TrainState,
     build_gp_dataloader,
     cfg_to_run_name,

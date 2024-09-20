@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "dsp"
+name = "dl4bi"
 version = "0.1.0"
-description = "Deep Stochastic Processes"
+description = "Deep Learning for Bayesian Inference (DL4BI)"
 authors = ["Daniel Jenson <daniel.a.jenson@gmail.com>"]
 readme = "README.md"
 
