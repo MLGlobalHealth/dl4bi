@@ -13,7 +13,7 @@ kwargs:
         cls: TransformerEncoderBlock
         kwargs:
           attn:
-            cls: MultiheadAttention
+            cls: MultiHeadAttention
             kwargs:
               num_heads: 4
               p_dropout: 0.0

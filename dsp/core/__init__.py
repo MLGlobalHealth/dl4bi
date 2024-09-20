@@ -5,7 +5,7 @@ from .attention import (
     FastAttention,
     FusedAttention,
     KernelAttention,
-    MultiheadAttention,
+    MultiHeadAttention,
     MultiKernelAttention,
     MultiplicativeScorer,
     ProductKernelAttention,

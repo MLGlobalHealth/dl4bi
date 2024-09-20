@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from jax import jit, random
 from jax.lax import stop_gradient as no_grad
 
-from ..core import MLP, MultiheadAttention, bootstrap, mask_from_valid_lens
+from ..core import MLP, MultiHeadAttention, bootstrap, mask_from_valid_lens
 
 
 class BANP(nn.Module):
@@ -20,10 +20,10 @@ class BANP(nn.Module):
 
     .. note::
         The Attentive Neural Processes paper does not indicate that there are
-        any projection matrices for queries, keys, values in MultiheadAttention,
+        any projection matrices for queries, keys, values in MultiHeadAttention,
         but does specify a linear projection for outputs. On the other hand, the
         code implementation uses a 2-layer MLP for queries and keys, and nothing
-        for values or outputs. Here, we follow the standard MultiheadAttention
+        for values or outputs. Here, we follow the standard MultiHeadAttention
         setup where all projection matrices are single layer linear projections.
 
     Args:
@@ -40,14 +40,14 @@ class BANP(nn.Module):
 
     embed_s: nn.Module = MLP([128] * 2)
     enc_det: nn.Module = MLP([128] * 3)
-    self_attn_det: nn.Module = MultiheadAttention(
+    self_attn_det: nn.Module = MultiHeadAttention(
         proj_qs=MLP([128]),
         proj_ks=MLP([128]),
         proj_vs=MLP([128]),
         proj_out=MLP([128]),
         num_heads=8,
     )
-    cross_attn: nn.Module = MultiheadAttention(
+    cross_attn: nn.Module = MultiHeadAttention(
         proj_qs=MLP([128]),
         proj_ks=MLP([128]),
         proj_vs=MLP([128]),

@@ -4,7 +4,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-from ..core import MLP, MultiheadAttention
+from ..core import MLP, MultiHeadAttention
 
 
 class CANP(nn.Module):
@@ -18,10 +18,10 @@ class CANP(nn.Module):
 
     .. note::
         The paper does not indicate that there are any projection matrices for
-        queries, keys, values in MultiheadAttention, but does specify a linear
+        queries, keys, values in MultiHeadAttention, but does specify a linear
         projection for outputs. On the other hand, the code implementation
         uses a 2-layer MLP for queries and keys, and nothing for values or
-        outputs. Here, we follow the standard MultiheadAttention setup where all
+        outputs. Here, we follow the standard MultiHeadAttention setup where all
         projection matrices are single layer linear projections.
 
     Args:
@@ -38,14 +38,14 @@ class CANP(nn.Module):
 
     embed_s: nn.Module = MLP([128] * 2)
     enc_det: nn.Module = MLP([128] * 3)
-    self_attn_det: nn.Module = MultiheadAttention(
+    self_attn_det: nn.Module = MultiHeadAttention(
         proj_qs=MLP([128]),
         proj_ks=MLP([128]),
         proj_vs=MLP([128]),
         proj_out=MLP([128]),
         num_heads=8,
     )
-    cross_attn: nn.Module = MultiheadAttention(
+    cross_attn: nn.Module = MultiHeadAttention(
         proj_qs=MLP([128]),
         proj_ks=MLP([128]),
         proj_vs=MLP([128]),

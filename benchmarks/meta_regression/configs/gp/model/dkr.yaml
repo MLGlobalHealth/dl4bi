@@ -7,7 +7,7 @@ kwargs:
     kwargs:
       dims: [64, 64, 64, 64]
   attn:
-    cls: MultiheadAttention
+    cls: MultiHeadAttention
     kwargs:
       proj_out:
         cls: MLP

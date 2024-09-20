@@ -7,7 +7,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 
-from .attention import FastAttention, FusedAttention, MultiheadAttention
+from .attention import FastAttention, FusedAttention, MultiHeadAttention
 from .mlp import MLP
 
 
@@ -27,7 +27,7 @@ class TransformerEncoderBlock(nn.Module):
         Input transformed by a single self-attention encoder block.
     """
 
-    attn: nn.Module = MultiheadAttention()
+    attn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([128, 64], nn.relu)
     p_dropout: float = 0.0
@@ -102,7 +102,7 @@ class TransformerDecoderBlock(nn.Module):
         Input transformed by a single decoder block.
     """
 
-    attn: nn.Module = MultiheadAttention()
+    attn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([128, 64])
     p_dropout: float = 0.0
@@ -199,7 +199,7 @@ class KRBlock(nn.Module):
         An instance of the `KRBlock` model.
     """
 
-    attn: nn.Module = MultiheadAttention(FastAttention())
+    attn: nn.Module = MultiHeadAttention(FastAttention())
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([128, 64])
     p_dropout: float = 0.0
@@ -257,10 +257,10 @@ class KRStack(nn.Module):
 
     @classmethod
     def build_fast(cls, num_blks: int = 6, num_reps: int = 1):
-        blk = KRBlock(MultiheadAttention(FastAttention()))
+        blk = KRBlock(MultiHeadAttention(FastAttention()))
         return cls(blk, nn.LayerNorm(), num_blks, num_reps)
 
     @classmethod
     def build_fused(cls, num_blks: int = 6, num_reps: int = 1):
-        blk = KRBlock(MultiheadAttention(FusedAttention()))
+        blk = KRBlock(MultiHeadAttention(FusedAttention()))
         return cls(blk, nn.LayerNorm(), num_blks, num_reps)

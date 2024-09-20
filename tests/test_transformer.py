@@ -9,7 +9,7 @@ from dsp.core import (
     FastAttention,
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
-    MultiheadAttention,
+    MultiHeadAttention,
     MultiplicativeScorer,
     NeRFEmbedding,
     TransformerDecoder,
@@ -33,7 +33,7 @@ def test_transformer():
     ]:
         s_e, _ = embedder.init_with_output(rng_init, s)
         for scorer in [AdditiveScorer(), MultiplicativeScorer(), DotScorer()]:
-            attn = MultiheadAttention(Attention(scorer))
+            attn = MultiHeadAttention(Attention(scorer))
             enc_blk = TransformerEncoderBlock(attn)
             f_enc, _ = TransformerEncoder(blk=enc_blk).init_with_output(
                 rng_init, s_e, valid_lens
@@ -50,7 +50,7 @@ def test_transformer():
                 ), f"Incorrect {name} output shape!"
                 assert not jnp.isnan(f).any(), f"{name.title()} returned nans!"
         # test fast version too
-        mh_attn = MultiheadAttention(attn=FastAttention())
+        mh_attn = MultiHeadAttention(attn=FastAttention())
         enc_blk = TransformerEncoderBlock(mh_attn)
         dec_blk = TransformerDecoderBlock(mh_attn)
         f_enc, _ = TransformerEncoder(blk=enc_blk).init_with_output(

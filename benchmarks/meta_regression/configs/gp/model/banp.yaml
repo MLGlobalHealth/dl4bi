@@ -10,7 +10,7 @@ kwargs:
     kwargs:
       dims: [128, 128, 128]
   self_attn_det:
-    cls: MultiheadAttention
+    cls: MultiHeadAttention
     kwargs:
       num_heads: 8
       proj_qs:
@@ -30,7 +30,7 @@ kwargs:
         kwargs:
           dims: [128]
   cross_attn:
-    cls: MultiheadAttention
+    cls: MultiHeadAttention
     kwargs:
       num_heads: 8
       proj_qs:

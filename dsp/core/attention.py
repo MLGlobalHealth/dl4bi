@@ -407,7 +407,7 @@ class FusedAttention(nn.Module):
         ), None
 
 
-class MultiheadAttention(nn.Module):
+class MultiHeadAttention(nn.Module):
     r"""Performs multihead query-key-value attention.
 
     Args:
@@ -419,7 +419,7 @@ class MultiheadAttention(nn.Module):
         proj_out: A module for projecting output.
 
     Returns:
-        A `MultiheadAttention` module.
+        A `MultiHeadAttention` module.
 
     """
 

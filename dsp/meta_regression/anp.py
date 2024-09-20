@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 from jax import random
 
-from ..core import MLP, MultiheadAttention, mask_from_valid_lens
+from ..core import MLP, MultiHeadAttention, mask_from_valid_lens
 
 
 class ANP(nn.Module):
@@ -17,10 +17,10 @@ class ANP(nn.Module):
 
     .. note::
         The paper does not indicate that there are any projection matrices for
-        queries, keys, values in MultiheadAttention, but does specify a linear
+        queries, keys, values in MultiHeadAttention, but does specify a linear
         projection for outputs. On the other hand, the code implementation
         uses a 2-layer MLP for queries and keys, and nothing for values or
-        outputs. Here, we follow the standard MultiheadAttention setup where all
+        outputs. Here, we follow the standard MultiHeadAttention setup where all
         projection matrices are single layer linear projections.
 
     .. note::
@@ -48,14 +48,14 @@ class ANP(nn.Module):
     embed_s: nn.Module = MLP([128] * 2)
     enc_det: nn.Module = MLP([128] * 3)
     enc_lat: nn.Module = MLP([128] * 3)
-    self_attn_det: nn.Module = MultiheadAttention(
+    self_attn_det: nn.Module = MultiHeadAttention(
         proj_qs=MLP([128]),
         proj_ks=MLP([128]),
         proj_vs=MLP([128]),
         proj_out=MLP([128]),
         num_heads=8,
     )
-    self_attn_lat: nn.Module = MultiheadAttention(
+    self_attn_lat: nn.Module = MultiHeadAttention(
         proj_qs=MLP([128]),
         proj_ks=MLP([128]),
         proj_vs=MLP([128]),
@@ -63,7 +63,7 @@ class ANP(nn.Module):
         num_heads=8,
     )
     z_dist: nn.Module = MLP([128, 256])
-    cross_attn: nn.Module = MultiheadAttention(
+    cross_attn: nn.Module = MultiHeadAttention(
         proj_qs=MLP([128]),
         proj_ks=MLP([128]),
         proj_vs=MLP([128]),

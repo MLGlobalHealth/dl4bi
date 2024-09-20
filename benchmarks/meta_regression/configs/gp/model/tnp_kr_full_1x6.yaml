@@ -13,7 +13,7 @@ kwargs:
         cls: KRBlock
         kwargs:
           attn:
-            cls: MultiheadAttention
+            cls: MultiHeadAttention
             kwargs:
               attn:
                 cls: Attention

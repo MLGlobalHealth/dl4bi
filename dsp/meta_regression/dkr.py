@@ -5,7 +5,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-from dsp.core.attention import MultiheadAttention
+from dsp.core.attention import MultiHeadAttention
 
 from ..core import MLP
 
@@ -35,7 +35,7 @@ class DKR(nn.Module):
     embed_s: Callable = lambda x: x
     embed_f: Callable = lambda x: x
     embed_s_f: nn.Module = MLP([64] * 4)
-    attn: nn.Module = MultiheadAttention()
+    attn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([128, 2])
     min_std: float = 0.0
