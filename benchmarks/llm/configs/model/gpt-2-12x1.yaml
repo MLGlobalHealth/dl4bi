@@ -1,0 +1,7 @@
+d_model: 768
+num_blks: 12
+num_reps: 1
+num_heads: 12
+num_vocab: 50304
+num_context_window: 1024
+p_dropout: 0.0
