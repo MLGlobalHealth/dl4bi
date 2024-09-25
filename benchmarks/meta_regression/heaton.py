@@ -10,6 +10,7 @@ import optax
 import pandas as pd
 from jax import random
 from omegaconf import DictConfig, OmegaConf
+from matplotlib.axes import Axes
 
 import wandb
 from dl4bi.meta_regression.train_utils import (
@@ -92,7 +93,6 @@ def build_dataloader(
     num_ctx_max: int = 500,
     num_test_max: int = 1000,
 ):
-    path = Path("cache/heaton/sim.csv")
     df = pd.read_csv(path)
     df = preprocess(df)
     s_ctx, f_ctx, s_test = ctx_test_split(df)
@@ -130,6 +130,7 @@ def build_dataloader(
 
 
 def preprocess(df: pd.DataFrame):
+    """De-mean locations and standardize temperature."""
     df.Lon -= df.Lon.mean()
     df.Lat -= df.Lat.mean()
     df.Temp = (df.Temp - df.Temp.mean()) / df.Temp.std()
@@ -137,6 +138,12 @@ def preprocess(df: pd.DataFrame):
 
 
 def ctx_test_split(df: pd.DataFrame):
+    """Returns a context/test split.
+
+    .. warning::
+        Unlike the other benchmarks, s_test is not a superset of s_ctx; it
+        consists only of unknown test locations.
+    """
     ctx_idx = df.Temp.notna().values
     ctx, test = df[ctx_idx].values, df[~ctx_idx].values
     s_ctx, f_ctx = ctx[:, :-1], ctx[:, [-1]]
@@ -145,6 +152,7 @@ def ctx_test_split(df: pd.DataFrame):
 
 
 def log_plot(step: int, rng_step: int, state: TrainState, batch: tuple):
+    """Logs a plot of the entire image to wandb."""
     *_, s_ctx, f_ctx, s_test = batch
     rng_dropout, rng_extra = random.split(rng_step)
     f_mu, f_std, *_ = state.apply_fn(
@@ -157,33 +165,30 @@ def log_plot(step: int, rng_step: int, state: TrainState, batch: tuple):
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
     s = jnp.vstack([s_ctx, s_test])
-    f = jnp.vstack([f_ctx, f_mu])
-    df = pd.DataFrame(jnp.hstack([s, f]), columns=["Lon", "Lat", "Temp"])
-
-
-def plot_sat(df: pd.DataFrame, path: Path):
+    f_pred = jnp.vstack([f_ctx, f_mu])
+    # TODO(danj): do we want f_task to be zeros, which implies the mean?
+    f_task = jnp.vstack([f_ctx, jnp.zeros(f_mu.shape)])
+    data = jnp.hstack([s, f_task, f_pred])
+    df = pd.DataFrame(data, columns=["Lon", "Lat", "Task", "Pred"])
     df = df.sort_values(["Lat", "Lon"], ascending=[False, True])
-    plt.imshow(df.Temp.values.reshape(300, 500), cmap="inferno", interpolation="none")
-    plt.savefig(path, dpi=600)
-
-
-def plot_img(
-    id: int,
-    shape: tuple[int, int, int],
-    f_ctx: jax.Array,  # [L_ctx, 1]
-    f_mu: jax.Array,  # [L, 1]
-    f_test: jax.Array,  # [L, 1]
-    inv_permute_idx: jax.Array,  # [L]
-):
-    """Plots a triptych of [task, pred, truth]."""
-    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-    axs[0].imshow(task)
-    axs[0].set_title("Task")
-    axs[1].imshow(task_pred)
-    axs[1].set_title("Predicted")
-    axs[2].imshow(task_true)
-    axs[2].set_title("Ground Truth")
+    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+    plot(df, "Task", axs[0])
+    plot(df, "Pred", axs[1])
+    # TODO(danj): add plot(df, 'GroundTruth', axs[2])
+    path = f"/tmp/heaton_step_{step}.png"
     plt.tight_layout()
+    plt.savefig(path, dpi=125)
+    plt.clf()
+    wandb.log({f"Step {step}": wandb.Image(path)})
+
+
+def plot(df: pd.DataFrame, col="Temp", ax: Axes | None = None):
+    """Plots an original image from a pandas DataFrame."""
+    if not isinstance(ax, Axes):
+        ax = plt.gca()
+    df = df.sort_values(["Lat", "Lon"], ascending=[False, True])
+    ax.imshow(df[col].values.reshape(300, 500), cmap="inferno", interpolation="none")
+    ax.set_title(col)
     return plt.gcf()
 
 
