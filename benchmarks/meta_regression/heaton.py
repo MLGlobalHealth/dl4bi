@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 import optax
 import pandas as pd
 from jax import random
-from omegaconf import DictConfig, OmegaConf
 from matplotlib.axes import Axes
+from omegaconf import DictConfig, OmegaConf
 
 import wandb
 from dl4bi.meta_regression.train_utils import (
@@ -183,7 +183,7 @@ def log_plot(step: int, rng_step: int, state: TrainState, batch: tuple):
 
 
 def plot(df: pd.DataFrame, col="Temp", ax: Axes | None = None):
-    """Plots an original image from a pandas DataFrame."""
+    """Plots a satellite image from a pandas DataFrame."""
     if not isinstance(ax, Axes):
         ax = plt.gca()
     df = df.sort_values(["Lat", "Lon"], ascending=[False, True])
