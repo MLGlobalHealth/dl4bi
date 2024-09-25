@@ -1,6 +1,5 @@
 cache
 **/ckpts/**
-**/data/**
 img_align_celeba
 *.npy
 *.nu

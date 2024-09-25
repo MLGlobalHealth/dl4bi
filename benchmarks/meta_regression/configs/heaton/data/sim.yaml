@@ -1,0 +1,8 @@
+name: sim
+path: cache/heaton/sim.csv
+batch_size: 16
+num_ctx:
+  min: 200
+  max: 500
+num_test:
+  max: 1000

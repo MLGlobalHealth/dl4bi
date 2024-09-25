@@ -13,7 +13,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import wandb
 from flax.core import FrozenDict
 from flax.training import orbax_utils, train_state
 from jax import jit, random
@@ -26,6 +25,8 @@ from sps.kernels import matern_3_2, periodic, rbf
 from sps.priors import Prior
 from sps.utils import build_grid
 from tqdm import tqdm
+
+import wandb
 
 from ..core import *
 from .anp import ANP

@@ -1,0 +1,13 @@
+path: cache/shakespeare/full
+batch_size: 8
+grad_accum_steps: 8 # 1 step = 8 * 8 = 64 examples
+train_num_steps: 5000
+valid_num_steps: 200
+valid_interval: 500
+lr_min: 6.0e-5
+lr_peak: 6.0e-4
+lr_warmup_num_steps: 2000
+clip_max_norm: 1.0
+beta_1: 0.9
+beta_2: 0.95
+weight_decay: 1.0e-1
