@@ -1,5 +1,5 @@
-name: sim
-path: cache/heaton/sim.csv
+name: sat
+path: cache/heaton/sat.csv
 valid_pct: 0.3
 batch_size: 4
 num_ctx:
