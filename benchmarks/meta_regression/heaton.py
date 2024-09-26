@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import optax
 import pandas as pd
 from jax import random
+from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
 
@@ -21,6 +22,7 @@ from dl4bi.meta_regression.train_utils import (
     cosine_annealing_lr,
     evaluate,
     instantiate,
+    mask_from_valid_lens,
     save_ckpt,
     train,
 )
@@ -75,7 +77,10 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        callbacks=[Callback(log_plot, cfg.plot_interval)],
+        callbacks=[
+            Callback(log_plot, cfg.plot_interval),
+            Callback(log_metrics, cfg.metrics_interval),
+        ],
     )
     loss = evaluate(rng_test, state, dataloader, cfg.valid_num_steps)
     wandb.log({"test_loss": loss})
@@ -162,10 +167,9 @@ def log_plot(step: int, rng_step: jax.Array, state: TrainState, batch: tuple):
         valid_lens_test=None,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
-    f_mu = f_mu[0, ...]
+    f_mu = f_mu[0, ...]  # remove dummy batch dimension
     s = jnp.vstack([s_ctx, s_test])
     f_pred = jnp.vstack([f_ctx, f_mu])
-    # TODO(danj): do we want f_task to be zeros, which implies the mean?
     f_task = jnp.vstack([f_ctx, jnp.full(f_mu.shape, jnp.nan)])
     data = jnp.hstack([s, f_task, f_pred])
     df = pd.DataFrame(data, columns=["Lon", "Lat", "Task", "Pred"])
@@ -191,6 +195,33 @@ def plot(df: pd.DataFrame, col="Temp", ax: Axes | None = None):
     ax.imshow(df[col].values.reshape(300, 500), cmap=cmap, interpolation="none")
     ax.set_title(col)
     return plt.gcf()
+
+
+# TODO(danj): implement "interval score", and CRPS
+def log_metrics(step: int, rng_step: jax.Array, state: TrainState, batch: tuple):
+    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, *_ = batch
+    rng_dropout, rng_extra = random.split(rng_step)
+    f_mu, f_std, *_ = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        s_ctx,
+        f_ctx,
+        s_test,
+        valid_lens_ctx,
+        valid_lens_test=None,
+        rngs={"dropout": rng_dropout, "extra": rng_extra},
+    )
+    hdi_prob = 0.95
+    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
+    f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
+    # by construction (see dataloader above), s_test contains all
+    # context points and then some extra non-context test locations;
+    # here we want to ignore the context points in the test set and
+    # calculate metrics for non-context test locations.
+    mask_test = ~mask_from_valid_lens(s_test.shape[1], valid_lens_ctx)
+    rmse = jnp.sqrt(jnp.square(f_test - f_mu).mean(where=mask_test))
+    mae = jnp.abs(f_test - f_mu).mean(where=mask_test)
+    cvg = ((f_test >= f_lower) & (f_test <= f_upper)).mean(where=mask_test)
+    wandb.log({"RMSE": rmse, "MAE": mae, "Coverage": cvg})
 
 
 if __name__ == "__main__":
