@@ -50,9 +50,11 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    rng_train, rng_test = random.split(rng)
-    dataloader = build_dataloader(
+    rng_train, rng_data, rng_test = random.split(rng, 3)
+    train_dataloader, valid_dataloader = build_dataloaders(
+        rng_data,
         cfg.data.path,
+        cfg.data.valid_pct,
         cfg.data.batch_size,
         cfg.data.num_ctx.min,
         cfg.data.num_ctx.max,
@@ -72,8 +74,8 @@ def main(cfg: DictConfig):
         rng_train,
         model,
         optimizer,
-        dataloader,
-        dataloader,
+        train_dataloader,
+        valid_dataloader,
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
@@ -82,40 +84,51 @@ def main(cfg: DictConfig):
             Callback(log_metrics, cfg.metrics_interval),
         ],
     )
-    loss = evaluate(rng_test, state, dataloader, cfg.valid_num_steps)
+    loss = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
     wandb.log({"test_loss": loss})
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def build_dataloader(
+def build_dataloaders(
+    rng: jax.Array,
     path: Path,
+    valid_pct: float = 0.10,
     batch_size: int = 16,
     num_ctx_min: int = 200,
     num_ctx_max: int = 500,
     num_test_max: int = 1000,
 ):
+    """
+    The image consists of ~105k observed locations and ~45k unobserved locations.
+    Here we partition the 105k observed locations into train and validation datasets.
+    With each batch, we also pass all observed locations and unobserved locations
+    so that the plotting callback can use them periodically.
+    """
     df = pd.read_csv(path)
     df = preprocess(df)
-    s_ctx, f_ctx, s_test = ctx_test_split(df)
-    B, L_ctx = batch_size, s_ctx.shape[0]
+    s_obs, f_obs, s_unobs = split_observed(df)
+    B, L, L_train = batch_size, s_obs.shape[0], int((1 - valid_pct) * s_obs.shape[0])
+    permute_idx = random.choice(rng, L, (L,), replace=False)
+    s_obs, f_obs = s_obs[permute_idx, :], f_obs[permute_idx, :]
+    s_train, f_train = s_obs[:L_train, :], f_obs[:L_train, :]
+    s_valid, f_valid = s_obs[L_train:, :], f_obs[L_train:, :]
     valid_lens_test = jnp.repeat(num_test_max, B)
 
-    # For training and validation, we use the context points (s_ctx, f_ctx)
-    # as a dataset; only when we run the final test do we input all (s_ctx, f_ctx)
-    # and try to predict f_test at s_test locations.
-    def dataloader(rng: jax.Array):
+    def train_dataloader(rng: jax.Array):
         while True:
             rng_permute, rng_valid, rng = random.split(rng, 3)
             s_ctxs, f_ctxs, s_tests, f_tests = [], [], [], []
             for _ in range(B):  # TODO(danj): speed up?
                 rng_i, rng_permute = random.split(rng_permute)
-                permute_idx = random.choice(rng_i, L_ctx, (L_ctx,), replace=False)
-                s_ctxs += [s_ctx[permute_idx, :][:num_ctx_max, :]]
-                f_ctxs += [f_ctx[permute_idx, :][:num_ctx_max, :]]
-                s_tests += [s_ctx[permute_idx, :][:num_test_max, :]]
-                f_tests += [f_ctx[permute_idx, :][:num_test_max, :]]
+                permute_idx = random.choice(rng_i, L_train, (L_train,), replace=False)
+                s_perm, f_perm = s_train[permute_idx, :], f_train[permute_idx, :]
+                s_ctxs += [s_perm[:num_ctx_max, :]]
+                f_ctxs += [f_perm[:num_ctx_max, :]]
+                # NOTE: (s,f)_test are superset of (s,f)_ctx
+                s_tests += [s_perm[:num_test_max, :]]
+                f_tests += [f_perm[:num_test_max, :]]
             valid_lens_ctx = random.randint(rng_valid, (B,), num_ctx_min, num_ctx_max)
             yield (
                 jnp.stack(s_ctxs),
@@ -124,12 +137,22 @@ def build_dataloader(
                 jnp.stack(s_tests),
                 jnp.stack(f_tests),
                 valid_lens_test,
-                s_ctx,  # return full originals for log_plot callback
-                f_ctx,
-                s_test,
+                s_obs,  # return full originals for log_plot callback
+                f_obs,
+                s_unobs,
             )
 
-    return dataloader
+    def valid_dataloader(rng: jax.Array):
+        yield (
+            s_train[None, ...],  # add dummy batch dim
+            f_train[None, ...],
+            jnp.array([L_train]),  # use all train locations
+            s_valid[None, ...],
+            f_valid[None, ...],
+            None,  # no valid_lens_test
+        )
+
+    return train_dataloader, valid_dataloader
 
 
 def preprocess(df: pd.DataFrame):
@@ -140,18 +163,13 @@ def preprocess(df: pd.DataFrame):
     return df
 
 
-def ctx_test_split(df: pd.DataFrame):
-    """Returns a context/test split.
-
-    .. warning::
-        Unlike the other benchmarks, s_test is not a superset of s_ctx; it
-        consists only of unknown test locations.
-    """
-    ctx_idx = df.Temp.notna().values
-    ctx, test = df[ctx_idx].values, df[~ctx_idx].values
-    s_ctx, f_ctx = ctx[:, :-1], ctx[:, [-1]]
-    s_test = test[:, :-1]  # f_test is all nans
-    return s_ctx, f_ctx, s_test
+def split_observed(df: pd.DataFrame):
+    """Splits the df into observed and unobserved locations."""
+    obs_idx = df.Temp.notna().values
+    obs, unobs = df[obs_idx].values, df[~obs_idx].values
+    s_obs, f_obs = obs[:, :-1], obs[:, [-1]]
+    s_unobs = unobs[:, :-1]  # f_unobs is all nans
+    return s_obs, f_obs, s_unobs
 
 
 def log_plot(step: int, rng_step: jax.Array, state: TrainState, batch: tuple):

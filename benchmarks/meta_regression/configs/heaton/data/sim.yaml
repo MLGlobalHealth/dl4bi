@@ -1,5 +1,6 @@
 name: sim
 path: cache/heaton/sim.csv
+valid_pct: 0.1
 batch_size: 4
 num_ctx:
   min: 10000
