@@ -181,7 +181,7 @@ def log_test_results(rng: jax.Array, state: TrainState, test_dataloader: Callabl
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
     # remove dummy batch dimension
-    s_ctx, f_ctx, s_test, f_test = (s_ctx[0], f_ctx[0], s_test[0], f_test[0])
+    s_ctx, f_ctx, s_test, f_test = s_ctx[0], f_ctx[0], s_test[0], f_test[0]
     f_mu, f_std = f_mu[0], f_std[0]
     # rescale to original
     log_metrics(f_test, f_mu, f_std)
@@ -209,10 +209,10 @@ def log_metrics(
     cvg = ((f_test >= f_lower) & (f_test <= f_upper)).mean()
     wandb.log(
         {
-            "Test NLL (Original Scale)": nll,
-            "Test RSME (Original Scale)": rmse,
-            "Test MAE (Original Scale)": mae,
-            "Test Coverage (Original Scale)": cvg,
+            "Test NLL": nll,
+            "Test RSME": rmse,
+            "Test MAE": mae,
+            "Test Coverage": cvg,
         }
     )
 
