@@ -1,8 +1,8 @@
 name: sim
 path: cache/heaton/sim.csv
-valid_pct: 0.05
+valid_pct: 0.3
 num_ctx:
-  min: 20000
-  max: 70000
+  min: 25000
+  max: 50000
 num_test:
-  max: 100000
+  max: 70000

@@ -48,36 +48,39 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    rng_data, rng_train, rng_test = random.split(rng, 3)
-    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(
-        rng_data,
-        cfg.data.path,
-        cfg.data.valid_pct,
-        cfg.data.num_ctx.min,
-        cfg.data.num_ctx.max,
-        cfg.data.num_test.max,
-    )
-    lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps,
-        cfg.lr_peak,
-        cfg.lr_pct_warmup,
-    )
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(cfg.clip_max_norm),
-        optax.yogi(lr_schedule),
-    )
-    model = instantiate(cfg.model)
-    state = train(
-        rng_train,
-        model,
-        optimizer,
-        train_dataloader,
-        valid_dataloader,
-        cfg.train_num_steps,
-        cfg.valid_num_steps,
-        cfg.valid_interval,
-    )
-    log_test_results(rng_test, state, test_dataloader)
+    state = None
+    for _ in range(cfg.num_cycles):
+        rng_data, rng_train, rng_test, rng = random.split(rng, 4)
+        train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(
+            rng_data,
+            cfg.data.path,
+            cfg.data.valid_pct,
+            cfg.data.num_ctx.min,
+            cfg.data.num_ctx.max,
+            cfg.data.num_test.max,
+        )
+        lr_schedule = cosine_annealing_lr(
+            cfg.train_num_steps,
+            cfg.lr_peak,
+            cfg.lr_pct_warmup,
+        )
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(cfg.clip_max_norm),
+            optax.yogi(lr_schedule),
+        )
+        model = instantiate(cfg.model)
+        state = train(
+            rng_train,
+            model,
+            optimizer,
+            train_dataloader,
+            valid_dataloader,
+            cfg.train_num_steps,
+            cfg.valid_num_steps,
+            cfg.valid_interval,
+            state=state,
+        )
+    # log_test_results(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))

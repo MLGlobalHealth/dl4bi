@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import flax
 import flax.linen as nn
@@ -67,6 +67,7 @@ def train(
     valid_interval: int = 25000,
     log_loss_interval: int = 100,
     callbacks: list[Callback] = [],
+    state: Optional[TrainState] = None,
 ):
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
     batches = train_dataloader(rng_data)
@@ -84,9 +85,9 @@ def train(
     print(param_count)
     state = TrainState.create(
         apply_fn=model.apply,
-        params=params,
+        params=params if state is None else state.params,
+        kwargs=kwargs if state is None else state.kwargs,
         tx=optimizer,
-        kwargs=kwargs,
     )
     train_step = vanilla_train_step
     if isinstance(model, (NP, ANP)):
