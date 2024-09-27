@@ -199,7 +199,7 @@ def evaluate(
             nll = (nlls / valid_lens_test).mean()
             rmse = jnp.sqrt(jnp.square(f_test - f_mu).mean(where=mask_test))
             mae = jnp.abs(f_test - f_mu).mean(where=mask_test)
-            f_std_diag = vmap(jnp.diag)(f_std)  # get marginal f_std
+            f_std_diag = vmap(jnp.diag)(f_std)[..., None]  # get marginal f_std
             f_lower, f_upper = f_mu - z_score * f_std_diag, f_mu + z_score * f_std_diag
             cvg = ((f_test >= f_lower) & (f_test <= f_upper)).mean(where=mask_test)
         loss["NLL"] += [nll]
