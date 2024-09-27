@@ -78,7 +78,7 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
         cfg.valid_interval,
     )
-    log_test_results(rng_test, state, test_dataloader)
+    # log_test_results(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -102,7 +102,7 @@ def build_dataloaders(
     order to be comparable to `TrueTemp`.
     """
     df = pd.read_csv(path)
-    df, mu, sigma = preprocess(df)
+    df, mu, std = preprocess(df)
     s_obs, f_obs, s_unobs, f_unobs = split_observed(df)
     B, L, L_train = batch_size, s_obs.shape[0], int((1 - valid_pct) * s_obs.shape[0])
     permute_idx = random.choice(rng, L, (L,), replace=False)
@@ -153,7 +153,7 @@ def build_dataloaders(
             f_unobs[None, ...],
             jnp.array([s_unobs.shape[0]]),  # all test points are valid
             mu,  # used to rescale predictions
-            sigma,
+            std,
         )
 
     return train_dataloader, valid_dataloader, test_dataloader
@@ -163,9 +163,10 @@ def preprocess(df: pd.DataFrame):
     """De-mean locations and standardize masked temperature."""
     df.Lon -= df.Lon.mean()
     df.Lat -= df.Lat.mean()
-    mu, sigma = df.MaskTemp.mean(), df.MaskTemp.std()
-    df["MaskTempStd"] = (df.MaskTemp - mu) / sigma
-    return df, mu, sigma
+    # mu, std = df.MaskTemp.mean(), df.MaskTemp.std()
+    # df["MaskTempStd"] = (df.MaskTemp - mu) / std
+    df["MaskTempStd"], mu, std = df.MaskTemp, 0, 1
+    return df, mu, std
 
 
 def split_observed(df: pd.DataFrame):
