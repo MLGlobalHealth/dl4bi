@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import hydra
@@ -10,12 +11,12 @@ import matplotlib.pyplot as plt
 import optax
 import pandas as pd
 from jax import random
+from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
 
 import wandb
 from dl4bi.meta_regression.train_utils import (
-    Callback,
     TrainState,
     cfg_to_run_name,
     cosine_annealing_lr,
@@ -35,7 +36,6 @@ from dl4bi.meta_regression.train_utils import (
 # )
 
 
-# TODO(danj): implement "interval score", and CRPS
 @hydra.main("configs/heaton", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
@@ -48,8 +48,8 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    rng_train, rng_data = random.split(rng)
-    train_dataloader, valid_dataloader = build_dataloaders(
+    rng_data, rng_train, rng_test = random.split(rng, 3)
+    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(
         rng_data,
         cfg.data.path,
         cfg.data.valid_pct,
@@ -77,8 +77,8 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        callbacks=[Callback(log_plot, cfg.plot_interval)],
     )
+    log_plot(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -94,14 +94,16 @@ def build_dataloaders(
     num_test_max: int = 1000,
 ):
     """
-    The image consists of ~105k observed locations and ~45k unobserved locations.
-    Here we partition the 105k observed locations into train and validation datasets.
-    With each batch, we also pass all observed locations and unobserved locations
-    so that the plotting callback can use them periodically.
+    The image consists of ~105k observed locations and ~45k unobserved
+    locations. For training, we partition the 105k observed locations into train
+    and validation datasets. We also standardize the target, `MaskedTemp` ->
+    `MaskedTempStd`, because predicting a standarized value is easier for the
+    network. This means that at test time, the predictions must be rescaled in
+    order to be comparable to `TrueTemp`.
     """
     df = pd.read_csv(path)
-    df = preprocess(df)
-    s_obs, f_obs, s_unobs = split_observed(df)
+    df, mu, sigma = preprocess(df)
+    s_obs, f_obs, s_unobs, f_unobs = split_observed(df)
     B, L, L_train = batch_size, s_obs.shape[0], int((1 - valid_pct) * s_obs.shape[0])
     permute_idx = random.choice(rng, L, (L,), replace=False)
     s_obs, f_obs = s_obs[permute_idx, :], f_obs[permute_idx, :]
@@ -130,9 +132,6 @@ def build_dataloaders(
                 jnp.stack(s_tests),
                 jnp.stack(f_tests),
                 valid_lens_test,
-                s_obs,  # return full originals for log_plot callback
-                f_obs,
-                s_unobs,
             )
 
     def valid_dataloader(rng: jax.Array):
@@ -142,61 +141,117 @@ def build_dataloaders(
             jnp.array([L_train]),  # use all train locations
             s_valid[None, ...],
             f_valid[None, ...],
-            jnp.array([s_valid.shape[0]]),  # use all valid locations
+            jnp.array([s_valid.shape[0]]),  # all test points are valid
         )
 
-    return train_dataloader, valid_dataloader
+    def test_dataloader(rng: jax.Array):
+        yield (
+            s_obs[None, ...],  # add a dummy batch dim
+            f_obs[None, ...],
+            jnp.array([L]),  # use all observed locations
+            s_unobs[None, ...],
+            f_unobs[None, ...],
+            jnp.array([s_unobs.shape[0]]),  # all test points are valid
+            mu,  # used to rescale predictions
+            sigma,
+        )
+
+    return train_dataloader, valid_dataloader, test_dataloader
 
 
 def preprocess(df: pd.DataFrame):
-    """De-mean locations and standardize temperature."""
+    """De-mean locations and standardize masked temperature."""
     df.Lon -= df.Lon.mean()
     df.Lat -= df.Lat.mean()
-    df.Temp = (df.Temp - df.Temp.mean()) / df.Temp.std()
-    return df
+    mu, sigma = df.MaskTemp.mean(), df.MaskTemp.std()
+    df["MaskTempStd"] = (df.MaskTemp - mu) / sigma
+    return df, mu, sigma
 
 
 def split_observed(df: pd.DataFrame):
-    """Splits the df into observed and unobserved locations."""
-    obs_idx = df.Temp.notna().values
-    obs, unobs = df[obs_idx].values, df[~obs_idx].values
+    """Splits `col` into observed and unobserved locations.
+
+    .. warning::
+        `f_obs` is a standardized value, while `f_unobs`
+        is in its original scale. This means that before
+        comparing predictions based on `f_obs` to `f_unobs`,
+        the predictions must be rescaled.
+    """
+    obs_idx = df.MaskTempStd.notna().values
+    obs = df[obs_idx][["Lon", "Lat", "MaskTempStd"]].values
+    unobs = df[~obs_idx][["Lon", "Lat", "TrueTemp"]].values
     s_obs, f_obs = obs[:, :-1], obs[:, [-1]]
-    s_unobs = unobs[:, :-1]  # f_unobs is all nans
-    return s_obs, f_obs, s_unobs
+    s_unobs, f_unobs = unobs[:, :-1], unobs[:, [-1]]
+    return s_obs, f_obs, s_unobs, f_unobs
 
 
-def log_plot(step: int, rng_step: jax.Array, state: TrainState, batch: tuple):
+def log_results(rng: jax.Array, state: TrainState, test_dataloader: Callable):
     """Logs a plot of the entire image to wandb."""
-    *_, s_ctx, f_ctx, s_test = batch
-    rng_dropout, rng_extra = random.split(rng_step)
+    rng_data, rng = random.split(rng)
+    batch = next(test_dataloader(rng_data))
+    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, mu, sigma = batch
+    rng_dropout, rng_extra = random.split(rng)
     f_mu, f_std, *_ = state.apply_fn(
         {"params": state.params, **state.kwargs},
-        s_ctx[None, ...],  # add dummy batch dimension
-        f_ctx[None, ...],
-        s_test[None, ...],
-        valid_lens_ctx=None,
-        valid_lens_test=None,
+        s_ctx,
+        f_ctx,
+        s_test,
+        valid_lens_ctx,
+        valid_lens_test,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
-    f_mu = f_mu[0, ...]  # remove dummy batch dimension
+    # remove dummy batch dimension
+    s_ctx, f_ctx, s_test, f_test = (s_ctx[0], f_ctx[0], s_test[0], f_test[0])
+    f_mu, f_std = f_mu[0], f_std[0]
+    # rescale to original
+    f_ctx, f_mu, f_std = f_ctx * sigma + mu, f_mu * sigma + mu, f_std * sigma
+    log_metrics(f_test, f_mu, f_std)
     s = jnp.vstack([s_ctx, s_test])
-    f_pred = jnp.vstack([f_ctx, f_mu])
     f_task = jnp.vstack([f_ctx, jnp.full(f_mu.shape, jnp.nan)])
-    data = jnp.hstack([s, f_task, f_pred])
-    df = pd.DataFrame(data, columns=["Lon", "Lat", "Task", "Pred"])
+    f_pred = jnp.vstack([f_ctx, f_mu])
+    f_true = jnp.vstack([f_ctx, f_test])
+    data = jnp.hstack([s, f_task, f_pred, f_true])
+    df = pd.DataFrame(data, columns=["Lon", "Lat", "Task", "Pred", "True"])
+    log_plot(df)
+
+
+# TODO(danj): implement "interval score", and CRPS
+def log_metrics(
+    f_test: jax.Array,
+    f_mu: jax.Array,
+    f_std: jax.Array,
+    hdi_prob: float = 0.95,
+):
+    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
+    nll = -norm.logpdf(f_test, f_mu, f_std).mean()
+    rmse = jnp.sqrt(jnp.square(f_test - f_mu).mean())
+    mae = jnp.abs(f_test - f_mu).mean()
+    f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
+    cvg = ((f_test >= f_lower) & (f_test <= f_upper)).mean()
+    wandb.log(
+        {
+            "Test NLL (Original Scale)": nll,
+            "Test RSME (Original Scale)": rmse,
+            "Test MAE (Original Scale)": mae,
+            "Test Coverage (Original Scale)": cvg,
+        }
+    )
+
+
+def log_plot(df: pd.DataFrame):
     df = df.sort_values(["Lat", "Lon"], ascending=[False, True])
     _, axs = plt.subplots(1, 2, figsize=(10, 5))
     plot(df, "Task", axs[0])
     plot(df, "Pred", axs[1])
-    # TODO(danj): add plot(df, 'GroundTruth', axs[2])
-    path = f"/tmp/heaton_step_{step}.png"
+    plot(df, "True", axs[2])
+    path = "/tmp/heaton_benchmark.png"
     plt.tight_layout()
     plt.savefig(path, dpi=125)
     plt.clf()
-    wandb.log({f"Step {step}": wandb.Image(path)})
+    wandb.log({"Heaton Benchmark": wandb.Image(path)})
 
 
-def plot(df: pd.DataFrame, col="Temp", ax: Axes | None = None):
+def plot(df: pd.DataFrame, col: str, ax: Axes | None = None):
     """Plots a satellite image from a pandas DataFrame."""
     if not isinstance(ax, Axes):
         ax = plt.gca()

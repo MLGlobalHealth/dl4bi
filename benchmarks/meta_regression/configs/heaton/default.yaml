@@ -8,7 +8,6 @@ project: Heaton
 train_num_steps: 300
 valid_num_steps: null # exhaust valid_dataloader
 valid_interval: 100
-plot_interval: 300
 lr_peak: 1.0e-3
 lr_pct_warmup: 0.25
 clip_max_norm: 3.0
