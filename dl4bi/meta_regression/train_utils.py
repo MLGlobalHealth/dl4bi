@@ -185,7 +185,7 @@ def evaluate(
                 ).mean()  # average over [B, K]
                 f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
                 cvg = (
-                    ((f_test >= f_lower) & (f_test <= f_upper))
+                    ((f_test_boot >= f_lower) & (f_test_boot <= f_upper))
                     .reshape(B, K, L_test, -1)
                     .mean(axis=2, where=mask_test[:, None, ...])
                 ).mean()  # average over [B, K]

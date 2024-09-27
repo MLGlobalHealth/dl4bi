@@ -78,7 +78,7 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
         cfg.valid_interval,
     )
-    log_plot(rng_test, state, test_dataloader)
+    log_test_results(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -185,7 +185,7 @@ def split_observed(df: pd.DataFrame):
     return s_obs, f_obs, s_unobs, f_unobs
 
 
-def log_results(rng: jax.Array, state: TrainState, test_dataloader: Callable):
+def log_test_results(rng: jax.Array, state: TrainState, test_dataloader: Callable):
     """Logs a plot of the entire image to wandb."""
     rng_data, rng = random.split(rng)
     batch = next(test_dataloader(rng_data))
@@ -240,7 +240,7 @@ def log_metrics(
 
 def log_plot(df: pd.DataFrame):
     df = df.sort_values(["Lat", "Lon"], ascending=[False, True])
-    _, axs = plt.subplots(1, 2, figsize=(10, 5))
+    _, axs = plt.subplots(1, 3, figsize=(15, 5))
     plot(df, "Task", axs[0])
     plot(df, "Pred", axs[1])
     plot(df, "True", axs[2])
