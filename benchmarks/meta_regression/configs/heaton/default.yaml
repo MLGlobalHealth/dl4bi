@@ -1,12 +1,11 @@
 defaults:
   - _self_ # use default global values below
-  - data: sim
+  - data: mat # simulated training data
   - model: tnp_kr_fast_rff
 seed: 42
 wandb: True
 project: Heaton
 train_num_steps:
- - 3000
  - 3000
  - 3000
  - 1000

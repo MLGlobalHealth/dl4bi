@@ -80,7 +80,7 @@ def main(cfg: DictConfig):
             cfg.valid_interval,
             state=state,
         )
-    # log_test_results(rng_test, state, test_dataloader)
+        log_test_results(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
