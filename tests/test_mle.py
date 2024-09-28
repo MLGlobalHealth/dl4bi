@@ -5,7 +5,7 @@ from sps.kernels import rbf
 from sps.priors import Prior
 from sps.utils import build_grid
 
-from dl4bi.core import find_gp_mle
+from dl4bi.core import gp_mle_bfgs
 
 
 def test_find_gp_mle():
@@ -15,7 +15,7 @@ def test_find_gp_mle():
     gp = GP(rbf, var=Prior("fixed", {"value": var}), ls=Prior("fixed", {"value": ls}))
     f, *_ = gp.simulate(rng, s)
     f = f[0]  # get rid of batch dim
-    var_hat, ls_hat = find_gp_mle(s, f, rbf, jitter=1e-4)
+    var_hat, ls_hat = gp_mle_bfgs(s, f, rbf, jitter=1e-4)
     print(var, var_hat)
     print(ls, ls_hat)
     assert np.isclose(var, var_hat)

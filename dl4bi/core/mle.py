@@ -11,7 +11,7 @@ from jax.scipy.optimize import minimize
 from jax.typing import ArrayLike
 
 
-def find_gp_mle(
+def gp_mle_bfgs(
     s: ArrayLike,
     f: ArrayLike,
     kernel: Callable,
@@ -20,14 +20,14 @@ def find_gp_mle(
     jitter: float = 1e-6,
 ):
     return minimize(
-        _nll_fn_stable(s, f, kernel, jitter),
+        gp_nll_fn(s, f, kernel, jitter),
         jnp.array([initial_var, initial_ls]),
         method="BFGS",
         options=dict(gtol=1e-8),
     ).x  # (var, ls)
 
 
-def _nll_fn_stable(s: ArrayLike, f: ArrayLike, kernel: Callable, jitter: float):
+def gp_nll_fn(s: ArrayLike, f: ArrayLike, kernel: Callable, jitter: float):
     N, D = s.size // s.shape[-1], s.shape[-1]
     s = s.reshape(-1, D)
     f = f.reshape(-1)
@@ -46,16 +46,13 @@ def _nll_fn_stable(s: ArrayLike, f: ArrayLike, kernel: Callable, jitter: float):
     return nll
 
 
-def _nll_fn(s: ArrayLike, f: ArrayLike, kernel: Callable, jitter: float):
-    N, D = s.size // s.shape[-1], s.shape[-1]
-    s = s.reshape(-1, D)
-    f = f.reshape(-1)
-
-    def nll(theta):
-        var, ls = theta
-        K = kernel(s, s, var, ls) + jitter * jnp.eye(N)
-        return (
-            0.5 * jnp.log(det(K)) + 0.5 * f @ inv(K) @ f + 0.5 * N * jnp.log(2 * jnp.pi)
-        )
-
-    return nll
+def gp_mle_sgd(
+    s: ArrayLike,
+    f: ArrayLike,
+    kernel: Callable,
+    initial_var: float = 1.0,
+    initial_ls: float = 1.0,
+    jitter: float = 1e-6,
+    tol: float = 0.01,
+):
+    pass
