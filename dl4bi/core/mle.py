@@ -4,8 +4,10 @@ Based on reference implementation here: https://krasserm.github.io/2018/03/19/ga
 
 from collections.abc import Callable
 
+import jax
 import jax.numpy as jnp
-from jax.numpy.linalg import cholesky, det, inv
+import optax
+from jax.numpy.linalg import cholesky
 from jax.scipy.linalg import solve_triangular
 from jax.scipy.optimize import minimize
 from jax.typing import ArrayLike
@@ -19,31 +21,35 @@ def gp_mle_bfgs(
     initial_ls: float = 1.0,
     jitter: float = 1e-6,
 ):
+    def nll_fn(theta):
+        var, ls = theta
+        return gp_nll(s, f, kernel, var, ls, jitter)
+
     return minimize(
-        gp_nll_fn(s, f, kernel, jitter),
+        nll_fn,
         jnp.array([initial_var, initial_ls]),
         method="BFGS",
         options=dict(gtol=1e-8),
     ).x  # (var, ls)
 
 
-def gp_nll_fn(s: ArrayLike, f: ArrayLike, kernel: Callable, jitter: float):
+def gp_nll(
+    s: ArrayLike,
+    f: ArrayLike,
+    kernel: Callable,
+    var: float,
+    ls: float,
+    jitter: float,
+):
     N, D = s.size // s.shape[-1], s.shape[-1]
     s = s.reshape(-1, D)
     f = f.reshape(-1)
-
-    def nll(theta):
-        var, ls = theta
-        K = kernel(s, s, var, ls) + jitter * jnp.eye(N)
-        L = cholesky(K)
-        S1 = solve_triangular(L, f, lower=True)
-        S2 = solve_triangular(L.T, S1, lower=False)
-        # TODO(danj): ignore constant terms
-        return (
-            jnp.sum(jnp.log(jnp.diag(L))) + 0.5 * f @ S2 + 0.5 * N * jnp.log(2 * jnp.pi)
-        )
-
-    return nll
+    K = kernel(s, s, var, ls) + jitter * jnp.eye(N)
+    L = cholesky(K)
+    S1 = solve_triangular(L, f, lower=True)
+    S2 = solve_triangular(L.T, S1, lower=False)
+    # TODO(danj): ignore constant terms
+    return jnp.sum(jnp.log(jnp.diag(L))) + 0.5 * f @ S2 + 0.5 * N * jnp.log(2 * jnp.pi)
 
 
 def gp_mle_sgd(
@@ -53,6 +59,29 @@ def gp_mle_sgd(
     initial_var: float = 1.0,
     initial_ls: float = 1.0,
     jitter: float = 1e-6,
-    tol: float = 0.01,
+    loss_tol: float = 1e-4,
+    param_tol: float = 1e-4,
+    optimizer: optax.GradientTransformation = optax.yogi(learning_rate=1e-3),
 ):
-    pass
+    @jax.jit
+    def nll_fn(theta):
+        var, ls = theta
+        return gp_nll(s, f, kernel, var, ls, jitter)
+
+    theta = jnp.array([initial_var, initial_ls])
+    state = optimizer.init(theta)
+    nll = loss_delta = param_delta = jnp.float32("inf")
+    while loss_delta > loss_tol or param_delta > param_delta:
+        nll_prev = nll
+        nll, grad = jax.value_and_grad(nll_fn)(theta)
+        updates, state = optimizer.update(grad, state, theta)
+        theta_prev = theta
+        theta = optax.apply_updates(theta, updates)
+        loss_delta = jnp.abs(nll - nll_prev)
+        param_delta = jnp.max(jnp.abs(theta - theta_prev))
+        print(
+            f"NLL: {nll:0.3f}",
+            f"loss_delta: {loss_delta:0.3f}",
+            f"param_delta: {param_delta:0.3f}",
+        )
+    return theta  # (var, ls)
