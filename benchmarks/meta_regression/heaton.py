@@ -38,7 +38,7 @@ from dl4bi.meta_regression.train_utils import (
 # TODO(danj):
 # 1. Standardize Temps
 # 2. Use SGD find optimal lengthscale
-# 3. Pre-train on 90x150 images
+# 3. Pre-train on 90x150 images at different resolutions
 
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
