@@ -4,23 +4,27 @@ Based on reference implementation here: https://krasserm.github.io/2018/03/19/ga
 
 from collections.abc import Callable
 
-import numpy as np
+import jax.numpy as jnp
+from jax.numpy.linalg import cholesky, det, inv
+from jax.scipy.linalg import solve_triangular
+from jax.scipy.optimize import minimize
 from jax.typing import ArrayLike
-from numpy.linalg import cholesky, det, inv
-from scipy.linalg import solve_triangular
-from scipy.optimize import minimize
 
 
-def find_gp_mle(s: ArrayLike, f: ArrayLike, kernel: Callable, jitter: float = 1e-5):
-    res = minimize(
+def find_gp_mle(
+    s: ArrayLike,
+    f: ArrayLike,
+    kernel: Callable,
+    initial_var: float = 1.0,
+    initial_ls: float = 1.0,
+    jitter: float = 1e-6,
+):
+    return minimize(
         _nll_fn_stable(s, f, kernel, jitter),
-        [2.0, 2.0],
-        bounds=((1e-5, None), (1e-5, None)),
-        method="L-BFGS-B",
-        options=dict(ftol=0.01, gtol=1e-10),
-    )
-    print(res)
-    return res.x  # (ls, var)
+        jnp.array([initial_var, initial_ls]),
+        method="BFGS",
+        options=dict(gtol=1e-8),
+    ).x  # (var, ls)
 
 
 def _nll_fn_stable(s: ArrayLike, f: ArrayLike, kernel: Callable, jitter: float):
@@ -30,12 +34,14 @@ def _nll_fn_stable(s: ArrayLike, f: ArrayLike, kernel: Callable, jitter: float):
 
     def nll(theta):
         var, ls = theta
-        K = kernel(s, s, var, ls) + jitter * np.eye(N)
+        K = kernel(s, s, var, ls) + jitter * jnp.eye(N)
         L = cholesky(K)
         S1 = solve_triangular(L, f, lower=True)
         S2 = solve_triangular(L.T, S1, lower=False)
         # TODO(danj): ignore constant terms
-        return np.sum(np.log(np.diag(L))) + 0.5 * f @ S2 + 0.5 * N * np.log(2 * np.pi)
+        return (
+            jnp.sum(jnp.log(jnp.diag(L))) + 0.5 * f @ S2 + 0.5 * N * jnp.log(2 * jnp.pi)
+        )
 
     return nll
 
@@ -47,7 +53,9 @@ def _nll_fn(s: ArrayLike, f: ArrayLike, kernel: Callable, jitter: float):
 
     def nll(theta):
         var, ls = theta
-        K = kernel(s, s, var, ls) + jitter * np.eye(N)
-        return 0.5 * np.log(det(K)) + 0.5 * f @ inv(K) @ f + 0.5 * N * np.log(2 * np.pi)
+        K = kernel(s, s, var, ls) + jitter * jnp.eye(N)
+        return (
+            0.5 * jnp.log(det(K)) + 0.5 * f @ inv(K) @ f + 0.5 * N * jnp.log(2 * jnp.pi)
+        )
 
     return nll
