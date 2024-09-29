@@ -1,11 +1,11 @@
-name: 50x30
-s: # each image is ~1% the size of the original 300x500
+name: 30x50 # HxW, specified tensor dims format
+s: # each image i s ~1% the size of the original 300x500
+  - start: 1.5  # y = Lat
+    stop: -1.5
+    num: 30
   - start: -2.5 # x = Lon
     stop: 2.5
     num: 50
-  - start: -1.5  # y = Lat
-    stop: 1.5
-    num: 30
 num_ctx:
   min: 375 # 25%
   max: 1125 # 75%

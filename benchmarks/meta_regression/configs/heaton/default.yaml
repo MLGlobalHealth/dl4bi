@@ -2,7 +2,7 @@ defaults:
   - _self_ # use default global values below
   - model: tnp_kr_fast_rff
   - kernel: matern_1_2
-  - data: 50x30 # WxH
+  - data: 30x50
   - test: sim
 seed: 42
 wandb: True
@@ -10,6 +10,8 @@ project: Heaton
 train_num_steps: 100000
 valid_num_steps: null # exhaust valid_dataloader
 valid_interval: 1000
-lr_peak: 1.0e-3
+plot_interval: 1000
+log_loss_interval: 1000
+lr_peak: 2.0e-3
 lr_pct_warmup: 0.0
 clip_max_norm: 3.0

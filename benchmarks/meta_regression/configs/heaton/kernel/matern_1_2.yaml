@@ -11,7 +11,14 @@ kwargs:
   ls:
     cls: Prior
     kwargs:
-      dist: normal
+      dist: beta
       kwargs:
-        mu: 1.25
-        sigma: 0.25
+        a: 3.0
+        b: 7.0
+  # ls:
+  #   cls: Prior
+  #   kwargs:
+  #     dist: normal
+  #     kwargs:
+  #       mu: 1.25
+  #       sigma: 0.25

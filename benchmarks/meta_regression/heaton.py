@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 import hydra
@@ -17,10 +18,12 @@ from sps.utils import random_subgrid
 
 import wandb
 from dl4bi.meta_regression.train_utils import (
+    Callback,
     TrainState,
     cfg_to_run_name,
     cosine_annealing_lr,
     instantiate,
+    log_img_plots,
     save_ckpt,
     train,
 )
@@ -55,6 +58,8 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
+    H, W = cfg.data.s[0].num, cfg.data.s[1].num
+    callback = Callback(partial(log_img_plots, shape=(H, W, 1)), cfg.plot_interval)
     state = train(
         rng_train,
         model,
@@ -64,9 +69,9 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        # TODO(danj): log training img plots
+        callbacks=[callback],
     )
-    log_test_results(rng_test, state, test_dataloader)
+    # log_test_results(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -119,7 +124,14 @@ def build_dataloaders(
                 rng_valid, (B,), data.num_ctx.min, data.num_ctx.max
             )
             f_noisy = f + data.obs_noise * random.normal(rng_eps, f.shape)
-            yield s, f_noisy, valid_lens_ctx, s, f, valid_lens_test
+            yield (
+                s,
+                f_noisy,
+                valid_lens_ctx,
+                s,
+                f,
+                valid_lens_test,
+            )
 
     def valid_dataloader(rng: jax.Array):
         yield (
@@ -205,27 +217,44 @@ def log_metrics(
     )
 
 
-def log_plot(df: pd.DataFrame):
+def log_img_plots(
+    step: int,
+    rng_step: int,
+    state: TrainState,
+    batch: tuple,
+    shape: tuple[int, int, int],
+    num_plots: int = 16,
+):
+    pass
+
+
+def log_plot(df: pd.DataFrame, wandb_key: str = "Heaton Benchmark"):
     df = df.sort_values(["Lat", "Lon"], ascending=[False, True])
+    shape = (df.Lat.nunique(), df.Lon.nunique())
     _, axs = plt.subplots(1, 3, figsize=(15, 5))
-    plot(df, "Task", axs[0])
-    plot(df, "Pred", axs[1])
-    plot(df, "True", axs[2])
+    plot(df, "Task", axs[0], shape)
+    plot(df, "Pred", axs[1], shape)
+    plot(df, "True", axs[2], shape)
     path = "/tmp/heaton_benchmark.png"
     plt.tight_layout()
     plt.savefig(path, dpi=125)
     plt.clf()
-    wandb.log({"Heaton Benchmark": wandb.Image(path)})
+    wandb.log({wandb_key: wandb.Image(path)})
 
 
-def plot(df: pd.DataFrame, col: str, ax: Axes | None = None):
+def plot(
+    df: pd.DataFrame,
+    col: str,
+    ax: Axes | None = None,
+    shape: tuple[int, int] = (300, 500),
+):
     """Plots a satellite image from a pandas DataFrame."""
     if not isinstance(ax, Axes):
         ax = plt.gca()
     df = df.sort_values(["Lat", "Lon"], ascending=[False, True])
     cmap = mpl.colormaps.get_cmap("Spectral_r")
     cmap.set_bad("grey")
-    ax.imshow(df[col].values.reshape(300, 500), cmap=cmap, interpolation="none")
+    ax.imshow(df[col].values.reshape(shape), cmap=cmap, interpolation="none")
     ax.set_title(col)
     return plt.gcf()
 
