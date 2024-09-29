@@ -28,6 +28,10 @@ from dl4bi.meta_regression.train_utils import (
     train,
 )
 
+# TODO(danj):
+# 1. Add finetuning
+# 2. Explore model params
+
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
 def main(cfg: DictConfig):
