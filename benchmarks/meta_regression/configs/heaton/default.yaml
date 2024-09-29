@@ -7,11 +7,11 @@ defaults:
 seed: 42
 wandb: True
 project: Heaton
-train_num_steps: 20000
+train_num_steps: 10000
 finetune_num_steps: 5000
-valid_num_steps: null # exhaust valid_dataloader
+valid_num_steps: 100
 valid_interval: 1000
-plot_interval: 25000
+plot_interval: 20000
 log_loss_interval: 1000
 lr_peak: 3.0e-3
 lr_pct_warmup: 0.0

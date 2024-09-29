@@ -29,8 +29,9 @@ from dl4bi.meta_regression.train_utils import (
 )
 
 # TODO(danj):
-# 1. Add finetuning
-# 2. Explore model params
+# Coalesce finetine and validation?
+# For valid and finetine - choose a different partition each time
+# Explore model params
 
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
@@ -47,9 +48,7 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_data, rng_train, rng_finetune, rng_test, rng = random.split(rng, 5)
     dataloaders = build_dataloaders(rng_data, cfg.data, cfg.kernel, cfg.test)
-    train_dataloader, finetune_dataloader, valid_dataloader, test_dataloader = (
-        dataloaders
-    )
+    train_dataloader, valid_dataloader, test_dataloader = dataloaders
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -77,7 +76,7 @@ def main(cfg: DictConfig):
         rng_finetune,
         model,
         optax.yogi(1e-5),
-        finetune_dataloader,
+        valid_dataloader,
         valid_dataloader,
         cfg.finetune_num_steps,
         cfg.valid_num_steps,
@@ -108,22 +107,17 @@ def build_dataloaders(
     df["MaskTemp"] = (df.MaskTemp - mean) / std
     df["TrueTemp"] = (df.TrueTemp - mean) / std
     s_obs, f_obs, s_unobs, f_unobs = split_observed(df)
-    L_obs, L_valid_ctx = s_obs.shape[0], int((1 - test.valid_pct) * s_obs.shape[0])
-    L_unobs, L_valid_test = s_unobs.shape[0], L_obs - L_valid_ctx
-    L_train = jnp.prod(jnp.array([dim.num for dim in data.s]))
-    valid_permute_idx = random.choice(rng, L_obs, (L_obs,), replace=False)
-    s_obs, f_obs = s_obs[valid_permute_idx, :], f_obs[valid_permute_idx, :]
-    s_valid_ctx, f_valid_ctx = s_obs[:L_valid_ctx, :], f_obs[:L_valid_ctx, :]
-    s_valid_test, f_valid_test = s_obs[L_valid_ctx:, :], f_obs[L_valid_ctx:, :]
+    L_obs, L_unobs = s_obs.shape[0], s_unobs.shape[0]
+    L = jnp.prod(jnp.array([dim.num for dim in data.s]))
+    B, D = data.batch_size, len(data.s)
 
     def build_train_dataloader():
         """Generates batches of random subgrids."""
-        B, D = data.batch_size, len(data.s)
         gp = instantiate(kernel)
         # NOTE: these reflections assume the data is centered on the origin (0,)*D
         reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [-1, -1]])
         gp_batch_size = data.batch_size // 4  # account for reflections
-        valid_lens_test = jnp.repeat(L_train, B)  # all positions in test set
+        valid_lens_test = jnp.repeat(L, B)  # all positions in test set
 
         def gen_batch(rng: jax.Array):
             rng_s, rng_f, rng_valid, rng_permute, rng_eps = random.split(rng, 5)
@@ -132,7 +126,7 @@ def build_dataloaders(
             f = jnp.repeat(f, 4, axis=0)  # [B, L, D]
             s = jnp.stack([s] * 4) * reflections[:, None, :]  # [4, L, D]
             s = jnp.vstack([s] * gp_batch_size)  # [B, L, D]
-            permute_idx = random.choice(rng_permute, L_train, (L_train,), replace=False)
+            permute_idx = random.choice(rng_permute, L, (L,), replace=False)
             inv_permute_idx = jnp.argsort(permute_idx)
             s_perm = s[:, permute_idx, :]
             f_perm = f[:, permute_idx, :]
@@ -160,15 +154,14 @@ def build_dataloaders(
 
         return dataloader
 
-    def finetune_dataloader(rng: jax.Array):
-        B = data.batch_size
-        valid_lens_test = jnp.repeat(L_train, B)
+    def valid_dataloader(rng: jax.Array):
+        valid_lens_test = jnp.repeat(L, B)
         while True:
             rng_idx, rng_valid = random.split(rng)
             s_batch, f_batch = [], []
             for i in range(B):
                 rng_i, rng_idx = random.split(rng_idx)
-                idx = random.choice(rng_i, L_obs, (L_train,), replace=False)
+                idx = random.choice(rng_i, L_obs, (L,), replace=False)
                 s, f = s_obs[idx], f_obs[idx]
                 s_batch += [s]
                 f_batch += [f]
@@ -177,16 +170,6 @@ def build_dataloaders(
                 rng_valid, (B,), data.num_ctx.min, data.num_ctx.max
             )
             yield s, f, valid_lens_ctx, s, f, valid_lens_test
-
-    def valid_dataloader(rng: jax.Array):
-        yield (
-            s_valid_ctx[None, ...],  # add dummy batch dim
-            f_valid_ctx[None, ...],
-            jnp.array([L_valid_ctx]),
-            s_valid_test[None, ...],
-            f_valid_test[None, ...],
-            jnp.array([L_valid_test]),
-        )
 
     def test_dataloader(rng: jax.Array):
         yield (
@@ -200,7 +183,6 @@ def build_dataloaders(
 
     return (
         build_train_dataloader(),
-        finetune_dataloader,
         valid_dataloader,
         test_dataloader,
     )
