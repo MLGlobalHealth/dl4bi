@@ -4,12 +4,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 import flax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
@@ -820,11 +821,14 @@ def plot_img(
     task_pred = f_to_img_task(shape, f_mu)
     task_true = f_to_img_task(shape, f_test)
     fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-    axs[0].imshow(task)
+    cmap = mpl.colormaps.get_cmap("Spectral_r")
+    cmap.set_bad("grey")
+    # NOTE: cmap is ignored when images has RGB channels
+    axs[0].imshow(task, cmap=cmap, interpolation="none")
     axs[0].set_title("Task")
-    axs[1].imshow(task_pred)
+    axs[1].imshow(task_pred, cmap=cmap, interpolation="none")
     axs[1].set_title("Predicted")
-    axs[2].imshow(task_true)
+    axs[2].imshow(task_true, cmap=cmap, interpolation="none")
     axs[2].set_title("Ground Truth")
     plt.tight_layout()
     return plt.gcf()
@@ -837,21 +841,23 @@ def f_ctx_to_img_task(
 ):
     H, W, D = shape
     L, L_ctx = H * W, f_ctx.shape[0]
-    f_ctx = f_ctx / 2 + 0.5  # [-1, 1] -> [0, 1]
     task = jnp.pad(f_ctx, ((0, L - L_ctx), (0, 0)))  # [L_ctx, 1] -> [L, 1]
-    if D == 1:  # if black/white, convert to RGB
-        task = jnp.repeat(task, 3, axis=-1)  # [L, 1] -> [L, 3]
-    task = task.at[L_ctx:, 2].set(1.0)  # set non-context points to blue
+    if D == 1:  # single channel color
+        task = task.at[L_ctx:, 0].set(jnp.nan)  # will use cmap "bad" color
+    else:  # RGB
+        task = task / 2 + 0.5  # [-1, 1] -> [0, 1]
+        task = task.at[L_ctx:, :].set(jnp.array([0, 0, 1]))  # set to RGB blue
     task = task[inv_permute_idx, :]  # permute back to original ordering
-    return task.reshape(*shape[:-1], 3)  # reshape to [H, W, 3] image
+    return task.reshape(shape).squeeze()  # [H, W] or # [H, W, RGB=3]
 
 
 def f_to_img_task(shape: tuple[int, int, int], f: jax.Array):
-    task = f.reshape(shape)  # [H, W, D]
-    task = task / 2 + 0.5  # [-1, 1] -> [0, 1]
-    if shape[-1] == 1:  # if black/white, convert to RGB
-        task = jnp.repeat(task, 3, axis=-1)  # [H, W, 3]
-    return jnp.clip(task, 0, 1)  # to avoid matplotlib warnings
+    D = shape[-1]
+    task = f.reshape(shape).squeeze()  # [H, W] or [H, W, RGB=3]
+    if D > 1:
+        task = task / 2 + 0.5  # [-1, 1] -> [0, 1]
+        task = jnp.clip(task, 0, 1)  # avoid matplotlib warnings
+    return task
 
 
 def log_wandb_line(vec: jax.Array, title: str):

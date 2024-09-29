@@ -114,23 +114,29 @@ def build_dataloaders(
         while True:
             rng_s, rng_f, rng_valid, rng_permute, rng_eps, rng = random.split(rng, 6)
             s = random_subgrid(rng_s, data.s, data.min_axes_pct).reshape(-1, D)
-            permute_idx = random.choice(rng_permute, L, (L,), replace=False)
-            s = s[permute_idx, :]  # permute so valid lens mask different locations
             f, *_ = gp.simulate(rng_f, s, gp_batch_size)
-            f = jnp.repeat(f, 4, axis=0)  # [B = MiniB * 4, L, 1]
-            s = jnp.stack([s] * 4) * reflections[:, None, :]
-            s = jnp.vstack([s] * gp_batch_size)
+            f = jnp.repeat(f, 4, axis=0)  # [B, L, D]
+            s = jnp.stack([s] * 4) * reflections[:, None, :]  # [4, L, D]
+            s = jnp.vstack([s] * gp_batch_size)  # [B, L, D]
+            permute_idx = random.choice(rng_permute, L, (L,), replace=False)
+            inv_permute_idx = jnp.argsort(permute_idx)
+            s_perm = s[:, permute_idx, :]
+            f_perm = f[:, permute_idx, :]
             valid_lens_ctx = random.randint(
                 rng_valid, (B,), data.num_ctx.min, data.num_ctx.max
             )
-            f_noisy = f + data.obs_noise * random.normal(rng_eps, f.shape)
+            eps = random.normal(rng_eps, f_perm.shape)
+            f_perm_noisy = f_perm + data.obs_noise * eps
             yield (
-                s,
-                f_noisy,
+                s_perm,
+                f_perm_noisy,
                 valid_lens_ctx,
+                s_perm,
+                f_perm,
+                valid_lens_test,
                 s,
                 f,
-                valid_lens_test,
+                inv_permute_idx,
             )
 
     def valid_dataloader(rng: jax.Array):
@@ -215,17 +221,6 @@ def log_metrics(
             "Test Coverage": cvg,
         }
     )
-
-
-def log_img_plots(
-    step: int,
-    rng_step: int,
-    state: TrainState,
-    batch: tuple,
-    shape: tuple[int, int, int],
-    num_plots: int = 16,
-):
-    pass
 
 
 def log_plot(df: pd.DataFrame, wandb_key: str = "Heaton Benchmark"):

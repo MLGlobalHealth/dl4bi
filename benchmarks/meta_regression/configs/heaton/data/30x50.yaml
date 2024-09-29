@@ -1,7 +1,7 @@
 name: 30x50 # HxW, specified tensor dims format
 s: # each image i s ~1% the size of the original 300x500
-  - start: 1.5  # y = Lat
-    stop: -1.5
+  - start: -1.5  # y = Lat
+    stop: 1.5
     num: 30
   - start: -2.5 # x = Lon
     stop: 2.5
