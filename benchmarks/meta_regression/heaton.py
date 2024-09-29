@@ -29,8 +29,7 @@ from dl4bi.meta_regression.train_utils import (
 )
 
 # TODO(danj):
-# Coalesce finetine and validation?
-# For valid and finetine - choose a different partition each time
+# reduce overfitting
 # Explore model params
 
 
@@ -110,22 +109,23 @@ def build_dataloaders(
     L_obs, L_unobs = s_obs.shape[0], s_unobs.shape[0]
     L = jnp.prod(jnp.array([dim.num for dim in data.s]))
     B, D = data.batch_size, len(data.s)
+    # NOTE: these reflections assume the data is centered on the origin (0,)*D
+    reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [-1, -1]])
+    N_r = len(reflections)
+    mB = B // N_r
 
     def build_train_dataloader():
         """Generates batches of random subgrids."""
         gp = instantiate(kernel)
-        # NOTE: these reflections assume the data is centered on the origin (0,)*D
-        reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [-1, -1]])
-        gp_batch_size = data.batch_size // 4  # account for reflections
         valid_lens_test = jnp.repeat(L, B)  # all positions in test set
 
         def gen_batch(rng: jax.Array):
             rng_s, rng_f, rng_valid, rng_permute, rng_eps = random.split(rng, 5)
             s = random_subgrid(rng_s, data.s, data.min_axes_pct).reshape(-1, D)
-            f, *_ = gp.simulate(rng_f, s, gp_batch_size)
-            f = jnp.repeat(f, 4, axis=0)  # [B, L, D]
-            s = jnp.stack([s] * 4) * reflections[:, None, :]  # [4, L, D]
-            s = jnp.vstack([s] * gp_batch_size)  # [B, L, D]
+            f, *_ = gp.simulate(rng_f, s, mB)
+            f = jnp.repeat(f, N_r, axis=0)  # [B, L, D]
+            s = jnp.stack([s] * N_r) * reflections[:, None, :]  # [N_r, L, D]
+            s = jnp.vstack([s] * mB)  # [B, L, D]
             permute_idx = random.choice(rng_permute, L, (L,), replace=False)
             inv_permute_idx = jnp.argsort(permute_idx)
             s_perm = s[:, permute_idx, :]
@@ -157,15 +157,17 @@ def build_dataloaders(
     def valid_dataloader(rng: jax.Array):
         valid_lens_test = jnp.repeat(L, B)
         while True:
-            rng_idx, rng_valid = random.split(rng)
-            s_batch, f_batch = [], []
-            for i in range(B):
+            rng_idx, rng_valid, rng = random.split(rng, 3)
+            ss, fs = [], []
+            for i in range(mB):
                 rng_i, rng_idx = random.split(rng_idx)
                 idx = random.choice(rng_i, L_obs, (L,), replace=False)
                 s, f = s_obs[idx], f_obs[idx]
-                s_batch += [s]
-                f_batch += [f]
-            s, f = jnp.array(s_batch), jnp.array(f_batch)
+                s = jnp.stack([s] * N_r) * reflections[:, None, :]
+                f = jnp.stack([f] * N_r)
+                ss += [s]
+                fs += [f]
+            s, f = jnp.vstack(ss), jnp.vstack(fs)
             valid_lens_ctx = random.randint(
                 rng_valid, (B,), data.num_ctx.min, data.num_ctx.max
             )
