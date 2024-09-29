@@ -10,7 +10,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import optax
 import pandas as pd
-from jax import jit, random
+from jax import random
 from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
@@ -27,9 +27,6 @@ from dl4bi.meta_regression.train_utils import (
     save_ckpt,
     train,
 )
-
-# TODO(danj):
-# 1. Use SGD find optimal lengthscale
 
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)

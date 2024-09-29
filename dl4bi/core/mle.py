@@ -62,6 +62,7 @@ def gp_mle_sgd(
     loss_tol: float = 1e-4,
     param_tol: float = 1e-4,
     optimizer: optax.GradientTransformation = optax.yogi(learning_rate=1e-3),
+    verbose: bool = False,
 ):
     @jax.jit
     def nll_fn(theta):
@@ -79,9 +80,10 @@ def gp_mle_sgd(
         theta = optax.apply_updates(theta, updates)
         loss_delta = jnp.abs(nll - nll_prev)
         param_delta = jnp.max(jnp.abs(theta - theta_prev))
-        print(
-            f"NLL: {nll:0.3f}",
-            f"loss_delta: {loss_delta:0.3f}",
-            f"param_delta: {param_delta:0.3f}",
-        )
+        if verbose:
+            print(
+                f"NLL: {nll:0.3f}",
+                f"loss_delta: {loss_delta:0.3f}",
+                f"param_delta: {param_delta:0.3f}",
+            )
     return theta  # (var, ls)
