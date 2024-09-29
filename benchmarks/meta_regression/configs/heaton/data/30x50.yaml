@@ -10,5 +10,5 @@ num_ctx:
   min: 375 # 25%
   max: 1125 # 75%
 batch_size: 16
-obs_noise: 0.25
+obs_noise: 0.05
 min_axes_pct: 0.05 # used for subsampling grid
