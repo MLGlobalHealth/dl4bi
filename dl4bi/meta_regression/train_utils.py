@@ -21,7 +21,7 @@ from jax.scipy.stats import norm
 from omegaconf import DictConfig, OmegaConf
 from orbax.checkpoint import PyTreeCheckpointer
 from sps.gp import GP
-from sps.kernels import matern_3_2, periodic, rbf
+from sps.kernels import matern_1_2, matern_3_2, matern_5_2, periodic, rbf
 from sps.priors import Prior
 from sps.utils import build_grid
 from tqdm import tqdm
