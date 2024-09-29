@@ -91,7 +91,7 @@ def build_dataloaders(
     df.Lat -= df.Lat.mean()
     df.Lon -= df.Lon.mean()
     mean, std = df.MaskTemp.mean(), df.MaskTemp.std()
-    df["MaskedTemp"] = (df.MaskTemp - mean) / std
+    df["MaskTemp"] = (df.MaskTemp - mean) / std
     df["TrueTemp"] = (df.TrueTemp - mean) / std
     s_obs, f_obs, s_unobs, f_unobs = split_observed(df)
     L_obs, L_valid_ctx = s_obs.shape[0], int((1 - test.valid_pct) * s_obs.shape[0])
