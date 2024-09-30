@@ -107,11 +107,11 @@ def build_dataloaders(
     L_obs, L_unobs = s_obs.shape[0], s_unobs.shape[0]
     L_valid = int(test.valid_pct * L_obs)
     L_finetune = L_obs - L_valid
+    L_train = jnp.prod(jnp.array([dim.num for dim in data.s]))
     permute_idx = random.choice(rng, L_obs, (L_obs,), replace=False)
     s_obs, f_obs = s_obs[permute_idx], f_obs[permute_idx]
     s_valid, f_valid = s_obs[:L_valid], f_obs[:L_valid]
     s_finetune, f_finetune = s_obs[L_valid:], f_obs[L_valid:]
-    L = jnp.prod(jnp.array([dim.num for dim in data.s]))
     B, D = data.batch_size, len(data.s)
     # NOTE: these reflections assume the data is centered on the origin (0,)*D
     reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [-1, -1]])
@@ -121,7 +121,7 @@ def build_dataloaders(
     def build_train_dataloader():
         """Generates batches of random subgrids."""
         gp = instantiate(kernel)
-        valid_lens_test = jnp.repeat(L, B)  # all positions in test set
+        valid_lens_test = jnp.repeat(L_train, B)
 
         def gen_batch(rng: jax.Array):
             rng_s, rng_f, rng_valid, rng_permute, rng_eps = random.split(rng, 5)
@@ -130,7 +130,7 @@ def build_dataloaders(
             f = jnp.repeat(f, N_r, axis=0)  # [B, L, D]
             s = jnp.stack([s] * N_r) * reflections[:, None, :]  # [N_r, L, D]
             s = jnp.vstack([s] * mB)  # [B, L, D]
-            permute_idx = random.choice(rng_permute, L, (L,), replace=False)
+            permute_idx = random.choice(rng_permute, L_train, (L_train,), replace=False)
             inv_permute_idx = jnp.argsort(permute_idx)
             s_perm = s[:, permute_idx, :]
             f_perm = f[:, permute_idx, :]
@@ -159,13 +159,13 @@ def build_dataloaders(
         return dataloader
 
     def finetune_dataloader(rng: jax.Array):
-        valid_lens_test = jnp.repeat(L, B)
+        valid_lens_test = jnp.repeat(L_train, B)
         while True:
             rng_idx, rng_valid, rng = random.split(rng, 3)
             ss, fs = [], []
             for i in range(mB):
                 rng_i, rng_idx = random.split(rng_idx)
-                idx = random.choice(rng_i, L_obs, (L,), replace=False)
+                idx = random.choice(rng_i, L_finetune, (L_train,), replace=False)
                 s, f = s_finetune[idx], f_finetune[idx]
                 s = jnp.stack([s] * N_r) * reflections[:, None, :]
                 f = jnp.stack([f] * N_r)
