@@ -805,7 +805,7 @@ def log_img_plots(
             s = i * K
             f_mu_i = f_mu[s : s + K].mean(axis=0)  # TODO(danj): legitimate?
         fig = plot_img(i, shape, f_ctx_i, f_mu_i, f_test_full_i, inv_permute_idx)
-        paths += [f"/tmp/sample_{i}.png"]
+        paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
         plt.close(fig)

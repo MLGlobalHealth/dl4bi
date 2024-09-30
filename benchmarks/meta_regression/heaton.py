@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from collections.abc import Callable
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 
@@ -273,7 +274,7 @@ def log_plot(df: pd.DataFrame, wandb_key: str = "Heaton Benchmark"):
     plot(df, "Task", axs[0], shape)
     plot(df, "Pred", axs[1], shape)
     plot(df, "True", axs[2], shape)
-    path = "/tmp/heaton_benchmark.png"
+    path = f"/tmp/{datetime.now().isoformat()} heaton_benchmark.png"
     plt.tight_layout()
     plt.savefig(path, dpi=125)
     plt.clf()

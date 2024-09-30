@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
 import hydra
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-import wandb
 from jax import jit, random
 from jax.scipy import stats
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
+import wandb
 from dl4bi.core import mask_from_valid_lens
 from dl4bi.meta_regression.train_utils import (
     TrainState,
@@ -186,7 +187,7 @@ def log_regret_dist(regret: jax.Array, hdi_prob: float = 0.95):
     ax = plt.gca()
     ax.set_xlabel("Iteration")
     ax.set_ylabel("Minimum Simple Regret")
-    path = "/tmp/regret_dist.png"
+    path = f"/tmp/{datetime.now().isoformat()} regret_dist.png"
     plt.title("Regret Distribution")
     plt.savefig(path, dpi=125)
     plt.clf()
@@ -230,7 +231,9 @@ def log_worst_regret(
         global_min_idx = f_test_i.argmin()
         ax.plot(s_ctx_i[opt_min_idx], f_ctx_i[opt_min_idx], "ro", alpha=0.5)
         ax.plot(s_test_i[global_min_idx], f_test_i[global_min_idx], "go", alpha=0.5)
-        paths += [f"/tmp/worst_regret_{rank+1}_sample_{i}.png"]
+        paths += [
+            f"/tmp/{datetime.now().isoformat()} worst regret {rank+1} sample {i}.png"
+        ]
         fig.suptitle(f"Sample {i}, Regret {regret[i, -1]:.3f}")
         fig.savefig(paths[-1], dpi=125)
         plt.clf()

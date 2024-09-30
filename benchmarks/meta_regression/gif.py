@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -93,7 +94,7 @@ def save_samples_gif(
         else:
             ax.plot(s_test, f_mu_samples, color="darkorange")
         fig.suptitle("Samples")
-        paths += [f"/tmp/sample_{i}.png"]
+        paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
         save(fig, paths[-1])
     frames = jnp.stack([iio.imread(p) for p in paths], axis=0)
     iio.imwrite(path, frames)
