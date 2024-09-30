@@ -29,6 +29,10 @@ from dl4bi.meta_regression.train_utils import (
     train,
 )
 
+# TODO(danj):
+# implement block/blotch masked dataloader
+# implement localized attention
+
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
 def main(cfg: DictConfig):
