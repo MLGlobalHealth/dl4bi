@@ -28,10 +28,6 @@ from dl4bi.meta_regression.train_utils import (
     train,
 )
 
-# TODO(danj):
-# reduce overfitting
-# Explore model params
-
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
 def main(cfg: DictConfig):
@@ -47,7 +43,9 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_data, rng_train, rng_finetune, rng_test, rng = random.split(rng, 5)
     dataloaders = build_dataloaders(rng_data, cfg.data, cfg.kernel, cfg.test)
-    train_dataloader, valid_dataloader, test_dataloader = dataloaders
+    train_dataloader, finetune_dataloader, valid_dataloader, test_dataloader = (
+        dataloaders
+    )
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -75,7 +73,7 @@ def main(cfg: DictConfig):
         rng_finetune,
         model,
         optax.yogi(1e-5),
-        valid_dataloader,
+        finetune_dataloader,
         valid_dataloader,
         cfg.finetune_num_steps,
         cfg.valid_num_steps,
@@ -107,6 +105,12 @@ def build_dataloaders(
     df["TrueTemp"] = (df.TrueTemp - mean) / std
     s_obs, f_obs, s_unobs, f_unobs = split_observed(df)
     L_obs, L_unobs = s_obs.shape[0], s_unobs.shape[0]
+    L_valid = int(test.valid_pct * L_obs)
+    L_finetune = L_obs - L_valid
+    permute_idx = random.choice(rng, L_obs, (L_obs,), replace=False)
+    s_obs, f_obs = s_obs[permute_idx], f_obs[permute_idx]
+    s_valid, f_valid = s_obs[:L_valid], f_obs[:L_valid]
+    s_finetune, f_finetune = s_obs[L_valid:], f_obs[L_valid:]
     L = jnp.prod(jnp.array([dim.num for dim in data.s]))
     B, D = data.batch_size, len(data.s)
     # NOTE: these reflections assume the data is centered on the origin (0,)*D
@@ -154,7 +158,7 @@ def build_dataloaders(
 
         return dataloader
 
-    def valid_dataloader(rng: jax.Array):
+    def finetune_dataloader(rng: jax.Array):
         valid_lens_test = jnp.repeat(L, B)
         while True:
             rng_idx, rng_valid, rng = random.split(rng, 3)
@@ -162,7 +166,7 @@ def build_dataloaders(
             for i in range(mB):
                 rng_i, rng_idx = random.split(rng_idx)
                 idx = random.choice(rng_i, L_obs, (L,), replace=False)
-                s, f = s_obs[idx], f_obs[idx]
+                s, f = s_finetune[idx], f_finetune[idx]
                 s = jnp.stack([s] * N_r) * reflections[:, None, :]
                 f = jnp.stack([f] * N_r)
                 ss += [s]
@@ -172,6 +176,16 @@ def build_dataloaders(
                 rng_valid, (B,), data.num_ctx.min, data.num_ctx.max
             )
             yield s, f, valid_lens_ctx, s, f, valid_lens_test
+
+    def valid_dataloader(rng: jax.Array):
+        yield (
+            s_finetune[None, ...],
+            f_finetune[None, ...],
+            jnp.array([L_finetune]),
+            s_valid[None, ...],
+            f_valid[None, ...],
+            jnp.array([L_valid]),
+        )
 
     def test_dataloader(rng: jax.Array):
         yield (
@@ -185,6 +199,7 @@ def build_dataloaders(
 
     return (
         build_train_dataloader(),
+        finetune_dataloader,
         valid_dataloader,
         test_dataloader,
     )

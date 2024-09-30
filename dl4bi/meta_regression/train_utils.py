@@ -98,7 +98,8 @@ def train(
     elif isinstance(model, (TNPND,)):
         train_step = tril_cov_train_step
     losses = []
-    train_nll, valid_nll = float("inf"), float("inf")
+    train_nll, valid_nll, best_valid_nll = float("inf"), float("inf"), float("inf")
+    best_state = None
     pbar = tqdm(range(1, train_num_steps + 1), unit=" batches", dynamic_ncols=True)
     for i in pbar:
         batch = next(batches)
@@ -112,6 +113,9 @@ def train(
             rng_valid, rng_train = random.split(rng_train)
             metrics = evaluate(rng_valid, state, valid_dataloader, valid_num_steps)
             valid_nll = metrics["NLL"]
+            if valid_nll < best_valid_nll:
+                best_valid_nll = valid_nll
+                best_state = state
             wandb.log({f"Valid {m}": v for m, v in metrics.items()})
         for cbk in callbacks:
             if i % cbk.interval == 0:
@@ -119,7 +123,7 @@ def train(
         pbar.set_postfix(
             {"Train NLL": f"{train_nll:.3f}", "Valid NLL": f"{valid_nll:.3f}"}
         )
-    return state
+    return best_state
 
 
 def evaluate(

@@ -9,7 +9,7 @@ wandb: True
 project: Heaton
 train_num_steps: 15000
 finetune_num_steps: 5000
-valid_num_steps: 100
+valid_num_steps: 1
 valid_interval: 1000
 plot_interval: 10000
 log_loss_interval: 1000
