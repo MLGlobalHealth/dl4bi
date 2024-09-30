@@ -11,7 +11,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import optax
 import pandas as pd
-from jax import random
+from jax import random, vmap
 from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
@@ -30,7 +30,7 @@ from dl4bi.meta_regression.train_utils import (
 )
 
 # TODO(danj):
-# implement block/blotch masked dataloader
+# implement use previous sample as mask for next sample
 # implement localized attention
 
 
@@ -119,7 +119,7 @@ def build_dataloaders(
     s_finetune, f_finetune = s_obs[L_valid:], f_obs[L_valid:]
     B, D = data.batch_size, len(data.s)
     # NOTE: these reflections assume the data is centered on the origin (0,)*D
-    reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [-1, -1]])
+    reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [-1, -1]])[:, None, :]
     N_r = len(reflections)
     mB = B // N_r
 
@@ -129,31 +129,34 @@ def build_dataloaders(
         valid_lens_test = jnp.repeat(L_train, B)
 
         def gen_batch(rng: jax.Array):
-            rng_s, rng_f, rng_valid, rng_permute, rng_eps = random.split(rng, 5)
+            rng_s, rng_f, rng_eps = random.split(rng, 3)
             s = random_subgrid(rng_s, data.s, data.min_axes_pct).reshape(-1, D)
             f, *_ = gp.simulate(rng_f, s, mB)
-            f = jnp.repeat(f, N_r, axis=0)  # [B, L, D]
-            s = jnp.stack([s] * N_r) * reflections[:, None, :]  # [N_r, L, D]
-            s = jnp.vstack([s] * mB)  # [B, L, D]
-            permute_idx = random.choice(rng_permute, L_train, (L_train,), replace=False)
-            inv_permute_idx = jnp.argsort(permute_idx)
-            s_perm = s[:, permute_idx, :]
-            f_perm = f[:, permute_idx, :]
-            valid_lens_ctx = random.randint(
-                rng_valid, (B,), data.num_ctx.min, data.num_ctx.max
-            )
-            eps = random.normal(rng_eps, f_perm.shape)
-            f_perm_noisy = f_perm + data.obs_noise * eps
+            # use the next image in the batch to mask the previous
+            rot_idx = jnp.arange(1, mB + 1).at[-1].set(0)
+            f_mask = f[rot_idx] > 0.5  # P(X > 0.5) ~= 30% for N(0, 1)
+            f_masked = f.at[f_mask].set(jnp.nan)
+            sort_idx = vmap(jnp.argsort)(f_masked.squeeze())  # nans to end
+            inv_sort_idx = vmap(jnp.argsort)(sort_idx)
+            valid_lens_ctx = L_train - jnp.repeat(f_mask.sum(axis=(1, 2)), N_r)
+            # use reflections to convert minibatch to full batch
+            ss, fs = [], []
+            for i in range(mB):
+                ss += [jnp.stack([s[sort_idx[i], :]] * N_r) * reflections]
+                fs += [jnp.stack([f[i, sort_idx[i], :]] * N_r)]
+            s_ord, f_ord = jnp.vstack(ss), jnp.vstack(fs)
+            f_ord_noisy = f_ord + data.obs_noise * random.normal(rng_eps, f_ord.shape)
             return (
-                s_perm,
-                f_perm_noisy,
+                s_ord,
+                f_ord_noisy,
                 valid_lens_ctx,
-                s_perm,
-                f_perm,
+                s_ord,
+                f_ord,
                 valid_lens_test,
-                s,
-                f,
-                inv_permute_idx,
+                # also pass full, unmodified originals for plotting
+                jnp.vstack([jnp.array([jnp.stack([s] * N_r) * reflections]) * mB]),
+                jnp.repeat(f, N_r, axis=0),
+                inv_sort_idx,
             )
 
         def dataloader(rng: jax.Array):

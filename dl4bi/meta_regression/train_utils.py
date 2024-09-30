@@ -796,6 +796,9 @@ def log_img_plots(
     )
     paths = []
     for i in range(num_plots):
+        inv_idx_i = inv_permute_idx
+        if inv_permute_idx.ndim > 1:  # each row was permuted separately
+            inv_idx_i = inv_permute_idx[i]
         v = valid_lens_ctx[i]
         f_ctx_i = f_ctx[i, :v, :]
         f_mu_i = f_mu[i]
@@ -804,7 +807,7 @@ def log_img_plots(
             K = f_mu.shape[0] // f_test.shape[0]
             s = i * K
             f_mu_i = f_mu[s : s + K].mean(axis=0)  # TODO(danj): legitimate?
-        fig = plot_img(i, shape, f_ctx_i, f_mu_i, f_test_full_i, inv_permute_idx)
+        fig = plot_img(i, shape, f_ctx_i, f_mu_i, f_test_full_i, inv_idx_i)
         paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
