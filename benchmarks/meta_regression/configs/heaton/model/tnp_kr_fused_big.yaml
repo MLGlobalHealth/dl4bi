@@ -1,0 +1,48 @@
+cls: TNPKR
+kwargs:
+  embed_s_f:
+    cls: MLP
+    kwargs:
+      dims: [512, 128]
+      act_fn: gelu
+  dec:
+    cls: KRStack
+    kwargs:
+      num_blks: 6
+      num_reps: 1
+      blk:
+        cls: KRBlock
+        kwargs:
+          attn:
+            cls: MultiHeadAttention
+            kwargs:
+              attn:
+                cls: FusedAttention
+                kwargs:
+                  num_ortho_features: 512
+              proj_qs:
+                cls: MLP
+                kwargs:
+                  dims: [128]
+              proj_ks:
+                cls: MLP
+                kwargs:
+                  dims: [128]
+              proj_vs:
+                cls: MLP
+                kwargs:
+                  dims: [128]
+              proj_out:
+                cls: MLP
+                kwargs:
+                  dims: [128]
+          ffn:
+            cls: MLP
+            kwargs:
+              dims: [512, 128]
+              act_fn: gelu
+  head:
+    cls: MLP
+    kwargs:
+      dims: [128, 64, 2]
+      act_fn: gelu
