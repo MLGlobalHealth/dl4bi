@@ -31,7 +31,7 @@ from dl4bi.meta_regression.train_utils import (
 
 # TODO(danj):
 # create realistic masks for validation testing
-# implement localized attention
+# implement localized attention with bias
 
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
@@ -58,7 +58,8 @@ def main(cfg: DictConfig):
     )
     optimizer = optax.chain(
         optax.clip_by_global_norm(cfg.clip_max_norm),
-        optax.yogi(lr_schedule),
+        optax.yogi(cfg.lr_peak),
+        # optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
     H, W = cfg.data.s[0].num, cfg.data.s[1].num
@@ -74,6 +75,7 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         callbacks=[callback],
     )
+    # NOTE: uncomment to finetune
     # state = train(
     #     rng_finetune,
     #     model,
@@ -85,6 +87,7 @@ def main(cfg: DictConfig):
     #     cfg.valid_interval,
     #     state=state,
     # )
+    # NOTE: uncomment to test
     # log_test_results(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -134,7 +137,7 @@ def build_dataloaders(
             f, *_ = gp.simulate(rng_f, s, mB)  # f: [mB, L_train, 1]
             # use the next image in the batch to mask the previous
             rot_idx = jnp.arange(1, mB + 1).at[-1].set(0)
-            f_mask = f[rot_idx] > 0.5  # P(X > 0.5) ~= 30% for N(0, 1)
+            f_mask = f[rot_idx] > 1.0  # P(X > 1.0) ~= 15% for N(0, 1)
             f_masked = f.at[f_mask].set(jnp.nan)
             sort_idx = vmap(jnp.argsort)(f_masked.squeeze())  # nans to end
             inv_sort_idx = vmap(jnp.argsort)(sort_idx)

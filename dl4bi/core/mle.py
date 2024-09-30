@@ -19,15 +19,15 @@ def gp_mle_bfgs(
     kernel: Callable,
     initial_var: float = 1.0,
     initial_ls: float = 1.0,
-    jitter: float = 1e-6,
+    initial_eps: float = 0.05,
 ):
     def nll_fn(theta):
-        var, ls = theta
-        return gp_nll(s, f, kernel, var, ls, jitter)
+        var, ls, eps = theta
+        return gp_nll(s, f, kernel, var, ls, eps)
 
     return minimize(
         nll_fn,
-        jnp.array([initial_var, initial_ls]),
+        jnp.array([initial_var, initial_ls, initial_eps]),
         method="BFGS",
         options=dict(gtol=1e-8),
     ).x  # (var, ls)
@@ -39,12 +39,12 @@ def gp_nll(
     kernel: Callable,
     var: float,
     ls: float,
-    jitter: float,
+    eps: float,
 ):
     N, D = s.size // s.shape[-1], s.shape[-1]
     s = s.reshape(-1, D)
     f = f.reshape(-1)
-    K = kernel(s, s, var, ls) + jitter * jnp.eye(N)
+    K = kernel(s, s, var, ls) + eps * jnp.eye(N)
     L = cholesky(K)
     S1 = solve_triangular(L, f, lower=True)
     S2 = solve_triangular(L.T, S1, lower=False)
@@ -58,18 +58,18 @@ def gp_mle_sgd(
     kernel: Callable,
     initial_var: float = 1.0,
     initial_ls: float = 1.0,
-    jitter: float = 1e-6,
+    initial_eps: float = 0.05,
     loss_tol: float = 1e-4,
-    param_tol: float = 1e-4,
+    param_tol: float = 1e-5,
     optimizer: optax.GradientTransformation = optax.yogi(learning_rate=1e-3),
     verbose: bool = False,
 ):
     @jax.jit
     def nll_fn(theta):
-        var, ls = theta
-        return gp_nll(s, f, kernel, var, ls, jitter)
+        var, ls, eps = theta
+        return gp_nll(s, f, kernel, var, ls, eps)
 
-    theta = jnp.array([initial_var, initial_ls])
+    theta = jnp.array([initial_var, initial_ls, initial_eps])
     state = optimizer.init(theta)
     nll = loss_delta = param_delta = jnp.float32("inf")
     while loss_delta > loss_tol or param_delta > param_delta:
@@ -86,4 +86,4 @@ def gp_mle_sgd(
                 f"loss_delta: {loss_delta:0.3f}",
                 f"param_delta: {param_delta:0.3f}",
             )
-    return theta  # (var, ls)
+    return theta  # (var, ls, eps)

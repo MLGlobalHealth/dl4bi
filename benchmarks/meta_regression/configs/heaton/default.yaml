@@ -13,6 +13,6 @@ valid_num_steps: 1
 valid_interval: 1000
 plot_interval: 5000
 log_loss_interval: 1000
-lr_peak: 1.0e-3
+lr_peak: 1.0e-4
 lr_pct_warmup: 0.1
-clip_max_norm: 3.0
+clip_max_norm: 1.0
