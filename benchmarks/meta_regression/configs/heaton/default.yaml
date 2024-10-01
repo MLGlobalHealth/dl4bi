@@ -12,6 +12,7 @@ valid_num_steps: 1000
 valid_interval: 1000
 plot_interval: 1000
 lr_peak: 2.0e-4
+lr_finetune: 1.0e-4
 lr_pct_warmup: 0.0
 clip_max_norm: 1.0
 monitor_metric: RMSE

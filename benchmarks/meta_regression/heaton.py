@@ -25,6 +25,7 @@ from dl4bi.meta_regression.train_utils import (
     cosine_annealing_lr,
     evaluate,
     instantiate,
+    load_ckpt,
     log_img_plots,
     save_ckpt,
     train,
@@ -61,6 +62,11 @@ def main(cfg: DictConfig):
     model = instantiate(cfg.model)
     H, W = cfg.data.s[0].num, cfg.data.s[1].num
     callback = Callback(partial(log_img_plots, shape=(H, W, 1)), cfg.plot_interval)
+    state = None
+    finetune_path = cfg.get("finetune", None)
+    if finetune_path:
+        state, _ = load_ckpt(Path(finetune_path))
+        optimizer = optax.yogi(cfg.lr_finetune)
     state = train(
         rng_train,
         model,
@@ -73,6 +79,7 @@ def main(cfg: DictConfig):
         callbacks=[callback],
         monitor_metric=cfg.monitor_metric,
         early_stop_patience=cfg.early_stop_patience,
+        state=state,
     )
     # NOTE: uncomment to run actual test
     # log_test_results(rng_test, state, test_dataloader)
