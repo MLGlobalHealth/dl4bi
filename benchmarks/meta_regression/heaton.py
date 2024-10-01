@@ -50,7 +50,7 @@ def main(cfg: DictConfig):
     rng_data, rng_train, rng_test, rng = random.split(rng, 4)
     dataloaders = build_dataloaders(rng_data, cfg.data, cfg.kernel, cfg.test)
     train_dataloader, valid_dataloader, test_dataloader = dataloaders
-    num_decay_steps = int(cfg.lr_pct_decay * cfg.num_train_steps)
+    num_decay_steps = int(cfg.lr_pct_decay * cfg.train_num_steps)
     lr_schedule = cosine_decay_schedule(cfg.lr_peak, num_decay_steps, cfg.lr_alpha)
     optimizer = optax.chain(
         optax.clip_by_global_norm(cfg.clip_max_norm),
