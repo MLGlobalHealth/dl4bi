@@ -124,7 +124,7 @@ def train(
                 patience = 0
                 best_metric = metric
                 best_state = state
-            if patience > early_stop_patience:
+            if patience >= early_stop_patience:
                 return best_state
         for cbk in callbacks:
             if i % cbk.interval == 0:
