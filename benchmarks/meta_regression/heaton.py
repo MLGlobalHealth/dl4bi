@@ -22,16 +22,14 @@ from dl4bi.meta_regression.train_utils import (
     Callback,
     TrainState,
     cfg_to_run_name,
-    cosine_annealing_lr,
+    evaluate,
     instantiate,
     log_img_plots,
     save_ckpt,
     train,
 )
 
-# TODO(danj):
-# create realistic masks for validation testing
-# implement localized attention with bias
+# TODO(danj): attention bias that privilges local information
 
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
@@ -46,20 +44,12 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    rng_data, rng_train, rng_finetune, rng_test, rng = random.split(rng, 5)
+    rng_data, rng_train, rng_test, rng = random.split(rng, 4)
     dataloaders = build_dataloaders(rng_data, cfg.data, cfg.kernel, cfg.test)
-    train_dataloader, finetune_dataloader, valid_dataloader, test_dataloader = (
-        dataloaders
-    )
-    lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps,
-        cfg.lr_peak,
-        cfg.lr_pct_warmup,
-    )
+    train_dataloader, valid_dataloader, test_dataloader = dataloaders
     optimizer = optax.chain(
         optax.clip_by_global_norm(cfg.clip_max_norm),
         optax.yogi(cfg.lr_peak),
-        # optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
     H, W = cfg.data.s[0].num, cfg.data.s[1].num
@@ -74,22 +64,13 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
         cfg.valid_interval,
         callbacks=[callback],
+        monitor_metric=cfg.monitor_metric,
         early_stop_patience=cfg.early_stop_patience,
     )
-    # NOTE: uncomment to finetune
-    # state = train(
-    #     rng_finetune,
-    #     model,
-    #     optax.yogi(1e-5),
-    #     finetune_dataloader,
-    #     valid_dataloader,
-    #     cfg.finetune_num_steps,
-    #     cfg.valid_num_steps,
-    #     cfg.valid_interval,
-    #     state=state,
-    # )
-    # NOTE: uncomment to test
+    # NOTE: uncomment to run actual test
     # log_test_results(rng_test, state, test_dataloader)
+    metrics = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
+    wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -114,13 +95,9 @@ def build_dataloaders(
     df["TrueTemp"] = (df.TrueTemp - mean) / std
     s_obs, f_obs, s_unobs, f_unobs = split_observed(df)
     L_obs, L_unobs = s_obs.shape[0], s_unobs.shape[0]
-    L_valid = int(test.valid_pct * L_obs)
-    L_finetune = L_obs - L_valid
     L_train = jnp.prod(jnp.array([dim.num for dim in data.s]))
     permute_idx = random.choice(rng, L_obs, (L_obs,), replace=False)
     s_obs, f_obs = s_obs[permute_idx], f_obs[permute_idx]
-    s_valid, f_valid = s_obs[:L_valid], f_obs[:L_valid]
-    s_finetune, f_finetune = s_obs[L_valid:], f_obs[L_valid:]
     B, D = data.batch_size, len(data.s)
     # NOTE: these reflections assume the data is centered on the origin (0,)*D
     reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [-1, -1]])[:, None, :]
@@ -170,16 +147,16 @@ def build_dataloaders(
 
         return dataloader
 
-    def finetune_dataloader(rng: jax.Array):
+    def valid_dataloader(rng: jax.Array):
         valid_lens_test = jnp.repeat(L_train, B)
         while True:
             rng_idx, rng_valid, rng = random.split(rng, 3)
             ss, fs = [], []
             for i in range(mB):
                 rng_i, rng_idx = random.split(rng_idx)
-                idx = random.choice(rng_i, L_finetune, (L_train,), replace=False)
-                s, f = s_finetune[idx], f_finetune[idx]
-                s = jnp.stack([s] * N_r) * reflections[:, None, :]
+                idx = random.choice(rng_i, L_obs, (L_train,), replace=False)
+                s, f = s_obs[idx], f_obs[idx]
+                s = jnp.stack([s] * N_r) * reflections
                 f = jnp.stack([f] * N_r)
                 ss += [s]
                 fs += [f]
@@ -188,16 +165,6 @@ def build_dataloaders(
                 rng_valid, (B,), data.num_ctx.min, data.num_ctx.max
             )
             yield s, f, valid_lens_ctx, s, f, valid_lens_test
-
-    def valid_dataloader(rng: jax.Array):
-        yield (
-            s_finetune[None, ...],
-            f_finetune[None, ...],
-            jnp.array([L_finetune]),
-            s_valid[None, ...],
-            f_valid[None, ...],
-            jnp.array([L_valid]),
-        )
 
     def test_dataloader(rng: jax.Array):
         yield (
@@ -211,7 +178,6 @@ def build_dataloaders(
 
     return (
         build_train_dataloader(),
-        finetune_dataloader,
         valid_dataloader,
         test_dataloader,
     )

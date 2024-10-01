@@ -68,6 +68,7 @@ def train(
     valid_interval: int = 25000,
     log_loss_interval: int = 100,
     callbacks: list[Callback] = [],
+    monitor_metric: str = "NLL",
     early_stop_patience: Optional[int] = None,
     state: Optional[TrainState] = None,
 ):
@@ -102,7 +103,7 @@ def train(
     patience = 0
     best_state = state
     early_stop_patience = early_stop_patience or train_num_steps
-    train_nll, valid_nll, best_valid_nll = float("inf"), float("inf"), float("inf")
+    train_nll, valid_nll, best_metric = float("inf"), float("inf"), float("inf")
     pbar = tqdm(range(1, train_num_steps + 1), unit=" batches", dynamic_ncols=True)
     for i in pbar:
         batch = next(batches)
@@ -115,15 +116,14 @@ def train(
         if i % valid_interval == 0:
             rng_valid, rng_train = random.split(rng_train)
             metrics = evaluate(rng_valid, state, valid_dataloader, valid_num_steps)
-            prev_valid_nll = valid_nll
             valid_nll = metrics["NLL"]
-            if valid_nll < best_valid_nll:
-                best_valid_nll = valid_nll
-                best_state = state
+            metric = metrics[monitor_metric]
             wandb.log({f"Valid {m}": v for m, v in metrics.items()})
             patience += 1
-            if valid_nll < prev_valid_nll:
+            if metric < best_metric:
                 patience = 0
+                best_metric = metric
+                best_state = state
             if patience > early_stop_patience:
                 return best_state
         for cbk in callbacks:

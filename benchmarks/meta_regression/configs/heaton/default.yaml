@@ -8,12 +8,12 @@ seed: 42
 wandb: True
 project: Heaton
 train_num_steps: 25000
-finetune_num_steps: 5000
-valid_num_steps: 1
+valid_num_steps: 1000
 valid_interval: 1000
 plot_interval: 1000
 log_loss_interval: 1000
-early_stop_patience: 3
+early_stop_patience: 5
 lr_peak: 1.0e-3
-lr_pct_warmup: 0.1
 clip_max_norm: 1.0
+monitor_metric: RMSE
+early_stop_patience: 5
