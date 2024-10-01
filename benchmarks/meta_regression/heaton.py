@@ -22,6 +22,7 @@ from dl4bi.meta_regression.train_utils import (
     Callback,
     TrainState,
     cfg_to_run_name,
+    cosine_annealing_lr,
     evaluate,
     instantiate,
     log_img_plots,
@@ -47,9 +48,14 @@ def main(cfg: DictConfig):
     rng_data, rng_train, rng_test, rng = random.split(rng, 4)
     dataloaders = build_dataloaders(rng_data, cfg.data, cfg.kernel, cfg.test)
     train_dataloader, valid_dataloader, test_dataloader = dataloaders
+    lr_schedule = cosine_annealing_lr(
+        cfg.train_num_steps,
+        cfg.lr_peak,
+        cfg.lr_pct_warmup,
+    )
     optimizer = optax.chain(
         optax.clip_by_global_norm(cfg.clip_max_norm),
-        optax.yogi(cfg.lr_peak),
+        optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
     H, W = cfg.data.s[0].num, cfg.data.s[1].num
