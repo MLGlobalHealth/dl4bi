@@ -81,13 +81,13 @@ def main(cfg: DictConfig):
         early_stop_patience=cfg.early_stop_patience,
         state=state,
     )
-    # NOTE: uncomment to run actual test
-    log_test_results(rng_test, state, test_dataloader)
     metrics = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
+    # NOTE: uncomment to run actual test
+    # log_test_results(rng_test, state, test_dataloader)
 
 
 def build_dataloaders(
