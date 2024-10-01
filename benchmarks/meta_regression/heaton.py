@@ -11,8 +11,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import optax
 import pandas as pd
-from jax import jit
-from jax import random, vmap
+from jax import jit, random, vmap
 from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
@@ -31,6 +30,7 @@ from dl4bi.meta_regression.train_utils import (
     train,
 )
 
+# TODO(danj): figure out what is causing huge spike in loss
 # TODO(danj): attention bias that privilges local information
 
 
