@@ -2,6 +2,7 @@
 import argparse
 import sys
 
+import numpy as np
 import pandas as pd
 
 # NOTE: first download the results you care about from wandb,
@@ -16,22 +17,14 @@ import pandas as pd
 
 def main(args):
     df = pd.read_csv(args.path)
-    if "loss" in args.col:  # all losses in this project are NLL
-        df["NLL"] = df[args.col]
-        args.col = "NLL"
-    funcs = ["mean", "std"]
-    x = df[[*args.group_by, args.col]].groupby(args.group_by).agg(funcs)
-    x.columns = funcs
-    x = x.apply(lambda r: f"${r['mean']:.2f}\\pm{r['std']:.2f}$", axis=1)
+    func = lambda x: f"${np.mean(x):.2f}\\pm{np.std(x):0.2f}$"
+    x = df[[*args.group_by, *args.metrics]].groupby(args.group_by).agg(func)
     x = x.reset_index()
-    colnames = list(x.columns)
-    colnames[-1] = args.col
-    x.columns = colnames
     if args.pivot:
-        rows = list(set(x.columns) - set([args.pivot, args.col]))
-        x = x.pivot(index=rows, columns=args.pivot, values=args.col)
+        index = args.group_by
+        index.remove(args.pivot)
+        x = x.pivot(index=index, columns=args.pivot, values=args.metrics)
         x = x.reset_index()
-    x.columns = [c.title().replace("_", " ") for c in x.columns]
     x_tex = x.to_latex(
         index=False,
         caption=args.name,
@@ -49,23 +42,24 @@ def parse_args(argv):
     )
     parser.add_argument("path", help="Path to csv.")
     parser.add_argument(
-        "-c",
-        "--col",
-        default="test_loss",
-        help="Column to apply funcs.",
+        "-m",
+        "--metrics",
+        nargs="+",
+        default=["Test NLL", "Test Coverage", "Test RMSE", "Test MAE", "Runtime"],
+        help="Metric columns to apply mean/std to.",
     )
     parser.add_argument(
         "-g",
         "--group_by",
         nargs="+",
-        default=["Name"],
+        default=["Name", "kernel.kwargs.kernel.func"],
         help="Columns to group by.",
     )
     parser.add_argument(
         "-p",
         "--pivot",
         nargs="?",
-        default=None,
+        default="kernel.kwargs.kernel.func",
         help="Pivot to column headers.",
     )
     parser.add_argument(
