@@ -11,7 +11,7 @@ from omegaconf import DictConfig
 from shapely import MultiPolygon, Point, unary_union
 from shapely.affinity import scale, translate
 
-MAPS_DATA_PATH = "benchmarks/uk_disease_spread/maps/{map_name}/{data_type}"
+MAPS_DATA_PATH = "benchmarks/uk_disease_distribution/maps/{map_name}/{data_type}"
 MAP_REMOTE_PATH = {
     "England": "https://drive.usercontent.google.com/download?id=1NW0fkE5mWjAZDwiz7oWxTQt97JYajlK5&export=download&confirm=t"
 }
@@ -22,15 +22,15 @@ def download_and_extract_map(map_name, raw_path):
         if not os.path.exists(os.path.dirname(raw_path)):
             os.makedirs(os.path.dirname(raw_path))
         zip_url = MAP_REMOTE_PATH[map_name]
-        zip_path = f"benchmarks/uk_disease_spread/maps/{map_name}.zip"
+        zip_path = f"benchmarks/uk_disease_distribution/maps/{map_name}.zip"
         print(f"Downloading {map_name} from {zip_url}...")
 
         request.urlretrieve(zip_url, zip_path)
 
         print(f"Unzipping {zip_path}...")
         with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(f"benchmarks/uk_disease_spread/maps/{map_name}")
-        print("Unzipped to benchmarks/uk_disease_spread/maps/")
+            zip_ref.extractall(f"benchmarks/uk_disease_distribution/maps/{map_name}")
+        print("Unzipped to benchmarks/uk_disease_distribution/maps/")
 
         os.remove(zip_path)
         print(f"Deleted {zip_path}")
