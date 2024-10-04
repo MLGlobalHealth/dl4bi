@@ -1,0 +1,15 @@
+defaults:
+  - _self_ # use default global values below
+  - data: England
+  - kernel: rbf
+  - model: tnp_kr_fast
+seed: 42
+wandb: True
+project: UK_disease_spread
+train_num_steps: 1000 #100000
+valid_num_steps: 500 #5000
+valid_interval: 500 #25000
+plot_interval: 1000 #100000
+lr_peak: 1.0e-3
+lr_pct_warmup: 0.01
+clip_max_norm: 3.0

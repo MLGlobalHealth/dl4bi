@@ -1,0 +1,8 @@
+name: England
+num_ctx:
+  min: 10
+  max: 32
+sampling_grid:
+  grid_densities: [1000, 800, 1200]
+batch_size: 16
+obs_noise: 0.1

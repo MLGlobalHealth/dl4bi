@@ -1,0 +1,16 @@
+cls: GP
+kwargs: 
+  kernel:
+    func: rbf
+  var:
+    cls: Prior
+    kwargs:
+      dist: fixed
+      kwargs:
+        value: 1.0
+  ls:
+    cls: Prior
+    kwargs:
+      dist: fixed
+      kwargs:
+        value: 0.2
