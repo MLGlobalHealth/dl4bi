@@ -49,6 +49,43 @@ class TransformerEncoderBlock(nn.Module):
         return x_3 + drop(x_5), attn
 
 
+class PostNormTransformerEncoderBlock(nn.Module):
+    """A single encoder block from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
+
+    This formulation uses the original post-normalization. This is only included
+    for models originally constructed with this block, e.g. TNP-{D,ND,A}.
+
+    Args:
+        attn: An attention module.
+        norm: A normalization module.
+        ffn: A feedforward network module.
+        p_dropout: Dropout rate for residual connections.
+
+    Returns:
+        Input transformed by a single self-attention encoder block.
+    """
+
+    attn: nn.Module = MultiHeadAttention()
+    norm: nn.Module = nn.LayerNorm()
+    ffn: nn.Module = MLP([128, 64], nn.relu)
+    p_dropout: float = 0.0
+
+    @nn.compact
+    def __call__(
+        self,
+        x: jax.Array,
+        valid_lens: Optional[jax.Array] = None,
+        training: bool = False,
+        **kwargs,
+    ):
+        drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        x, attn = self.attn(x, x, x, valid_lens, training, **kwargs)
+        x = x + drop(self.norm(x))
+        x = self.ffn(x)
+        x = x + drop(self.norm.copy()(x))
+        return x, attn
+
+
 class TransformerEncoder(nn.Module):
     """A transformer encoder inspired by ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 

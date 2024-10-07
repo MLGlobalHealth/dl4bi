@@ -10,7 +10,7 @@ kwargs:
     kwargs:
       num_blks: 6
       blk:
-        cls: TransformerEncoderBlock
+        cls: PostNormTransformerEncoderBlock
         kwargs:
           attn:
             cls: MultiHeadAttention
@@ -29,7 +29,7 @@ kwargs:
     kwargs:
       num_blks: 2
       blk:
-        cls: TransformerEncoderBlock
+        cls: PostNormTransformerEncoderBlock
         kwargs:
           attn:
             cls: MultiHeadAttention
