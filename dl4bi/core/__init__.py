@@ -47,6 +47,7 @@ from .mlp import MLP, MLPMixer, MLPMixerBlock
 from .transformer import (
     KRBlock,
     KRStack,
+    PostNormTransformerEncoderBlock,
     TransformerDecoder,
     TransformerDecoderBlock,
     TransformerEncoder,
