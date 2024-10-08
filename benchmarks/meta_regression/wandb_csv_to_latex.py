@@ -17,7 +17,7 @@ import pandas as pd
 
 def main(args):
     df = pd.read_csv(args.path)
-    func = lambda x: f"${np.mean(x):.2f}\\pm{np.std(x):0.2f}$"
+    func = lambda x: f"${np.mean(x):.3f}\\pm{np.std(x):0.3f}$"
     x = df[[*args.group_by, *args.metrics]].groupby(args.group_by).agg(func)
     x = x.reset_index()
     if args.pivot:
@@ -29,7 +29,7 @@ def main(args):
         index=False,
         caption=args.name,
         label=args.name.lower().replace(" ", "-"),
-        float_format="{:0.2f}".format,
+        float_format="{:0.4f}".format,
         column_format="l" + "r" * (len(x.columns) - 1),
     )
     print(x_tex)
