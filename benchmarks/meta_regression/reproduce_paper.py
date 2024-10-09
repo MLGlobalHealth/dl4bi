@@ -92,14 +92,13 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         overrides,
         "TNP-KR - CelebA",
     )
-
     img_benchmark(
         seeds,
         "configs/cifar_10",
         models_2d,
         cifar_10_main,
         overrides,
-        "TNP-KR - Cifar_10",
+        "TNP-KR - Cifar 10",
     )
 
 
