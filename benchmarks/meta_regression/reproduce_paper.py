@@ -14,6 +14,7 @@ from collections.abc import Callable
 import jax
 from bayes_opt import main as bayes_opt_main
 from celeba import main as celeba_main
+from cifar_10 import main as cifar_10_main
 from gp import main as gp_main
 from hydra import compose, initialize
 from jax import random
@@ -90,6 +91,15 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         celeba_main,
         overrides,
         "TNP-KR - CelebA",
+    )
+
+    img_benchmark(
+        seeds,
+        "configs/cifar_10",
+        models_2d,
+        cifar_10_main,
+        overrides,
+        "TNP-KR - Cifar_10",
     )
 
 

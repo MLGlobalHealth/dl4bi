@@ -1,0 +1,26 @@
+cls: TNPKR
+kwargs:
+  embed_s:
+    cls: GaussianFourierEmbedding
+    kwargs:
+      embed_dim: 256
+      std: 2.0
+  embed_s_f:
+    cls: MLP
+    kwargs:
+      dims: [64]
+  dec:
+    cls: KRStack
+    kwargs:
+      blk:
+        cls: KRBlock
+        kwargs:
+          attn:
+            cls: MultiHeadAttention
+            kwargs:
+              attn:
+                cls: FastAttention
+  head:
+    cls: MLP
+    kwargs:
+      dims: [128, 6]

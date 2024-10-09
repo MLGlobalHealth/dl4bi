@@ -1,0 +1,10 @@
+cls: CNP
+kwargs:
+  enc_det:
+    cls: MLP
+    kwargs:
+      dims: [128, 128, 128, 128, 128, 128]
+  dec:
+    cls: MLP
+    kwargs:
+      dims: [128, 128, 128, 128, 6]
