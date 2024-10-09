@@ -151,6 +151,10 @@ def prepare_data():
         "https://drive.google.com/uc?export=download&id=0B7EVK8r0v71pZjFTYXZWM3FlRnM",
         "https://drive.google.com/uc?export=download&id=0B7EVK8r0v71pY0NSMzRuSXJEVkk",
     )
+    if train_path.exists() and valid_path.exists() and test_path.exists():
+        # skip if training data directly copied without extraction from zip
+        return
+
     if not imgs_zip_path.exists():
         request.urlretrieve(imgs_url, imgs_zip_path)
 

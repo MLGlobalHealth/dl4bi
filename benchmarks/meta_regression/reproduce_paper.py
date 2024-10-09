@@ -69,31 +69,31 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         overrides,
         "TNP-KR - Bayesian Optimization",
     )
-    gp_benchmark(
-        seeds,
-        2,
-        gp_kernels_2d,
-        gp_models_2d,
-        gp_main,
-        overrides,
-        "TNP-KR - Gaussian Processes",
-    )
-    img_benchmark(
-        seeds,
-        "configs/mnist",
-        models_2d,
-        mnist_main,
-        overrides,
-        "TNP-KR - MNIST",
-    )
-    img_benchmark(
-        seeds,
-        "configs/celeba",
-        models_2d,
-        celeba_main,
-        overrides,
-        "TNP-KR - CelebA",
-    )
+    # gp_benchmark(
+    #     seeds,
+    #     2,
+    #     gp_kernels_2d,
+    #     gp_models_2d,
+    #     gp_main,
+    #     overrides,
+    #     "TNP-KR - Gaussian Processes",
+    # )
+    # img_benchmark(
+    #     seeds,
+    #     "configs/mnist",
+    #     models_2d,
+    #     mnist_main,
+    #     overrides,
+    #     "TNP-KR - MNIST",
+    # )
+    # img_benchmark(
+    #     seeds,
+    #     "configs/celeba",
+    #     models_2d,
+    #     celeba_main,
+    #     overrides,
+    #     "TNP-KR - CelebA",
+    # )
 
 
 def lore_paper(seeds: jax.Array, dry_run: bool = False):
