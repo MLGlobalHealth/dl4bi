@@ -9,11 +9,11 @@ import numpy as np
 import optax
 import tensorflow as tf
 import tensorflow_datasets as tfds
+import wandb
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
-import wandb
 from dl4bi.meta_regression.train_utils import (
     Callback,
     cfg_to_run_name,
@@ -73,21 +73,14 @@ def main(cfg: DictConfig):
 def build_dataloaders(
     batch_size: int = 32,
     num_ctx_min: int = 3,
-    num_ctx_max: int = 200,
+    num_ctx_max: int = 100,
     num_test_max: int = 200,
-    seed: int = 42,
 ):
-    # Prepare and cache CIFAR-10 data
-    prepare_data()
-
     B, L = batch_size, 32 * 32
-
-    # Load cached normalized CIFAR-10 dataset
+    prepare_data()
     train_ds = 2 * (np.load("cache/cifar_10/train.npy", mmap_mode="r") / 255.0 - 0.5)
     valid_ds = 2 * (np.load("cache/cifar_10/valid.npy", mmap_mode="r") / 255.0 - 0.5)
     test_ds = 2 * (np.load("cache/cifar_10/test.npy", mmap_mode="r") / 255.0 - 0.5)
-
-    # Build grid and context for testing
     s_test = build_grid([dict(start=-1.0, stop=1.0, num=32)] * 2).reshape(L, 2)
     s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
     valid_lens_test = jnp.repeat(num_test_max, B)
@@ -139,7 +132,6 @@ def prepare_data():
     """Prepares and caches the CIFAR-10 dataset with standard splits."""
     cache_path = Path("cache/cifar_10")
     cache_path.mkdir(parents=True, exist_ok=True)
-
     train_path = cache_path / "train.npy"
     valid_path = cache_path / "valid.npy"
     test_path = cache_path / "test.npy"
@@ -147,7 +139,6 @@ def prepare_data():
     if train_path.exists() and valid_path.exists() and test_path.exists():
         return
 
-    # Load CIFAR-10 using tensorflow datasets (TFDS)
     dataset, info = tfds.load(
         "cifar10",
         split=["train", "test"],
@@ -155,25 +146,17 @@ def prepare_data():
         with_info=True,
         data_dir=cache_path,
     )
-
-    train_dataset = dataset[0]
-    test_dataset = dataset[1]
-
-    buffer_size = info.splits[
-        "train"
-    ].num_examples  # Get the total number of training samples
-    train_dataset = train_dataset.shuffle(buffer_size, seed=42)
+    train_dataset, test_dataset = dataset[0], dataset[1]
+    num_examples = info.splits["train"].num_examples
+    train_dataset = train_dataset.shuffle(num_examples, seed=42)
     train_split = int(info.splits["train"].num_examples * 0.9)
     train_data, valid_data = (
         tf.data.Dataset.take(train_dataset, train_split),
         tf.data.Dataset.skip(train_dataset, train_split),
     )
-
-    # Convert datasets to numpy arrays and normalize them
     train_data = dataset_to_numpy(train_data)
     valid_data = dataset_to_numpy(valid_data)
     test_data = dataset_to_numpy(test_dataset)
-
     np.save(train_path, train_data)
     np.save(valid_path, valid_data)
     np.save(test_path, test_data)
