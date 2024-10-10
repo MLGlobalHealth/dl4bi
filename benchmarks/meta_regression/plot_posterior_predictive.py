@@ -10,34 +10,19 @@ from sps.priors import Prior
 
 import dl4bi.meta_regression.train_utils as tu
 
-VALID_KERNELS = [matern_3_2, periodic, rbf]
-
-
-def kernel_fn_to_dir_name(kernel_fn):
-    if kernel_fn == matern_3_2:
-        return "matern_3_2"
-    elif kernel_fn == periodic:
-        return "periodic"
-    elif kernel_fn == rbf:
-        return "rbf"
-    else:
-        raise ValueError(f"Unidentified kernel function used: {kernel_fn}")
-
 
 def kernel_fn_to_plot_name(kernel_fn):
-    if kernel_fn == matern_3_2:
-        return "Matern 3/2"
-    if kernel_fn == periodic:
-        return "Periodic"
-    if kernel_fn == rbf:
-        return "RBF"
-    else:
-        raise ValueError(f"Unidentified kernel function used: {kernel_fn}")
+    plot_name = {rbf: "RBF", matern_3_2: "Matern 3/2", periodic: "Periodic"}.get(
+        kernel_fn, None
+    )
+    if plot_name is None:
+        raise ValueError(f"Unidentified kernel function used: {kernel_fn.__name__}")
+    return plot_name
 
 
 def kernel_name_to_fn(kernel_names: list[str]):
     kernel_fns = []
-    valid_kernels = {kernel_fn_to_dir_name(k): k for k in VALID_KERNELS}
+    valid_kernels = {k.__name__: k for k in [rbf, matern_3_2, periodic]}
     for kernel_name in kernel_names:
         if kernel_name not in valid_kernels:
             raise ValueError(f"Unidentified kernel name used: {kernel_name}")
@@ -47,9 +32,8 @@ def kernel_name_to_fn(kernel_names: list[str]):
 
 def get_models(ckpt_base_dir: str, model_seed: int, model_name: str, kernels: list):
     return {
-        kernel_fn_to_dir_name(kernel_fn): tu.load_ckpt(
-            Path(ckpt_base_dir)
-            / f"{kernel_fn_to_dir_name(kernel_fn)}/{model_seed}/{model_name}.ckpt"
+        kernel_fn.__name__: tu.load_ckpt(
+            Path(ckpt_base_dir) / f"{kernel_fn.__name__}/{model_seed}/{model_name}.ckpt"
         )[0]
         for kernel_fn in kernels
     }
@@ -106,7 +90,7 @@ def plot_kernel_lengthscale_posterior(
         )
         rng_gp, rng_extra, rng_sample, rng_noise = random.split(rng, 4)
         for i, kernel_fn in enumerate(kernels):
-            state = models[kernel_fn_to_dir_name(kernel_fn)]
+            state = models[kernel_fn.__name__]
             for j, ls in enumerate(lengthscales):
                 s_ctx, f_ctx, s_test, f_test = sample(
                     num_ctx,
@@ -211,7 +195,7 @@ def get_args():
         "--kernels",
         type=str,
         nargs="+",
-        default=["matern_3_2", "periodic", "rbf"],
+        default=["rbf", "matern_3_2", "periodic"],
         help="List of kernels to use",
     )
     args = parser.parse_args()
