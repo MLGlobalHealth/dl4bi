@@ -4,6 +4,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+from scipy.stats import sem
 
 # NOTE: first download the results you care about from wandb,
 # e.g. name, kernel, seed, runtime, valid_loss, test_loss, etc
@@ -17,7 +18,7 @@ import pandas as pd
 
 def main(args):
     df = pd.read_csv(args.path)
-    func = lambda x: f"${np.mean(x):.3f}\\pm{np.std(x):0.3f}$"
+    func = lambda x: f"${np.mean(x):.3f}\\pm{sem(x):0.3f}$"
     x = df[[*args.group_by, *args.metrics]].groupby(args.group_by).agg(func)
     x = x.reset_index()
     if args.pivot:
