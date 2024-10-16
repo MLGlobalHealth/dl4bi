@@ -27,7 +27,7 @@ def main(cfg: DictConfig):
     img_tasks = re.compile("MNIST|CelebA|Cifar", re.IGNORECASE)
     only_regex = re.compile(cfg.get("only", ".*"), re.IGNORECASE)
     exclude_regex = re.compile(cfg.get("exclude", r"^$"), re.IGNORECASE)
-    num_samples = cfg.get("num_samples", None)
+    num_samples = cfg.get("num_samples", 16)
     if gp_tasks.match(cfg.project):
         if "1d" in cfg.data.name:
             return plot_1d_gp_samples(cfg, only_regex, exclude_regex)
