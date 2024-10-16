@@ -817,12 +817,13 @@ def log_img_plots(
         v = valid_lens_ctx[i]
         f_ctx_i = f_ctx[i, :v, :]
         f_mu_i = f_mu[i]
+        f_std_i = f_std[i]
         f_test_full_i = f_test_full[i]
         if f_mu.shape != f_test.shape:  # bootstrapped
             K = f_mu.shape[0] // f_test.shape[0]
             s = i * K
             f_mu_i = f_mu[s : s + K].mean(axis=0)  # TODO(danj): legitimate?
-        fig = plot_img(i, shape, f_ctx_i, f_mu_i, f_test_full_i, inv_idx_i)
+        fig = plot_img(i, shape, f_ctx_i, f_mu_i, f_std_i, f_test_full_i, inv_idx_i)
         paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
@@ -835,23 +836,30 @@ def plot_img(
     shape: tuple[int, int, int],
     f_ctx: jax.Array,  # [L_ctx, 1]
     f_mu: jax.Array,  # [L, 1]
+    f_std: jax.Array,  # [L, 1]
     f_test: jax.Array,  # [L, 1]
     inv_permute_idx: jax.Array,  # [L]
+    axs=None,
 ):
     """Plots a triptych of [task, pred, truth]."""
     task = f_ctx_to_img_task(shape, f_ctx, inv_permute_idx)
     task_pred = f_to_img_task(shape, f_mu)
+    task_std = f_std_to_img_task(shape, f_std)
     task_true = f_to_img_task(shape, f_test)
-    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+    if axs is None:
+        _, axs = plt.subplots(1, 4, figsize=(15, 5))
     cmap = mpl.colormaps.get_cmap("Spectral_r")
     cmap.set_bad("grey")
     # NOTE: cmap is ignored when images has RGB channels
-    axs[0].imshow(task, cmap=cmap, interpolation="none")
-    axs[0].set_title("Task")
-    axs[1].imshow(task_pred, cmap=cmap, interpolation="none")
-    axs[1].set_title("Predicted")
-    axs[2].imshow(task_true, cmap=cmap, interpolation="none")
-    axs[2].set_title("Ground Truth")
+    axs[0].imshow(task_std, cmap=cmap, interpolation="none")
+    axs[0].set_title("Uncertainty")
+    axs[1].imshow(task, cmap=cmap, interpolation="none")
+    axs[1].set_title("Task")
+    axs[2].imshow(task_pred, cmap=cmap, interpolation="none")
+    axs[2].set_title("Predicted")
+    axs[3].imshow(task_true, cmap=cmap, interpolation="none")
+    axs[3].set_title("Ground Truth")
+
     plt.tight_layout()
     return plt.gcf()
 
@@ -879,6 +887,14 @@ def f_to_img_task(shape: tuple[int, int, int], f: jax.Array):
     if D > 1:
         task = task / 2 + 0.5  # [-1, 1] -> [0, 1]
         task = jnp.clip(task, 0, 1)  # avoid matplotlib warnings
+    return task
+
+
+def f_std_to_img_task(shape: tuple[int, int, int], f_std: jax.Array):
+    D = shape[-1]
+    task = f_std.reshape(shape).squeeze()  # [H, W] or [H, W, RGB=3]
+    if D > 1:
+        task = task.mean(axis=-1)
     return task
 
 

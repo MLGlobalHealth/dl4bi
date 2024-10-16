@@ -125,15 +125,6 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         "TNP-KR - Cifar 10",
     )
 
-    img_benchmark(
-        seeds,
-        "configs/cifar_10",
-        models_2d,
-        cifar_10_main,
-        overrides,
-        "TNP-KR - Cifar_10",
-    )
-
 
 def lore_paper(seeds: jax.Array, dry_run: bool = False):
     """Reproduces the LoRe: Local Refinement with Tranformers paper."""
