@@ -140,8 +140,10 @@ def plot_2d_img_samples(
             num_cols,
             figsize=(6 * num_cols, 6 * num_rows),
         )
-        for row_idx, model_name in enumerate(sorted(ckpts)):
-            state = ckpts[model_name]["state"]
+        preds = {}
+        min_std, max_std = float("inf"), -float("inf")
+        for row_idx, run_name in enumerate(sorted(ckpts)):
+            state = ckpts[run_name]["state"]
             f_mu, f_std, *_ = state.apply_fn(
                 {"params": state.params, **state.kwargs},
                 s_ctx,
@@ -151,6 +153,12 @@ def plot_2d_img_samples(
                 valid_lens_test,
                 rngs={"dropout": rng_dropout, "extra": rng_extra},
             )
+            preds[run_name] = (f_mu, f_std)
+            min_std = min(min_std, f_std.min())
+            max_std = max(max_std, f_std.max())
+        norm_std = mpl.colors.Normalize(vmin=min_std, vmax=max_std)
+        for row_idx, run_name in enumerate(sorted(ckpts)):
+            f_mu, f_std = preds[run_name]
             plot_img(
                 i,
                 shape,
@@ -162,6 +170,7 @@ def plot_2d_img_samples(
                 axs[row_idx],
                 cmap=cmap,
                 cmap_std=cmap_std,
+                norm_std=norm_std,
             )
             # NOTE: unset titles by row, unless its the first row
             for col_idx in range(num_cols):
@@ -172,7 +181,7 @@ def plot_2d_img_samples(
                 else:
                     title = axs[row_idx, col_idx].get_title()
                     axs[row_idx, col_idx].set_title(title, fontsize=36)
-            axs[row_idx, 0].set_ylabel(f"{model_name}", fontsize=36)
+            axs[row_idx, 0].set_ylabel(f"{run_name}", fontsize=36)
         fig.tight_layout()
         fig.savefig(results_dir / f"comparison_sample_{i+1}.png", dpi=150)
         plt.clf()

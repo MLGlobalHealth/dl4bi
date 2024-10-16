@@ -875,6 +875,7 @@ def plot_img(
     axs: Optional[mpl.axes.Axes] = None,
     cmap=mpl.colormaps.get_cmap("grey"),
     cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
+    norm_std=None,
 ):
     """Plots a triptych of [task, uncertainty, pred, truth]."""
     task = f_ctx_to_img_task(shape, f_ctx, inv_permute_idx)
@@ -887,7 +888,7 @@ def plot_img(
     axs[0].set_title("Task")
     axs[0].imshow(task, cmap=cmap, interpolation="none")
     axs[1].set_title("Uncertainty")
-    axs[1].imshow(task_std, cmap=cmap_std, interpolation="none")
+    axs[1].imshow(task_std, cmap=cmap_std, norm=norm_std, interpolation="none")
     axs[2].set_title("Prediction")
     axs[2].imshow(task_pred, cmap=cmap, interpolation="none")
     axs[3].set_title("Ground Truth")
