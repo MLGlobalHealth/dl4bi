@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import re
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -27,14 +28,18 @@ from dl4bi.meta_regression.train_utils import (
 # NOTE: use the same configs as the Gaussian Process (GP) models
 @hydra.main("configs/gp", config_name="default", version_base=None)
 def main(cfg: DictConfig):
+    project_parent = cfg.get("project_parent")
+    if re.match(".*Gaussian Process.*", cfg.project, re.IGNORECASE):
+        project_parent = project_parent or cfg.project
+        cfg.project = "Bayesian Optimization"
     run_name = cfg.get("name", cfg_to_run_name(cfg))
-    path = f"results/{cfg.project}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
+    path = f"results/{project_parent}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
     path = Path(path)
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
         name=run_name,
-        project=cfg.get("project", "Bayesian Optimization"),
+        project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
     )
     cfg.data.batch_size = 1  # override GP batch argument

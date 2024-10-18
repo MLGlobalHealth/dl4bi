@@ -72,6 +72,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         bayes_opt_main,
         overrides,
         "TNP-KR - Bayesian Optimization",
+        "TNP-KR - Gaussian Processes,",
     )
     gp_benchmark(
         seeds,
@@ -90,6 +91,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         bayes_opt_main,
         overrides,
         "TNP-KR - Bayesian Optimization",
+        "TNP-KR - Gaussian Processes,",
     )
     gp_benchmark(
         seeds,
@@ -191,6 +193,7 @@ def gp_benchmark(
     main_fn: Callable = gp_main,
     overrides: list[list[str]] = [[]],
     project: str = "",
+    project_parent: str = "",
 ):
     for kernel in kernels:
         for seed in seeds:
@@ -205,6 +208,7 @@ def gp_benchmark(
                                 f"model={model}",
                                 f"kernel={kernel}",
                                 f"seed={seed}",
+                                f"+project_parent={project_parent}",
                             ]
                             + _overrides,
                         )

@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+# Example: python bayes_opt_summarize.py "TNP-KR - Gaussian Processes"
+
 
 def main():
     dfs = []
-    for path in Path("results/gp").rglob("*.npy"):
+    project_parent = sys.argv[1]
+    results_path = Path(f"results/{project_parent}")
+    for path in results_path.rglob("*.npy"):
         record = list(path.parts)
-        record = record[record.index("gp") + 1 : -1] + [path.stem]
+        record = record[record.index(project_parent) + 1 : -1] + [path.stem]
         regret = np.load(path)[:, -1]  # final regret
         df = pd.DataFrame([record] * len(regret))
         df["regret"] = regret
