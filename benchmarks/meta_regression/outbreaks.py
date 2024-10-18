@@ -5,6 +5,7 @@ from pathlib import Path
 import hydra
 import jax
 import jax.numpy as jnp
+import matplotlib as mpl
 import numpy as np
 import optax
 import wandb
@@ -50,7 +51,12 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
-    img_cbk = Callback(partial(log_img_plots, shape=(16, 16, 1)), cfg.plot_interval)
+    cmap = mpl.colormaps.get_cmap("grey")
+    cmap.set_bad("blue")
+    img_cbk = Callback(
+        partial(log_img_plots, shape=(16, 16, 1), cmap=cmap),
+        cfg.plot_interval,
+    )
     state = train(
         rng_train,
         model,
