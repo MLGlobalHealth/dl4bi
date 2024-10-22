@@ -114,11 +114,16 @@ def process_map(data: DictConfig):
     processed_path = os.path.join(
         MAPS_DATA_PATH.format(data_type="processed", map_name=map_name), "data.npz"
     )
-    map_data = get_raw_map_data(map_name)
+    map_data = normalize_geometry(get_raw_map_data(map_name))
+    bounds = jnp.array(
+        [
+            [map_data.bounds.minx.min(), map_data.bounds.maxx.max()],
+            [map_data.bounds.miny.min(), map_data.bounds.maxy.max()],
+        ]
+    )
     all_map_data = dict(jnp.load(processed_path))
     sample_grid, s_map = all_map_data["all_grid_points"], all_map_data["s_map"]
-
-    return s_map, sample_grid, map_data.total_bounds, len(map_data.geometry)
+    return s_map, sample_grid, bounds
 
 
 def grid_valid_pct():

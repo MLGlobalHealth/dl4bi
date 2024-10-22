@@ -1,4 +1,5 @@
 name: England
+sampling_policy: 'in_map'
 num_ctx:
   min: 10
   max: 32

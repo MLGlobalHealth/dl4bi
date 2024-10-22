@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from jax import jit, random
-from map_utils import process_map, get_raw_map_data
+from map_utils import get_raw_map_data, process_map
 from omegaconf import DictConfig, OmegaConf
 from plot_utils import log_posterior_map_predictive_plots
 
@@ -16,13 +16,13 @@ from dl4bi.meta_regression.train_utils import (
     cosine_annealing_lr,
     evaluate,
     instantiate,
-    log_posterior_predictive_plots,
     save_ckpt,
     train,
 )
 
 
 def cfg_to_run_name(cfg: DictConfig):
+    # TODO(jhonathan): update
     # name = cfg.model.cls
     return "test"
 
@@ -30,17 +30,37 @@ def cfg_to_run_name(cfg: DictConfig):
 def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
     """Generates batches of GP samples."""
     gp = instantiate(kernel)
-    s_map, sample_grid, total_bounds, num_goems = process_map(data)
+    s_map, sample_grid, s_bounds = process_map(data)
     obs_noise, batch_size = data.obs_noise, data.batch_size
     valid_lens_test = jnp.repeat(data.num_ctx.max + s_map.shape[0], batch_size)
 
     @jit
-    def gen_s_random(rng: jax.Array):
+    def gen_s_random_centroids(rng: jax.Array):
+        return jax.random.choice(rng, s_map, shape=(data.num_ctx.max,))
+
+    @jit
+    def gen_s_random_grid(rng: jax.Array):
+        s_x = random.uniform(
+            rng, (data.num_ctx.max, 1), minval=s_bounds[0, 0], maxval=s_bounds[0, 1]
+        )
+        s_y = random.uniform(
+            rng, (data.num_ctx.max, 1), minval=s_bounds[1, 0], maxval=s_bounds[1, 1]
+        )
+        return jnp.concatenate([s_x, s_y], axis=-1)
+
+    @jit
+    def gen_s_random_in_map(rng: jax.Array):
         return jax.random.choice(rng, sample_grid, shape=(data.num_ctx.max,))
+
+    ctx_gen_func = {
+        "centroids": gen_s_random_centroids,
+        "grid": gen_s_random_grid,
+        "in_map": gen_s_random_in_map,
+    }[data["sampling_policy"]]
 
     def gen_batch(rng: jax.Array):
         rng_s_random, rng_valid_lens_ctx, rng_gp, rng_eps, rng = random.split(rng, 5)
-        s_random = gen_s_random(rng_s_random)
+        s_random = ctx_gen_func(rng_s_random)
         s = jnp.vstack([s_random, s_map])
         f, var, ls, period, *_ = gp.simulate(rng_gp, s, batch_size)
         valid_lens_ctx = random.randint(
