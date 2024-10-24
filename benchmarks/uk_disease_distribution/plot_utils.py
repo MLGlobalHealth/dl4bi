@@ -30,7 +30,6 @@ def plot_posterior_predictives_map_points(
     x_mean, x_std = x_norm_vars
     y_mean, y_std = y_norm_vars
     for i in range(num_plots):
-        # Extract relevant data for each plot
         v_ctx = valid_lens_ctx[i]
         s_ctx_i = s_ctx[i, :v_ctx].squeeze()
         v_test = valid_lens_test[i]
@@ -38,20 +37,17 @@ def plot_posterior_predictives_map_points(
         f_mu_i = f_mu[i, -num_geoms:v_test].squeeze()
         f_std_i = f_std[i, -num_geoms:v_test].squeeze()
 
-        # Find common vmin and vmax for both plots (Ground Truth and Predicted)
         vmin = min(f_test_i.min(), f_mu_i.min())
         vmax = max(f_test_i.max(), f_mu_i.max())
 
-        # Plot 1: Ground Truth (GT)
-        fig, ax = plt.subplots(1, 3, figsize=(18, 6))
-        ax[0].set_title("Ground Truth Values (GT)")
-        gdf["GT"] = f_test_i  # Assuming f_test contains true values per geom
+        fig, ax = plt.subplots(1, 4, figsize=(20, 5))
+        ax[0].set_title("Ground Truth")
+        gdf["GT"] = f_test_i
         gdf.plot(
             column="GT", cmap="viridis", ax=ax[0], legend=True, vmin=vmin, vmax=vmax
         )
 
-        # Plot 2: Mean Predicted Values
-        ax[1].set_title("Mean Predicted Values with Context Points")
+        ax[1].set_title("Mean Predicted Values with Ctx")
         gdf["Predicted"] = f_mu_i
         gdf.plot(
             column="Predicted",
@@ -62,7 +58,6 @@ def plot_posterior_predictives_map_points(
             vmax=vmax,
         )
 
-        # Scatter context points on the second plot (predicted mean)
         context_points = np.array(
             [(s_ctx_i[:, 0] * x_std) + x_mean, (s_ctx_i[:, 1] * y_std) + y_mean]
         ).T
@@ -75,27 +70,28 @@ def plot_posterior_predictives_map_points(
         )
         ax[1].legend()
 
-        # Plot 3: 1-0 Coverage for 95% Confidence Interval
+        ax[2].set_title("Uncertainty - STD")
+        gdf["Uncertainty"] = f_std_i
+        gdf.plot(column="Uncertainty", cmap="plasma", ax=ax[2], legend=True)
+
         z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
         f_lower, f_upper = f_mu_i - z_score * f_std_i, f_mu_i + z_score * f_std_i
 
         coverage = jnp.logical_and(f_test_i >= f_lower, f_test_i <= f_upper)
         coverage_pct = coverage.mean() * 100
-        ax[2].set_title(f"1-0 Coverage for 95% Conf\n" f"Coverage: {coverage_pct:.2f}%")
+        ax[3].set_title(f"1-0 Coverage for 95% Conf\n" f"Coverage: {coverage_pct:.2f}%")
         gdf["Coverage"] = coverage.astype(int)  # 1 if within interval, 0 if not
 
-        gdf.plot(column="Coverage", cmap="coolwarm", ax=ax[2], legend=True)
+        gdf.plot(column="Coverage", cmap="coolwarm", ax=ax[3], legend=True)
 
-        # Final plot adjustments
         for axis in ax:
             axis.set_axis_off()
 
         plt.tight_layout()
 
-        # Create filename and save the figure
         timestamp = datetime.now().isoformat()
-        title = f"Sample {i} (GT, Prediction, Coverage)"
-        paths.append(f"/tmp/{timestamp} - {title}.png")
+        title = f"Sample {i} (GT, Prediction, Uncertainty, Coverage)"
+        paths.append(f"/tmp/Meta Reg {timestamp} - {title}.png")
         fig.suptitle(title)
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
@@ -127,9 +123,9 @@ def log_posterior_map_predictive_plots(gdf: gpd.GeoDataFrame):
             s_test,
             f_test,
             valid_lens_test,
-            var,
-            ls,
-            period,
+            _,
+            _,
+            _,
         ) = batch
 
         f_mu, f_std, *_ = state.apply_fn(
@@ -151,6 +147,86 @@ def log_posterior_map_predictive_plots(gdf: gpd.GeoDataFrame):
             valid_lens_test,
             f_mu,
             f_std,
+            num_plots=num_plots,
+        )
+        wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
+
+    return log_posterior_predictive_plots
+
+
+def plot_vae_map_points(
+    gdf: gpd.GeoDataFrame,
+    f: jax.Array,
+    f_hat: jax.Array,
+    var: jax.Array,
+    ls: jax.Array,
+    num_plots: int = 10,
+):
+    """Plots posterior predictives for geoms on the map, and saves figures."""
+    paths = []
+    for i in range(num_plots):
+        f_i = f[i].squeeze()
+        f_hat_i = f_hat[i].squeeze()
+
+        vmin = min(f_i.min(), f_hat_i.min())
+        vmax = max(f_i.max(), f_hat_i.max())
+
+        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+        fig.subplots_adjust(top=0.8)
+        ax[0].set_title("Ground Truth")
+        gdf["GT"] = f_i
+        gdf.plot(
+            column="GT", cmap="viridis", ax=ax[0], legend=True, vmin=vmin, vmax=vmax
+        )
+
+        ax[1].set_title("Predicted Values")
+        gdf["Predicted"] = f_hat_i
+        gdf.plot(
+            column="Predicted",
+            cmap="viridis",
+            ax=ax[1],
+            legend=True,
+            vmin=vmin,
+            vmax=vmax,
+        )
+        for axis in ax:
+            axis.set_axis_off()
+
+        plt.tight_layout()
+
+        timestamp = datetime.now().isoformat()
+        title = f"Sample {i} (var: {var[0]:0.2f}, ls: {ls[0]:0.2f})"
+        paths.append(f"/tmp/VAE {timestamp} - {title}.png")
+        fig.suptitle(title)
+        fig.savefig(paths[-1], dpi=125)
+        plt.clf()
+        plt.close(fig)
+    return paths
+
+
+def log_vae_map_plots(gdf: gpd.GeoDataFrame):
+    def log_posterior_predictive_plots(
+        step: int,
+        rng_step: int,
+        state: TrainState,
+        batch: tuple,
+        num_plots: int = 10,
+    ):
+        rng_dropout, rng_extra = jax.random.split(rng_step)
+        f, var, ls, _, *_ = batch
+        f_hat, _, _ = state.apply_fn(
+            {"params": state.params, **state.kwargs},
+            f,
+            var,
+            ls,
+            rngs={"dropout": rng_dropout, "extra": rng_extra},
+        )
+        paths = plot_vae_map_points(
+            gdf,
+            f,
+            f_hat,
+            var,
+            ls,
             num_plots=num_plots,
         )
         wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})

@@ -24,7 +24,7 @@ from dl4bi.meta_regression.train_utils import (
 def cfg_to_run_name(cfg: DictConfig):
     # TODO(jhonathan): update
     # name = cfg.model.cls
-    return "test"
+    return cfg.data.sampling_policy + "_test"
 
 
 def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
@@ -40,11 +40,12 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
 
     @jit
     def gen_s_random_grid(rng: jax.Array):
+        rng_x, rng_y = random.split(rng)
         s_x = random.uniform(
-            rng, (data.num_ctx.max, 1), minval=s_bounds[0, 0], maxval=s_bounds[0, 1]
+            rng_x, (data.num_ctx.max, 1), minval=s_bounds[0, 0], maxval=s_bounds[0, 1]
         )
         s_y = random.uniform(
-            rng, (data.num_ctx.max, 1), minval=s_bounds[1, 0], maxval=s_bounds[1, 1]
+            rng_y, (data.num_ctx.max, 1), minval=s_bounds[1, 0], maxval=s_bounds[1, 1]
         )
         return jnp.concatenate([s_x, s_y], axis=-1)
 
@@ -122,7 +123,7 @@ def main(cfg: DictConfig):
     )
     metrics = evaluate(rng_test, state, dataloader, cfg.valid_num_steps)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path = f"results/gp/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
+    path = f"results/uk_disease_dist/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))

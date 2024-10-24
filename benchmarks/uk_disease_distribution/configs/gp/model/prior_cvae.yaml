@@ -1,0 +1,11 @@
+cls: PriorCVAE
+kwargs:
+  encoder:
+    cls: MLP
+    kwargs:
+      dims: [256, 256]
+  decoder:
+    cls: MLP
+    kwargs:
+      dims: [256, 363]
+  z_dim: 256
