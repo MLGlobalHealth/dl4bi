@@ -28,6 +28,38 @@ def mask_attn(x: jax.Array, valid_lens: jax.Array, fill=-jnp.inf):
     m = jnp.arange(K) < valid_lens.reshape(-1, 1)
     return jnp.where(m, x, fill).reshape(B, Q, K)
 
+def load_adj_list(file_path):
+    graph = {}  # Dictionary to store adjacency list
+    with open(file_path, 'r') as file:
+        node = 0
+        for neighbors in file:
+            # Convert neighbors to a list of integers
+            if '#' not in neighbors:
+                neighbors = [int(n) for n in neighbors.strip().split(' ')]
+                # Add node and its neighbors to the graph
+                graph[node] = neighbors
+                node += 1
+    return graph
+
+@jit
+def mask_attn_graph(x: jax.Array, fill=-jnp.inf):
+    r"""Mask `x` with `fill` using adjancency matrix from graph.
+    
+    Args: 
+        x: Values of dimension $\mathbb{R}^{B\times Q\times K}$
+        
+    Returns:
+        `x` with filled values according to mask.
+    """
+    adj_matrix_path = '/cache/outbreaks/dim16_lattice.adjilist'
+    graph = load_adj_list(adj_matrix_path)
+    B, Q, K = x.shape
+    mask = jnp.zeros((Q, K), dtype=bool)
+    for j in range(Q):
+        mask = mask.at[j, graph[j]].set(True)
+    mask = jnp.broadcast_to(mask, (B, Q, K))
+    x = jnp.where(mask, x, fill)
+    return x
 
 def mask_from_valid_lens(max_len: int, valid_lens: jax.Array):
     """Return a boolean mask using `valid_lens`.

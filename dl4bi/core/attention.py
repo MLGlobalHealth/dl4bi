@@ -8,7 +8,7 @@ from jax import jit, lax, random, vmap
 from jax.nn import dot_product_attention
 
 from .mlp import MLP
-from .utils import mask_attn, mask_from_valid_lens
+from .utils import mask_attn, mask_from_valid_lens, mask_attn_graph
 
 
 def gaussian_orf(key: jax.Array, m: int, d: int, structured: bool = True):
@@ -343,7 +343,8 @@ class Attention(nn.Module):
         scores = self.scorer(qs.astype(self.dtype), ks.astype(self.dtype))
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
-            scores = mask_attn(scores, valid_lens)
+            # scores = mask_attn(scores, valid_lens)
+            scores = mask_attn_graph(scores) # NOTE: test to mask according to ajacency matrix
         attn = nn.softmax(scores, axis=-1)  # [B * H, Q, K]
         ctx = drop(attn) @ vs  # [B * H, Q, D_V_H]
         # [B * H, Q, D_V_H] -> [B, Q, H, D_V_H]
