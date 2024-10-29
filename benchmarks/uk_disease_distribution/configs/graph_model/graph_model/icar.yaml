@@ -1,0 +1,9 @@
+name: icar
+tau:
+  cls: Prior
+  kwargs:
+    dist: gamma
+    kwargs:
+      alpha: 3
+      beta: 2
+

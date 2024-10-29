@@ -14,10 +14,12 @@ from jax.scipy.stats import norm
 from map_utils import get_raw_map_data, process_map
 from omegaconf import DictConfig, OmegaConf
 from plot_utils import log_vae_map_plots
+from prior_cvae import PriorCVAE
 from sps.gp import GP
 from sps.kernels import matern_3_2, periodic, rbf
 from sps.priors import Prior
 from tqdm import tqdm
+from vae_train_utils import elbo_train_step, mse_train_step
 
 import wandb
 from dl4bi.core import *  # noqa: F403
@@ -27,23 +29,16 @@ from dl4bi.meta_regression.train_utils import (
     cosine_annealing_lr,
     save_ckpt,
 )
-from dl4bi.vae import DeepChol, PriorCVAE, train_utils
-from dl4bi.vae.train_utils import elbo_train_step, mse_train_step
-
-
-def cfg_to_run_name(cfg: DictConfig):
-    # TODO(jhonathan): update
-    # name = cfg.model.cls
-    return "VAE_test"
+from dl4bi.vae import DeepChol, train_utils
 
 
 @hydra.main("configs/gp", config_name="default", version_base=None)
 def main(cfg: DictConfig):
-    run_name = cfg.get("name", cfg_to_run_name(cfg))
+    run_name = cfg.get("name", f"VAE_GP_{cfg.model.cls}_{cfg.data.sampling_policy}")
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
-        name=cfg.get("name", run_name),
+        name=run_name,
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
     )
@@ -75,7 +70,12 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
         cfg.valid_interval,
         cfg.data.batch_size,
-        callbacks=[Callback(log_vae_map_plots(map_data), cfg.plot_interval)],
+        callbacks=[
+            Callback(
+                log_vae_map_plots(map_data, s, ["var", "ls"], cfg.model.kwargs.z_dim),
+                cfg.plot_interval,
+            )
+        ],
     )
     results = validate(
         rng_test,
@@ -96,10 +96,13 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def dataloader(rng, gp, s, batch_size=32, approx=False):
+def dataloader(
+    rng: jax.Array, gp: GP, s: jax.Array, batch_size: int = 32, approx: bool = False
+):
     while True:
         _, rng = random.split(rng)
-        yield gp.simulate(rng, s, batch_size, approx)
+        f, var, ls, _, z = gp.simulate(rng, s, batch_size, approx)
+        yield f, z, [var, ls]
 
 
 def train(
@@ -119,14 +122,14 @@ def train(
 ):
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
     loader = dataloader(rng_data, gp, s, batch_size)
-    f, var, ls, _, z = next(loader)
+    f, z, conditionals = next(loader)
     rngs = {"params": rng_params, "extra": rng_extra}
 
     x = z if is_decoder_only else f
     train_step = mse_train_step if is_decoder_only else elbo_train_step
-    kwargs = model.init(rngs, x, var, ls)
+    kwargs = model.init(rngs, x, conditionals)
     params = kwargs.pop("params")
-    param_count = nn.tabulate(model, rngs)(x, var, ls)
+    param_count = nn.tabulate(model, rngs)(x, conditionals)
     state = TrainState.create(
         apply_fn=model.apply,
         params=params if state is None else state.params,
@@ -157,7 +160,7 @@ def train(
             )
         for cbk in callbacks:
             if (i + 1) % cbk.interval == 0:
-                cbk.fn(i, rng_step, state, batch)
+                cbk.fn(i, rng_step, state, loader, model)
     return state
 
 
@@ -177,15 +180,15 @@ def validate(
     results = []
     for i in (_ := tqdm(range(valid_num_steps), unit="batch", dynamic_ncols=True)):
         batch = next(loader)
-        f, var, ls, _, z = batch
+        f, z, conditionals = batch
         params = {"params": state.params, **state.kwargs}
         rngs = {"extra": rng_extra}
         if is_decoder_only:
-            f_hat = jit(state.apply_fn)(params, z, var, ls)
+            f_hat = jit(state.apply_fn)(params, z, conditionals)
             losses[i] = optax.squared_error(f_hat, f.squeeze()).mean()
         else:
             # NOTE: ELBO, assumes normal gaussian
-            f_hat, z_mu, z_std = jit(state.apply_fn)(params, f, var, ls, rngs=rngs)
+            f_hat, z_mu, z_std = jit(state.apply_fn)(params, f, conditionals, rngs=rngs)
             kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
             logp = norm.logpdf(f, f_hat, 1.0).mean()
             losses[i] = -logp + kl_div.mean()
@@ -218,3 +221,23 @@ def instantiate(d: Union[dict, DictConfig]):
 
 if __name__ == "__main__":
     main()
+
+# TODO(jhonathan): delete if not adding new sampling policies to VAE
+
+# def generate_vae_locations(data: DictConfig, rng_train: jax.Array):
+#     s_map, sample_grid, s_bounds = process_map(data)
+#     if data.sampling_policy == "centroids":
+#         return s_map
+#     elif data.sampling_policy == "in_map":
+#         _, locations_rng = random.split(rng_train)
+#         return random.choice(locations_rng, sample_grid, shape=(data.num_ctx.max))
+#     elif data.sampling_policy == "grid":
+#         ctx_sqrt = int(jnp.sqrt(data.num_ctx.max))
+#         return build_grid(
+#             [
+#                 {"start": s_bounds[0, 0], "stop": s_bounds[0, 1], "num": ctx_sqrt},
+#                 {"start": s_bounds[1, 0], "stop": s_bounds[1, 1], "num": ctx_sqrt},
+#             ]
+#         ).reshape(-1, 2)
+#     else:
+#         raise ValueError(f"Invalid data sampling policy: {data.sampling_policy}")

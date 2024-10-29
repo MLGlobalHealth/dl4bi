@@ -1,5 +1,7 @@
 from datetime import datetime
+from typing import Generator, Optional
 
+import flax.linen as nn
 import geopandas as gpd
 import jax
 import jax.numpy as jnp
@@ -21,6 +23,7 @@ def plot_posterior_predictives_map_points(
     valid_lens_test: jax.Array,
     f_mu: jax.Array,
     f_std: jax.Array,
+    sampling_policy: str,
     hdi_prob: float = 0.95,
     num_plots: int = 10,
 ):
@@ -40,52 +43,32 @@ def plot_posterior_predictives_map_points(
         vmin = min(f_test_i.min(), f_mu_i.min())
         vmax = max(f_test_i.max(), f_mu_i.max())
 
-        fig, ax = plt.subplots(1, 4, figsize=(20, 5))
-        ax[0].set_title("Ground Truth")
-        gdf["GT"] = f_test_i
-        gdf.plot(
-            column="GT", cmap="viridis", ax=ax[0], legend=True, vmin=vmin, vmax=vmax
-        )
-
-        ax[1].set_title("Mean Predicted Values with Ctx")
-        gdf["Predicted"] = f_mu_i
-        gdf.plot(
-            column="Predicted",
-            cmap="viridis",
-            ax=ax[1],
-            legend=True,
-            vmin=vmin,
-            vmax=vmax,
-        )
-
+        fig, ax = plt.subplots(2, 3, figsize=(15, 10))
+        plot_on_map(ax[0, 0], gdf, f_test_i, vmin, vmax, "Ground Truth", "viridis")
+        plot_on_map(ax[0, 1], gdf, f_mu_i, vmin, vmax, "Predicted Values", "viridis")
         context_points = np.array(
             [(s_ctx_i[:, 0] * x_std) + x_mean, (s_ctx_i[:, 1] * y_std) + y_mean]
         ).T
-        ax[1].scatter(
-            context_points[:, 0],
-            context_points[:, 1],
-            color="red",
-            marker="x",
-            label="Context Points",
+        plot_locations_map(
+            ax[0, 2], gdf, context_points, sampling_policy, plot_blank=True
         )
-        ax[1].legend()
-
-        ax[2].set_title("Uncertainty - STD")
-        gdf["Uncertainty"] = f_std_i
-        gdf.plot(column="Uncertainty", cmap="plasma", ax=ax[2], legend=True)
+        plot_on_map(ax[1, 0], gdf, f_std_i, title="Uncertainty - STD", cmap="plasma")
 
         z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
         f_lower, f_upper = f_mu_i - z_score * f_std_i, f_mu_i + z_score * f_std_i
 
         coverage = jnp.logical_and(f_test_i >= f_lower, f_test_i <= f_upper)
         coverage_pct = coverage.mean() * 100
-        ax[3].set_title(f"1-0 Coverage for 95% Conf\n" f"Coverage: {coverage_pct:.2f}%")
-        gdf["Coverage"] = coverage.astype(int)  # 1 if within interval, 0 if not
-
-        gdf.plot(column="Coverage", cmap="coolwarm", ax=ax[3], legend=True)
-
-        for axis in ax:
-            axis.set_axis_off()
+        plot_on_map(
+            ax[1, 1],
+            gdf,
+            coverage.astype(int),
+            title=f"1-0 Coverage for 95% Conf\n" f"Coverage: {coverage_pct:.2f}%",
+            cmap="coolwarm",
+        )
+        for axis_row in ax:
+            for axis in axis_row:
+                axis.set_axis_off()
 
         plt.tight_layout()
 
@@ -93,6 +76,7 @@ def plot_posterior_predictives_map_points(
         title = f"Sample {i} (GT, Prediction, Uncertainty, Coverage)"
         paths.append(f"/tmp/Meta Reg {timestamp} - {title}.png")
         fig.suptitle(title)
+        fig.subplots_adjust(top=0.95)
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
         plt.close(fig)
@@ -105,7 +89,7 @@ def get_norm_vars(gdf: gpd.GeoDataFrame):
     return (centroid_x.mean(), centroid_x.std()), (centroid_y.mean(), centroid_y.std())
 
 
-def log_posterior_map_predictive_plots(gdf: gpd.GeoDataFrame):
+def log_posterior_map_predictive_plots(gdf: gpd.GeoDataFrame, sampling_policy: str):
     x_norm_vars, y_norm_vars = get_norm_vars(gdf)
 
     def log_posterior_predictive_plots(
@@ -147,6 +131,7 @@ def log_posterior_map_predictive_plots(gdf: gpd.GeoDataFrame):
             valid_lens_test,
             f_mu,
             f_std,
+            sampling_policy,
             num_plots=num_plots,
         )
         wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
@@ -156,14 +141,19 @@ def log_posterior_map_predictive_plots(gdf: gpd.GeoDataFrame):
 
 def plot_vae_map_points(
     gdf: gpd.GeoDataFrame,
+    x_norm_vars: tuple,
+    y_norm_vars: tuple,
     f: jax.Array,
     f_hat: jax.Array,
-    var: jax.Array,
-    ls: jax.Array,
+    conditionals: list[jax.Array],
+    conditionals_names: list[str],
+    s: jax.Array,
     num_plots: int = 10,
 ):
-    """Plots posterior predictives for geoms on the map, and saves figures."""
+    """Plots VAE predictions on map"""
     paths = []
+    x_mean, x_std = x_norm_vars
+    y_mean, y_std = y_norm_vars
     for i in range(num_plots):
         f_i = f[i].squeeze()
         f_hat_i = f_hat[i].squeeze()
@@ -171,64 +161,151 @@ def plot_vae_map_points(
         vmin = min(f_i.min(), f_hat_i.min())
         vmax = max(f_i.max(), f_hat_i.max())
 
-        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        fig.subplots_adjust(top=0.8)
-        ax[0].set_title("Ground Truth")
-        gdf["GT"] = f_i
-        gdf.plot(
-            column="GT", cmap="viridis", ax=ax[0], legend=True, vmin=vmin, vmax=vmax
-        )
-
-        ax[1].set_title("Predicted Values")
-        gdf["Predicted"] = f_hat_i
-        gdf.plot(
-            column="Predicted",
-            cmap="viridis",
-            ax=ax[1],
-            legend=True,
-            vmin=vmin,
-            vmax=vmax,
-        )
+        fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+        plot_on_map(ax[0], gdf, f_i, vmin, vmax, "Ground Truth", "viridis")
+        plot_on_map(ax[1], gdf, f_hat_i, vmin, vmax, "Predicted Values", "viridis")
+        context_points = np.array(
+            [(s[:, 0] * x_std) + x_mean, (s[:, 1] * y_std) + y_mean]
+        ).T
+        plot_locations_map(ax[2], gdf, context_points, plot_blank=True)
         for axis in ax:
             axis.set_axis_off()
 
         plt.tight_layout()
 
         timestamp = datetime.now().isoformat()
-        title = f"Sample {i} (var: {var[0]:0.2f}, ls: {ls[0]:0.2f})"
-        paths.append(f"/tmp/VAE {timestamp} - {title}.png")
+        title = generate_title_from_conditionals(i, conditionals_names, conditionals)
+        paths.append(f"/tmp/VAE_Rec {timestamp} - {title}.png")
         fig.suptitle(title)
+        fig.subplots_adjust(top=0.85)
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
         plt.close(fig)
     return paths
 
 
-def log_vae_map_plots(gdf: gpd.GeoDataFrame):
+def plot_vae_decoder_samples(
+    rng_decoder,
+    gdf: gpd.GeoDataFrame,
+    loader: Generator,
+    state: TrainState,
+    conditionals_names: list[str],
+    z_dim: int,
+    model: nn.Module,
+    num_batches: int = 3,
+    num_plots: int = 5,
+):
+    paths = []
+    for i in range(num_batches):
+        rng_z, _ = jax.random.split(rng_decoder, 2)
+        fig, ax = plt.subplots(1, num_plots + 1, figsize=(5 * num_plots, 5))
+        f, _, conditionals = next(loader)
+        f = f[0]
+        z = jax.random.normal(rng_z, shape=(num_plots, z_dim))
+        f_hat = model.decoder.apply(
+            {"params": state.params["decoder"], **state.kwargs}, z
+        ).reshape((num_plots,) + f.shape)
+        vmin = min(f.min(), f_hat.min())
+        vmax = max(f.max(), f_hat.max())
+        plot_on_map(ax[0], gdf, f, vmin, vmax, "Ground Truth", "viridis")
+        for j in range(num_plots):
+            plot_on_map(
+                ax[j + 1], gdf, f_hat[j], vmin, vmax, f"Realisation {j + 1}", "viridis"
+            )
+        for axis in ax:
+            axis.set_axis_off()
+        plt.tight_layout()
+        timestamp = datetime.now().isoformat()
+        title = generate_title_from_conditionals(i, conditionals_names, conditionals)
+        paths.append(f"/tmp/VAE_Decoder {timestamp} - {title}.png")
+        fig.suptitle(title)
+        fig.subplots_adjust(top=0.86)
+        fig.savefig(paths[-1], dpi=125)
+        plt.clf()
+        plt.close(fig)
+    return paths
+
+
+def log_vae_map_plots(
+    gdf: gpd.GeoDataFrame, s: jax.Array, conditionals_names: list[str], z_dim: int
+):
+    x_norm_vars, y_norm_vars = get_norm_vars(gdf)
+
     def log_posterior_predictive_plots(
         step: int,
         rng_step: int,
         state: TrainState,
-        batch: tuple,
+        loader: Generator,
+        model: nn.Module,
         num_plots: int = 10,
     ):
-        rng_dropout, rng_extra = jax.random.split(rng_step)
-        f, var, ls, _, *_ = batch
+        rng_dropout, rng_extra, rng_decoder = jax.random.split(rng_step, 3)
+        f, _, conditionals = next(loader)
         f_hat, _, _ = state.apply_fn(
             {"params": state.params, **state.kwargs},
             f,
-            var,
-            ls,
+            conditionals,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
         )
         paths = plot_vae_map_points(
             gdf,
+            x_norm_vars,
+            y_norm_vars,
             f,
             f_hat,
-            var,
-            ls,
+            conditionals,
+            conditionals_names,
+            s,
             num_plots=num_plots,
         )
-        wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
+        paths_decoder = plot_vae_decoder_samples(
+            rng_decoder, gdf, loader, state, conditionals_names, z_dim, model
+        )
+        wandb.log({f"Reconstruction {step}": [wandb.Image(p) for p in paths]})
+        wandb.log({f"Decoder {step}": [wandb.Image(p) for p in paths_decoder]})
 
     return log_posterior_predictive_plots
+
+
+def plot_on_map(
+    ax,
+    gdf: gpd.GeoDataFrame,
+    values: jax.Array,
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    title: str = "",
+    cmap: str = "virdis",
+):
+    ax.set_title(title)
+    gdf["TEMP"] = values
+    gdf.plot(column="TEMP", cmap=cmap, ax=ax, legend=True, vmin=vmin, vmax=vmax)
+
+
+def plot_locations_map(
+    ax,
+    gdf: gpd.GeoDataFrame,
+    locations,
+    sampling_policy: str = "centroids",
+    plot_blank: bool = False,
+):
+    if plot_blank:
+        gdf.plot(ax=ax)
+    ax.set_title(
+        f"{len(locations)} Locations (ctx): {sampling_policy.replace('_', ' ')}"
+    )
+    ax.scatter(locations[:, 0], locations[:, 1], color="red", marker=".", s=15)
+
+
+def generate_title_from_conditionals(
+    sample_num: int, conditionals_names: list[str], conditionals: list[jax.Array]
+):
+    return (
+        f"Sample {sample_num} ("
+        + ", ".join(
+            [
+                f"{conditionals_names[j]}: {conditionals[j][0]:0.2f}"
+                for j in range(len(conditionals_names))
+            ]
+        )
+        + ")"
+    )

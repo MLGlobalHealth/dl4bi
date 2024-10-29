@@ -1,0 +1,9 @@
+name: England
+sampling_policy: 'centroids'
+num_ctx:
+  min: 20
+  max: 100
+sampling_grid:
+  grid_densities: [1000, 800, 1200]
+batch_size: 16
+obs_noise: 0.1

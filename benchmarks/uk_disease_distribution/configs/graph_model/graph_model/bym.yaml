@@ -1,0 +1,22 @@
+name: bym
+tau:
+  cls: Prior
+  kwargs:
+    dist: gamma
+    kwargs:
+      alpha: 3
+      beta: 2
+alpha:
+  cls: Prior
+  kwargs:
+    dist: uniform
+    kwargs:
+      minval: 0.01
+      maxval: 0.99
+v:
+  cls: Prior
+  kwargs:
+    dist: gamma
+    kwargs:
+      alpha: 3
+      beta: 2
