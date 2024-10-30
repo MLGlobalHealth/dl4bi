@@ -7,6 +7,7 @@ import numpy as np
 from flax.training.train_state import TrainState
 from jax import jit, lax, random, vmap
 from jax.tree_util import Partial
+import networkx as nx
 
 
 @jit
@@ -31,17 +32,24 @@ def mask_attn(x: jax.Array, valid_lens: jax.Array, fill=-jnp.inf):
 def load_adj_list(file_path):
     graph = {}  # Dictionary to store adjacency list
     with open(file_path, 'r') as file:
-        node = 0
         for neighbors in file:
             # Convert neighbors to a list of integers
             if '#' not in neighbors:
-                neighbors = [int(n) for n in neighbors.strip().split(' ')]
+                node_list = [int(n) for n in neighbors.strip().split(' ')]
                 # Add node and its neighbors to the graph
-                graph[node] = neighbors
-                node += 1
+                graph[node_list[0]] = node_list
     return graph
 
-@jit
+import matplotlib.pyplot as plt
+
+def visualize_graph(matrix, name='Adjacency_Matrix'):
+    plt.imshow(matrix, cmap='viridis', interpolation='none')
+    plt.colorbar()
+    plt.title(name)
+    plt.savefig('/cache/outbreaks/' + name + '.png')
+    plt.clf()
+
+# @jit
 def mask_attn_graph(x: jax.Array, fill=-jnp.inf):
     r"""Mask `x` with `fill` using adjancency matrix from graph.
     
@@ -57,8 +65,18 @@ def mask_attn_graph(x: jax.Array, fill=-jnp.inf):
     mask = jnp.zeros((Q, K), dtype=bool)
     for j in range(Q):
         mask = mask.at[j, graph[j]].set(True)
+        mask = mask.at[graph[j], j].set(True)
     mask = jnp.broadcast_to(mask, (B, Q, K))
     x = jnp.where(mask, x, fill)
+    
+    # Debugging
+    # print('graph:', graph)  
+    # print('nx.to_numpy_array(nx.Graph(graph))', nx.to_numpy_array(nx.Graph(graph)))
+    # visualize_graph(nx.to_numpy_array(nx.Graph(graph)))
+    # visualize_graph(np.array(mask[1, :, :]), 'Mask')
+    # visualize_graph(np.array(x[1, :, :]), 'Masked_X')
+    # raise ValueError('Masked_X')
+    
     return x
 
 def mask_from_valid_lens(max_len: int, valid_lens: jax.Array):
