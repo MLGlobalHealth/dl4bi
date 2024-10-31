@@ -21,7 +21,7 @@ from dl4bi.meta_regression.train_utils import (
 )
 
 
-@hydra.main("configs/gp", config_name="default", version_base=None)
+@hydra.main("configs", config_name="default_gp", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get(
         "name", f"GP_meta_reg_{cfg.model.cls}_{cfg.data.sampling_policy}"
@@ -38,7 +38,7 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     map_data = get_raw_map_data(cfg.data.name)
-    dataloader = build_gp_dataloader(cfg.data, cfg.kernel)
+    dataloader = build_gp_dataloader(cfg.data, cfg.kernel, cfg.batch_size)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -73,11 +73,11 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
+def build_gp_dataloader(data: DictConfig, kernel: DictConfig, batch_size: int):
     """Generates batches of GP samples."""
     gp = instantiate(kernel)
     s_map, sample_grid, s_bounds = process_map(data)
-    obs_noise, batch_size = data.obs_noise, data.batch_size
+    obs_noise = data.obs_noise
     valid_lens_test = jnp.repeat(data.num_ctx.max + s_map.shape[0], batch_size)
 
     @jit

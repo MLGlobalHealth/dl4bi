@@ -34,8 +34,9 @@ class PriorCVAE(nn.Module):
 
         Args:
             f: The function values, an array of shape `(B, K, 1)`.
-            var: The variance for the GP.
-            ls: The lengthscale for the GP.
+            conditionals: list of conditional variavles to condition the
+            output on. NOTE: Must ensure same ordering of conditional
+            at all times, as the model implicitly learns this order.
 
         Returns:
             $\hat{\mathbf{f}}$, a recreation of the original$\mathbf{f}$,

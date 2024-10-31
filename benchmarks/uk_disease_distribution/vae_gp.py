@@ -32,7 +32,7 @@ from dl4bi.meta_regression.train_utils import (
 from dl4bi.vae import DeepChol, train_utils
 
 
-@hydra.main("configs/gp", config_name="default", version_base=None)
+@hydra.main("configs", config_name="default_vae", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", f"VAE_GP_{cfg.model.cls}_{cfg.data.sampling_policy}")
     wandb.init(
@@ -69,7 +69,7 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        cfg.data.batch_size,
+        cfg.batch_size,
         callbacks=[
             Callback(
                 log_vae_map_plots(map_data, s, ["var", "ls"], cfg.model.kwargs.z_dim),
@@ -84,7 +84,7 @@ def main(cfg: DictConfig):
         state,
         isinstance(model, (DeepChol,)),
         cfg.valid_num_steps,
-        cfg.data.batch_size,
+        cfg.batch_size,
         log_results=True,
     )
     path = Path(

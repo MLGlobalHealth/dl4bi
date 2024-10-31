@@ -33,7 +33,7 @@ from dl4bi.meta_regression.train_utils import (
 from dl4bi.vae import DeepChol, train_utils
 
 
-@hydra.main("configs/graph_model", config_name="default", version_base=None)
+@hydra.main("configs", config_name="default_vae_graph_model", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get(
         "name",
@@ -56,7 +56,7 @@ def main(cfg: DictConfig):
     s, _, _ = process_map(cfg.data)
     dataloader, conditionals_names = {"car": car, "icar": icar, "bym": bym}[
         cfg.graph_model.name
-    ](cfg.data.batch_size, adj_mat, cfg.graph_model)
+    ](cfg.batch_size, adj_mat, cfg.graph_model)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
