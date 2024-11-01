@@ -74,18 +74,18 @@ def train(
 ):
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
     batches = train_dataloader(rng_data)
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = next(batches)
+    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, _, _, inv_permute_idx = next(batches)
     rngs = {"params": rng_params, "extra": rng_extra}
-    kwargs = model.init(rngs, s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test)
+    kwargs = model.init(rngs, s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test, inv_permute_idx=inv_permute_idx)
     params = kwargs.pop("params")
-    param_count = nn.tabulate(model, rngs)(
-        s_ctx,
-        f_ctx,
-        s_test,
-        valid_lens_ctx,
-        valid_lens_test,
-    )
-    print(param_count)
+    # param_count = nn.tabulate(model, rngs)(
+    #     s_ctx,
+    #     f_ctx,
+    #     s_test,
+    #     valid_lens_ctx,
+    #     valid_lens_test,
+    # )
+    # print(param_count)
     state = TrainState.create(
         apply_fn=model.apply,
         params=params if state is None else state.params,
@@ -159,7 +159,7 @@ def evaluate(
         # early stopping for infinite dataloaders
         if i >= num_steps:
             break
-        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
+        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, _,_,inv_permute_idx = batch
         f_mu, f_std, *_ = jit(state.apply_fn)(
             {"params": state.params, **state.kwargs},
             s_ctx,
@@ -167,6 +167,7 @@ def evaluate(
             s_test,
             valid_lens_ctx,
             valid_lens_test,
+            inv_permute_idx=inv_permute_idx,
             rngs={"extra": rng_extra},
         )
         mask_test = mask_from_valid_lens(s_test.shape[1], valid_lens_test)
@@ -413,9 +414,8 @@ def vanilla_train_step(
         `TrainState` with updated parameters.
     """
     rng_dropout, rng_extra = random.split(rng)
-
     def loss_fn(params):
-        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
+        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, _,_,inv_permute_idx = batch
         (B, L_test, _) = s_test.shape
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(L_test, B)
@@ -428,6 +428,7 @@ def vanilla_train_step(
             valid_lens_ctx,
             valid_lens_test,
             training=True,
+            inv_permute_idx = inv_permute_idx,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
         )
         return -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
@@ -511,7 +512,6 @@ def tril_cov_train_step(
         `TrainState` with updated parameters.
     """
     rng_dropout, rng_extra = random.split(rng)
-
     def loss_fn(params):
         s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
         f_mu, f_L = state.apply_fn(
@@ -830,6 +830,7 @@ def log_img_plots(
         s_test_full,
         valid_lens_ctx,
         valid_lens_test=None,
+        inv_permute_idx=inv_permute_idx,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
     paths = []

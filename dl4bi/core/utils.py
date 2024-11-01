@@ -27,6 +27,7 @@ def mask_attn(x: jax.Array, valid_lens: jax.Array, fill=-jnp.inf):
         valid_lens = jnp.repeat(valid_lens, Q)
     x = x.reshape(B * Q, K)
     m = jnp.arange(K) < valid_lens.reshape(-1, 1)
+    # visualize_graph(m.reshape(B, Q, K)[0,:,:], 'Mask_Attn[0]')
     return jnp.where(m, x, fill).reshape(B, Q, K)
 
 def load_adj_list(file_path):
@@ -37,20 +38,60 @@ def load_adj_list(file_path):
             if '#' not in neighbors:
                 node_list = [int(n) for n in neighbors.strip().split(' ')]
                 # Add node and its neighbors to the graph
-                graph[node_list[0]] = node_list
+                curr_node = node_list[0]
+                if curr_node not in graph:
+                    graph[curr_node] = node_list[1:]
+                else:
+                    graph[curr_node] += node_list[1:]
+                for neighbor in node_list[1:]:
+                    if neighbor not in graph:
+                        graph[neighbor] = [curr_node]
+                    else:
+                        graph[neighbor].append(curr_node)
     return graph
 
+def convert_graph_to_mask(graph, inv_permute_idx=None):
+    L = len(graph)
+    # if inv_permute_idx is None:
+    #     permute_idx = jnp.arange(L)
+    # else:
+    permute_idx = inv_permute_idx.argsort()
+    mask = jnp.zeros((L, L), dtype=bool)
+    
+    # num_edges = sum(len(neighbors) for neighbors in graph.values())
+    # print(f'Number of edges: {num_edges}') # 960
+    
+    for node in graph:
+        mask = mask.at[node, node].set(True)
+        mask = mask.at[node, graph[node]].set(True)
+    mask = mask[permute_idx, :][:, permute_idx]
+    
+    # visualize_graph(mask, 'Mask_Adj')
+    
+    # Set some random indices of mask to be True to decrease its sparsity
+    # rng = random.PRNGKey(0)
+    # num_random_entries = L * L // 10  # Number of random entries to set to True
+    # random_indices = random.randint(rng, (num_random_entries, 2), 0, L)
+    # mask = mask.at[random_indices[:, 0], random_indices[:, 1]].set(True)
+    
+    # if inv_permute_idx is not None:
+    #     mask_inv = mask[inv_permute_idx, :][:, inv_permute_idx]
+    # visualize_graph(mask, 'Mask_Adj_Random')
+    # visualize_graph(mask_inv, 'Mask_adj_permuted')
+    
+    return mask
+    
 import matplotlib.pyplot as plt
 
 def visualize_graph(matrix, name='Adjacency_Matrix'):
-    plt.imshow(matrix, cmap='viridis', interpolation='none')
+    plt.imshow(np.array(matrix), cmap='viridis', interpolation='none')
     plt.colorbar()
     plt.title(name)
-    plt.savefig('/cache/outbreaks/' + name + '.png')
+    plt.savefig('/home/scratch/menang/outbreaks/' + name + '.png')
     plt.clf()
 
 # @jit
-def mask_attn_graph(x: jax.Array, fill=-jnp.inf):
+def mask_attn_graph(x: jax.Array, inv_permute_idx, fill=-jnp.inf):
     r"""Mask `x` with `fill` using adjancency matrix from graph.
     
     Args: 
@@ -59,24 +100,12 @@ def mask_attn_graph(x: jax.Array, fill=-jnp.inf):
     Returns:
         `x` with filled values according to mask.
     """
-    adj_matrix_path = '/cache/outbreaks/dim16_lattice.adjilist'
+    adj_matrix_path = '/home/scratch/menang/outbreaks/dim16_lattice.adjilist'
     graph = load_adj_list(adj_matrix_path)
+    mask = convert_graph_to_mask(graph, inv_permute_idx)
     B, Q, K = x.shape
-    mask = jnp.zeros((Q, K), dtype=bool)
-    for j in range(Q):
-        mask = mask.at[j, graph[j]].set(True)
-        mask = mask.at[graph[j], j].set(True)
     mask = jnp.broadcast_to(mask, (B, Q, K))
     x = jnp.where(mask, x, fill)
-    
-    # Debugging
-    # print('graph:', graph)  
-    # print('nx.to_numpy_array(nx.Graph(graph))', nx.to_numpy_array(nx.Graph(graph)))
-    # visualize_graph(nx.to_numpy_array(nx.Graph(graph)))
-    # visualize_graph(np.array(mask[1, :, :]), 'Mask')
-    # visualize_graph(np.array(x[1, :, :]), 'Masked_X')
-    # raise ValueError('Masked_X')
-    
     return x
 
 def mask_from_valid_lens(max_len: int, valid_lens: jax.Array):

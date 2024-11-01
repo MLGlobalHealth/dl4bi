@@ -219,11 +219,12 @@ class KRBlock(nn.Module):
         kvs: jax.Array,
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
+        inv_permute_idx: Optional[jax.Array] = None,
     ):
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
-        qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, valid_lens, training)
-        kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, valid_lens, training)
+        qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, valid_lens, training, inv_permute_idx)
+        kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, valid_lens, training, inv_permute_idx)
         qvs_3, kvs_3 = qvs + drop(qvs_2), kvs + drop(kvs_2)
         norm_2 = self.norm.copy()
         qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)
@@ -256,11 +257,12 @@ class KRStack(nn.Module):
         kvs: jax.Array,
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
+        inv_permute_idx: Optional[jax.Array] = None,
     ):
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
-                qvs, kvs = blk(qvs, kvs, valid_lens, training)
+                qvs, kvs = blk(qvs, kvs, valid_lens, training, inv_permute_idx)
         return self.norm(qvs), self.norm(kvs)
 
     @classmethod

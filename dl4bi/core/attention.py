@@ -319,6 +319,7 @@ class Attention(nn.Module):
         vs: jax.Array,  # [B, K, H, D_H]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
+        inv_permute_idx: Optional[jax.Array] = None,
         **kwargs,
     ):
         r"""Performs forward pass of network.
@@ -344,7 +345,7 @@ class Attention(nn.Module):
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
             # scores = mask_attn(scores, valid_lens)
-            scores = mask_attn_graph(scores) # NOTE: test to mask according to ajacency matrix
+            scores = mask_attn_graph(scores, inv_permute_idx) # NOTE: test to mask according to ajacency matrix
         attn = nn.softmax(scores, axis=-1)  # [B * H, Q, K]
         ctx = drop(attn) @ vs  # [B * H, Q, D_V_H]
         # [B * H, Q, D_V_H] -> [B, Q, H, D_V_H]
@@ -439,6 +440,7 @@ class MultiHeadAttention(nn.Module):
         vs: jax.Array,
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
+        inv_permute_idx: Optional[jax.Array] = None,
         **kwargs,
     ):
         r"""Performs forward pass of network.
@@ -460,7 +462,7 @@ class MultiHeadAttention(nn.Module):
         qs = qs.reshape(B, Q, H, D_QK // H)
         ks = ks.reshape(B, K, H, D_QK // H)
         vs = vs.reshape(B, K, H, D_V // H)
-        ctx, attn = self.attn(qs, ks, vs, valid_lens, training, **kwargs)
+        ctx, attn = self.attn(qs, ks, vs, valid_lens, training, inv_permute_idx, **kwargs)
         return self.proj_out(ctx.reshape(B, Q, D_V)), attn
 
 

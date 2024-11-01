@@ -42,6 +42,7 @@ class TNPKR(nn.Module):
         valid_lens_ctx: Optional[jax.Array] = None,  # [B]
         valid_lens_test: Optional[jax.Array] = None,  # [B]
         training: bool = False,
+        inv_permute_idx: Optional[jax.Array] = None,
         **kwargs,
     ):
         r"""Run module forward.
@@ -76,6 +77,7 @@ class TNPKR(nn.Module):
             self.embed_s_f(s_f_ctx),
             valid_lens_ctx,
             training,
+            inv_permute_idx
         )
         f_dist = self.head(s_f_test_enc, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
