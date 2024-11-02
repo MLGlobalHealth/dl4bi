@@ -21,6 +21,9 @@ class TNPKR(nn.Module):
         dec: A decoder module, e.g. a `KRStack`.
         head: A prediction head for decoded output.
         min_std: Minimum pointwise standard deviation.
+        bias: An optional callable that is given `s_ctx`, `f_ctx`, `s_test`,
+            `valid_lens_ctx` and `valid_lens_test` and returns a bias matrix
+            of shape `[B, L_ctx, L_test]`.
 
     Returns:
         An instance of the `TNP-KR` model.
@@ -29,6 +32,7 @@ class TNPKR(nn.Module):
     embed_s: Callable = lambda x: x
     embed_f: Callable = lambda x: x
     embed_s_f: nn.Module = MLP([256, 64])
+    bias: Callable = lambda *_: None
     dec: nn.Module = KRStack()
     head: nn.Module = MLP([128, 2])
     min_std: float = 0.0
@@ -42,7 +46,6 @@ class TNPKR(nn.Module):
         valid_lens_ctx: Optional[jax.Array] = None,  # [B]
         valid_lens_test: Optional[jax.Array] = None,  # [B]
         training: bool = False,
-        bias_func: Callable = lambda *_: None,
         **kwargs,
     ):
         r"""Run module forward.
@@ -64,9 +67,6 @@ class TNPKR(nn.Module):
                 valid positions for each `L_test` sequence in the batch.
             training: A boolean indicating whether this call is performed during
                 training.
-            bias: An optional callable that is given `s_ctx`, `f_ctx`, `s_test`,
-                `valid_lens_ctx` and `valid_lens_test` and returns a bias matrix
-                of shape `[B, L_ctx, L_test]`.
 
         Returns:
             $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
@@ -75,7 +75,7 @@ class TNPKR(nn.Module):
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         s_f_ctx = stack(self.embed_s(s_ctx), self.embed_f(f_ctx))
         s_f_test = stack(self.embed_s(s_test), self.embed_f(f_test))
-        bias = bias_func(s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test)
+        bias = self.bias(s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test)
         s_f_test_enc, _ = self.dec(
             self.embed_s_f(s_f_test),
             self.embed_s_f(s_f_ctx),

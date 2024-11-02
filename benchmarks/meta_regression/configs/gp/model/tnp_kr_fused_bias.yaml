@@ -1,0 +1,25 @@
+cls: TNPKR
+kwargs:
+  embed_s_f:
+    cls: MLP
+    kwargs:
+      dims: [256, 64]
+  bias:
+    cls: DistanceBias
+    kwargs:
+      num_heads: 4
+  dec:
+    cls: KRStack
+    kwargs:
+      blk:
+        cls: KRBlock
+        kwargs:
+          attn:
+            cls: MultiHeadAttention
+            kwargs:
+              attn:
+                cls: FusedAttention
+  head:
+    cls: MLP
+    kwargs:
+      dims: [128, 2]
