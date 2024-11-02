@@ -31,6 +31,9 @@ class DistanceBias(nn.Module):
         valid_lens_ctx: Optional[jax.Array] = None,  # [B]
         valid_lens_test: Optional[jax.Array] = None,  # [B]
     ):
+        init = nn.initializers.constant(1)
+        bias_scale = self.param("bias_scale", init, (1, self.num_heads, 1, 1))
         # negative because you want closer locations to have higher values
         bias = -self.transform(vmap(outer_subtract)(s_ctx, s_test))
-        return bias
+        bias = jnp.repeat(bias[:, None, ...], self.num_heads, axis=1)
+        return bias_scale * bias
