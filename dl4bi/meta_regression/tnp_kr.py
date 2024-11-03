@@ -7,25 +7,30 @@ import jax.numpy as jnp
 from jax import vmap
 from sps.kernels import l2_dist_sq
 
-from ..core import MLP, DistanceBias, KRBlock, MultiHeadAttention
+from ..core import MLP, DistanceBias, FusedAttention, KRBlock, MultiHeadAttention
 
 
 class TNPKR(nn.Module):
     """Transformer Neural Process - Kernel Regression (TNP-KR).
 
     Args:
+        num_blks: Number of `KRBlocks` to use.
+        num_reps: Number of times to repeat each `KRBlock`.
+        min_std: Minimum pointwise standard deviation.
         embed_s: A module that embeds the index set prior to embedding with
             function values.
         embed_f: A module that embeds function values prior to embedding with
             the index set.
-        embed_s_f: A module that jointly embeds the (embedded) index set and
-            function values.
+        embed_obs: A module that creates embeddings for observed (context) and
+            unobserved (test) points.
+        embed_all: A module that jointly embeds `obs`, `s`, and `f` embeddings.
         dist: A distance function used to calculate pairwise distances between
             two arrays.
         bias: A bias module that consumes pairwise distances.
-        attn: An attention module.
+        attn: An attention module used in `KRBlocks`.
+        norm: A normalization module used in `KRBlocks`.
+        ffn: A FeedForward Network used in `KRBlocks`.
         head: A prediction head.
-        min_std: Minimum pointwise standard deviation.
 
     Returns:
         An instance of the `TNP-KR` model.
@@ -40,7 +45,7 @@ class TNPKR(nn.Module):
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
     dist: Callable = l2_dist_sq
     bias: nn.Module = DistanceBias()
-    attn: nn.Module = MultiHeadAttention()
+    attn: nn.Module = MultiHeadAttention(FusedAttention())
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64], nn.gelu)
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
