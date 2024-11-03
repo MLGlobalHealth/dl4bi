@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Callable, Sequence
 from typing import Optional
 
@@ -175,7 +176,7 @@ class FastAttention(nn.Module):
         qs: jax.Array,  # [B, Q, H, D_QK_H]
         ks: jax.Array,  # [B, K, H D_QK_H]
         vs: jax.Array,  # [B, K, H, D_H]
-        bias: jax.Array = jnp.zeros(()),  # broadcastable to [B, H, Q, K]
+        bias: Optional[jax.Array] = None,  # broadcastable to [B, H, Q, K]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         redraw_random_features: bool = False,
@@ -202,6 +203,8 @@ class FastAttention(nn.Module):
         gen_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_QK_H)
         init_proj = lambda: gen_proj(self.make_rng("params"))
         proj = self.variable("projections", "random", init_proj)
+        if bias is not None:
+            warnings.warn("FastAttention does not currently support bias!")
         if redraw_random_features:
             proj.value = gen_proj(self.make_rng("rng_extra"))
         # [B, L, H, D_H] -> [B * H, L, D_H]

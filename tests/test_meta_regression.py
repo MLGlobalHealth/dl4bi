@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import optax
 from jax import jit, random
 
-from dl4bi.core import FusedAttention
+from dl4bi.core import Attention, FastAttention, FusedAttention, MultiHeadAttention
 from dl4bi.meta_regression import (
     ANP,
     BANP,
@@ -30,7 +30,7 @@ def test_models():
     s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, S, D_s=1]
     valid_lens = jnp.array([2, 4, 9, 3])
     f = random.normal(rng_data, s.shape)
-    for np in [NP, CNP, BNP, ANP, CANP, BANP, DKR, TNPD, TNPDS, TNPND, TNPKR, ConvCNP]:
+    for np in [NP, CNP, BNP, ANP, CANP, BANP, DKR, TNPD, TNPND, TNPKR, ConvCNP]:
         m = np()
         (f_mu, f_std, *_), params = m.init_with_output(
             {"params": rng_params, "dropout": rng_dropout, "extra": rng_extra},
@@ -45,7 +45,7 @@ def test_models():
         assert f_mu.shape == (B * K, L, 1)
 
 
-def test_tnp_kr_scale():
+def test_tnp_kr_fast_scale():
     B, D_f, L_init, L_ctx, L_test = 1, 1, 3, 500000, 50000
     rng = random.key(42)
     rng_ctx, rng_init, rng_model = random.split(rng, 3)
@@ -54,7 +54,7 @@ def test_tnp_kr_scale():
     s_test = jnp.linspace(0, 1.0, L_test)[None, :, None]  # [1, L_test, 1]
     f_init = random.normal(rng_init, (B, L_init, D_f))
     f_ctx = random.normal(rng_ctx, (B, L_ctx, D_f))
-    m = TNPKR()
+    m = TNPKR(attn=MultiHeadAttention(FastAttention()))
     params = m.init(rng_init, s_init, f_init, s_init)
     jit_m = jit(lambda *args: m.apply(params, *args))
     jit_m(s_init, f_init, s_init)  # dummy run to compile
@@ -87,8 +87,9 @@ def test_context_data_leaks():
         DKR,
         TNPD,
         TNPND,
-        TNPKR,
-        lambda: TNPKR(attn=FusedAttention()),
+        lambda: TNPKR(attn=MultiHeadAttention(Attention())),
+        lambda: TNPKR(attn=MultiHeadAttention(FusedAttention())),
+        lambda: TNPKR(attn=MultiHeadAttention(FastAttention())),
         ConvCNP,
     ]:
         print(np)
@@ -126,7 +127,7 @@ def test_train_step_loss():
     f = 10 * random.normal(rng_data, s.shape)
     batch_1 = (s, f, valid_lens_ctx, s, f, valid_lens_test_1)
     batch_2 = (s, f, valid_lens_ctx, s, f, valid_lens_test_2)
-    for np in [NP, CNP, BNP, ANP, CANP, BANP, DKR, TNPD, TNPDS, TNPND, TNPKR, ConvCNP]:
+    for np in [NP, CNP, BNP, ANP, CANP, BANP, DKR, TNPD, TNPND, TNPKR, ConvCNP]:
         print(np)
         model = np()
         train_step = tu.vanilla_train_step
@@ -163,7 +164,7 @@ def test_sample():
     s_ctx = jnp.linspace(0, 0.90, 90)[:, None]  # [L_ctx, 1]
     s_test = jnp.linspace(0.90, 1.0, 10)[:, None]  # [L_test, 1]
     f_ctx = s_ctx  # [L_ctx, 1] : just a line
-    for np in [NP, CNP, ANP, CANP, DKR, TNPD, TNPDS, TNPKR, ConvCNP]:
+    for np in [NP, CNP, ANP, CANP, DKR, TNPD, TNPKR, ConvCNP]:
         print(np)
         model = np()
         kwargs = model.init(

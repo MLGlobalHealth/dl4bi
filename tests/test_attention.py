@@ -95,8 +95,8 @@ def test_fused_attention():
     assert ctx_true.shape == (B, L, H, D), "Full: incorrect context output shape!"
     assert ctx_fused.shape == (B, L, H, D), "Fused: incorrect context output shape!"
     # TODO(danj): is this expected?
-    assert mse_fused < 0.03, "Fused: Large MSE error in approximation"
-    assert max_error_fused < 1.5, "Fused: Large max error in approximation!"
+    assert mse_fused < 0.01, "Fused: Large MSE error in approximation"
+    assert max_error_fused < 1.0, "Fused: Large max error in approximation!"
 
 
 def test_fast_softmax_attention_speed():
