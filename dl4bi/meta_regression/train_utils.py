@@ -75,7 +75,7 @@ def train(
     valid_interval: int = 25000,
     log_loss_interval: int = 100,
     callbacks: list[Callback] = [],
-    monitor_metric: str = "NLL",
+    monitor_metric: str = "NLL",  # validation metric to monitor
     early_stop_patience: Optional[int] = None,
     state: Optional[TrainState] = None,
 ):

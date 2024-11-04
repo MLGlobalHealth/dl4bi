@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import optax
 import pandas as pd
 import wandb
-from jax import jit, random, vmap
+from jax import random, vmap
 from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
@@ -67,8 +67,9 @@ def main(cfg: DictConfig):
     if finetune_path:
         state, _ = load_ckpt(Path(finetune_path))
         optimizer = optax.yogi(cfg.lr_finetune)
-        train_dataloader = valid_dataloader
         train_num_steps = cfg.finetune_num_steps
+        if cfg.finetune_on_real:
+            train_dataloader = valid_dataloader
     state = train(
         rng_train,
         model,
