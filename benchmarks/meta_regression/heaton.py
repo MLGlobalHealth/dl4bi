@@ -111,6 +111,7 @@ def build_dataloaders(
     df["MaskTemp"] = (df.MaskTemp - mean) / std
     df["TrueTemp"] = (df.TrueTemp - mean) / std
     s_obs, f_obs, s_unobs, f_unobs = split_observed(df)
+    del df  # save memory
     L_obs, L_unobs = s_obs.shape[0], s_unobs.shape[0]
     L_train = jnp.prod(jnp.array([dim.num for dim in data.s]))
     permute_idx = random.choice(rng, L_obs, (L_obs,), replace=False)
@@ -208,7 +209,12 @@ def split_observed(df: pd.DataFrame):
     unobs = df[~obs_idx][["Lon", "Lat", "TrueTemp"]].values
     s_obs, f_obs = obs[:, :-1], obs[:, [-1]]
     s_unobs, f_unobs = unobs[:, :-1], unobs[:, [-1]]
-    return s_obs, f_obs, s_unobs, f_unobs
+    return (
+        jnp.float16(s_obs),
+        jnp.float16(f_obs),
+        jnp.float16(s_unobs),
+        jnp.float16(f_unobs),
+    )
 
 
 def log_test_results(rng: jax.Array, state: TrainState, test_dataloader: Callable):
