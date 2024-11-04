@@ -53,7 +53,7 @@ class PriorCVAE(nn.Module):
         z_std = jnp.exp(z_log_var / 2)
         eps = random.normal(self.make_rng("extra"), z_std.shape)
         z = z_mu + z_std * eps
-        f_hat = self.decoder(z, conditionals)
+        f_hat = self.decode(z, conditionals)
         return f_hat.reshape(f.shape), z_mu, z_std
 
     def decode(self, z: Array, conditionals: list[Array]):

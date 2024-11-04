@@ -2,10 +2,10 @@ defaults:
   - _self_ # use default global values below
   - data: England
   - kernel: rbf
-  - model: tnp_kr_fast
+  - model: prior_cvae
 seed: 42
 wandb: True
-project: UK_disease_spread
+project: UK_disease_distribution
 train_num_steps: 100000
 valid_num_steps: 5000
 valid_interval: 25000

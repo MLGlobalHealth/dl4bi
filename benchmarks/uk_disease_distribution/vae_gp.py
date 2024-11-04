@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import pickle
 from pathlib import Path
-from typing import Optional, Union
+from typing import Generator, Optional, Union
 
 import flax.linen as nn
 import hydra
@@ -58,37 +58,38 @@ def main(cfg: DictConfig):
         optax.clip_by_global_norm(cfg.clip_max_norm),
         optax.yogi(lr_schedule),
     )
-
+    train_loader, test_loader, conditional_names = generate_dataloaders(
+        rng, gp, s, cfg.batch_size
+    )
     state = train(
         rng_train,
-        gp,
-        s,
         model,
         optimizer,
         isinstance(model, (DeepChol,)),
+        train_loader,
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        cfg.batch_size,
         callbacks=[
             Callback(
-                log_vae_map_plots(map_data, s, ["var", "ls"], cfg.model.kwargs.z_dim),
+                log_vae_map_plots(
+                    map_data, s, conditional_names, cfg.model.kwargs.z_dim
+                ),
                 cfg.plot_interval,
             )
         ],
     )
     results = validate(
         rng_test,
-        gp,
-        s,
         state,
         isinstance(model, (DeepChol,)),
+        test_loader,
         cfg.valid_num_steps,
-        cfg.batch_size,
         log_results=True,
+        is_test=True,
     )
     path = Path(
-        f"results/uk_disease_dist/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
+        f"results/UK_disease_distribution/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path.with_suffix(".pkl"), "wb") as save_file:
@@ -96,32 +97,41 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def dataloader(
+def generate_dataloaders(
     rng: jax.Array, gp: GP, s: jax.Array, batch_size: int = 32, approx: bool = False
 ):
-    while True:
-        _, rng = random.split(rng)
-        f, var, ls, _, z = gp.simulate(rng, s, batch_size, approx)
-        yield f, z, [var, ls]
+    rng_train, rng_test = random.split(rng)
+    conditional_names = ["var", "ls"]
+    if gp.kernel.__name__ == "periodic":
+        conditional_names += ["period"]
+
+    def dataloader(data_rng):
+        while True:
+            rng_batch, data_rng = random.split(data_rng)
+            f, var, ls, period, z = gp.simulate(rng_batch, s, batch_size, approx)
+            yield (
+                f,
+                z,
+                ([var, ls] if gp.kernel.__name__ != "periodic" else [var, ls, period]),
+            )
+
+    return dataloader(rng_train), dataloader(rng_test), conditional_names
 
 
 def train(
     rng: jax.Array,
-    gp: GP,
-    s: jax.Array,
     model: nn.Module,
     optimizer: optax.GradientTransformation,
     is_decoder_only: bool,
+    loader: Generator,
     train_num_steps: int = 100000,
     valid_num_steps: int = 25000,
     valid_interval: int = 25000,
-    batch_size: int = 32,
     log_every_n: int = 100,
     callbacks: list[Callback] = [],
     state: Optional[TrainState] = None,
 ):
-    rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
-    loader = dataloader(rng_data, gp, s, batch_size)
+    rng_params, rng_extra, rng_train = random.split(rng, 3)
     f, z, conditionals = next(loader)
     rngs = {"params": rng_params, "extra": rng_extra}
 
@@ -151,12 +161,10 @@ def train(
             rng_valid, rng_train = random.split(rng_train)
             validate(
                 rng_valid,
-                gp,
-                s,
                 state,
                 is_decoder_only,
+                loader,
                 valid_num_steps,
-                batch_size,
             )
         for cbk in callbacks:
             if (i + 1) % cbk.interval == 0:
@@ -166,16 +174,14 @@ def train(
 
 def validate(
     rng: jax.Array,
-    gp: GP,
-    s: jax.Array,
     state: train_utils.TrainState,
     is_decoder_only: bool,
+    loader: Generator,
     valid_num_steps: int = 5000,
-    batch_size: int = 32,
     log_results: bool = False,
+    is_test: bool = False,
 ):
-    rng_data, rng_extra = random.split(rng)
-    loader = dataloader(rng_data, gp, s, batch_size)
+    _, rng_extra = random.split(rng)
     losses = np.zeros((valid_num_steps,))
     results = []
     for i in (_ := tqdm(range(valid_num_steps), unit="batch", dynamic_ncols=True)):
@@ -197,8 +203,8 @@ def validate(
             p = np.array(f_hat)
             results += [(b, p)]
     loss = losses.mean()
-    print(f"validation loss: {loss:.3f}")
-    wandb.log({"validation_loss": loss})
+    print(f"{'test' if is_test else 'validation'} loss: {loss:.3f}")
+    wandb.log({f"{'test' if is_test else 'validation'}": loss})
     return results
 
 
@@ -221,23 +227,3 @@ def instantiate(d: Union[dict, DictConfig]):
 
 if __name__ == "__main__":
     main()
-
-# TODO(jhonathan): delete if not adding new sampling policies to VAE
-
-# def generate_vae_locations(data: DictConfig, rng_train: jax.Array):
-#     s_map, sample_grid, s_bounds = process_map(data)
-#     if data.sampling_policy == "centroids":
-#         return s_map
-#     elif data.sampling_policy == "in_map":
-#         _, locations_rng = random.split(rng_train)
-#         return random.choice(locations_rng, sample_grid, shape=(data.num_ctx.max))
-#     elif data.sampling_policy == "grid":
-#         ctx_sqrt = int(jnp.sqrt(data.num_ctx.max))
-#         return build_grid(
-#             [
-#                 {"start": s_bounds[0, 0], "stop": s_bounds[0, 1], "num": ctx_sqrt},
-#                 {"start": s_bounds[1, 0], "stop": s_bounds[1, 1], "num": ctx_sqrt},
-#             ]
-#         ).reshape(-1, 2)
-#     else:
-#         raise ValueError(f"Invalid data sampling policy: {data.sampling_policy}")

@@ -93,7 +93,7 @@ def prior_cvae_train_step(
             {"params": params}, f, conditionals, rngs={"extra": rng}
         )
         kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
-        mse_loss = optax.squared_error(f_hat, f.squeeze()).mean()
+        mse_loss = optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
         # TODO(Jhonathan): remove hard-coding
         return (1 / (2 * 0.9)) * mse_loss + kl_div.mean()
 

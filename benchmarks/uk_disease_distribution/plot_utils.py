@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Generator, Optional
 
+import arviz as az
 import flax.linen as nn
 import geopandas as gpd
 import jax
@@ -11,6 +12,49 @@ from jax.scipy.stats import norm
 
 import wandb
 from dl4bi.meta_regression.train_utils import TrainState
+
+
+def plot_covariance(samples, conditionals, model_name, kernel, s):
+    if kernel.__name__ == "periodic":
+        K = kernel(
+            s, s, conditionals["var"], conditionals["ls"], conditionals["period"]
+        )
+    else:
+        K = kernel(s, s, conditionals["var"], conditionals["ls"])
+    mu_samples = samples.get("mu", samples["obs"])
+    mu_covariance = np.cov(mu_samples, rowvar=False)
+    vmin = min(K.min(), mu_covariance.min())
+    vmax = max(K.max(), mu_covariance.max())
+    plt.figure(figsize=(10, 8))
+    _, ax = plt.subplots(1, 2, figsize=(16, 8))
+    ax[0].set_title("GT Kernel")
+    ax[0].imshow(K, cmap="viridis", vmin=vmin, vmax=vmax)
+    ax[1].set_title("Inferred covariance")
+    ax[1].imshow(mu_covariance, cmap="viridis", vmin=vmin, vmax=vmax)
+
+    cond_str = ", ".join([f"{k}: {v[0]:.2f}" for k, v in conditionals.items()])
+    plt.title(f"Covariance Matrix for {model_name}: {cond_str}")
+    plt.tight_layout()
+    timestamp = datetime.now().isoformat()
+    path = f"/tmp/covariance_{model_name}_{timestamp}.png"
+    plt.savefig(path, dpi=300)
+    wandb.log({f"Covariance Matrix - {model_name}": wandb.Image(path)})
+    plt.clf()
+
+
+def plot_trace(mcmc, conditionals, model_name):
+    az.plot_trace(
+        az.from_numpyro(mcmc), var_names=[str(c) for c in conditionals.keys()]
+    )
+    title = f"Trace for {model_name}: " + ", ".join(
+        [f"{name}: {cond[0]:g}" for name, cond in conditionals.items()]
+    )
+    plt.tight_layout()
+    timestamp = datetime.now().isoformat()
+    path = f"/tmp/trace_{model_name}_{timestamp}.png"
+    plt.savefig(path, dpi=300)
+    wandb.log({title: wandb.Image(str(path))})
+    plt.clf()
 
 
 def plot_posterior_predictives_map_points(
@@ -76,7 +120,7 @@ def plot_posterior_predictives_map_points(
         title = f"Sample {i} (GT, Prediction, Uncertainty, Coverage)"
         paths.append(f"/tmp/Meta Reg {timestamp} - {title}.png")
         fig.suptitle(title)
-        fig.subplots_adjust(top=0.95)
+        fig.subplots_adjust(top=0.9)
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
         plt.close(fig)
@@ -202,8 +246,13 @@ def plot_vae_decoder_samples(
         f, _, conditionals = next(loader)
         f = f[0]
         z = jax.random.normal(rng_z, shape=(num_plots, z_dim))
+        batched_conditionals = jnp.repeat(
+            jnp.stack(conditionals).reshape(1, -1), repeats=z.shape[0], axis=0
+        )
+
         f_hat = model.decoder.apply(
-            {"params": state.params["decoder"], **state.kwargs}, z
+            {"params": state.params["decoder"], **state.kwargs},
+            jnp.hstack([z, batched_conditionals]),
         ).reshape((num_plots,) + f.shape)
         vmin = min(f.min(), f_hat.min())
         vmax = max(f.max(), f_hat.max())

@@ -67,7 +67,7 @@ def main(cfg: DictConfig):
     )
     metrics = evaluate(rng_test, state, dataloader, cfg.valid_num_steps)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path = f"results/uk_disease_dist/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
+    path = f"results/UK_disease_distribution/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -82,7 +82,7 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig, batch_size: int):
 
     @jit
     def gen_s_random_centroids(rng: jax.Array):
-        return jax.random.choice(rng, s_map, shape=(data.num_ctx.max,))
+        return jax.random.choice(rng, s_map, shape=(data.num_ctx.max,), replace=False)
 
     @jit
     def gen_s_random_grid(rng: jax.Array):
