@@ -1,0 +1,14 @@
+name: car
+tau:
+  cls: Prior
+  kwargs:
+    dist: fixed
+    kwargs:
+      value: 1.0
+alpha:
+  cls: Prior
+  kwargs:
+    dist: fixed
+    kwargs:
+      value: 0.95
+

@@ -1,0 +1,8 @@
+name: icar
+tau:
+  cls: Prior
+  kwargs:
+    dist: fixed
+    kwargs:
+      value: 1.0
+

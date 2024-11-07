@@ -95,6 +95,7 @@ def prior_cvae_train_step(
         kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
         mse_loss = optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
         # TODO(Jhonathan): remove hard-coding
+        # TODO change sigma -> check streching  on pre-violin plot
         return (1 / (2 * 0.9)) * mse_loss + kl_div.mean()
 
     loss, grads = value_and_grad(elbo_loss)(state.params)

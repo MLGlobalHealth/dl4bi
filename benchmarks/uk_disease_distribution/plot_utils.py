@@ -21,17 +21,22 @@ def plot_covariance(samples, conditionals, model_name, kernel, s):
         )
     else:
         K = kernel(s, s, conditionals["var"], conditionals["ls"])
-    mu_samples = samples.get("mu", samples["obs"])
-    mu_covariance = np.cov(mu_samples, rowvar=False)
+    mu_covariance = np.cov(samples["mu"], rowvar=False)
     vmin = min(K.min(), mu_covariance.min())
     vmax = max(K.max(), mu_covariance.max())
-    plt.figure(figsize=(10, 8))
-    _, ax = plt.subplots(1, 2, figsize=(16, 8))
-    ax[0].set_title("GT Kernel")
-    ax[0].imshow(K, cmap="viridis", vmin=vmin, vmax=vmax)
-    ax[1].set_title("Inferred covariance")
-    ax[1].imshow(mu_covariance, cmap="viridis", vmin=vmin, vmax=vmax)
+    fig, ax = plt.subplots(2, 2, figsize=(12, 12))
 
+    def plot_matrix_with_colorbar(axis, matrix, title, min_v=None, max_v=None):
+        im = axis.imshow(matrix, cmap="viridis", vmin=min_v, vmax=max_v)
+        axis.set_title(title)
+        fig.colorbar(im, ax=axis, fraction=0.046, pad=0.04)
+
+    plot_matrix_with_colorbar(ax[0, 0], K, "GT Kernel - scaled", vmin, vmax)
+    plot_matrix_with_colorbar(
+        ax[0, 1], mu_covariance, "Inferred covariance - scaled", vmin, vmax
+    )
+    plot_matrix_with_colorbar(ax[1, 0], K, "GT Kernel")
+    plot_matrix_with_colorbar(ax[1, 1], mu_covariance, "Inferred covariance")
     cond_str = ", ".join([f"{k}: {v[0]:.2f}" for k, v in conditionals.items()])
     plt.title(f"Covariance Matrix for {model_name}: {cond_str}")
     plt.tight_layout()
@@ -42,18 +47,63 @@ def plot_covariance(samples, conditionals, model_name, kernel, s):
     plt.clf()
 
 
-def plot_trace(mcmc, conditionals, model_name):
-    az.plot_trace(
-        az.from_numpyro(mcmc), var_names=[str(c) for c in conditionals.keys()]
-    )
+def plot_trace(samples, mcmc, conditionals, obs_noise, model_name):
+    var_names = [str(c) for c in conditionals.keys()] + ["sigma"]
+    az.plot_trace(az.from_numpyro(mcmc), var_names=var_names)
+    conditional_means = {c: samples[str(c)].mean().item() for c in var_names}
+    axes = plt.gcf().get_axes()
+    for i, (name, mean_val) in enumerate(conditional_means.items()):
+        axes[(i * 2) + 1].set_title(f"{name} (mean: {mean_val:.2f})", fontsize=10)
     title = f"Trace for {model_name}: " + ", ".join(
         [f"{name}: {cond[0]:g}" for name, cond in conditionals.items()]
     )
-    plt.tight_layout()
+    title += f" sigma: {obs_noise}"
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
     timestamp = datetime.now().isoformat()
     path = f"/tmp/trace_{model_name}_{timestamp}.png"
     plt.savefig(path, dpi=300)
     wandb.log({title: wandb.Image(str(path))})
+    plt.clf()
+
+
+def plot_histograms(samples, conditionals, obs_noise, model_name, priors):
+    num_plots = len(conditionals) + 1
+    _, axes = plt.subplots(1, num_plots, figsize=(12, 4))
+    for i, (name, actual_val) in enumerate(
+        {**conditionals, "sigma": [obs_noise]}.items()
+    ):
+        ax = axes[i]
+        sample_values = samples[str(name)]
+        ax.hist(
+            sample_values,
+            bins=20,
+            color="skyblue",
+            edgecolor="black",
+            label="Posterior Samples",
+        )
+        ax.axvline(
+            actual_val[0], color="red", linestyle="--", linewidth=1, label="True Value"
+        )
+        prior_dist = priors[name]
+        x_vals = jnp.linspace(min(sample_values), max(sample_values), 100)
+        prior_pdf = jnp.exp(prior_dist.log_prob(x_vals))
+        ax.plot(
+            x_vals,
+            prior_pdf * len(sample_values) * (ax.get_xlim()[1] - ax.get_xlim()[0]) / 20,
+            color="orange",
+            linestyle="--",
+            linewidth=1,
+            label="Prior Distribution",
+        )
+        ax.set_title(f"{name}: {actual_val[0]:.2f}")
+        ax.set_xlabel(name)
+        ax.legend()
+
+    plt.tight_layout()
+    timestamp = datetime.now().isoformat()
+    path = f"/tmp/histograms_{model_name}_{timestamp}.png"
+    plt.savefig(path, dpi=300)
+    wandb.log({f"Histograms for Conditionals - {model_name}": wandb.Image(path)})
     plt.clf()
 
 
