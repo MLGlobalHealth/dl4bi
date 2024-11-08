@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import pickle
 from pathlib import Path
-from typing import Generator, Optional, Union
+from typing import Generator, Optional
 
 import flax.linen as nn
 import hydra
@@ -9,20 +9,16 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+from graph_model_utils import bym, car, generate_adjacency_matrix, icar, instantiate
 from jax import jit, random
 from jax.scipy.stats import norm
 from map_utils import get_raw_map_data, process_map
 from omegaconf import DictConfig, OmegaConf
 from plot_utils import log_vae_map_plots
-from prior_cvae import PriorCVAE
-from sps.gp import GP
-from sps.kernels import matern_3_2, periodic, rbf
-from sps.priors import Prior
 from tqdm import tqdm
 from vae_train_utils import elbo_train_step, mse_train_step
 
 import wandb
-from dl4bi.core import *  # noqa: F403
 from dl4bi.meta_regression.train_utils import (
     Callback,
     TrainState,
@@ -34,7 +30,11 @@ from dl4bi.vae import DeepChol, train_utils
 
 @hydra.main("configs", config_name="default_vae", version_base=None)
 def main(cfg: DictConfig):
-    run_name = cfg.get("name", f"VAE_GP_{cfg.model.cls}_{cfg.data.sampling_policy}")
+    is_gp = cfg.is_gp
+    run_name = cfg.get(
+        "name",
+        f"VAE_{'GP' if is_gp else cfg.graph_model.name}_{cfg.model.cls}_{cfg.data.sampling_policy}",
+    )
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
@@ -43,12 +43,11 @@ def main(cfg: DictConfig):
         reinit=True,  # allows reinitialization for multiple runs
     )
     print(OmegaConf.to_yaml(cfg))
-
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     map_data = get_raw_map_data(cfg.data.name)
     s, _, _ = process_map(cfg.data)
-    model, gp = instantiate(cfg.model), instantiate(cfg.kernel)
+    model = instantiate(cfg.model)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -58,9 +57,10 @@ def main(cfg: DictConfig):
         optax.clip_by_global_norm(cfg.clip_max_norm),
         optax.yogi(lr_schedule),
     )
-    train_loader, test_loader, conditional_names = generate_dataloaders(
-        rng, gp, s, cfg.batch_size
-    )
+    if is_gp:
+        train_loader, test_loader, cond_names = gp_dataloaders(rng, cfg, s)
+    else:
+        train_loader, test_loader, cond_names = graph_dataloaders(rng, cfg, map_data)
     state = train(
         rng_train,
         model,
@@ -72,9 +72,7 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         callbacks=[
             Callback(
-                log_vae_map_plots(
-                    map_data, s, conditional_names, cfg.model.kwargs.z_dim
-                ),
+                log_vae_map_plots(map_data, s, cond_names, cfg.model.kwargs.z_dim),
                 cfg.plot_interval,
             )
         ],
@@ -88,8 +86,9 @@ def main(cfg: DictConfig):
         log_results=True,
         is_test=True,
     )
+    data_gen_name = cfg.kernel.kwargs.kernel.func if is_gp else cfg.graph_model.name
     path = Path(
-        f"results/UK_disease_distribution/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
+        f"results/{cfg.project}/{cfg.data.name}/{data_gen_name}/{cfg.seed}/{run_name}"
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path.with_suffix(".pkl"), "wb") as save_file:
@@ -97,13 +96,18 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def generate_dataloaders(
-    rng: jax.Array, gp: GP, s: jax.Array, batch_size: int = 32, approx: bool = False
+def gp_dataloaders(
+    rng: jax.Array,
+    cfg: DictConfig,
+    s: jax.Array,
+    approx: bool = False,
 ):
+    batch_size = cfg.batch_size
+    gp = instantiate(cfg.kernel)
     rng_train, rng_test = random.split(rng)
-    conditional_names = ["var", "ls"]
+    conditionals_names = ["var", "ls"]
     if gp.kernel.__name__ == "periodic":
-        conditional_names += ["period"]
+        conditionals_names += ["period"]
 
     def dataloader(data_rng):
         while True:
@@ -115,7 +119,16 @@ def generate_dataloaders(
                 ([var, ls] if gp.kernel.__name__ != "periodic" else [var, ls, period]),
             )
 
-    return dataloader(rng_train), dataloader(rng_test), conditional_names
+    return dataloader(rng_train), dataloader(rng_test), conditionals_names
+
+
+def graph_dataloaders(rng, cfg, map_data):
+    adj_mat = generate_adjacency_matrix(map_data, cfg.graph_construction)
+    rng_train, rng_test = random.split(rng)
+    dataloader, conditionals_names = {"car": car, "icar": icar, "bym": bym}[
+        cfg.graph_model.name
+    ](cfg.batch_size, adj_mat, cfg.graph_model)
+    return dataloader(rng_train), dataloader(rng_test), conditionals_names
 
 
 def train(
@@ -206,23 +219,6 @@ def validate(
     print(f"{'test' if is_test else 'validation'} loss: {loss:.3f}")
     wandb.log({f"{'test' if is_test else 'validation'}": loss})
     return results
-
-
-def instantiate(d: Union[dict, DictConfig]):
-    """Convenience function to instantiate an object from a config."""
-    if isinstance(d, DictConfig):
-        d = OmegaConf.to_container(d, resolve=True)
-    if "cls" in d:
-        cls, kwargs = d["cls"], d.get("kwargs", {})
-        for k in kwargs:
-            if k == "act_fn":
-                kwargs[k] = getattr(nn, kwargs[k])
-            elif isinstance(kwargs[k], dict):
-                kwargs[k] = instantiate(kwargs[k])
-        return globals()[cls](**kwargs)
-    elif "func" in d:
-        return eval(d["func"])
-    return d
 
 
 if __name__ == "__main__":

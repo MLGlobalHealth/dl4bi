@@ -233,7 +233,7 @@ def log_posterior_map_predictive_plots(gdf: gpd.GeoDataFrame, sampling_policy: s
     return log_posterior_predictive_plots
 
 
-def plot_vae_map_points(
+def plot_vae_reconstruction_samples(
     gdf: gpd.GeoDataFrame,
     x_norm_vars: tuple,
     y_norm_vars: tuple,
@@ -346,7 +346,7 @@ def log_vae_map_plots(
             conditionals,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
         )
-        paths = plot_vae_map_points(
+        paths = plot_vae_reconstruction_samples(
             gdf,
             x_norm_vars,
             y_norm_vars,

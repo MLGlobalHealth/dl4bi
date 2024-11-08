@@ -21,7 +21,7 @@ from dl4bi.meta_regression.train_utils import (
 )
 
 
-@hydra.main("configs", config_name="default_gp", version_base=None)
+@hydra.main("configs", config_name="default_meta_regression_gp", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get(
         "name", f"GP_meta_reg_{cfg.model.cls}_{cfg.data.sampling_policy}"

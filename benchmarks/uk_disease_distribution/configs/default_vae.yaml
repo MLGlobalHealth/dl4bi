@@ -3,7 +3,10 @@ defaults:
   - data: England
   - kernel: rbf
   - model: prior_cvae
+  - graph_model: icar
+  - graph_construction: default_graph
 seed: 42
+is_gp: True
 wandb: True
 project: UK_disease_distribution
 train_num_steps: 100000

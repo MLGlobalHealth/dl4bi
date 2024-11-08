@@ -1,101 +1,21 @@
 #!/usr/bin/env python3
-import pickle
-from pathlib import Path
 
-import hydra
+from typing import Union
+
+import flax.linen as nn
+import geopandas as gpd
 import jax
 import jax.numpy as jnp
-
-# import networkx as nx  # Import for graph-based data generation
 import numpy as np
-import optax
 from jax import random
-from map_utils import get_raw_map_data, process_map
 from omegaconf import DictConfig, OmegaConf
-from plot_utils import log_vae_map_plots
+from prior_cvae import PriorCVAE
 from scipy.spatial import distance_matrix
+from sps.gp import GP
+from sps.kernels import matern_3_2, periodic, rbf
 from sps.priors import Prior
-from vae_gp import instantiate, train, validate
 
-import wandb
 from dl4bi.core import *  # noqa: F403
-from dl4bi.meta_regression.train_utils import (
-    Callback,
-    cosine_annealing_lr,
-    save_ckpt,
-)
-from dl4bi.vae import DeepChol
-
-
-@hydra.main("configs", config_name="default_vae_graph_model", version_base=None)
-def main(cfg: DictConfig):
-    run_name = cfg.get(
-        "name",
-        f"VAE_{cfg.graph_model.name}_{cfg.model.cls}_{cfg.data.sampling_policy}",
-    )
-    wandb.init(
-        config=OmegaConf.to_container(cfg, resolve=True),
-        mode="online" if cfg.wandb else "disabled",
-        name=run_name,
-        project=cfg.project,
-        reinit=True,  # allows reinitialization for multiple runs
-    )
-    print(OmegaConf.to_yaml(cfg))
-
-    rng = random.key(cfg.seed)
-    rng_train, rng_test = random.split(rng)
-    map_data = get_raw_map_data(cfg.data.name)
-    model = instantiate(cfg.model)
-    adj_mat = generate_adjacency_matrix(map_data)
-    s, _, _ = process_map(cfg.data)
-    dataloader, conditionals_names = {"car": car, "icar": icar, "bym": bym}[
-        cfg.graph_model.name
-    ](cfg.batch_size, adj_mat, cfg.graph_model)
-    train_rng, test_rng = random.split(rng)
-    train_loader, test_loader = dataloader(train_rng), dataloader(test_rng)
-    lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps,
-        cfg.lr_peak,
-        cfg.lr_pct_warmup,
-    )
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(cfg.clip_max_norm),
-        optax.yogi(lr_schedule),
-    )
-    state = train(
-        rng_train,
-        model,
-        optimizer,
-        isinstance(model, (DeepChol,)),
-        train_loader,
-        cfg.train_num_steps,
-        cfg.valid_num_steps,
-        cfg.valid_interval,
-        callbacks=[
-            Callback(
-                log_vae_map_plots(
-                    map_data, s, conditionals_names, cfg.model.kwargs.z_dim
-                ),
-                cfg.plot_interval,
-            )
-        ],
-    )
-    results = validate(
-        rng_test,
-        state,
-        isinstance(model, (DeepChol,)),
-        test_loader,
-        cfg.valid_num_steps,
-        log_results=True,
-        is_test=True,
-    )
-    path = Path(
-        f"results/UK_disease_distribution/{cfg.data.name}/{cfg.graph_model.name}/{cfg.seed}/{run_name}"
-    )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path.with_suffix(".pkl"), "wb") as save_file:
-        pickle.dump(results, save_file)
-    save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
 def icar(batch_size, adj_mat, graph_model):
@@ -149,7 +69,7 @@ def car(batch_size, adj_mat, graph_model):
             tau = tau_sampler.sample(tau_rng)
             alpha = alpha_sampler.sample(alpha_rng)
             precision_matrix = D - (alpha * adj_mat)
-            K = jnp.linalg.inv(precision_matrix)
+            K = jnp.linalg.pinv(precision_matrix, hermitian=True)
             z = random.normal(z_rng, shape=(batch_size, num_nodes))
             f = cholesky(num_nodes, (1 / tau) * K, z)
             yield f, z, [tau, alpha]
@@ -189,7 +109,7 @@ def bym(batch_size, adj_mat, graph_model):
     return bym_loader, ["tau", "alpha", "v"]
 
 
-def generate_adjacency_matrix(gdf):
+def generate_adjacency_matrix(gdf: gpd.GeoDataFrame, graph_construction: DictConfig):
     """
     Constructs an undirected adjacency matrix for a GeoDataFrame, where each (i, j) is 1
     if geometry i is adjacent to geometry j, and 0 otherwise. For isolated geoms
@@ -220,6 +140,8 @@ def generate_adjacency_matrix(gdf):
         closest_neighbor = jnp.argmin(distances[i])
         adjacency_matrix = adjacency_matrix.at[i, closest_neighbor].set(1.0)
         adjacency_matrix = adjacency_matrix.at[closest_neighbor, i].set(1.0)
+    if graph_construction.self_loops:
+        adjacency_matrix += jnp.eye(N=num_geoms, dtype=adjacency_matrix.dtype)
     return adjacency_matrix
 
 
@@ -247,5 +169,18 @@ def cholesky(
     return jnp.einsum("ij,bj->bi", L, z)
 
 
-if __name__ == "__main__":
-    main()
+def instantiate(d: Union[dict, DictConfig]):
+    """Convenience function to instantiate an object from a config."""
+    if isinstance(d, DictConfig):
+        d = OmegaConf.to_container(d, resolve=True)
+    if "cls" in d:
+        cls, kwargs = d["cls"], d.get("kwargs", {})
+        for k in kwargs:
+            if k == "act_fn":
+                kwargs[k] = getattr(nn, kwargs[k])
+            elif isinstance(kwargs[k], dict):
+                kwargs[k] = instantiate(kwargs[k])
+        return globals()[cls](**kwargs)
+    elif "func" in d:
+        return eval(d["func"])
+    return d
