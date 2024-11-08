@@ -10,16 +10,23 @@ import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 import optax
+from graph_model_utils import instantiate
 from jax import random
 from map_utils import get_raw_map_data, process_map
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig, OmegaConf
 from orbax.checkpoint import PyTreeCheckpointer
-from plot_utils import plot_covariance, plot_histograms, plot_trace
+from plot_utils import (
+    plot_covariance,
+    plot_histograms,
+    plot_kl_on_map,
+    plot_trace,
+    plot_violin,
+)
 from prior_cvae import PriorCVAE
 from sps.kernels import matern_1_2, matern_3_2, matern_5_2, periodic, rbf
 from sps.priors import Prior
-from vae_gp import generate_dataloaders, instantiate
+from vae import gp_dataloaders
 
 import wandb
 from dl4bi.meta_regression.train_utils import (
@@ -43,18 +50,15 @@ def main(cfg: DictConfig):
     )
     rng, noise_rng = random.split(random.key(cfg.seed))
     s, _, _ = process_map(cfg.data)
-    gp = instantiate(cfg.kernel)
     results_dir = Path(
-        f"results/{cfg.project}/{cfg.data.name}/{gp.kernel.__name__}/{cfg.seed}"
+        f"results/{cfg.project}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}"
     )
 
-    gp_dataloader, _, conditionals_names = generate_dataloaders(
-        rng, gp, s, cfg.batch_size
-    )
-    f, _, conditionals = next(iter(gp_dataloader))
+    gp_loader, _, conditionals_names = gp_dataloaders(rng, cfg, s)
+    f_batch, _, conditionals = next(iter(gp_loader))
     conditionals = dict(zip(conditionals_names, conditionals))
     map_data = get_raw_map_data(cfg.data.name)
-    # NOTE: taking all LTAs as samples, it's possible to give partial information also
+    # NOTE: idxs taking all LTAs as samples, it's possible to give partial information also
     idxs = jnp.arange(len(map_data))
     priors = {
         "var": dist.HalfNormal(),
@@ -62,7 +66,7 @@ def main(cfg: DictConfig):
         "period": dist.HalfNormal(),
         "sigma": dist.Gamma(1, 2),
     }
-    kernel = globals()[gp.kernel.__name__]
+    kernel = globals()[cfg.kernel.kwargs.kernel.func]
     if cfg.infer.run_gp_baseline:
         inference_model = build_baseline_inference_model(s, idxs, kernel, priors)
     else:
@@ -72,63 +76,69 @@ def main(cfg: DictConfig):
             vae_model, idxs, kernel, cfg.model.kwargs.z_dim, priors
         )
 
-    f = f[0].squeeze()
+    f = f_batch[0].squeeze()
     if cfg.data.obs_noise > 0:
         f += random.multivariate_normal(
             noise_rng, jnp.zeros_like(f), cfg.data.obs_noise * jnp.eye(f.shape[0])
         )
-    _hmc(
-        cfg,
-        inference_model,
-        model_name,
+    hmc_res = _hmc(cfg, inference_model, s, f, conditionals, idxs)
+    log_inference_run(
+        hmc_res,
         s,
-        f,
+        f_batch,
         conditionals,
-        idxs,
         kernel,
-        s,
-        cfg.data.obs_noise,
         priors,
+        cfg.data.obs_noise,
+        map_data,
+        model_name,
         results_dir,
     )
 
 
-def _hmc(
-    cfg,
-    model,
-    model_name,
-    x,
-    y,
-    conditionals,
-    idxs,
-    kernel,
-    s,
-    obs_noise,
-    priors,
-    results_dir,
-):
+def _hmc(cfg, model, s, f, conditionals, idxs):
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
     k1, k2 = jax.random.split(jax.random.PRNGKey(0))
     mcmc = MCMC(nuts, **cfg.infer.mcmc)
-    mcmc.run(k1, y[idxs].squeeze())
+    mcmc.run(k1, f[idxs].squeeze())
     mcmc.print_summary()
     samples = mcmc.get_samples()
     post = Predictive(model, samples)(k2)
     post.update(
         {
-            "x": x,
-            "y": y,
+            "s": s,
+            "f": f,
             "idxs": idxs,
             "mu": samples["mu"],
             "sigma": samples["sigma"],
             **conditionals,
         }
     )
+    return samples, mcmc, post
+
+
+def log_inference_run(
+    hmc_res,
+    s,
+    f_batch,
+    conditionals,
+    kernel,
+    priors,
+    obs_noise,
+    map_data,
+    model_name,
+    results_dir,
+):
+    samples, mcmc, post = hmc_res
+    kl_per_location, kl_total = compute_kl_divergence(f_batch, post)
+    post.update({"kl_per_location": kl_per_location, "kl_mean": kl_total})
     with open(results_dir / f"{model_name}_hmc_pp.pkl", "wb") as out_file:
         pickle.dump(post, out_file)
     plot_trace(samples, mcmc, conditionals, obs_noise, model_name)
     plot_covariance(samples, conditionals, model_name, kernel, s)
     plot_histograms(samples, conditionals, obs_noise, model_name, priors)
+    plot_violin(post, f_batch, model_name)
+    plot_kl_on_map(map_data, kl_per_location, model_name)
 
 
 def build_baseline_inference_model(s, idxs, kernel, priors, jitter=1e-4):
@@ -176,6 +186,21 @@ def build_surrogate_inference_model(model, idxs, kernel, z_dim, priors):
     return gp_deep_sample_model
 
 
+def compute_kl_divergence(f_batch, post):
+    obs = post["obs"]
+    true_mean = jnp.mean(f_batch, axis=0).squeeze()
+    true_var = jnp.var(f_batch, axis=0).squeeze()
+    post_mean = jnp.mean(obs, axis=0).squeeze()
+    post_var = jnp.var(obs, axis=0).squeeze()
+    kl_per_location = (
+        jnp.log(jnp.sqrt(post_var) / jnp.sqrt(true_var))
+        + (true_var + (true_mean - post_mean) ** 2) / (2 * post_var)
+        - 0.5
+    )
+    kl_total = jnp.mean(kl_per_location)
+    return kl_per_location, kl_total
+
+
 def load_ckpt(path: Union[str, Path]):
     "Load a checkpoint."
     if not isinstance(path, Path):
@@ -186,7 +211,6 @@ def load_ckpt(path: Union[str, Path]):
     model = instantiate(cfg.model)
     state = TrainState.create(
         apply_fn=model.apply,
-        # TODO(danj): reload optimizer state
         tx=optax.yogi(cosine_annealing_lr()),
         params=ckpt["state"]["params"],
         kwargs=ckpt["state"]["kwargs"],

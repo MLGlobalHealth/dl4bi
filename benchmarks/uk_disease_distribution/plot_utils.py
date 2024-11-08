@@ -8,10 +8,66 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import seaborn as sns
 from jax.scipy.stats import norm
 
 import wandb
 from dl4bi.meta_regression.train_utils import TrainState
+
+
+def plot_kl_on_map(
+    map_data: gpd.GeoDataFrame, kl_per_location: jax.Array, model_name: str
+):
+    fig, ax = plt.subplots(1, 1, figsize=(15, 10))
+    plot_on_map(
+        ax,
+        map_data,
+        kl_per_location,
+        0.0,
+        kl_per_location.max().item(),
+        f"KL diveregence per location (Mean: {kl_per_location.mean():.2f})",
+        "coolwarm",
+    )
+    plt.tight_layout()
+    timestamp = datetime.now().isoformat()
+    path = f"/tmp/KL divergence {timestamp}.png"
+    fig.savefig(path, dpi=125)
+    wandb.log({f"KL divergence - {model_name}": wandb.Image(path)})
+    plt.clf()
+
+
+def plot_violin(post, f_batch, model_name, num_locations=10):
+    random_idxs = np.random.choice(post["obs"].shape[1], num_locations, replace=False)
+    obs_data = [post["obs"][:, idx] for idx in random_idxs]
+    true_data = f_batch[:, random_idxs, :].squeeze(axis=-1)
+    data = []
+    for i, (obs, true) in enumerate(zip(obs_data, true_data.T)):
+        location = f"Loc {random_idxs[i]}"
+        data.extend([(value.item(), location, "True Data") for value in true])
+        data.extend([(value.item(), location, "Posterior Data") for value in obs])
+    df = pd.DataFrame(data, columns=["Value", "Location", "Type"])
+    plt.figure(figsize=(16, 8))
+    sns.violinplot(
+        data=df,
+        x="Location",
+        y="Value",
+        hue="Type",
+        split=True,
+        palette={"True Data": "blue", "Posterior Data": "red"},
+        inner="quartile",
+        linewidth=1.2,
+    )
+    plt.title(f"True vs Posterior Distributions - {model_name}", fontsize=16)
+    plt.xlabel("Locations", fontsize=14)
+    plt.ylabel("Observation Value", fontsize=14)
+    plt.legend(title="Distribution Type", loc="upper right", fontsize=12)
+    plt.xticks(rotation=45)
+    timestamp = datetime.now().isoformat()
+    path = f"/tmp/violin_{model_name}_{timestamp}.png"
+    plt.savefig(path, dpi=200)
+    wandb.log({f"Violin Plot - {model_name}": wandb.Image(path)})
+    plt.clf()
 
 
 def plot_covariance(samples, conditionals, model_name, kernel, s):
