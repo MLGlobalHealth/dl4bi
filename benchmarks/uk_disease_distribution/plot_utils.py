@@ -16,6 +16,50 @@ import wandb
 from dl4bi.meta_regression.train_utils import TrainState
 
 
+def plot_infer_realizations(
+    rng_plot, map_data, f_batch, post, model_name, num_samples=10
+):
+    fig, ax = plt.subplots(2, num_samples, figsize=(3 * num_samples, 16))
+    samples_f = post["obs"]
+    rng_true, rng_samples = jax.random.split(rng_plot)
+    true_idxs = jax.random.choice(
+        rng_true, jnp.arange(f_batch.shape[0]), (num_samples,)
+    )
+    samples_idxs = jax.random.choice(
+        rng_samples, jnp.arange(samples_f.shape[0]), (num_samples,)
+    )
+    vmin = min(f_batch[true_idxs].min(), samples_f[samples_idxs].min())
+    vmax = min(f_batch[true_idxs].max(), samples_f[samples_idxs].max())
+    for i, (t_idx, s_idx) in enumerate(zip(true_idxs, samples_idxs)):
+        plot_on_map(
+            ax[0, i],
+            map_data,
+            f_batch[t_idx],
+            vmin=vmin,
+            vmax=vmax,
+            title=f"True realisation {i}",
+            legend=False,
+        )
+        plot_on_map(
+            ax[1, i],
+            map_data,
+            samples_f[s_idx],
+            vmin=vmin,
+            vmax=vmax,
+            title=f"Inferred realisation {i}",
+            legend=False,
+        )
+        ax[0, i].set_axis_off()
+        ax[1, i].set_axis_off()
+
+    plt.tight_layout()
+    timestamp = datetime.now().isoformat()
+    path = f"/tmp/Inferred Realisations {timestamp}.png"
+    fig.savefig(path, dpi=250)
+    wandb.log({f"Inferred Realisations - {model_name}": wandb.Image(path)})
+    plt.clf()
+
+
 def plot_kl_on_map(
     map_data: gpd.GeoDataFrame, kl_per_location: jax.Array, model_name: str
 ):
@@ -429,11 +473,12 @@ def plot_on_map(
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
     title: str = "",
-    cmap: str = "virdis",
+    cmap: str = "viridis",
+    legend: bool = True,
 ):
     ax.set_title(title)
     gdf["TEMP"] = values
-    gdf.plot(column="TEMP", cmap=cmap, ax=ax, legend=True, vmin=vmin, vmax=vmax)
+    gdf.plot(column="TEMP", cmap=cmap, ax=ax, legend=legend, vmin=vmin, vmax=vmax)
 
 
 def plot_locations_map(

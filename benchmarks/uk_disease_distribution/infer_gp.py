@@ -19,6 +19,7 @@ from orbax.checkpoint import PyTreeCheckpointer
 from plot_utils import (
     plot_covariance,
     plot_histograms,
+    plot_infer_realizations,
     plot_kl_on_map,
     plot_trace,
     plot_violin,
@@ -48,7 +49,7 @@ def main(cfg: DictConfig):
         project=cfg.project,
         reinit=True,
     )
-    rng, noise_rng = random.split(random.key(cfg.seed))
+    rng, rng_plot, noise_rng = random.split(random.key(cfg.seed), 3)
     s, _, _ = process_map(cfg.data)
     results_dir = Path(
         f"results/{cfg.project}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}"
@@ -60,6 +61,7 @@ def main(cfg: DictConfig):
     map_data = get_raw_map_data(cfg.data.name)
     # NOTE: idxs taking all LTAs as samples, it's possible to give partial information also
     idxs = jnp.arange(len(map_data))
+    # TODO(jhonathan): Add customizable priors
     priors = {
         "var": dist.HalfNormal(),
         "ls": dist.HalfNormal(),
@@ -83,6 +85,7 @@ def main(cfg: DictConfig):
         )
     hmc_res = _hmc(cfg, inference_model, s, f, conditionals, idxs)
     log_inference_run(
+        rng_plot,
         hmc_res,
         s,
         f_batch,
@@ -116,6 +119,7 @@ def _hmc(cfg, model, s, f, conditionals, idxs):
 
 
 def log_inference_run(
+    rng_plot,
     hmc_res,
     s,
     f_batch,
@@ -136,6 +140,7 @@ def log_inference_run(
     )
     with open(results_dir / f"{model_name}_hmc_pp.pkl", "wb") as out_file:
         pickle.dump(post, out_file)
+    plot_infer_realizations(rng_plot, map_data, f_batch, post, model_name)
     plot_trace(samples, mcmc, conditionals, obs_noise, model_name)
     plot_covariance(samples, conditionals, model_name, kernel, s)
     plot_histograms(samples, conditionals, obs_noise, model_name, priors)
