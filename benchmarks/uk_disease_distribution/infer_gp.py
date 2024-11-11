@@ -109,8 +109,6 @@ def _hmc(cfg, model, s, f, conditionals, idxs):
             "s": s,
             "f": f,
             "idxs": idxs,
-            "mu": samples["mu"],
-            "sigma": samples["sigma"],
             **conditionals,
         }
     )
@@ -130,8 +128,12 @@ def log_inference_run(
     results_dir,
 ):
     samples, mcmc, post = hmc_res
+    with open(results_dir / f"{model_name}_hmc_samples.pkl", "wb") as out_file:
+        pickle.dump(samples, out_file)
     kl_per_location, kl_total = compute_kl_divergence(f_batch, post)
-    post.update({"kl_per_location": kl_per_location, "kl_mean": kl_total})
+    post.update(
+        {"sigma": obs_noise, "kl_per_location": kl_per_location, "kl_mean": kl_total}
+    )
     with open(results_dir / f"{model_name}_hmc_pp.pkl", "wb") as out_file:
         pickle.dump(post, out_file)
     plot_trace(samples, mcmc, conditionals, obs_noise, model_name)
