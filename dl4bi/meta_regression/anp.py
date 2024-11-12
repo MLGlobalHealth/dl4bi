@@ -107,12 +107,14 @@ class ANP(nn.Module):
         valid_lens_ctx: Optional[jax.Array] = None,  # [B]
         training: bool = False,
     ):
+        bias = None
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_det(s_f_ctx, training)
         r_ctx, _ = self.self_attn_det(
             s_f_ctx_embed,
             s_f_ctx_embed,
             s_f_ctx_embed,
+            bias,
             valid_lens_ctx,
             training,
         )
@@ -126,6 +128,7 @@ class ANP(nn.Module):
         training: bool = False,
     ):
         (B, L, _) = s_ctx.shape
+        bias = None
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(L, B)
         mask = mask_from_valid_lens(L, valid_lens_ctx)
@@ -135,6 +138,7 @@ class ANP(nn.Module):
             s_f_ctx_embed,
             s_f_ctx_embed,
             s_f_ctx_embed,
+            bias,
             valid_lens_ctx,
             training,
         )
@@ -153,11 +157,13 @@ class ANP(nn.Module):
         valid_lens_ctx: Optional[jax.Array],  # [B]
         training: bool = False,
     ):
+        bias = None
         L_test = s_test.shape[1]
         r, _ = self.cross_attn(
             self.embed_s(s_test),  # qs
             self.embed_s(s_ctx),  # ks
             r_ctx,  # vs
+            bias,
             valid_lens_ctx,
             training,
         )  # [B, L_test, d_ffn]

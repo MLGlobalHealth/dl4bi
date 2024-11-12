@@ -24,7 +24,15 @@ from jax.scipy.stats import norm
 from omegaconf import DictConfig, OmegaConf
 from orbax.checkpoint import PyTreeCheckpointer
 from sps.gp import GP
-from sps.kernels import matern_1_2, matern_3_2, matern_5_2, periodic, rbf
+from sps.kernels import (
+    l2_dist,
+    l2_dist_sq,
+    matern_1_2,
+    matern_3_2,
+    matern_5_2,
+    periodic,
+    rbf,
+)
 from sps.priors import Prior
 from sps.utils import build_grid
 from tqdm import tqdm
@@ -39,7 +47,6 @@ from .convcnp import ConvCNP
 from .dkr import DKR
 from .np import NP
 from .tnp_d import TNPD
-from .tnp_ds import TNPDS
 from .tnp_kr import TNPKR
 from .tnp_nd import TNPND
 
@@ -68,7 +75,7 @@ def train(
     valid_interval: int = 25000,
     log_loss_interval: int = 100,
     callbacks: list[Callback] = [],
-    monitor_metric: str = "NLL",
+    monitor_metric: str = "NLL",  # validation metric to monitor
     early_stop_patience: Optional[int] = None,
     state: Optional[TrainState] = None,
 ):
@@ -237,25 +244,11 @@ def cfg_to_run_name(cfg: DictConfig):
     name = cfg.model.cls
     if name == "TNPKR":
         name = "TNP-KR"
-        attn_cls = OmegaConf.select(
-            cfg, "model.kwargs.dec.kwargs.blk.kwargs.attn.kwargs.attn.cls"
-        )
-        if attn_cls == "Attention":
-            name += "-Full"
-        elif attn_cls is None:
-            name += "-Fast"  # default for TNP-KR
+        attn_cls = OmegaConf.select(cfg, "model.kwargs.attn.kwargs.attn.cls")
+        if attn_cls is None:
+            name += "-Full"  # default for TNP-KR
         else:
             name += "-" + attn_cls.replace("Attention", "")  # i.e. Fused, Fast
-        embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.cls")
-        if embed_cls == "ResidualEmbedding":
-            name += " Resid"
-            embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.kwargs.embed.cls")
-        if embed_cls in [
-            "GaussianFourierEmbedding",
-            "NeRFEmbedding",
-            "FixedSinusoidalEmbedding",
-        ]:
-            name += " RFF"
     if name == "TNPD":
         name = "TNP-D"
     if name == "TNPND":

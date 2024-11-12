@@ -8,6 +8,5 @@ from .convcnp import ConvCNP
 from .dkr import DKR
 from .np import NP
 from .tnp_d import TNPD
-from .tnp_ds import TNPDS
 from .tnp_kr import TNPKR
 from .tnp_nd import TNPND

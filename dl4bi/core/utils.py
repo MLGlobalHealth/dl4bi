@@ -1,10 +1,8 @@
 from functools import partial
 
-import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
-from flax.training.train_state import TrainState
 from jax import jit, lax, random, vmap
 from jax.tree_util import Partial
 import networkx as nx

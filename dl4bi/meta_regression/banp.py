@@ -138,12 +138,14 @@ class BANP(nn.Module):
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
     ):
+        bias = None
         s_f = jnp.concatenate([s, f], -1)
         s_f_embed = self.enc_det(s_f, training)
         r_ctx, _ = self.self_attn_det(
             s_f_embed,
             s_f_embed,
             s_f_embed,
+            bias,
             valid_lens,
             training,
         )
@@ -160,10 +162,12 @@ class BANP(nn.Module):
     ):
         s_ctx_embed = self.embed_s(s_ctx)
         s_test_embed = self.embed_s(s_test)
+        bias = None
         r, _ = self.cross_attn(
             s_test_embed,  # qs
             s_ctx_embed,  # ks
             r_ctx,  # vs
+            bias,
             valid_lens_ctx,
             training,
         )  # [B*K, L_test, d_ffn]
@@ -174,6 +178,7 @@ class BANP(nn.Module):
                 s_test_embed,  # qs
                 s_ctx_embed,  # ks
                 r_ctx_boot,  # vs
+                bias,
                 valid_lens_ctx,
                 training,
             )  # [B*K, L_test, d_ffn]

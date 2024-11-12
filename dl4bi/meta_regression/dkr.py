@@ -80,12 +80,13 @@ class DKR(nn.Module):
         s_f_test = stack(self.embed_s(s_test), self.embed_f(f_test))
         qvs = self.embed_s_f(s_f_test)
         kvs = self.embed_s_f(s_f_ctx)
+        bias = None
         for i in range(self.num_blks):
             attn = self.attn.copy()
             _qvs, _kvs = qvs, kvs
             for j in range(self.num_reps):
-                qvs, _ = attn(qvs, kvs, kvs, valid_lens_ctx, training)
-                kvs, _ = attn(kvs, kvs, kvs, valid_lens_ctx, training)
+                qvs, _ = attn(qvs, kvs, kvs, bias, valid_lens_ctx, training)
+                kvs, _ = attn(kvs, kvs, kvs, bias, valid_lens_ctx, training)
                 qvs, kvs = self.norm(_qvs + qvs), self.norm(_kvs + kvs)
         f_dist = self.head(qvs, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)

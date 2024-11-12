@@ -7,7 +7,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 
-from .attention import FastAttention, FusedAttention, MultiHeadAttention
+from .attention import MultiHeadAttention
 from .mlp import MLP
 
 
@@ -38,6 +38,7 @@ class TransformerEncoderBlock(nn.Module):
     def __call__(
         self,
         x: jax.Array,
+        bias: Optional[jax.Array] = None,
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
         **kwargs,
@@ -45,13 +46,13 @@ class TransformerEncoderBlock(nn.Module):
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         if self.pre_norm:
             x_1 = self.norm(x)
-            x_2, attn = self.attn(x_1, x_1, x_1, valid_lens, training, **kwargs)
+            x_2, attn = self.attn(x_1, x_1, x_1, bias, valid_lens, training, **kwargs)
             x_3 = x + drop(x_2)
             x_4 = self.norm.copy()(x_3)
             x_5 = self.ffn(x_4)
             return x_3 + drop(x_5), attn
         # post-norm, original formulation
-        x_1, attn = self.attn(x, x, x, valid_lens, training, **kwargs)
+        x_1, attn = self.attn(x, x, x, bias, valid_lens, training, **kwargs)
         x_2 = self.norm(x + drop(x_1))
         x_3 = self.ffn(x_2)
         x_4 = self.norm.copy()(x_2 + drop(x_3))
@@ -78,12 +79,13 @@ class TransformerEncoder(nn.Module):
     def __call__(
         self,
         x: jax.Array,
+        bias: Optional[jax.Array] = None,
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
         **kwargs,
     ):
         for _ in range(self.num_blks):
-            x, _ = self.blk.copy()(x, valid_lens, training, **kwargs)
+            x, _ = self.blk.copy()(x, bias, valid_lens, training, **kwargs)
         if self.blk.pre_norm:
             x = self.norm(x)
         return x
@@ -120,6 +122,8 @@ class TransformerDecoderBlock(nn.Module):
         self,
         x_dec: jax.Array,
         x_enc: jax.Array,
+        bias_self: Optional[jax.Array] = None,
+        bias_cross: Optional[jax.Array] = None,
         valid_lens_dec: Optional[jax.Array] = None,
         valid_lens_enc: Optional[jax.Array] = None,
         training=False,
@@ -131,6 +135,7 @@ class TransformerDecoderBlock(nn.Module):
             x_dec_1,
             x_dec_1,
             x_dec_1,
+            bias_self,
             valid_lens_dec,
             training,
             **kwargs,
@@ -141,6 +146,7 @@ class TransformerDecoderBlock(nn.Module):
             x_dec_4,
             x_enc,
             x_enc,
+            bias_cross,
             valid_lens_enc,
             training,
             **kwargs,
@@ -174,6 +180,8 @@ class TransformerDecoder(nn.Module):
         self,
         x_dec: jax.Array,
         x_enc: jax.Array,
+        bias_self: Optional[jax.Array] = None,
+        bias_cross: Optional[jax.Array] = None,
         valid_lens_dec: Optional[jax.Array] = None,
         valid_lens_enc: Optional[jax.Array] = None,
         training=False,
@@ -183,6 +191,8 @@ class TransformerDecoder(nn.Module):
             x_dec, _, _ = self.blk.copy()(
                 x_dec,
                 x_enc,
+                bias_self,
+                bias_cross,
                 valid_lens_dec,
                 valid_lens_enc,
                 training,
@@ -207,7 +217,7 @@ class KRBlock(nn.Module):
         An instance of the `KRBlock` model.
     """
 
-    attn: nn.Module = MultiHeadAttention(FastAttention())
+    attn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([128, 64])
     p_dropout: float = 0.0
@@ -217,60 +227,18 @@ class KRBlock(nn.Module):
         self,
         qvs: jax.Array,
         kvs: jax.Array,
+        bias_qk: Optional[jax.Array] = None,
+        bias_kk: Optional[jax.Array] = None,
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
         inv_permute_idx: Optional[jax.Array] = None,
     ):
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
-        qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, valid_lens, training, inv_permute_idx)
-        kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, valid_lens, training, inv_permute_idx)
+        qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, bias_qk, valid_lens, training, inv_permute_idx)
+        kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, bias_kk, valid_lens, training, inv_permute_idx)
         qvs_3, kvs_3 = qvs + drop(qvs_2), kvs + drop(kvs_2)
         norm_2 = self.norm.copy()
         qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)
         qvs_5, kvs_5 = self.ffn(qvs_4, training), self.ffn(kvs_4, training)
         return qvs_3 + drop(qvs_5), kvs_3 + drop(kvs_5)
-
-
-class KRStack(nn.Module):
-    """A stack of `KRBlock`s.
-
-    Args:
-        blk: An instance of the block module.
-        norm: Final normalization module used before output.
-        num_blks: Number of blocks to use.
-        num_reps: Number of times to repeat each block.
-
-    Returns:
-        An instance of a `KRStack`.
-    """
-
-    blk: nn.Module = KRBlock()
-    norm: nn.Module = nn.LayerNorm()
-    num_blks: int = 6
-    num_reps: int = 1
-
-    @nn.compact
-    def __call__(
-        self,
-        qvs: jax.Array,
-        kvs: jax.Array,
-        valid_lens: Optional[jax.Array] = None,
-        training: bool = False,
-        inv_permute_idx: Optional[jax.Array] = None,
-    ):
-        for _ in range(self.num_blks):
-            blk = self.blk.copy()
-            for _ in range(self.num_reps):
-                qvs, kvs = blk(qvs, kvs, valid_lens, training, inv_permute_idx)
-        return self.norm(qvs), self.norm(kvs)
-
-    @classmethod
-    def build_fast(cls, num_blks: int = 6, num_reps: int = 1):
-        blk = KRBlock(MultiHeadAttention(FastAttention()))
-        return cls(blk, nn.LayerNorm(), num_blks, num_reps)
-
-    @classmethod
-    def build_fused(cls, num_blks: int = 6, num_reps: int = 1):
-        blk = KRBlock(MultiHeadAttention(FusedAttention()))
-        return cls(blk, nn.LayerNorm(), num_blks, num_reps)

@@ -37,8 +37,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     gp_kernels_2d = ["rbf"]
     models = [
         "tnp_d",
-        "tnp_kr_full",
-        "tnp_kr_fast",
+        "tnp_kr",
         "np",
         "bnp",
         "cnp",
@@ -49,8 +48,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     ]
     models_1d_long = [
         "tnp_d",
-        "tnp_kr_full",
-        "tnp_kr_fast",
+        "tnp_kr",
         "convcnp_long",
     ]
     exclude_2d = ["bnp", "banp", "convcnp"]

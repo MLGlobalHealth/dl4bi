@@ -70,15 +70,16 @@ class TNPND(nn.Module):
             $\mu_f,\log(\sigma_f^2\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
         (B, L_test, _), d_f = s_test.shape, f_ctx.shape[-1]
+        bias = None
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], d_f])
         s_f_test = jnp.concatenate([s_test, f_test], axis=-1)
         s_f = jnp.concatenate([s_f_ctx, s_f_test], axis=1)
         s_f_embed = self.embed_s_f(s_f, training)
-        s_f_enc = self.enc(s_f_embed, valid_lens_ctx, training, **kwargs)
+        s_f_enc = self.enc(s_f_embed, bias, valid_lens_ctx, training, **kwargs)
         s_f_test_enc = s_f_enc[:, -L_test:, ...]
         f_mu = self.dec_f_mu(s_f_test_enc, training)
-        f_std = self.dec_f_std(s_f_test_enc, valid_lens_test, training)
+        f_std = self.dec_f_std(s_f_test_enc, bias, valid_lens_test, training)
         f_std = self.proj_f_std(f_std, training).reshape(B, L_test * d_f, -1)
         f_L = jnp.tril(jnp.einsum("bid,bjd->bij", f_std, f_std))
         # WARNING: using min_std can cause instability when solving the system

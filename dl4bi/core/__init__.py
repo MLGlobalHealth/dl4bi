@@ -19,6 +19,7 @@ from .attention import (
     exponential_scorer,
     rbf_scorer,
 )
+from .bias import DistanceBias, TISABias
 from .conv import (
     ConvCNPBlock,
     ConvCNPNet,
@@ -46,7 +47,6 @@ from .mle import gp_mle_bfgs, gp_mle_sgd
 from .mlp import MLP, MLPMixer, MLPMixerBlock
 from .transformer import (
     KRBlock,
-    KRStack,
     TransformerDecoder,
     TransformerDecoderBlock,
     TransformerEncoder,

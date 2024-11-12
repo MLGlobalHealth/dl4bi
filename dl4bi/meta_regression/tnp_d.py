@@ -60,6 +60,7 @@ class TNPD(nn.Module):
             $\mu_f,\log(\sigma_f^2\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
         (B, L_test, _), L_ctx = s_test.shape, s_ctx.shape[1]
+        bias = None
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(L_ctx, B)
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], axis=-1)
@@ -67,7 +68,7 @@ class TNPD(nn.Module):
         s_f_test = jnp.concatenate([s_test, f_test], axis=-1)
         s_f = jnp.concatenate([s_f_ctx, s_f_test], axis=1)
         s_f_embed = self.embed_s_f(s_f, training)
-        s_f_enc = self.enc(s_f_embed, valid_lens_ctx, training, **kwargs)
+        s_f_enc = self.enc(s_f_embed, bias, valid_lens_ctx, training, **kwargs)
         s_f_test_enc = s_f_enc[:, -L_test:, ...]
         f_dist = self.head(s_f_test_enc, training)
         f_mu, f_std = jnp.split(f_dist, 2, axis=-1)

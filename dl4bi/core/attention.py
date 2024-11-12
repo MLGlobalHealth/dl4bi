@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Callable, Sequence
 from typing import Optional
 
@@ -6,6 +7,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit, lax, random, vmap
 from jax.nn import dot_product_attention
+from sps.kernels import outer_subtract
 
 from .mlp import MLP
 from .utils import mask_attn, mask_from_valid_lens, mask_attn_graph
@@ -157,6 +159,7 @@ def build_phi(h: Callable, funcs: list[Callable], proj: jax.Array, eps: float = 
     )
 
 
+# TODO(danj): implement bias with random SVD decomposition?
 class FastAttention(nn.Module):
     r"""[FAVOR+](https://arxiv.org/abs/2009.14794) implementation, Appendix B.
 
@@ -173,6 +176,7 @@ class FastAttention(nn.Module):
         qs: jax.Array,  # [B, Q, H, D_QK_H]
         ks: jax.Array,  # [B, K, H D_QK_H]
         vs: jax.Array,  # [B, K, H, D_H]
+        bias: Optional[jax.Array] = None,  # broadcastable to [B, H, Q, K]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         redraw_random_features: bool = False,
@@ -183,6 +187,7 @@ class FastAttention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_{Q,K}_H}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_{Q,K}_H}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times H\times D_V_H}$
+            bias: Bias added to attention scores.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$.
             training: Boolean indicating whether currently training.
@@ -198,6 +203,8 @@ class FastAttention(nn.Module):
         gen_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_QK_H)
         init_proj = lambda: gen_proj(self.make_rng("params"))
         proj = self.variable("projections", "random", init_proj)
+        if bias is not None:
+            warnings.warn("FastAttention does not currently support bias!")
         if redraw_random_features:
             proj.value = gen_proj(self.make_rng("rng_extra"))
         # [B, L, H, D_H] -> [B * H, L, D_H]
@@ -317,6 +324,7 @@ class Attention(nn.Module):
         qs: jax.Array,  # [B, Q, H, D_QK_H]
         ks: jax.Array,  # [B, K, H D_QK_H]
         vs: jax.Array,  # [B, K, H, D_H]
+        bias: Optional[jax.Array] = None,  # [B, H, Q, K]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         inv_permute_idx: Optional[jax.Array] = None,
@@ -328,6 +336,7 @@ class Attention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
+            bias: Bias added to attention scores.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$.
             training: Boolean indicating whether currently training.
@@ -342,6 +351,8 @@ class Attention(nn.Module):
         ks = ks.transpose(0, 2, 1, 3).reshape(-1, K, D_QK_H)
         vs = vs.transpose(0, 2, 1, 3).reshape(-1, K, D_V_H)
         scores = self.scorer(qs.astype(self.dtype), ks.astype(self.dtype))
+        if bias is not None:
+            scores += jnp.broadcast_to(bias, (B, H, Q, K)).reshape(-1, Q, K)
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
             # scores = mask_attn(scores, valid_lens)
@@ -360,6 +371,13 @@ class FusedAttention(nn.Module):
         A `FusedAttention` module.
 
     .. note::
+        Since the CUDA kernel requires `jnp.bfloat16`, this implementation
+        normalizes the queries and keys using `norm_qs` and `norm_ks` in order
+        to stabilize dot product logits in the attention calculation. While this
+        slightly slows computation, it often obviates the need to search for an
+        appropriate `scale` argument.
+
+    .. note::
         As of 2024-08-29, this requires `jax-nightly` and an NVIDIA GPU of
         Ampere architecture or above.
 
@@ -370,14 +388,19 @@ class FusedAttention(nn.Module):
         materializes it.
     """
 
+    norm_qs: nn.Module = nn.LayerNorm(dtype=jnp.bfloat16)
+    norm_ks: nn.Module = nn.LayerNorm(dtype=jnp.bfloat16)
+
     @nn.compact
     def __call__(
         self,
         qs: jax.Array,  # [B, Q, H, D_QK_H]
         ks: jax.Array,  # [B, K, H D_QK_H]
         vs: jax.Array,  # [B, K, H, D_H]
+        bias: Optional[jax.Array] = None,  # broadcastable to [B, H, Q, K]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
+        inv_permute_idx: Optional[jax.Array] = None,
         **kwargs,
     ):
         r"""Performs forward pass of network.
@@ -386,6 +409,7 @@ class FusedAttention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
+            bias: Bias added to attention scores.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$.
             training: Boolean indicating whether currently training. Unused here.
@@ -395,13 +419,16 @@ class FusedAttention(nn.Module):
             `None` for this implementation.
         """
         B, L, H, D = qs.shape
+        if bias is not None:
+            bias = jnp.bfloat16(bias)
         if valid_lens is None:
             valid_lens = jnp.repeat(L, B)
         # As of 2024-08-29, the CUDA kernel requires bfloat16
         return dot_product_attention(
-            jnp.bfloat16(qs),
-            jnp.bfloat16(ks),
+            self.norm_qs(qs),
+            self.norm_ks(ks),
             jnp.bfloat16(vs),
+            bias,
             # TODO(danj): remove when PR lands https://github.com/google/jax/issues/23349
             query_seq_lengths=jnp.repeat(L, B),
             key_value_seq_lengths=valid_lens,
@@ -435,9 +462,10 @@ class MultiHeadAttention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,
-        ks: jax.Array,
-        vs: jax.Array,
+        qs: jax.Array,  # [B, Q, H, D_QK_H]
+        ks: jax.Array,  # [B, K, H, D_QK_H]
+        vs: jax.Array,  # [B, K, H, D_H]
+        bias: Optional[jax.Array] = None,  # broadcastable to [B, H, Q, K]
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
         inv_permute_idx: Optional[jax.Array] = None,
@@ -449,6 +477,7 @@ class MultiHeadAttention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times D_QK}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times D_QK}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times D_V}$
+            bias: Bias added to attention scores of dimension $\mathbb{R}^{B\times H\times Q\times K}$.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$ or $\mathbb{R}^{B\times K}$.
             training: Boolean indicating whether currently training.
@@ -462,7 +491,7 @@ class MultiHeadAttention(nn.Module):
         qs = qs.reshape(B, Q, H, D_QK // H)
         ks = ks.reshape(B, K, H, D_QK // H)
         vs = vs.reshape(B, K, H, D_V // H)
-        ctx, attn = self.attn(qs, ks, vs, valid_lens, training, inv_permute_idx, **kwargs)
+        ctx, attn = self.attn(qs, ks, vs, bias, valid_lens, training, inv_permute_idx, **kwargs)
         return self.proj_out(ctx.reshape(B, Q, D_V)), attn
 
 
@@ -478,12 +507,6 @@ def exponential_scorer(qs: jax.Array, ks: jax.Array):  # [B, L, D]
     r"""Calculates $\exp\left(-\frac{\lVert xW_x - yW_y\rVert^2}{\sqrt{d_k}}\right)$."""
     scores = jnp.einsum("bqd,bkd->bqk", qs, ks)
     return jnp.exp(scores / jnp.sqrt(ks.shape[-1]))
-
-
-@jit
-def outer_subtract(x: jax.Array, y: jax.Array):
-    """Outer subtracts two arrays: `[L, D] x [K, D] -> [L, K, D]`"""
-    return vmap(vmap(jnp.subtract, (None, 0)), (0, None))(x, y)
 
 
 # TODO(danj): add learnable variance and lengthscale?
@@ -520,6 +543,7 @@ class KernelAttention(nn.Module):
         qs: jax.Array,  # [B, Q, D_QK]
         ks: jax.Array,  # [B, K, D_QK]
         vs: jax.Array,  # [B, K, D_V]
+        bias: Optional[jax.Array] = None,  # broadcastable to [B, Q, K]
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
         **kwargs,
@@ -530,6 +554,7 @@ class KernelAttention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times D_QK}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times D_QK}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times D_V}$
+            bias: Bias added to attention scores.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$ or $\mathbb{R}^{B\times K}$.
             training: Boolean indicating whether currently training.
@@ -540,6 +565,8 @@ class KernelAttention(nn.Module):
         """
         qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
         attn = self.kernel_scorer(qs.astype(self.dtype), ks.astype(self.dtype))
+        if bias is not None:
+            attn += jnp.broadcast_to(bias, attn.shape)
         if valid_lens is not None:
             attn = mask_attn(attn, valid_lens, fill=0.0)
         attn = attn / attn.sum(axis=-1)[..., None]  # [B, Q, K]
@@ -547,6 +574,7 @@ class KernelAttention(nn.Module):
         return self.proj_out(ctx), attn
 
 
+# TODO(danj): incorporate bias!
 class ProductKernelAttention(nn.Module):
     r"""Performs product-kernel query-key-value attention.
 
@@ -570,6 +598,7 @@ class ProductKernelAttention(nn.Module):
         qs: jax.Array,  # [B, Q, D_QK]
         ks: jax.Array,  # [B, K, D_QK]
         vs: jax.Array,  # [B, K, D_V]
+        bias: Optional[jax.Array] = None,  # broadcastable to [B, Q, K]
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
         **kwargs,
@@ -578,12 +607,13 @@ class ProductKernelAttention(nn.Module):
         ctx = jnp.ones((B, Q, K))
         attns = []
         for kernel_scorer in self.kernel_scorers:
-            k_ctx, attn = kernel_scorer(qs, ks, vs, valid_lens, training)
+            k_ctx, attn = kernel_scorer(qs, ks, vs, bias, valid_lens, training)
             ctx *= k_ctx
             attns += [attn]  # list of [B, Q, K]
         return self.proj_out(ctx), attns
 
 
+# TODO(danj): incorporate bias!
 class MultiKernelAttention(nn.Module):
     r"""Performs multikernel query-key-value attention.
 
@@ -607,13 +637,14 @@ class MultiKernelAttention(nn.Module):
         qs: jax.Array,  # [B, Q, D_QK]
         ks: jax.Array,  # [B, K, D_QK]
         vs: jax.Array,  # [B, K, D_V]
+        bias: Optional[jax.Array] = None,  # broadcastable to [B, Q, K]
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
         **kwargs,
     ):
         ctxs, attns = [], []
         for kernel in self.kernels:
-            ctx, attn = kernel(qs, ks, vs, valid_lens, training)
+            ctx, attn = kernel(qs, ks, vs, bias, valid_lens, training)
             ctxs += [ctx]  # list of [B, Q, D_V]
             attns += [attn]  # list of [B, Q, K]
         return self.proj_out(jnp.concatenate(ctxs, axis=-1)), attns

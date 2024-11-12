@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import optax
 import pandas as pd
 import wandb
-from jax import jit, random, vmap
+from jax import random, vmap
 from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
@@ -30,9 +30,6 @@ from dl4bi.meta_regression.train_utils import (
     save_ckpt,
     train,
 )
-
-# TODO(danj): figure out what is causing huge spike in loss
-# TODO(danj): attention bias that privilges local information
 
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
@@ -70,8 +67,9 @@ def main(cfg: DictConfig):
     if finetune_path:
         state, _ = load_ckpt(Path(finetune_path))
         optimizer = optax.yogi(cfg.lr_finetune)
-        train_dataloader = valid_dataloader
         train_num_steps = cfg.finetune_num_steps
+        if cfg.finetune_on_real:
+            train_dataloader = valid_dataloader
     state = train(
         rng_train,
         model,
@@ -88,7 +86,7 @@ def main(cfg: DictConfig):
     )
     metrics = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path = Path(f"results/heaton/{cfg.seed}/{run_name}")
+    path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
     # NOTE: uncomment to run actual test
@@ -113,6 +111,7 @@ def build_dataloaders(
     df["MaskTemp"] = (df.MaskTemp - mean) / std
     df["TrueTemp"] = (df.TrueTemp - mean) / std
     s_obs, f_obs, s_unobs, f_unobs = split_observed(df)
+    del df  # save memory
     L_obs, L_unobs = s_obs.shape[0], s_unobs.shape[0]
     L_train = jnp.prod(jnp.array([dim.num for dim in data.s]))
     permute_idx = random.choice(rng, L_obs, (L_obs,), replace=False)
@@ -127,17 +126,12 @@ def build_dataloaders(
         """Generates batches of random subgrids."""
         gp = instantiate(kernel)
         valid_lens_test = jnp.repeat(L_train, B)
-        pct_valid = jit(lambda f: (f < data.mask_threshold).sum(axis=(1, 2)) / L_train)
 
         def gen_batch(rng: jax.Array):
             rng_s, rng_f, rng_eps = random.split(rng, 3)
             s = random_subgrid(rng_s, data.s, data.min_axes_pct, data.max_axes_pct)
             s = s.reshape(-1, D)
             f, *_ = gp.simulate(rng_f, s, mB)  # f: [mB, L_train, 1]
-            # resample any sample in batch has than min_pct_valid locations
-            # while (pct_valid(f) < data.min_pct_valid).any():
-            #     rng_re, rng_f = random.split(rng_f)
-            #     f, *_ = gp.simulate(rng_re, s, mB)  # f: [mB, L_train, 1]
             # use the next image in the batch to mask the previous
             rot_idx = jnp.arange(1, mB + 1).at[-1].set(0)
             f_mask = f[rot_idx] > data.mask_threshold
@@ -215,7 +209,12 @@ def split_observed(df: pd.DataFrame):
     unobs = df[~obs_idx][["Lon", "Lat", "TrueTemp"]].values
     s_obs, f_obs = obs[:, :-1], obs[:, [-1]]
     s_unobs, f_unobs = unobs[:, :-1], unobs[:, [-1]]
-    return s_obs, f_obs, s_unobs, f_unobs
+    return (
+        jnp.float16(s_obs),
+        jnp.float16(f_obs),
+        jnp.float16(s_unobs),
+        jnp.float16(f_unobs),
+    )
 
 
 def log_test_results(rng: jax.Array, state: TrainState, test_dataloader: Callable):

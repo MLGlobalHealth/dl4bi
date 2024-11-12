@@ -82,12 +82,14 @@ class CANP(nn.Module):
         valid_lens_ctx: Optional[jax.Array] = None,  # [B]
         training: bool = False,
     ):
+        bias = None
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_det(s_f_ctx, training)
         r_ctx, _ = self.self_attn_det(
             s_f_ctx_embed,
             s_f_ctx_embed,
             s_f_ctx_embed,
+            bias,
             valid_lens_ctx,
             training,
         )
@@ -102,10 +104,12 @@ class CANP(nn.Module):
         d_f: int,
         training: bool = False,
     ):
+        bias = None
         r, _ = self.cross_attn(
             self.embed_s(s_test),  # qs
             self.embed_s(s_ctx),  # ks
             r_ctx,  # vs
+            bias,
             valid_lens_ctx,
             training,
         )  # [B, L_test, d_ffn]

@@ -4,34 +4,51 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from jax import vmap
+from sps.kernels import l2_dist_sq
 
-from ..core import MLP, KRStack
+from ..core import MLP, DistanceBias, FusedAttention, KRBlock, MultiHeadAttention
 
 
 class TNPKR(nn.Module):
     """Transformer Neural Process - Kernel Regression (TNP-KR).
 
     Args:
+        num_blks: Number of `KRBlocks` to use.
+        num_reps: Number of times to repeat each `KRBlock`.
+        min_std: Minimum pointwise standard deviation.
         embed_s: A module that embeds the index set prior to embedding with
             function values.
         embed_f: A module that embeds function values prior to embedding with
             the index set.
-        embed_s_f: A module that jointly embeds the (embedded) index set and
-            function values.
-        dec: A decoder module, e.g. a `KRStack`.
-        head: A prediction head for decoded output.
-        min_std: Minimum pointwise standard deviation.
+        embed_obs: A module that creates embeddings for observed (context) and
+            unobserved (test) points.
+        embed_all: A module that jointly embeds `obs`, `s`, and `f` embeddings.
+        dist: A distance function used to calculate pairwise distances between
+            two arrays.
+        bias: A bias module that consumes pairwise distances.
+        attn: An attention module used in `KRBlocks`.
+        norm: A normalization module used in `KRBlocks`.
+        ffn: A FeedForward Network used in `KRBlocks`.
+        head: A prediction head.
 
     Returns:
         An instance of the `TNP-KR` model.
     """
 
+    num_blks: int = 6
+    num_reps: int = 1
+    min_std: float = 0.0
     embed_s: Callable = lambda x: x
     embed_f: Callable = lambda x: x
-    embed_s_f: nn.Module = MLP([256, 64])
-    dec: nn.Module = KRStack()
-    head: nn.Module = MLP([128, 2])
-    min_std: float = 0.0
+    embed_obs: nn.Module = nn.Embed(2, 4)
+    embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
+    dist: Callable = l2_dist_sq
+    bias: nn.Module = DistanceBias()
+    attn: nn.Module = MultiHeadAttention(FusedAttention())
+    norm: nn.Module = nn.LayerNorm()
+    ffn: nn.Module = MLP([256, 64], nn.gelu)
+    head: nn.Module = MLP([256, 64, 2], nn.gelu)
 
     @nn.compact
     def __call__(
@@ -68,18 +85,24 @@ class TNPKR(nn.Module):
         Returns:
             $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
+        vdist = vmap(self.dist)
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
-        s_f_ctx = stack(self.embed_s(s_ctx), self.embed_f(f_ctx))
-        s_f_test = stack(self.embed_s(s_test), self.embed_f(f_test))
-        s_f_test_enc, _ = self.dec(
-            self.embed_s_f(s_f_test),
-            self.embed_s_f(s_f_ctx),
-            valid_lens_ctx,
-            training,
-            inv_permute_idx
-        )
-        f_dist = self.head(s_f_test_enc, training)
+        obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
+        unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
+        ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
+        test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
+        qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
+        d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
+        for _ in range(self.num_blks):
+            attn, ffn = self.attn.copy(), self.ffn.copy()
+            for _ in range(self.num_reps):
+                bias, norm = self.bias.copy(), self.norm.copy()
+                b_qk, b_kk = bias(d_qk), bias(d_kk)
+                blk = KRBlock(attn, norm, ffn)
+                qvs, kvs = blk(qvs, kvs, b_qk, b_kk, valid_lens_ctx, training, inv_permute_idx)
+        qvs = self.norm.copy()(qvs)
+        f_dist = self.head(qvs, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
         f_std = jnp.exp(f_log_var / 2)
         f_std = self.min_std + (1 - self.min_std) * f_std

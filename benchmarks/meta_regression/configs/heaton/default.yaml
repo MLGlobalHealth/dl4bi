@@ -1,21 +1,22 @@
 defaults:
   - _self_ # use default global values below
-  - model: tnp_kr_fused_big
+  - model: tnp_kr
   - kernel: matern_1_2
   - data: 30x50
   - test: sim
 seed: 42
 wandb: True
 project: Heaton
-train_num_steps: 20000
+train_num_steps: 100000
 valid_num_steps: 1000
 finetune_num_steps: 1000
+finetune_on_real: False
 valid_interval: 1000
-plot_interval: 1000
+plot_interval: 20000
 lr_peak: 5.0e-4
 lr_pct_decay: 0.6
 lr_alpha: 0.2
 lr_finetune: 1.0e-4
 clip_max_norm: 1.0
-monitor_metric: RMSE
-early_stop_patience: 5
+monitor_metric: NLL
+early_stop_patience: 20
