@@ -3,7 +3,21 @@ import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
 from jax import jit, vmap
+from jax.typing import ArrayLike
 
+def graph_distance(x_idx: ArrayLike, y_idx: ArrayLike) -> ArrayLike:
+    r"""Graph distance between two [..., D] arrays according to the precalculated distance (shortest path) matrix.
+    
+    Args:
+        x_idx: Input Index array of size n_x
+        y_idx: Input Index array of size n_y
+    
+    Returns:
+        Matrix of all pairwise distances.
+    """
+    distance_matrix = jnp.load('/home/scratch/menang/outbreaks/distances.npy')
+    distances = distance_matrix[x_idx, :][:, y_idx]
+    return distances
 
 class DistanceBias(nn.Module):
     num_heads: int = 4
