@@ -886,13 +886,13 @@ def plot_img(
         _, axs = plt.subplots(1, 4, figsize=(20, 5))
     # NOTE: cmap is ignored when images has RGB channels
     axs[0].set_title("Task")
-    axs[0].imshow(task, cmap=cmap, interpolation="none")
+    axs[0].imshow(task, cmap=cmap, norm=norm, interpolation="none")
     axs[1].set_title("Uncertainty")
     axs[1].imshow(task_std, cmap=cmap_std, norm=norm_std, interpolation="none")
     axs[2].set_title("Prediction")
     axs[2].imshow(task_pred, cmap=cmap, norm=norm, interpolation="none")
     axs[3].set_title("Ground Truth")
-    axs[3].imshow(task_true, cmap=cmap, interpolation="none")
+    axs[3].imshow(task_true, cmap=cmap, norm=norm, interpolation="none")
     plt.tight_layout()
     return plt.gcf()
 
