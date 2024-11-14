@@ -19,6 +19,7 @@ from orbax.checkpoint import PyTreeCheckpointer
 from plot_utils import (
     plot_covariance,
     plot_histograms,
+    plot_infer_observed_coverage,
     plot_infer_realizations,
     plot_kl_on_map,
     plot_trace,
@@ -49,7 +50,7 @@ def main(cfg: DictConfig):
         project=cfg.project,
         reinit=True,
     )
-    rng, rng_plot, noise_rng = random.split(random.key(cfg.seed), 3)
+    rng, rng_plot, noise_rng, idxs_rng = random.split(random.key(cfg.seed), 4)
     s, _, _ = process_map(cfg.data)
     results_dir = Path(
         f"results/{cfg.project}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}"
@@ -59,8 +60,13 @@ def main(cfg: DictConfig):
     f_batch, _, conditionals = next(iter(gp_loader))
     conditionals = dict(zip(conditionals_names, conditionals))
     map_data = get_raw_map_data(cfg.data.name)
-    # NOTE: idxs taking all LTAs as samples, it's possible to give partial information also
-    idxs = jnp.arange(len(map_data))
+    # NOTE: obs_idxs taking all LTAs as samples, it's possible to give partial information also
+    obs_idxs, obs_mask = jnp.arange(len(map_data)), True
+    if cfg.infer.get("num_context_points") is not None:
+        obs_idxs = jax.random.choice(
+            idxs_rng, obs_idxs, (cfg.infer.num_context_points,), replace=False
+        )
+        obs_mask = jnp.array([i in obs_idxs for i in range(len(s))])
     # TODO(jhonathan): Add customizable priors
     priors = {
         "var": dist.HalfNormal(),
@@ -70,12 +76,12 @@ def main(cfg: DictConfig):
     }
     kernel = globals()[cfg.kernel.kwargs.kernel.func]
     if cfg.infer.run_gp_baseline:
-        inference_model = build_baseline_inference_model(s, idxs, kernel, priors)
+        inference_model = build_baseline_inference_model(s, obs_mask, kernel, priors)
     else:
         state, _ = load_ckpt((results_dir / model_name).with_suffix(".ckpt"))
         vae_model = (state, instantiate(cfg.model))
         inference_model = build_surrogate_inference_model(
-            vae_model, idxs, kernel, cfg.model.kwargs.z_dim, priors
+            vae_model, obs_mask, kernel, cfg.model.kwargs.z_dim, priors
         )
 
     f = f_batch[0].squeeze()
@@ -83,7 +89,7 @@ def main(cfg: DictConfig):
         f += random.multivariate_normal(
             noise_rng, jnp.zeros_like(f), cfg.data.obs_noise * jnp.eye(f.shape[0])
         )
-    hmc_res = _hmc(cfg, inference_model, s, f, conditionals, idxs)
+    hmc_res = _hmc(cfg, inference_model, s, f, conditionals, obs_idxs)
     log_inference_run(
         rng_plot,
         hmc_res,
@@ -99,11 +105,11 @@ def main(cfg: DictConfig):
     )
 
 
-def _hmc(cfg, model, s, f, conditionals, idxs):
+def _hmc(cfg, model, s, f, conditionals, obs_idxs):
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
     k1, k2 = jax.random.split(jax.random.PRNGKey(0))
     mcmc = MCMC(nuts, **cfg.infer.mcmc)
-    mcmc.run(k1, f[idxs].squeeze())
+    mcmc.run(k1, f.squeeze())
     mcmc.print_summary()
     samples = mcmc.get_samples()
     post = Predictive(model, samples)(k2)
@@ -111,7 +117,7 @@ def _hmc(cfg, model, s, f, conditionals, idxs):
         {
             "s": s,
             "f": f,
-            "idxs": idxs,
+            "obs_idxs": obs_idxs,
             **conditionals,
         }
     )
@@ -140,6 +146,7 @@ def log_inference_run(
     )
     with open(results_dir / f"{model_name}_hmc_pp.pkl", "wb") as out_file:
         pickle.dump(post, out_file)
+    plot_infer_observed_coverage(post, map_data, model_name)
     plot_infer_realizations(rng_plot, map_data, f_batch, post, model_name)
     plot_trace(samples, mcmc, conditionals, obs_noise, model_name)
     plot_covariance(samples, conditionals, model_name, kernel, s)
@@ -148,7 +155,7 @@ def log_inference_run(
     plot_kl_on_map(map_data, kl_per_location, model_name)
 
 
-def build_baseline_inference_model(s, idxs, kernel, priors, jitter=1e-4):
+def build_baseline_inference_model(s, obs_mask, kernel, priors, jitter=1e-4):
     I_jitter = jitter * jnp.eye(s.shape[0])
 
     def gp_model(y=None):
@@ -161,12 +168,13 @@ def build_baseline_inference_model(s, idxs, kernel, priors, jitter=1e-4):
             K = kernel(s, s, variance, lengthscale) + I_jitter
         mu = numpyro.sample("mu", dist.MultivariateNormal(0, K))
         sigma = numpyro.sample("sigma", priors["sigma"])
-        numpyro.sample("obs", dist.Normal(mu[idxs], sigma), obs=y)
+        with numpyro.handlers.mask(mask=obs_mask):
+            numpyro.sample("obs", dist.Normal(mu, sigma), obs=y)
 
     return gp_model
 
 
-def build_surrogate_inference_model(model, idxs, kernel, z_dim, priors):
+def build_surrogate_inference_model(model, obs_mask, kernel, z_dim, priors):
     state, module = model
 
     def z_to_y_hat(z, conditionals):
@@ -188,7 +196,8 @@ def build_surrogate_inference_model(model, idxs, kernel, z_dim, priors):
         # because the underlying VAE assumes they are stacked that way
         mu = numpyro.deterministic("mu", z_to_y_hat(z, conditionals))
         sigma = numpyro.sample("sigma", priors["sigma"])
-        numpyro.sample("obs", dist.Normal(mu[idxs], sigma), obs=y)
+        with numpyro.handlers.mask(mask=obs_mask):
+            numpyro.sample("obs", dist.Normal(mu, sigma), obs=y)
 
     return gp_deep_sample_model
 

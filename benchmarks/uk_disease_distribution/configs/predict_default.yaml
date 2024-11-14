@@ -1,10 +1,14 @@
 defaults:
   - _self_ # use default global values below
   - data: England
-  - kernel: rbf_fixed
+  - kernel: rbf
   - model: prior_cvae
-  - infer: baseline
+  - vae_predict: default
 seed: 42
+is_gp: True
 wandb: True
 project: UK_disease_distribution
+lr_peak: 1.0e-3
+lr_pct_warmup: 0.01
+clip_max_norm: 3.0
 batch_size: 1024

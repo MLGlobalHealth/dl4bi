@@ -16,6 +16,34 @@ import wandb
 from dl4bi.meta_regression.train_utils import TrainState
 
 
+def plot_infer_observed_coverage(post, map_data, model_name, hdi_prob=0.95):
+    obs_idxs, f, f_hat = post["obs_idxs"], post["f"], post["obs"]
+    vmin, vmax = min(f.min(), f_hat.min()), max(f.max(), f_hat.max())
+    f_hat_mean, f_hat_std = f_hat.mean(axis=0), f_hat.std(axis=0)
+    fig, ax = plt.subplots(1, 5, figsize=(30, 10))
+    plot_on_map(ax[0], map_data, f, vmin, vmax, "y observed", "viridis")
+    plot_on_map(ax[1], map_data, f_hat_mean, vmin, vmax, "Mean MCMC Samples", "viridis")
+    plot_on_map(ax[2], map_data, f_hat_std, title="MCMC STD", cmap="plasma")
+    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
+    f_lower = f_hat_mean - z_score * f_hat_std
+    f_upper = f_hat_mean + z_score * f_hat_std
+    coverage = jnp.logical_and(f >= f_lower, f <= f_upper)
+    coverage_pct = coverage.mean() * 100
+    cvr_title = f"1-0 Coverage for {hdi_prob}% Conf\n" f"Coverage: {coverage_pct:.2f}%"
+    plot_on_map(ax[3], map_data, coverage.astype(int), title=cvr_title, cmap="coolwarm")
+    obs_title = f"Obsereved Locations ({len(obs_idxs)} locations)"
+    mask = jnp.array([(1 if i in obs_idxs else 0) for i in range(map_data.shape[0])])
+    plot_on_map(ax[4], map_data, mask, 0.0, 1.0, obs_title, cmap="coolwarm")
+    for axis in ax:
+        axis.set_axis_off()
+    plt.tight_layout()
+    timestamp = datetime.now().isoformat()
+    path = f"/tmp/Sampeled vs GT {timestamp}.png"
+    fig.savefig(path, dpi=125)
+    wandb.log({f"Sampeled vs GT - {model_name}": wandb.Image(path)})
+    plt.clf()
+
+
 def plot_infer_realizations(
     rng_plot, map_data, f_batch, post, model_name, num_samples=10
 ):
@@ -82,12 +110,14 @@ def plot_kl_on_map(
 
 
 def plot_violin(post, f_batch, model_name, num_locations=10):
+    obs_idxs = post["obs_idxs"]
     random_idxs = np.random.choice(post["obs"].shape[1], num_locations, replace=False)
     obs_data = [post["obs"][:, idx] for idx in random_idxs]
     true_data = f_batch[:, random_idxs, :].squeeze(axis=-1)
     data = []
     for i, (obs, true) in enumerate(zip(obs_data, true_data.T)):
-        location = f"Loc {random_idxs[i]}"
+        obs_str = " obs" if random_idxs[i] in obs_idxs else ""
+        location = f"Loc {random_idxs[i]}{obs_str}"
         data.extend([(value.item(), location, "True Data") for value in true])
         data.extend([(value.item(), location, "Posterior Data") for value in obs])
     df = pd.DataFrame(data, columns=["Value", "Location", "Type"])
