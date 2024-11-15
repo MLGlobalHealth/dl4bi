@@ -85,7 +85,7 @@ def visualize_graph(matrix, name='Adjacency_Matrix'):
     plt.imshow(np.array(matrix), cmap='viridis', interpolation='none')
     plt.colorbar()
     plt.title(name)
-    plt.savefig('/home/scratch/menang/outbreaks/' + name + '.png')
+    plt.savefig('cache/outbreaks/' + name + '.png')
     plt.clf()
 
 # @jit
@@ -98,7 +98,7 @@ def mask_attn_graph(x: jax.Array, inv_permute_idx, fill=-jnp.inf):
     Returns:
         `x` with filled values according to mask.
     """
-    adj_matrix_path = '/home/scratch/menang/outbreaks/dim16_lattice.adjilist'
+    adj_matrix_path = 'cache/outbreaks/dim16_lattice.adjilist'
     graph = load_adj_list(adj_matrix_path)
     mask = convert_graph_to_mask(graph, inv_permute_idx)
     B, Q, K = x.shape

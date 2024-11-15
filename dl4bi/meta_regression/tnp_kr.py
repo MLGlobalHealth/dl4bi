@@ -9,6 +9,7 @@ from sps.kernels import l2_dist_sq
 
 from ..core import MLP, DistanceBias, FusedAttention, KRBlock, MultiHeadAttention
 from ..core.bias import graph_distance
+import os
 
 
 class TNPKR(nn.Module):
@@ -95,20 +96,20 @@ class TNPKR(nn.Module):
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
-        # d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
-        # print(d_qk.shape, d_kk.shape)
-        # print('d_qk:', d_qk)
-        # print('d_kk:', d_kk)
         
-        permute_idx = inv_permute_idx.argsort()
-        permuted_graph_dist = self.graphdist(permute_idx, permute_idx) # L x L
-        d_qk = jnp.repeat(permuted_graph_dist[None, :, :], len(s_ctx), axis=0) # B x L x L
-        d_kk = jnp.repeat(permuted_graph_dist[None, :, :], len(s_ctx), axis=0) # B x L x L
-        # print(d_qk.shape, d_kk.shape)
-        # print('use graph distance')
-        # print('d_qk:', d_qk)
-        # raise ValueError('stop here')
-        # TODO: add d_qk_graph, d_kk_graph to the bias module
+        # TODO: pass path as an argument
+        path = "cache/outbreaks/distances.npy" 
+        if not os.path.exists(path):
+            d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
+        else:
+            permute_idx = inv_permute_idx.argsort()
+            permuted_graph_dist = self.graphdist(permute_idx, permute_idx, path) # L x L
+            d_qk = jnp.repeat(permuted_graph_dist[None, :, :], len(s_ctx), axis=0) # B x L x L
+            d_kk = jnp.repeat(permuted_graph_dist[None, :, :], len(s_ctx), axis=0) # B x L x L
+            # print(d_qk.shape, d_kk.shape)
+            # print('use graph distance')
+            # print('d_qk:', d_qk)
+            # raise ValueError('stop here')
         
         for _ in range(self.num_blks):
             attn, ffn = self.attn.copy(), self.ffn.copy()

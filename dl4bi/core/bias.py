@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jax import jit, vmap
 from jax.typing import ArrayLike
 
-def graph_distance(x_idx: ArrayLike, y_idx: ArrayLike) -> ArrayLike:
+def graph_distance(x_idx: ArrayLike, y_idx: ArrayLike, path=None) -> ArrayLike:
     r"""Graph distance between two [..., D] arrays according to the precalculated distance (shortest path) matrix.
     
     Args:
@@ -15,7 +15,7 @@ def graph_distance(x_idx: ArrayLike, y_idx: ArrayLike) -> ArrayLike:
     Returns:
         Matrix of all pairwise distances.
     """
-    distance_matrix = jnp.load('/home/scratch/menang/outbreaks/distances.npy')
+    distance_matrix = jnp.load(path)
     distances = distance_matrix[x_idx, :][:, y_idx]
     return distances
 

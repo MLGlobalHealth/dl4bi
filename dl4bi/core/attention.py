@@ -355,8 +355,8 @@ class Attention(nn.Module):
             scores += jnp.broadcast_to(bias, (B, H, Q, K)).reshape(-1, Q, K)
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
-            # scores = mask_attn(scores, valid_lens)
-            scores = mask_attn_graph(scores, inv_permute_idx) # NOTE: test to mask according to ajacency matrix
+            scores = mask_attn(scores, valid_lens)
+            # scores = mask_attn_graph(scores, inv_permute_idx) # NOTE: test to mask according to ajacency matrix
         attn = nn.softmax(scores, axis=-1)  # [B * H, Q, K]
         ctx = drop(attn) @ vs  # [B * H, Q, D_V_H]
         # [B * H, Q, D_V_H] -> [B, Q, H, D_V_H]
