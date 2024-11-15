@@ -802,6 +802,8 @@ def log_img_plots(
     num_plots: int = 16,
     cmap=mpl.colormaps.get_cmap("grey"),
     cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
+    norm=None,
+    norm_std=None,
 ):
     """Logs `num_plots` from the given batch."""
     rng_dropout, rng_extra = random.split(rng_step)
@@ -852,6 +854,8 @@ def log_img_plots(
             inv_idx_i,
             cmap=cmap,
             cmap_std=cmap_std,
+            norm=norm,
+            norm_std=norm_std,
         )
         paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
         fig.savefig(paths[-1], dpi=125)
@@ -871,6 +875,7 @@ def plot_img(
     axs: Optional[mpl.axes.Axes] = None,
     cmap=mpl.colormaps.get_cmap("grey"),
     cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
+    norm=None,
     norm_std=None,
 ):
     """Plots a triptych of [task, uncertainty, pred, truth]."""
@@ -882,13 +887,13 @@ def plot_img(
         _, axs = plt.subplots(1, 4, figsize=(20, 5))
     # NOTE: cmap is ignored when images has RGB channels
     axs[0].set_title("Task")
-    axs[0].imshow(task, cmap=cmap, interpolation="none")
+    axs[0].imshow(task, cmap=cmap, norm=norm, interpolation="none")
     axs[1].set_title("Uncertainty")
     axs[1].imshow(task_std, cmap=cmap_std, norm=norm_std, interpolation="none")
     axs[2].set_title("Prediction")
-    axs[2].imshow(task_pred, cmap=cmap, interpolation="none")
+    axs[2].imshow(task_pred, cmap=cmap, norm=norm, interpolation="none")
     axs[3].set_title("Ground Truth")
-    axs[3].imshow(task_true, cmap=cmap, interpolation="none")
+    axs[3].imshow(task_true, cmap=cmap, norm=norm, interpolation="none")
     plt.tight_layout()
     return plt.gcf()
 

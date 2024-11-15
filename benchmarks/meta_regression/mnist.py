@@ -52,6 +52,7 @@ def main(cfg: DictConfig):
     model = instantiate(cfg.model)
     cmap = mpl.colormaps.get_cmap("grey")
     cmap.set_bad("blue")
+    norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
     state = train(
         rng_train,
         model,
@@ -63,7 +64,7 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         callbacks=[
             Callback(
-                partial(log_img_plots, shape=(28, 28, 1), cmap=cmap),
+                partial(log_img_plots, shape=(28, 28, 1), cmap=cmap, norm=norm),
                 cfg.plot_interval,
             )
         ],
