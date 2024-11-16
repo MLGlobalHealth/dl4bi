@@ -16,6 +16,7 @@ from dl4bi.core import (
     MultiHeadAttention,
     MultiKernelAttention,
     MultiplicativeScorer,
+    ScanAttention,
     exponential_scorer,
     rbf_scorer,
 )
@@ -74,6 +75,25 @@ def test_fast_attention():
     # Source: https://tinyurl.com/google-fast-attn
     assert mse_fast < 0.05, "Fast: Large MSE error in approximation"
     assert max_error_fast < 2.0, "Fast: Large max error in approximation!"
+
+
+def test_scan_attention():
+    B, L, H, D = 4, 128, 4, 16
+    key = random.key(42)
+    rng_qkvs, rng_valid, rng_init = random.split(key, 3)
+    data = random.normal(rng_qkvs, (3, B, L, H, D))
+    qs, ks, vs = data[0], data[1], data[2]
+    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
+    (ctx_true, _), _ = Attention().init_with_output(rng_init, qs, ks, vs, valid_lens)
+    (ctx_scan, _), _ = ScanAttention().init_with_output(
+        rng_init, qs, ks, vs, valid_lens
+    )
+    mse_scan = jnp.square(ctx_true - ctx_scan).mean()
+    max_error_scan = jnp.max(jnp.abs(ctx_true - ctx_scan))
+    assert ctx_true.shape == (B, L, H, D), "Full: incorrect context output shape!"
+    assert ctx_scan.shape == (B, L, H, D), "Scan: incorrect context output shape!"
+    assert mse_scan < 1e-6, "Scan: Large MSE error in approximation"
+    assert max_error_scan < 1e-6, "Scan: Large max error in approximation!"
 
 
 def test_fused_attention():
@@ -155,6 +175,28 @@ def test_fast_softmax_attention_scale():
 
     assert jnp.isfinite(ctx_fast_init).all(), "Non-finite values produced!"
     assert jnp.isfinite(ctx_fast).all(), "Non-finite values produced!"
+
+
+def test_scan_attention_scale():
+    # L_ctx, L_test = 105569, 44431  # Case Study for Large Spatial Data, Heaton et al
+    B, L_ctx, L_test, L_init, H, D = 1, 110000, 50000, 3, 4, 16
+    key = random.key(42)
+    rng_init, rng_qs, rng_kvs = random.split(key, 3)
+    x = random.normal(rng_init, (B, L_init, H, D))
+    qs = random.normal(rng_qs, (B, L_test, H, D))
+    kvs = random.normal(rng_kvs, (B, L_ctx, H, D))
+
+    scan_attn = ScanAttention()
+    (ctx_scan_init, _), params = scan_attn.init_with_output(rng_init, x, x, x)
+    jit_scan_attn = jax.jit(
+        lambda qs, ks, vs: scan_attn.apply(params, qs, ks, vs, rngs={"rng_extra": key})
+    )
+    # to view results: tensorboard --logdir /tmp/tensorboard/
+    with jax.profiler.trace("/tmp/tensorboard"):
+        ctx_scan, _ = jit_scan_attn(qs, kvs, kvs)
+
+    assert jnp.isfinite(ctx_scan_init).all(), "Non-finite values produced!"
+    assert jnp.isfinite(ctx_scan).all(), "Non-finite values produced!"
 
 
 def test_kernel_attention():

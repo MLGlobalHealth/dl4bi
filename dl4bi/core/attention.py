@@ -1,11 +1,16 @@
+import math
 import warnings
 from collections.abc import Callable, Sequence
+from functools import partial
 from typing import Optional
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from einops import rearrange
 from jax import jit, lax, random, vmap
+from jax.lax import dynamic_slice as slice
+from jax.lax import scan
 from jax.nn import dot_product_attention
 from sps.kernels import outer_subtract
 
@@ -239,6 +244,137 @@ def fast_attend(
     buf_4 = jnp.where(buf_4 < eps, eps, buf_4)  # numerical stabilization
     d_inv = (1 / buf_4)[..., None]
     return d_inv * buf_3
+
+
+# TODO(danj): update to Flash Attention 2
+# TODO(danj): implement TISA bias version
+@partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size"))
+def scan_attention(
+    qs: jax.Array,
+    ks: jax.Array,
+    vs: jax.Array,
+    ks_mask: Optional[jax.Array] = None,
+    qs_chunk_size: int = 1024,
+    ks_chunk_size: int = 1024,
+):
+    """Scan Attention based on [Flash Attention 2](https://arxiv.org/abs/2307.08691).
+
+    Implementation based on [flash-attention-jax](https://github.com/lucidrains/flash-attention-jax).
+    """
+    B, Q, H, D = qs.shape
+
+    def qs_scanner(i, _result):
+        Q_chunk = min(Q, qs_chunk_size)
+        qs_chunk = slice(qs, (i, 0, 0, 0), (Q_chunk, B, H, D))
+        return i + Q_chunk, scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size)
+
+    qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> L B H D"), (qs, ks, vs))
+    if ks_mask is not None:
+        ks_mask = rearrange(ks_mask, "B K -> K B")
+
+    _, new_qs = scan(
+        qs_scanner,
+        init=0,
+        xs=None,
+        length=math.ceil(Q / qs_chunk_size),
+    )
+
+    return rearrange(new_qs, "C Q_c B H D -> B (C Q_c) H D")
+
+
+def scan_ks(
+    qs_chunk: jax.Array,
+    ks: jax.Array,
+    vs: jax.Array,
+    ks_mask: Optional[jax.Array] = None,
+    ks_chunk_size: int = 1024,
+):
+    (Q_chunk, B, H, D), K = qs_chunk.shape, ks.shape[0]
+    qs_chunk /= jnp.sqrt(D)
+
+    def ks_scanner(carry: tuple, _):
+        i, new_qs, row_max, row_sum = carry
+        K_chunk = min(K, ks_chunk_size)
+        ks_chunk = slice(ks, (i, 0, 0, 0), (K_chunk, B, H, D))
+        vs_chunk = slice(vs, (i, 0, 0, 0), (K_chunk, B, H, D))
+        scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
+        if ks_mask is not None:
+            ks_mask_chunk = slice(ks_mask, (i, 0), (K_chunk, B))
+            ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
+            scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
+        row_max_chunk = jnp.max(scores, axis=-1, keepdims=True)
+        new_row_max = jnp.maximum(row_max_chunk, row_max)
+        exp_scores = jnp.exp(scores - new_row_max)
+        row_sum_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
+        new_qs_chunk = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs_chunk)
+        exp_row_max_diff = jnp.exp(row_max - new_row_max)
+        new_row_sum = exp_row_max_diff * row_sum + row_sum_chunk
+        new_qs *= exp_row_max_diff * row_sum / new_row_sum
+        new_qs += new_qs_chunk / new_row_sum
+        return (i + K_chunk, new_qs, new_row_max, new_row_sum), None
+
+    qs_new = jnp.zeros((Q_chunk, B, H, D))
+    row_sum = jnp.zeros((Q_chunk, B, H, 1))
+    row_max = jnp.full((Q_chunk, B, H, 1), -float("inf"))
+
+    (_, new_qs, row_max, row_sum), _ = scan(
+        ks_scanner,
+        init=(0, qs_new, row_max, row_sum),
+        xs=None,
+        length=math.ceil(K / ks_chunk_size),
+    )
+    return new_qs
+
+
+class ScanAttention(nn.Module):
+    r"""Performs query-key-value attention with a scan for reduced memory usage.
+
+    Args:
+        qs_chunk_size: Number of queries to process in each chunk of scan.
+        ks_chunk_size: Number of keys to process in each chunk of scan.
+
+    Returns:
+        A `ScanAttention` module.
+    """
+
+    qs_chunk_size: int = 1024
+    ks_chunk_size: int = 1024
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, H, D_QK_H]
+        ks: jax.Array,  # [B, K, H D_QK_H]
+        vs: jax.Array,  # [B, K, H, D_H]
+        valid_lens: Optional[jax.Array] = None,  # [B]
+        training: bool = False,
+        **kwargs,
+    ):
+        r"""Performs forward pass of network.
+
+        Args:
+            qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
+            ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
+            vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
+            valid_lens: Mask consisting of valid length per sequence of dimension
+                $\mathbb{R}^B$.
+            training: Boolean indicating whether currently training.
+
+        Returns:
+            `ctx` and `attn`, the updated values and None, respectively,
+            since scanned attention never materializes the attention matrix.
+        """
+        ks_mask = None
+        if valid_lens is not None:
+            ks_mask = mask_from_valid_lens(ks.shape[1], valid_lens).squeeze()
+        return scan_attention(
+            qs,
+            ks,
+            vs,
+            ks_mask,
+            self.qs_chunk_size,
+            self.ks_chunk_size,
+        ), None
 
 
 class DotScorer(nn.Module):
