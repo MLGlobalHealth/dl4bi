@@ -247,7 +247,6 @@ def fast_attend(
 
 
 # TODO(danj): update to Flash Attention 2
-# TODO(danj): implement TISA bias version
 @partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size"))
 def scan_attention(
     qs: jax.Array,
@@ -326,8 +325,12 @@ def scan_ks(
     return new_qs
 
 
+# TODO(danj): implement TISA bias version
 class ScanAttention(nn.Module):
     r"""Performs query-key-value attention with a scan for reduced memory usage.
+
+    .. warning::
+        This does not currently support bias.
 
     Args:
         qs_chunk_size: Number of queries to process in each chunk of scan.
@@ -346,6 +349,7 @@ class ScanAttention(nn.Module):
         qs: jax.Array,  # [B, Q, H, D_QK_H]
         ks: jax.Array,  # [B, K, H D_QK_H]
         vs: jax.Array,  # [B, K, H, D_H]
+        bias: Optional[jax.Array] = None,  # unused here
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         **kwargs,
@@ -356,6 +360,7 @@ class ScanAttention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
+            bias: Bias added to attention scores.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$.
             training: Boolean indicating whether currently training.
@@ -364,6 +369,8 @@ class ScanAttention(nn.Module):
             `ctx` and `attn`, the updated values and None, respectively,
             since scanned attention never materializes the attention matrix.
         """
+        if bias is not None:
+            warnings.warn("ScanAttention does not currently support bias!")
         ks_mask = None
         if valid_lens is not None:
             ks_mask = mask_from_valid_lens(ks.shape[1], valid_lens).squeeze()

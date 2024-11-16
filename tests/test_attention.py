@@ -81,12 +81,15 @@ def test_scan_attention():
     B, L, H, D = 4, 128, 4, 16
     key = random.key(42)
     rng_qkvs, rng_valid, rng_init = random.split(key, 3)
+    bias = None
     data = random.normal(rng_qkvs, (3, B, L, H, D))
     qs, ks, vs = data[0], data[1], data[2]
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
-    (ctx_true, _), _ = Attention().init_with_output(rng_init, qs, ks, vs, valid_lens)
+    (ctx_true, _), _ = Attention().init_with_output(
+        rng_init, qs, ks, vs, bias, valid_lens
+    )
     (ctx_scan, _), _ = ScanAttention().init_with_output(
-        rng_init, qs, ks, vs, valid_lens
+        rng_init, qs, ks, vs, bias, valid_lens
     )
     mse_scan = jnp.square(ctx_true - ctx_scan).mean()
     max_error_scan = jnp.max(jnp.abs(ctx_true - ctx_scan))
