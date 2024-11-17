@@ -155,6 +155,39 @@ def test_fast_softmax_attention_speed():
     assert t_fast_diff < t_true_diff, "Fast isn't faster!"
 
 
+def test_scan_attention_speed():
+    B, L, H, D = 1, 32768, 4, 16
+    key = random.key(42)
+    rng_qkv, rng_bias, rng_valid, rng_init = random.split(key, 4)
+    data = random.normal(rng_qkv, (3, B, L, H, D))
+    bias = None  # not yet supported
+    qs, ks, vs = data[0], data[1], data[2]
+    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L)
+    scan_attn = ScanAttention()
+    _, params = scan_attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
+    jit_scan_attn = jax.jit(scan_attn.apply)
+    t_scan_start = time()
+    for i in range(3):
+        jit_scan_attn(params, qs, ks, vs, bias, valid_lens, rngs={"rng_extra": key})
+    t_scan_stop = time()
+    t_scan_diff = t_scan_stop - t_scan_start
+    del jit_scan_attn, scan_attn, params  # free up memory
+
+    try:
+        attn = Attention()
+        _, p_true = attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
+        jit_attn = jax.jit(attn.apply)
+        t_true_start = time()
+        for i in range(3):
+            jit_attn(p_true, qs, ks, vs, bias, valid_lens)
+        t_true_stop = time()
+        t_true_diff = t_true_stop - t_true_start
+    except XlaRuntimeError:  # OOM
+        t_true_diff = 1e6
+
+    assert t_scan_diff < t_true_diff, "scan isn't faster!"
+
+
 def test_fast_softmax_attention_scale():
     # L_ctx, L_test = 105569, 44431  # Case Study for Large Spatial Data, Heaton et al
     B, L_ctx, L_test, L_init, H, D = 1, 110000, 50000, 3, 4, 16
