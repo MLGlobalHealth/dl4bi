@@ -349,34 +349,33 @@ def scan_ks(
     ks_mask: Optional[jax.Array] = None,
     ks_chunk_size: int = 1024,
 ):
-    (Qc, B, H, D), K = qs_chunk.shape, ks.shape[0]
+    (Q_c, B, H, D), K = qs_chunk.shape, ks.shape[0]
     qs_chunk /= jnp.sqrt(D)
 
     def ks_scanner(carry: tuple, _):
         i, os, row_maxs, row_sums = carry
-        Kc = min(K, ks_chunk_size)
-        ks_chunk = slice(ks, (i, 0, 0, 0), (Kc, B, H, D))
-        vs_chunk = slice(vs, (i, 0, 0, 0), (Kc, B, H, D))
-        # TODO(danj); better order?
-        scores = jnp.einsum("Qc B H D, Kc B H D -> Qc B H Kc", qs_chunk, ks_chunk)
+        K_c = min(K, ks_chunk_size)
+        ks_chunk = slice(ks, (i, 0, 0, 0), (K_c, B, H, D))
+        vs_chunk = slice(vs, (i, 0, 0, 0), (K_c, B, H, D))
+        scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
         if ks_mask is not None:
-            ks_mask_chunk = slice(ks_mask, (i, 0), (Kc, B))
+            ks_mask_chunk = slice(ks_mask, (i, 0), (K_c, B))
             ks_mask_chunk = rearrange(ks_mask_chunk, "Kc B -> 1 B 1 Kc")
             scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
         row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
         exp_scores = jnp.exp(scores - new_row_maxs)
         row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
-        os_chunk = jnp.einsum("Qc B H Kc, Kc B H D -> Qc B H D", exp_scores, vs_chunk)
+        os_chunk = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs_chunk)
         exp_row_maxs_diff = jnp.exp(row_maxs - new_row_maxs)
         new_row_sums = exp_row_maxs_diff * row_sums + row_sums_chunk
         os *= exp_row_maxs_diff * row_sums / new_row_sums
         os += os_chunk / new_row_sums
-        return (i + Kc, os, new_row_maxs, new_row_sums), None
+        return (i + K_c, os, new_row_maxs, new_row_sums), None
 
-    os = jnp.zeros((Qc, B, H, D))
-    row_sums = jnp.zeros((Qc, B, H, 1))
-    row_maxs = jnp.full((Qc, B, H, 1), -float("inf"))
+    os = jnp.zeros((Q_c, B, H, D))
+    row_sums = jnp.zeros((Q_c, B, H, 1))
+    row_maxs = jnp.full((Q_c, B, H, 1), -float("inf"))
 
     (_, os, row_maxs, row_sums), _ = scan(
         ks_scanner,
