@@ -360,7 +360,7 @@ def scan_ks(
         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
         if ks_mask is not None:
             ks_mask_chunk = slice(ks_mask, (i, 0), (K_c, B))
-            ks_mask_chunk = rearrange(ks_mask_chunk, "Kc B -> 1 B 1 Kc")
+            ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
             scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
         row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
