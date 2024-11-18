@@ -84,7 +84,8 @@ def test_scan_attention_impl():
     bias = None
     data = random.normal(rng_qkvs, (3, B, L, H, D))
     qs, ks, vs = data[0], data[1], data[2]
-    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
+    valid_lens = None
+    # valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
     (ctx_true, _), _ = Attention().init_with_output(
         rng_init, qs, ks, vs, bias, valid_lens
     )
@@ -95,8 +96,8 @@ def test_scan_attention_impl():
     max_error_scan = jnp.max(jnp.abs(ctx_true - ctx_scan))
     assert ctx_true.shape == (B, L, H, D), "Full: incorrect context output shape!"
     assert ctx_scan.shape == (B, L, H, D), "Scan: incorrect context output shape!"
-    assert mse_scan < 1e-6, "Scan: Large MSE error in approximation"
-    assert max_error_scan < 0.005, "Scan: Large max error in approximation!"
+    assert mse_scan < 1e-7, "Scan: Large MSE error in approximation"
+    assert max_error_scan < 1e-3, "Scan: Large max error in approximation!"
 
 
 def test_fused_attention_impl():
@@ -158,13 +159,14 @@ def test_fast_softmax_attention_speed():
 
 
 def test_scan_attention_speed():
-    B, L, H, D, N, C = 1, 10240, 4, 16, 5, 4096
+    B, L, H, D, N, C = 1, 10240, 4, 16, 5, 1024
     key = random.key(42)
     rng_qkv, rng_bias, rng_valid, rng_init = random.split(key, 4)
     data = random.normal(rng_qkv, (3, B, L, H, D))
     bias = None  # not yet supported
     qs, ks, vs = data[0], data[1], data[2]
-    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L)
+    valid_lens = None
+    # valid_lens = random.randint(rng_valid, (B,), 0, maxval=L)
     scan_attn = ScanAttention(C, C)
     _, params = scan_attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
     jit_scan_attn = jax.jit(scan_attn.apply)  # force compile

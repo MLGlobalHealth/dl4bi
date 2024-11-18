@@ -305,10 +305,6 @@ class ScanAttention(nn.Module):
         ), None
 
 
-# TODO(danj): update to Flash Attention 2
-# TODO(danj): test with jax.remat for gradient checkpointing scan functions?
-# TODO(danj): https://bit.ly/4eFA4mC
-@partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size"))
 def scan_attention(
     qs: jax.Array,
     ks: jax.Array,
@@ -316,33 +312,37 @@ def scan_attention(
     ks_mask: Optional[jax.Array] = None,
     qs_chunk_size: int = 1024,
     ks_chunk_size: int = 1024,
+    dtype: jnp.dtype = jnp.float32,
+    precision: lax.Precision = lax.Precision.HIGHEST,
 ):
-    """Scan Attention based on [Flash Attention 2](https://arxiv.org/abs/2307.08691).
+    """Memory efficient attention based on [Google's implementation](https://tinyurl.com/memory-efficient-attention)."""
+    vscan_qs = vmap(scan_qs, in_axes=(0, 0, 0, 0, None, None, None, None))
+    return vscan_qs(qs, ks, vs, ks_mask, qs_chunk_size, ks_chunk_size, dtype, precision)
 
-    Implementation based on [flash-attention-jax](https://github.com/lucidrains/flash-attention-jax)
-    and Google's [memory-efficient-attention](https://bit.ly/4eFA4mC).
-    """
-    B, Q, H, D = qs.shape
+
+@partial(jit, static_argnums=(4, 5, 6, 7))
+def scan_qs(
+    qs: jax.Array,
+    ks: jax.Array,
+    vs: jax.Array,
+    ks_mask: Optional[jax.Array] = None,
+    qs_chunk_size: int = 1024,
+    ks_chunk_size: int = 1024,
+    dtype: jnp.dtype = jnp.float32,
+    precision: lax.Precision = lax.Precision.HIGHEST,
+):
+    Q, H, D = qs.shape
+    Q_c = min(Q, qs_chunk_size)
 
     def qs_scanner(i, _):
-        Q_c = min(Q, qs_chunk_size)
-        qs_chunk = slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
-        return i + Q_c, scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size)
+        qs_chunk = lax.dynamic_slice(qs, (i, 0, 0), slice_sizes=(Q_c, H, D))
+        return (
+            i + Q_c,
+            scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size, dtype, precision),
+        )
 
-    # JAX/numpy store data in row major format, so (theoretically) putting the
-    # scanned axes first improves cache locality
-    qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> L B H D"), (qs, ks, vs))
-    if ks_mask is not None:
-        ks_mask = rearrange(ks_mask, "B K -> K B")
-
-    _, os = scan(
-        qs_scanner,
-        init=0,
-        xs=None,
-        length=math.ceil(Q / qs_chunk_size),
-    )
-
-    return rearrange(os, "C Q B H D -> B (C Q) H D")
+    _, res = lax.scan(qs_scanner, init=0, xs=None, length=math.ceil(Q / qs_chunk_size))
+    return res.reshape(Q, H, D)
 
 
 def scan_ks(
@@ -350,43 +350,131 @@ def scan_ks(
     ks: jax.Array,
     vs: jax.Array,
     ks_mask: Optional[jax.Array] = None,
-    ks_chunk_size: int = 1024,
+    ks_chunk_size: int = 4096,
+    dtype: jnp.dtype = jnp.float32,
+    precision: lax.Precision = lax.Precision.HIGHEST,
 ):
-    (Q_c, B, H, D), K = qs_chunk.shape, ks.shape[0]
+    (Q_c, H, D), K = qs_chunk.shape, ks.shape[0]
+    K_c = min(K, ks_chunk_size)
     qs_chunk /= jnp.sqrt(D)
 
-    def ks_scanner(carry: tuple, _):
-        i, os, row_maxs, row_sums = carry
-        K_c = min(K, ks_chunk_size)
-        ks_chunk = slice(ks, (i, 0, 0, 0), (K_c, B, H, D))
-        vs_chunk = slice(vs, (i, 0, 0, 0), (K_c, B, H, D))
-        scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
-        if ks_mask is not None:
-            ks_mask_chunk = slice(ks_mask, (i, 0), (K_c, B))
-            ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
-            scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
-        row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
-        new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
-        exp_scores = jnp.exp(scores - new_row_maxs)
-        row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
-        os_chunk = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs_chunk)
-        row_sums_adj = jnp.exp(row_maxs - new_row_maxs) * row_sums
-        new_row_sums = row_sums_adj + row_sums_chunk
-        os *= row_sums_adj / new_row_sums
-        os += os_chunk / new_row_sums
-        return (i + K_c, os, new_row_maxs, new_row_sums), None
+    @partial(jax.remat, prevent_cse=False)
+    def attend(qs, ks, vs):
+        scores = jnp.einsum(
+            "Q H D, K H D -> Q H K",
+            qs,
+            ks,
+            precision=precision,
+        ).astype(dtype)
+        max_score = jnp.max(scores, axis=-1, keepdims=True)
+        max_score = jax.lax.stop_gradient(max_score)
+        exp_scores = jnp.exp(scores - max_score)
+        os = jnp.einsum(
+            "Q H K, K H D -> Q H D",
+            exp_scores,
+            vs,
+            precision=precision,
+        ).astype(dtype)
+        return os, exp_scores.sum(axis=-1), max_score.reshape((Q_c, H))
 
-    os = jnp.zeros((Q_c, B, H, D))
-    row_sums = jnp.zeros((Q_c, B, H, 1))
-    row_maxs = jnp.full((Q_c, B, H, 1), -float("inf"))
+    def ks_scanner(i):
+        ks_chunk = lax.dynamic_slice(ks, (i, 0, 0), slice_sizes=(K_c, H, D))
+        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0), slice_sizes=(K_c, H, D))
+        return attend(qs_chunk, ks_chunk, vs_chunk)
 
-    (_, os, row_maxs, row_sums), _ = scan(
-        ks_scanner,
-        init=(0, os, row_maxs, row_sums),
-        xs=None,
-        length=math.ceil(K / ks_chunk_size),
-    )
-    return os
+    # all of these outputs from lax.map have a leading chunk dim, i.e. [C, ...]
+    os, sum_exp_scores, max_scores = lax.map(ks_scanner, xs=jnp.arange(0, K, K_c))
+    global_max_scores = jnp.max(max_scores, axis=0, keepdims=True)
+    max_diffs = jnp.exp(max_scores - global_max_scores)  # [C, Q, H] - [1, Q, H]
+    os *= max_diffs[..., None]  # [C, Q, H, D] * [C, Q, H, 1]
+    sum_exp_scores *= max_diffs  # [C, Q, H] * [C, Q, H]
+    os = os.sum(axis=0)  # [C, Q, H, D] -> [Q, H, D]
+    sum_exp_scores = sum_exp_scores[..., None].sum(axis=0)  # [C, Q, H, 1] -> [Q, H, 1]
+    return os / sum_exp_scores  # [Q, H, D] / [Q, H, 1]
+
+
+# TODO(danj): update to Flash Attention 2
+# TODO(danj): test with jax.remat for gradient checkpointing scan functions?
+# TODO(danj): https://bit.ly/4eFA4mC
+# @partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size"))
+# def scan_attention(
+#     qs: jax.Array,
+#     ks: jax.Array,
+#     vs: jax.Array,
+#     ks_mask: Optional[jax.Array] = None,
+#     qs_chunk_size: int = 1024,
+#     ks_chunk_size: int = 1024,
+# ):
+#     """Scan Attention based on [Flash Attention 2](https://arxiv.org/abs/2307.08691).
+
+#     Implementation based on [flash-attention-jax](https://github.com/lucidrains/flash-attention-jax)
+#     and Google's [memory-efficient-attention](https://bit.ly/4eFA4mC).
+#     """
+#     B, Q, H, D = qs.shape
+
+#     def qs_scanner(i, _):
+#         Q_c = min(Q, qs_chunk_size)
+#         qs_chunk = slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
+#         return i + Q_c, scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size)
+
+#     # JAX/numpy store data in row major format, so (theoretically) putting the
+#     # scanned axes first improves cache locality
+#     qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> L B H D"), (qs, ks, vs))
+#     if ks_mask is not None:
+#         ks_mask = rearrange(ks_mask, "B K -> K B")
+
+#     _, os = scan(
+#         qs_scanner,
+#         init=0,
+#         xs=None,
+#         length=math.ceil(Q / qs_chunk_size),
+#     )
+
+#     return rearrange(os, "C Q B H D -> B (C Q) H D")
+
+
+# def scan_ks(
+#     qs_chunk: jax.Array,
+#     ks: jax.Array,
+#     vs: jax.Array,
+#     ks_mask: Optional[jax.Array] = None,
+#     ks_chunk_size: int = 1024,
+# ):
+#     (Q_c, B, H, D), K = qs_chunk.shape, ks.shape[0]
+#     qs_chunk /= jnp.sqrt(D)
+
+#     def ks_scanner(carry: tuple, _):
+#         i, os, row_maxs, row_sums = carry
+#         K_c = min(K, ks_chunk_size)
+#         ks_chunk = slice(ks, (i, 0, 0, 0), (K_c, B, H, D))
+#         vs_chunk = slice(vs, (i, 0, 0, 0), (K_c, B, H, D))
+#         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
+#         if ks_mask is not None:
+#             ks_mask_chunk = slice(ks_mask, (i, 0), (K_c, B))
+#             ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
+#             scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
+#         row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
+#         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
+#         exp_scores = jnp.exp(scores - new_row_maxs)
+#         row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
+#         os_chunk = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs_chunk)
+#         row_sums_adj = jnp.exp(row_maxs - new_row_maxs) * row_sums
+#         new_row_sums = row_sums_adj + row_sums_chunk
+#         os *= row_sums_adj / new_row_sums
+#         os += os_chunk / new_row_sums
+#         return (i + K_c, os, new_row_maxs, new_row_sums), None
+
+#     os = jnp.zeros((Q_c, B, H, D))
+#     row_sums = jnp.zeros((Q_c, B, H, 1))
+#     row_maxs = jnp.full((Q_c, B, H, 1), -float("inf"))
+
+#     (_, os, row_maxs, row_sums), _ = scan(
+#         ks_scanner,
+#         init=(0, os, row_maxs, row_sums),
+#         xs=None,
+#         length=math.ceil(K / ks_chunk_size),
+#     )
+#     return os
 
 
 class DotScorer(nn.Module):
