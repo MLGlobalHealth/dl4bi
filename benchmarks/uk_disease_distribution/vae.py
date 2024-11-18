@@ -77,22 +77,22 @@ def main(cfg: DictConfig):
             )
         ],
     )
-    results = validate(
+    validate(
         rng_test,
         state,
         isinstance(model, (DeepChol,)),
         test_loader,
         cfg.valid_num_steps,
-        log_results=True,
         is_test=True,
+    )
+    log_information_completion_score(
+        rng, test_loader, state, model, cfg.model.kwargs.z_dim
     )
     data_gen_name = cfg.kernel.kwargs.kernel.func if is_gp else cfg.graph_model.name
     path = Path(
         f"results/{cfg.project}/{cfg.data.name}/{data_gen_name}/{cfg.seed}/{run_name}"
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path.with_suffix(".pkl"), "wb") as save_file:
-        pickle.dump(results, save_file)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
@@ -191,12 +191,11 @@ def validate(
     is_decoder_only: bool,
     loader: Generator,
     valid_num_steps: int = 5000,
-    log_results: bool = False,
     is_test: bool = False,
 ):
     _, rng_extra = random.split(rng)
     losses = np.zeros((valid_num_steps,))
-    results = []
+    mse_score = np.zeros((valid_num_steps,))
     for i in (_ := tqdm(range(valid_num_steps), unit="batch", dynamic_ncols=True)):
         batch = next(loader)
         f, z, conditionals = batch
@@ -205,20 +204,56 @@ def validate(
         if is_decoder_only:
             f_hat = jit(state.apply_fn)(params, z, conditionals)
             losses[i] = optax.squared_error(f_hat, f.squeeze()).mean()
+            mse_score[i] = losses[i]
         else:
+            # TODO (jhonathan): combine with train step
             # NOTE: ELBO, assumes normal gaussian
             f_hat, z_mu, z_std = jit(state.apply_fn)(params, f, conditionals, rngs=rngs)
             kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
             logp = norm.logpdf(f, f_hat, 1.0).mean()
             losses[i] = -logp + kl_div.mean()
-        if log_results:
-            b = [np.array(v) for v in batch]
-            p = np.array(f_hat)
-            results += [(b, p)]
+            mse_score[i] = optax.squared_error(f_hat, f).mean()
     loss = losses.mean()
-    print(f"{'test' if is_test else 'validation'} loss: {loss:.3f}")
-    wandb.log({f"{'test' if is_test else 'validation'}": loss})
-    return results
+    print(f"{'Test' if is_test else 'Validation'} Loss: {loss:.3f}")
+    wandb.log({f"{'Test' if is_test else 'Validation'} Loss": loss})
+    wandb.log({f"{'Test' if is_test else 'Validation'} MSE": mse_score.mean()})
+
+
+def log_information_completion_score(
+    rng,
+    loader,
+    state,
+    model,
+    z_dim,
+    num_samples=10,
+    num_realizations=1000,
+    num_observed=150,
+):
+    unobserved_mse = np.zeros((num_samples,))
+    rng_z, rng_obs, rng_f = random.split(rng, 3)
+    f, _, conditionals = next(loader)
+    f = random.choice(rng_f, f, (num_samples,), replace=False)
+    z = jax.random.normal(rng_z, shape=(num_realizations, z_dim))
+    batched_conditionals = jnp.repeat(
+        jnp.stack(conditionals).reshape(1, -1), repeats=z.shape[0], axis=0
+    )
+    f_hat = model.decoder.apply(
+        {"params": state.params["decoder"], **state.kwargs},
+        jnp.hstack([z, batched_conditionals]),
+    )
+    obs_idxs = random.choice(rng_obs, f.shape[1], shape=(num_samples, num_observed))
+    for i in range(num_samples):
+        f_obs = f[i, obs_idxs[i]].squeeze()
+        f_hat_obs = f_hat[:, obs_idxs[i]]
+        l2_distances = jnp.mean((f_hat_obs - f_obs) ** 2, axis=1)
+        closest_idx = jnp.argmin(l2_distances)
+        unobserved_idxs = jnp.setdiff1d(jnp.arange(f.shape[1]), obs_idxs[i])
+        f_unobserved = f[i, unobserved_idxs].squeeze()
+        f_hat_unobserved = f_hat[closest_idx, unobserved_idxs]
+        unobserved_mse[i] = jnp.mean((f_unobserved - f_hat_unobserved) ** 2)
+    wandb.log(
+        {f"Unobserved MSE for {num_observed} context points": unobserved_mse.mean()}
+    )
 
 
 if __name__ == "__main__":

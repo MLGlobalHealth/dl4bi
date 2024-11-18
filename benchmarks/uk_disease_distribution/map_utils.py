@@ -13,11 +13,13 @@ from shapely.affinity import scale, translate
 
 MAPS_DATA_PATH = "benchmarks/uk_disease_distribution/maps/{map_name}/{data_type}"
 MAP_REMOTE_PATH = {
-    "England": "https://drive.usercontent.google.com/download?id=1NW0fkE5mWjAZDwiz7oWxTQt97JYajlK5&export=download&confirm=t"
+    "England": "https://drive.google.com/uc?export=download&id=1qo5KyZV2v9gMl77ZB6waaCOjr-hBZkjQ&confirm=t"
 }
 
 
 def download_and_extract_map(map_name, raw_path):
+    # NOTE if downloads fail due to file size\virus scan, then
+    # Manually download from the link above
     if not os.path.exists(raw_path):
         if not os.path.exists(os.path.dirname(raw_path)):
             os.makedirs(os.path.dirname(raw_path))
@@ -43,16 +45,12 @@ def get_raw_map_data(map_name):
 
 
 def normalize_geometry(gdf: gpd.GeoDataFrame):
-    centroids = gdf["geometry"].centroid
-    mean_x = np.mean(centroids.x)
-    mean_y = np.mean(centroids.y)
-    std_x = np.std(centroids.x)
-    std_y = np.std(centroids.y)
+    (x_trans, x_div), (y_trans, y_div) = get_norm_vars(gdf)
 
     def normalize_geometry(geom):
-        centered_geom = translate(geom, xoff=-mean_x, yoff=-mean_y)
+        centered_geom = translate(geom, xoff=-x_trans, yoff=-y_trans)
         normalized_geom = scale(
-            centered_geom, xfact=1 / std_x, yfact=1 / std_y, origin=(0, 0)
+            centered_geom, xfact=1 / x_div, yfact=1 / y_div, origin=(0, 0)
         )
         return normalized_geom
 
@@ -144,6 +142,12 @@ def grid_valid_pct():
         print(
             f"{map_name} map approximation is {100 * len(sample_grid)/ num_samples:.2f}% valid"
         )
+
+
+def get_norm_vars(gdf: gpd.GeoDataFrame):
+    unified_geom = gdf.geometry.convex_hull.union_all()
+    minx, miny, maxx, maxy = unified_geom.bounds
+    return (minx, maxx), (miny, maxy)
 
 
 if __name__ == "__main__":

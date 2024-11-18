@@ -11,17 +11,18 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from jax.scipy.stats import norm
+from map_utils import get_norm_vars
 
 import wandb
 from dl4bi.meta_regression.train_utils import TrainState
 
 
-def plot_infer_observed_coverage(post, map_data, model_name, hdi_prob=0.95):
+def plot_infer_observed_coverage(post, map_data, model_name, hdi_prob=0.95, log=True):
     obs_idxs, f, f_hat = post["obs_idxs"], post["f"], post["obs"]
     vmin, vmax = min(f.min(), f_hat.min()), max(f.max(), f_hat.max())
     f_hat_mean, f_hat_std = f_hat.mean(axis=0), f_hat.std(axis=0)
     fig, ax = plt.subplots(1, 5, figsize=(30, 10))
-    plot_on_map(ax[0], map_data, f, vmin, vmax, "y observed", "viridis")
+    plot_on_map(ax[0], map_data, f, vmin, vmax, "y obs - noised", "viridis")
     plot_on_map(ax[1], map_data, f_hat_mean, vmin, vmax, "Mean MCMC Samples", "viridis")
     plot_on_map(ax[2], map_data, f_hat_std, title="MCMC STD", cmap="plasma")
     z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
@@ -40,8 +41,10 @@ def plot_infer_observed_coverage(post, map_data, model_name, hdi_prob=0.95):
     timestamp = datetime.now().isoformat()
     path = f"/tmp/Sampeled vs GT {timestamp}.png"
     fig.savefig(path, dpi=125)
-    wandb.log({f"Sampeled vs GT - {model_name}": wandb.Image(path)})
+    if log:
+        wandb.log({f"Sampeled vs GT - {model_name}": wandb.Image(path)})
     plt.clf()
+    return path
 
 
 def plot_infer_realizations(
@@ -51,10 +54,12 @@ def plot_infer_realizations(
     samples_f = post["obs"]
     rng_true, rng_samples = jax.random.split(rng_plot)
     true_idxs = jax.random.choice(
-        rng_true, jnp.arange(f_batch.shape[0]), (num_samples,)
+        rng_true, jnp.arange(f_batch.shape[0]), (num_samples,), replace=False
     )
+    # NOTE: sets the first realisation to the actual observed one
+    true_idxs = true_idxs.at[0].set(0)
     samples_idxs = jax.random.choice(
-        rng_samples, jnp.arange(samples_f.shape[0]), (num_samples,)
+        rng_samples, jnp.arange(samples_f.shape[0]), (num_samples,), replace=False
     )
     vmin = min(f_batch[true_idxs].min(), samples_f[samples_idxs].min())
     vmax = min(f_batch[true_idxs].max(), samples_f[samples_idxs].max())
@@ -65,7 +70,7 @@ def plot_infer_realizations(
             f_batch[t_idx],
             vmin=vmin,
             vmax=vmax,
-            title=f"True realisation {i}",
+            title=f"True realisation {i}" if i > 0 else "y obs - noiseless",
             legend=False,
         )
         plot_on_map(
@@ -132,7 +137,7 @@ def plot_violin(post, f_batch, model_name, num_locations=10):
         inner="quartile",
         linewidth=1.2,
     )
-    plt.title(f"True vs Posterior Distributions - {model_name}", fontsize=16)
+    plt.title(f"True vs Sampeled Distributions {model_name}", fontsize=16)
     plt.xlabel("Locations", fontsize=14)
     plt.ylabel("Observation Value", fontsize=14)
     plt.legend(title="Distribution Type", loc="upper right", fontsize=12)
@@ -140,7 +145,7 @@ def plot_violin(post, f_batch, model_name, num_locations=10):
     timestamp = datetime.now().isoformat()
     path = f"/tmp/violin_{model_name}_{timestamp}.png"
     plt.savefig(path, dpi=200)
-    wandb.log({f"Violin Plot - {model_name}": wandb.Image(path)})
+    wandb.log({f"Violin Plot {model_name}": wandb.Image(path)})
     plt.clf()
 
 
@@ -307,12 +312,6 @@ def plot_posterior_predictives_map_points(
     return paths
 
 
-def get_norm_vars(gdf: gpd.GeoDataFrame):
-    centroid_x = gdf.geometry.centroid.x
-    centroid_y = gdf.geometry.centroid.y
-    return (centroid_x.mean(), centroid_x.std()), (centroid_y.mean(), centroid_y.std())
-
-
 def log_posterior_map_predictive_plots(gdf: gpd.GeoDataFrame, sampling_policy: str):
     x_norm_vars, y_norm_vars = get_norm_vars(gdf)
 
@@ -370,7 +369,7 @@ def plot_vae_reconstruction_samples(
     f: jax.Array,
     f_hat: jax.Array,
     conditionals: list[jax.Array],
-    conditionals_names: list[str],
+    conds_names: list[str],
     s: jax.Array,
     num_plots: int = 10,
 ):
@@ -398,7 +397,7 @@ def plot_vae_reconstruction_samples(
         plt.tight_layout()
 
         timestamp = datetime.now().isoformat()
-        title = generate_title_from_conditionals(i, conditionals_names, conditionals)
+        title = f"Sample {i} {conds_to_title(conds_names, conditionals)}"
         paths.append(f"/tmp/VAE_Rec {timestamp} - {title}.png")
         fig.suptitle(title)
         fig.subplots_adjust(top=0.85)
@@ -413,30 +412,30 @@ def plot_vae_decoder_samples(
     gdf: gpd.GeoDataFrame,
     loader: Generator,
     state: TrainState,
-    conditionals_names: list[str],
+    conds_names: list[str],
     z_dim: int,
     model: nn.Module,
-    num_batches: int = 3,
+    num_batches: int = 5,
     num_plots: int = 5,
 ):
+    violin_paths = []
     paths = []
     for i in range(num_batches):
         rng_z, _ = jax.random.split(rng_decoder, 2)
         fig, ax = plt.subplots(1, num_plots + 1, figsize=(5 * num_plots, 5))
-        f, _, conditionals = next(loader)
-        f = f[0]
-        z = jax.random.normal(rng_z, shape=(num_plots, z_dim))
+        f_batch, _, conditionals = next(loader)
+        f = f_batch[0]
+        z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim))
         batched_conditionals = jnp.repeat(
             jnp.stack(conditionals).reshape(1, -1), repeats=z.shape[0], axis=0
         )
-
         f_hat = model.decoder.apply(
             {"params": state.params["decoder"], **state.kwargs},
             jnp.hstack([z, batched_conditionals]),
-        ).reshape((num_plots,) + f.shape)
+        ).reshape((z.shape[0],) + f.shape)
         vmin = min(f.min(), f_hat.min())
         vmax = max(f.max(), f_hat.max())
-        plot_on_map(ax[0], gdf, f, vmin, vmax, "Ground Truth", "viridis")
+        plot_on_map(ax[0], gdf, f, vmin, vmax, "GT sample", "viridis")
         for j in range(num_plots):
             plot_on_map(
                 ax[j + 1], gdf, f_hat[j], vmin, vmax, f"Realisation {j + 1}", "viridis"
@@ -445,18 +444,60 @@ def plot_vae_decoder_samples(
             axis.set_axis_off()
         plt.tight_layout()
         timestamp = datetime.now().isoformat()
-        title = generate_title_from_conditionals(i, conditionals_names, conditionals)
+        title = f"Sample {i} {conds_to_title(conds_names, conditionals)}"
         paths.append(f"/tmp/VAE_Decoder {timestamp} - {title}.png")
         fig.suptitle(title)
         fig.subplots_adjust(top=0.86)
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
         plt.close(fig)
+        violin_paths.append(
+            plot_violin({"obs_idxs": jnp.arange(f.shape[0]), "obs": f_hat}, f_batch, "")
+        )
+    return paths
+
+
+def plot_vae_scatter_comp(
+    rng_scatter,
+    f,
+    f_hat,
+    conditionals,
+    conds_names,
+    num_samples=5,
+    num_LTAs=None,
+):
+    paths = []
+    fig, axes = plt.subplots(1, num_samples, figsize=(5 * num_samples, 5))
+    for i, ax in enumerate(axes.flatten()):
+        rng_scatter, _ = jax.random.split(rng_scatter)
+        f_i, f_hat_i = f[i], f_hat[i]
+        if num_LTAs is not None:
+            idxs = jax.random.choice(
+                rng_scatter, f_i.shape[0], (num_LTAs,), replace=False
+            )
+            f_i = f_i[idxs]
+            f_hat_i = f_hat_i[idxs]
+        ax.scatter(f_i, f_hat_i, alpha=0.6, label="Samples")
+        min_val = min(f_i.min(), f_hat_i.min())
+        max_val = max(f_i.max(), f_hat_i.max())
+        ax.plot([min_val, max_val], [min_val, max_val], "r--", label="y = x")
+        ax.set_xlabel("True values (f_i)")
+        ax.set_ylabel("Predicted values (f_hat_i)")
+        ax.set_title(f"Y vs Y hat - sample {i + 1}")
+        ax.legend()
+    plt.tight_layout()
+    timestamp = datetime.now().isoformat()
+    title = f"Y vs Y hat {conds_to_title(conds_names, conditionals)}"
+    paths.append(f"/tmp/VAE_Scatter {timestamp} - {title}.png")
+    fig.subplots_adjust(top=0.86)
+    fig.savefig(paths[-1], dpi=125)
+    plt.clf()
+    plt.close(fig)
     return paths
 
 
 def log_vae_map_plots(
-    gdf: gpd.GeoDataFrame, s: jax.Array, conditionals_names: list[str], z_dim: int
+    gdf: gpd.GeoDataFrame, s: jax.Array, conds_names: list[str], z_dim: int
 ):
     x_norm_vars, y_norm_vars = get_norm_vars(gdf)
 
@@ -468,13 +509,13 @@ def log_vae_map_plots(
         model: nn.Module,
         num_plots: int = 10,
     ):
-        rng_dropout, rng_extra, rng_decoder = jax.random.split(rng_step, 3)
+        rng_drop, rng_extra, rng_dec, rng_scat = jax.random.split(rng_step, 4)
         f, _, conditionals = next(loader)
         f_hat, _, _ = state.apply_fn(
             {"params": state.params, **state.kwargs},
             f,
             conditionals,
-            rngs={"dropout": rng_dropout, "extra": rng_extra},
+            rngs={"dropout": rng_drop, "extra": rng_extra},
         )
         paths = plot_vae_reconstruction_samples(
             gdf,
@@ -483,13 +524,21 @@ def log_vae_map_plots(
             f,
             f_hat,
             conditionals,
-            conditionals_names,
+            conds_names,
             s,
             num_plots=num_plots,
         )
         paths_decoder = plot_vae_decoder_samples(
-            rng_decoder, gdf, loader, state, conditionals_names, z_dim, model
+            rng_dec, gdf, loader, state, conds_names, z_dim, model
         )
+        paths_scatter = plot_vae_scatter_comp(
+            rng_scat,
+            f,
+            f_hat,
+            conditionals,
+            conds_names,
+        )
+        wandb.log({f"Scatter {step}": [wandb.Image(p) for p in paths_scatter]})
         wandb.log({f"Reconstruction {step}": [wandb.Image(p) for p in paths]})
         wandb.log({f"Decoder {step}": [wandb.Image(p) for p in paths_decoder]})
 
@@ -526,15 +575,13 @@ def plot_locations_map(
     ax.scatter(locations[:, 0], locations[:, 1], color="red", marker=".", s=15)
 
 
-def generate_title_from_conditionals(
-    sample_num: int, conditionals_names: list[str], conditionals: list[jax.Array]
-):
+def conds_to_title(conds_names: list[str], conditionals: list[jax.Array]):
     return (
-        f"Sample {sample_num} ("
+        "("
         + ", ".join(
             [
-                f"{conditionals_names[j]}: {conditionals[j][0]:0.2f}"
-                for j in range(len(conditionals_names))
+                f"{conds_names[j]}: {conditionals[j][0]:0.2f}"
+                for j in range(len(conds_names))
             ]
         )
         + ")"
