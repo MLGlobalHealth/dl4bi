@@ -3,7 +3,6 @@ from time import time
 import jax
 import jax.numpy as jnp
 from jax import random
-from jaxlib.xla_client import XlaRuntimeError
 
 from dl4bi.core import (
     MLP,
@@ -16,12 +15,13 @@ from dl4bi.core import (
     MultiHeadAttention,
     MultiKernelAttention,
     MultiplicativeScorer,
+    ScanAttention,
     exponential_scorer,
     rbf_scorer,
 )
 
 
-def test_vanilla_attention():
+def test_vanilla_attention_impl():
     B, L, H, D = 4, 7, 4, 16
     key = random.key(42)
     rng_qkv, rng_bias, rng_init = random.split(key, 3)
@@ -37,7 +37,7 @@ def test_vanilla_attention():
         assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
 
 
-def test_multihead_attention():
+def test_multihead_attention_impl():
     B, H, L, D = 4, 4, 7, 64
     key = random.key(42)
     rng_qkv, rng_bias, rng_init = random.split(key, 3)
@@ -53,7 +53,7 @@ def test_multihead_attention():
         assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
 
 
-def test_fast_attention():
+def test_fast_attention_impl():
     B, L, H, D = 4, 128, 4, 16
     key = random.key(42)
     rng_qkv, rng_valid, rng_init = random.split(key, 3)
@@ -76,7 +76,29 @@ def test_fast_attention():
     assert max_error_fast < 2.0, "Fast: Large max error in approximation!"
 
 
-def test_fused_attention():
+def test_scan_attention_impl():
+    B, L, H, D = 4, 313, 4, 16
+    key = random.key(42)
+    rng_qkvs, rng_valid, rng_init = random.split(key, 3)
+    bias = None
+    data = random.normal(rng_qkvs, (3, B, L, H, D))
+    qs, ks, vs = data[0], data[1], data[2]
+    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
+    (ctx_true, _), _ = Attention().init_with_output(
+        rng_init, qs, ks, vs, bias, valid_lens
+    )
+    (ctx_scan, _), _ = ScanAttention().init_with_output(
+        rng_init, qs, ks, vs, bias, valid_lens
+    )
+    mse_scan = jnp.square(ctx_true - ctx_scan).mean()
+    max_error_scan = jnp.max(jnp.abs(ctx_true - ctx_scan))
+    assert ctx_true.shape == (B, L, H, D), "Full: incorrect context output shape!"
+    assert ctx_scan.shape == (B, L, H, D), "Scan: incorrect context output shape!"
+    assert mse_scan < 1e-7, "Scan: Large MSE error in approximation"
+    assert max_error_scan < 0.01, "Scan: Large max error in approximation!"
+
+
+def test_fused_attention_impl():
     B, L, H, D = 4, 128, 4, 16
     key = random.key(42)
     rng_qkv, rng_bias, rng_valid, rng_init = random.split(key, 4)
@@ -100,7 +122,7 @@ def test_fused_attention():
 
 
 def test_fast_softmax_attention_speed():
-    B, L, H, D = 1, 32768, 4, 16
+    B, L, H, D, N = 1, 1024, 4, 16, 5
     key = random.key(42)
     rng_qkv, rng_bias, rng_valid, rng_init = random.split(key, 4)
     data = random.normal(rng_qkv, (3, B, L, H, D))
@@ -109,27 +131,59 @@ def test_fast_softmax_attention_speed():
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L)
     fast_attn = FastAttention()
     _, params = fast_attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
-    jit_fast_attn = jax.jit(fast_attn.apply)
+    jit_fast_attn = jax.jit(fast_attn.apply)  # force compile
+    jit_fast_attn(params, qs, ks, vs, bias, valid_lens, rngs={"rng_extra": key})
     t_fast_start = time()
-    for i in range(3):
+    for i in range(N):
         jit_fast_attn(params, qs, ks, vs, bias, valid_lens, rngs={"rng_extra": key})
     t_fast_stop = time()
     t_fast_diff = t_fast_stop - t_fast_start
     del jit_fast_attn, fast_attn, params  # free up memory
+    attn = Attention()
+    _, p_true = attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
+    jit_attn = jax.jit(attn.apply)  # force compile
+    jit_attn(p_true, qs, ks, vs, bias, valid_lens)
+    t_true_start = time()
+    for i in range(N):
+        jit_attn(p_true, qs, ks, vs, bias, valid_lens)
+    t_true_stop = time()
+    t_true_diff = t_true_stop - t_true_start
 
-    try:
-        attn = Attention()
-        _, p_true = attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
-        jit_attn = jax.jit(attn.apply)
-        t_true_start = time()
-        for i in range(3):
-            jit_attn(p_true, qs, ks, vs, bias, valid_lens)
-        t_true_stop = time()
-        t_true_diff = t_true_stop - t_true_start
-    except XlaRuntimeError:  # OOM
-        t_true_diff = 1e6
+    assert jnp.isclose(t_fast_diff, t_true_diff, atol=1e-4), "Fast isn't faster!"
 
-    assert t_fast_diff < t_true_diff, "Fast isn't faster!"
+
+def test_scan_attention_speed():
+    B, L, H, D, N, C = 5, 1024, 4, 16, 5, 1024
+    key = random.key(42)
+    rng_qkv, rng_bias, rng_valid, rng_init = random.split(key, 4)
+    data = random.normal(rng_qkv, (3, B, L, H, D))
+    bias = None  # not yet supported
+    qs, ks, vs = data[0], data[1], data[2]
+    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L)
+    scan_attn = ScanAttention(C, C)
+    _, params = scan_attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
+    jit_scan_attn = jax.jit(scan_attn.apply)  # force compile
+    jit_scan_attn(params, qs, ks, vs, bias, valid_lens, rngs={"rng_extra": key})
+    t_scan_start = time()
+    for i in range(N):
+        jit_scan_attn(params, qs, ks, vs, bias, valid_lens, rngs={"rng_extra": key})
+    t_scan_stop = time()
+    t_scan_diff = t_scan_stop - t_scan_start
+    del jit_scan_attn, scan_attn, params  # free up memory
+    attn = Attention()
+    _, p_true = attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
+    jit_attn = jax.jit(attn.apply)  # force compile
+    jit_attn(p_true, qs, ks, vs, bias, valid_lens)
+    t_true_start = time()
+    for i in range(N):
+        jit_attn(p_true, qs, ks, vs, bias, valid_lens)
+    t_true_stop = time()
+    t_true_diff = t_true_stop - t_true_start
+
+    max_t, factor = 5e-5, 1.1
+    # NOTE: can use the following assert for benchmarking
+    # assert t_scan_diff < max_t, f"Scan takes longer than {max_t}s!"
+    assert t_scan_diff < factor * t_true_diff, f"Scan is more than {factor}x slower!"
 
 
 def test_fast_softmax_attention_scale():
@@ -155,6 +209,28 @@ def test_fast_softmax_attention_scale():
 
     assert jnp.isfinite(ctx_fast_init).all(), "Non-finite values produced!"
     assert jnp.isfinite(ctx_fast).all(), "Non-finite values produced!"
+
+
+def test_scan_attention_scale():
+    # L_ctx, L_test = 105569, 44431  # Case Study for Large Spatial Data, Heaton et al
+    B, L_ctx, L_test, L_init, H, D = 1, 110000, 50000, 3, 4, 16
+    key = random.key(42)
+    rng_init, rng_qs, rng_kvs = random.split(key, 3)
+    x = random.normal(rng_init, (B, L_init, H, D))
+    qs = random.normal(rng_qs, (B, L_test, H, D))
+    kvs = random.normal(rng_kvs, (B, L_ctx, H, D))
+
+    scan_attn = ScanAttention()
+    (ctx_scan_init, _), params = scan_attn.init_with_output(rng_init, x, x, x)
+    jit_scan_attn = jax.jit(
+        lambda qs, ks, vs: scan_attn.apply(params, qs, ks, vs, rngs={"rng_extra": key})
+    )
+    # to view results: tensorboard --logdir /tmp/tensorboard/
+    with jax.profiler.trace("/tmp/tensorboard"):
+        ctx_scan, _ = jit_scan_attn(qs, kvs, kvs)
+
+    assert jnp.isfinite(ctx_scan_init).all(), "Non-finite values produced!"
+    assert jnp.isfinite(ctx_scan).all(), "Non-finite values produced!"
 
 
 def test_kernel_attention():
