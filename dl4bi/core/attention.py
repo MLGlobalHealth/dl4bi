@@ -13,6 +13,7 @@ from jax.lax import scan
 from jax.nn import dot_product_attention
 from sps.kernels import outer_subtract
 
+from .bias import zero_bias
 from .mlp import MLP
 from .utils import mask_attn, mask_from_valid_lens
 
@@ -262,7 +263,7 @@ class ScanAttention(nn.Module):
 
     qs_chunk_size: int = 1024
     ks_chunk_size: int = 1024
-    bias_func: Callable = lambda *_: 0  # ([Q, B, M], [K, B, M]) -> [Q, B, H, K]
+    bias_func: Callable = zero_bias  # ([B, Q, M], [B, K, M]) -> [B, H, Q, K]
 
     @nn.compact
     def __call__(
@@ -317,7 +318,7 @@ def scan_attention(
     ks_mask: jax.Array,  # [B, K]
     qs_chunk_size: int = 1024,
     ks_chunk_size: int = 1024,
-    bias_func: Callable = lambda *_: 0,  # ([Q, B, M], [K, B, M]) -> [Q, B, H, K]
+    bias_func: Callable = zero_bias,  # ([B, Q, M], [B, K, M]) -> [B, H, Q, K]
 ):
     """[Flash Attention 2](https://arxiv.org/abs/2307.08691) implementation using `jax.lax.scan`.
 
@@ -365,7 +366,7 @@ def _sa_scan_ks(
     ks_meta: jax.Array,  # [K, B, M]
     ks_mask: jax.Array,  # [K, B]
     ks_chunk_size: int = 1024,
-    bias_func: Callable = lambda *_: 0,  # ([Q, B, M], [K, B, M]) -> [Q, B, H, K]
+    bias_func: Callable = zero_bias,  # ([B, Q, M], [B, K, M]) -> [B, H, Q, K]
 ):
     (Q_c, B, H, D), K, M = qs_chunk.shape, ks.shape[0], ks_meta.shape[-1]
     qs_chunk /= jnp.sqrt(D)
@@ -400,8 +401,11 @@ def _sa_scan_ks(
         row_maxs,
         row_sums,
     ):
-        scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
-        scores += bias_func(qs_meta_chunk, ks_meta_chunk)
+        qs_meta_chunk_ = rearrange(qs_meta_chunk, "Q B M -> B Q M")
+        ks_meta_chunk_ = rearrange(ks_meta_chunk, "K B M -> B K M")
+        bias = bias_func(qs_meta_chunk_, ks_meta_chunk_)
+        bias = rearrange(bias, "B H Q K -> Q B H K")
+        scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk) + bias
         scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
         row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)

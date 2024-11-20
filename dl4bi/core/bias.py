@@ -3,6 +3,7 @@ import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
 from jax import jit, vmap
+from sps.kernels import l2_dist
 
 
 class DistanceBias(nn.Module):
@@ -30,6 +31,11 @@ class TISABias(nn.Module):
         # TODO(danj): convert vmap to scan
         x = vmap(rbf_basis, in_axes=(None, 0, 0, 0), out_axes=1)(d, a, b, c)
         return x.reshape(B, H, F, Q, K).sum(axis=2)  # [B, H * F, Q, K] -> [B, H, Q, K]
+
+
+def zero_bias(qs_meta_chunk, ks_meta_chunk):
+    (B, Q, _M), K = qs_meta_chunk.shape, ks_meta_chunk.shape[1]
+    return jnp.zeros((B, 1, Q, K))
 
 
 # TODO(danj): remove absolute value on b to make this strictly more expressive?
