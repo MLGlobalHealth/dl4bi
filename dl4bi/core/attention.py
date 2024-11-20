@@ -262,7 +262,7 @@ class ScanAttention(nn.Module):
 
     qs_chunk_size: int = 1024
     ks_chunk_size: int = 1024
-    bias_func: Callable = lambda *_: 0
+    bias_func: Callable = lambda *_: 0  # ([Q, B, M], [K, B, M]) -> [Q, B, H, K]
 
     @nn.compact
     def __call__(
@@ -317,7 +317,7 @@ def scan_attention(
     ks_mask: jax.Array,  # [B, K]
     qs_chunk_size: int = 1024,
     ks_chunk_size: int = 1024,
-    bias_func: Callable = lambda *_: 0,
+    bias_func: Callable = lambda *_: 0,  # ([Q, B, M], [K, B, M]) -> [Q, B, H, K]
 ):
     """[Flash Attention 2](https://arxiv.org/abs/2307.08691) implementation using `jax.lax.scan`.
 
@@ -365,7 +365,7 @@ def _sa_scan_ks(
     ks_meta: jax.Array,  # [K, B, M]
     ks_mask: jax.Array,  # [K, B]
     ks_chunk_size: int = 1024,
-    bias_func: Callable = lambda *_: 0,
+    bias_func: Callable = lambda *_: 0,  # ([Q, B, M], [K, B, M]) -> [Q, B, H, K]
 ):
     (Q_c, B, H, D), K, M = qs_chunk.shape, ks.shape[0], ks_meta.shape[-1]
     qs_chunk /= jnp.sqrt(D)
