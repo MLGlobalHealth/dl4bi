@@ -16,6 +16,7 @@ from dl4bi.core import (
     MultiKernelAttention,
     MultiplicativeScorer,
     ScanAttention,
+    TISABias,
     exponential_scorer,
     rbf_scorer,
 )
@@ -76,6 +77,7 @@ def test_fast_attention_impl():
     assert max_error_fast < 2.0, "Fast: Large max error in approximation!"
 
 
+# TODO(danj): add bias to this test
 def test_scan_attention_impl():
     B, L, H, D, M = 4, 313, 4, 16, 2
     key = random.key(42)
@@ -152,6 +154,7 @@ def test_fast_softmax_attention_speed():
     assert jnp.isclose(t_fast_diff, t_true_diff, atol=1e-4), "Fast isn't faster!"
 
 
+# TODO(danj): add bias to this test
 def test_scan_attention_speed():
     B, L, H, D, M, N, C = 5, 1024, 4, 16, 2, 5, 1024
     key = random.key(42)

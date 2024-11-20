@@ -3,7 +3,6 @@ import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
 from jax import jit, vmap
-from sps.kernels import l2_dist
 
 
 class DistanceBias(nn.Module):
@@ -28,7 +27,7 @@ class TISABias(nn.Module):
         a = self.param("a", init.constant(1), (H * F,))
         b = self.param("b", init.constant(1), (H * F,))
         c = self.param("c", init.constant(0), (H * F,))
-        # TODO(danj): convert vmap to scan
+        # TODO(danj): convert vmap to scan?
         x = vmap(rbf_basis, in_axes=(None, 0, 0, 0), out_axes=1)(d, a, b, c)
         return x.reshape(B, H, F, Q, K).sum(axis=2)  # [B, H * F, Q, K] -> [B, H, Q, K]
 
