@@ -7,7 +7,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 
-from .attention import MultiHeadAttention
+from .attention import MultiHeadAttention, MultiHeadScanTISABiasedAttention
 from .mlp import MLP
 
 
@@ -236,6 +236,52 @@ class KRBlock(nn.Module):
         qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
         qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, bias_qk, valid_lens, training)
         kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, bias_kk, valid_lens, training)
+        qvs_3, kvs_3 = qvs + drop(qvs_2), kvs + drop(kvs_2)
+        norm_2 = self.norm.copy()
+        qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)
+        qvs_5, kvs_5 = self.ffn(qvs_4, training), self.ffn(kvs_4, training)
+        return qvs_3 + drop(qvs_5), kvs_3 + drop(kvs_5)
+
+
+class ScanBiasedKRBlock(nn.Module):
+    """A Kernel Regression Block.
+
+    .. note::
+        This formulation uses [pre-normalization](https://arxiv.org/pdf/2002.04745).
+
+    Args:
+        attn: An attention module.
+        norm: A normalization module.
+        ffn: A feedforward module.
+        p_dropout: Dropout rate for residual connections.
+
+    Returns:
+        An instance of the `KRBlock` model.
+    """
+
+    attn: nn.Module = MultiHeadScanTISABiasedAttention()
+    norm: nn.Module = nn.LayerNorm()
+    ffn: nn.Module = MLP([128, 64])
+    p_dropout: float = 0.0
+
+    @nn.compact
+    def __call__(
+        self,
+        qvs: jax.Array,
+        kvs: jax.Array,
+        qs_locs: jax.Array,
+        ks_locs: jax.Array,
+        valid_lens: Optional[jax.Array] = None,
+        training: bool = False,
+    ):
+        drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
+        qvs_2, _ = self.attn(
+            qvs_1, kvs_1, kvs_1, qs_locs, ks_locs, valid_lens, training
+        )
+        kvs_2, _ = self.attn(
+            kvs_1, kvs_1, kvs_1, qs_locs, ks_locs, valid_lens, training
+        )
         qvs_3, kvs_3 = qvs + drop(qvs_2), kvs + drop(kvs_2)
         norm_2 = self.norm.copy()
         qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)

@@ -12,7 +12,7 @@ from einops import rearrange
 from jax import jit, lax, random, vmap
 from jax.lax import scan
 from jax.nn import dot_product_attention
-from sps.kernels import outer_subtract, l2_dist
+from sps.kernels import l2_dist, outer_subtract
 
 from .bias import rbf_basis
 from .mlp import MLP
@@ -247,22 +247,88 @@ def fast_attend(
     return d_inv * buf_3
 
 
+class MultiHeadScanTISABiasedAttention(nn.Module):
+    r"""Performs multihead query-key-value scanned TISA biased attention.
+
+    Args:
+        num_heads: Number of heads for attention module.
+        num_basis: Number of basis functions for TISA bias.
+        qs_chunk_size: Number of queries to process in each chunk of scan.
+        ks_chunk_size: Number of keys to process in each chunk of scan.
+        proj_qs: A module for projecting queries.
+        proj_ks: A module for projecting keys.
+        proj_vs: A module for projecting values.
+        proj_out: A module for projecting output.
+
+    Returns:
+        A `MultiHeadScanTISABiasedAttention` module.
+
+    """
+
+    num_heads: int = 4
+    num_basis: int = 5
+    qs_chunk_size: int = 1024
+    ks_chunk_size: int = 1024
+    proj_qs: nn.Module = MLP([64])
+    proj_ks: nn.Module = MLP([64])
+    proj_vs: nn.Module = MLP([64])
+    proj_out: nn.Module = MLP([64])
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, H, D_QK_H]
+        ks: jax.Array,  # [B, K, H, D_QK_H]
+        vs: jax.Array,  # [B, K, H, D_H]
+        qs_locs: jax.Array,  # [B, Q, D_S]
+        ks_locs: jax.Array,  # [B, K, D_S]
+        valid_lens: Optional[jax.Array] = None,
+        training: bool = False,
+        **kwargs,
+    ):
+        r"""Performs forward pass of network.
+
+        Args:
+            qs: Queries of dimension $\mathbb{R}^{B\times Q\times D_QK}$
+            ks: Keys of dimension $\mathbb{R}^{B\times K\times D_QK}$
+            vs: Values of dimension $\mathbb{R}^{B\times K\times D_V}$
+            qs_locs: Query locations of dimension $\mathbb{R}^{B\times Q\times S}$
+            ks_locs: Key locations of dimension $\mathbb{R}^{B\times K\times S}$
+            valid_lens: Mask consisting of valid length per sequence of dimension
+                $\mathbb{R}^B$ or $\mathbb{R}^{B\times K}$.
+            training: Boolean indicating whether currently training.
+            kwargs: Additional kwargs passed on to attention module.
+
+        Returns:
+            `ctx` and `attn`, the updated values and attention weights.
+        """
+        qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
+        (B, Q, D_QK), (K, D_V), H = qs.shape, vs.shape[-2:], self.num_heads
+        F, Q_C, K_C = self.num_basis, self.qs_chunk_size, self.ks_chunk_size
+        qs = qs.reshape(B, Q, H, D_QK // H)
+        ks = ks.reshape(B, K, H, D_QK // H)
+        vs = vs.reshape(B, K, H, D_V // H)
+        attn = ScanTISABiasedAttention(F, Q_C, K_C)
+        ctx, _ = attn(qs, ks, vs, qs_locs, ks_locs, valid_lens, training, **kwargs)
+        return self.proj_out(ctx.reshape(B, Q, D_V)), None
+
+
 class ScanTISABiasedAttention(nn.Module):
     r"""Performs query-key-value attention with a scan and TISA bias for reduced
         memory usage.
 
     Args:
+        num_basis: Number of basis functions for TISA bias.
         qs_chunk_size: Number of queries to process in each chunk of scan.
         ks_chunk_size: Number of keys to process in each chunk of scan.
-        num_basis: Number of basis functions for TISA bias.
 
     Returns:
         A `ScanTISABiasedAttention` module.
     """
 
+    num_basis: int = 5
     qs_chunk_size: int = 1024
     ks_chunk_size: int = 1024
-    num_basis: int = 5
 
     @nn.compact
     def __call__(
@@ -282,6 +348,8 @@ class ScanTISABiasedAttention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
+            qs_locs: Query locations of dimension $\mathbb{R}^{B\times Q\times S}$
+            ks_locs: Key locations of dimension $\mathbb{R}^{B\times K\times S}$
             bias: Bias added to attention scores.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$.

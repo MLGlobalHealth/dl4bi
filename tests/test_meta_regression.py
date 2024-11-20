@@ -16,6 +16,7 @@ from dl4bi.meta_regression import (
     TNPKR,
     TNPND,
     ConvCNP,
+    ScanTISABiasedTNPKR,
 )
 from dl4bi.meta_regression import (
     train_utils as tu,
@@ -30,7 +31,20 @@ def test_models():
     s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, S, D_s=1]
     valid_lens = jnp.array([2, 4, 9, 3])
     f = random.normal(rng_data, s.shape)
-    for np in [NP, CNP, BNP, ANP, CANP, BANP, DKR, TNPD, TNPND, TNPKR, ConvCNP]:
+    for np in [
+        NP,
+        CNP,
+        BNP,
+        ANP,
+        CANP,
+        BANP,
+        DKR,
+        TNPD,
+        TNPND,
+        TNPKR,
+        ScanTISABiasedTNPKR,
+        ConvCNP,
+    ]:
         m = np()
         (f_mu, f_std, *_), params = m.init_with_output(
             {"params": rng_params, "dropout": rng_dropout, "extra": rng_extra},
@@ -90,6 +104,7 @@ def test_context_data_leaks():
         lambda: TNPKR(attn=MultiHeadAttention(Attention())),
         lambda: TNPKR(attn=MultiHeadAttention(FusedAttention())),
         lambda: TNPKR(attn=MultiHeadAttention(FastAttention())),
+        ScanTISABiasedTNPKR,
         ConvCNP,
     ]:
         print(np)
@@ -127,7 +142,20 @@ def test_train_step_loss():
     f = 10 * random.normal(rng_data, s.shape)
     batch_1 = (s, f, valid_lens_ctx, s, f, valid_lens_test_1)
     batch_2 = (s, f, valid_lens_ctx, s, f, valid_lens_test_2)
-    for np in [NP, CNP, BNP, ANP, CANP, BANP, DKR, TNPD, TNPND, TNPKR, ConvCNP]:
+    for np in [
+        NP,
+        CNP,
+        BNP,
+        ANP,
+        CANP,
+        BANP,
+        DKR,
+        TNPD,
+        TNPND,
+        TNPKR,
+        ScanTISABiasedTNPKR,
+        ConvCNP,
+    ]:
         print(np)
         model = np()
         train_step = tu.vanilla_train_step
