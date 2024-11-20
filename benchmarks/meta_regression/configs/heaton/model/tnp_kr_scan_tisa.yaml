@@ -1,4 +1,4 @@
-cls: TNPKR
+cls: ScanTISABiasedTNPKR
 kwargs:
   num_blks: 6
   num_reps: 1
