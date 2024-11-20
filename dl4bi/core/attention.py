@@ -247,7 +247,7 @@ def fast_attend(
 
 
 # TODO(danj): implement TISA bias version
-class ScanAttention(nn.Module):
+class ScanTISABiasedAttention(nn.Module):
     r"""Performs query-key-value attention with a scan for reduced memory usage.
 
     .. warning::
@@ -258,12 +258,11 @@ class ScanAttention(nn.Module):
         ks_chunk_size: Number of keys to process in each chunk of scan.
 
     Returns:
-        A `ScanAttention` module.
+        A `ScanTISABiasedAttention` module.
     """
 
     qs_chunk_size: int = 1024
     ks_chunk_size: int = 1024
-    bias_func: Callable = zero_bias  # ([B, Q, M], [B, K, M]) -> [B, H, Q, K]
 
     @nn.compact
     def __call__(
@@ -295,7 +294,7 @@ class ScanAttention(nn.Module):
         ks_mask = None
         if valid_lens is not None:
             ks_mask = mask_from_valid_lens(ks.shape[1], valid_lens)[..., 0]
-        return scan_attention(
+        return scan_tisa_biased_attention(
             qs,
             ks,
             vs,
@@ -308,8 +307,8 @@ class ScanAttention(nn.Module):
         ), None
 
 
-@partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size", "bias_func"))
-def scan_attention(
+@partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size"))
+def scan_tisa_biased_attention(
     qs: jax.Array,  # [B, Q, H, D_QK_H]
     ks: jax.Array,  # [B, K, H D_QK_H]
     vs: jax.Array,  # [B, K, H, D_H]
@@ -318,13 +317,7 @@ def scan_attention(
     ks_mask: jax.Array,  # [B, K]
     qs_chunk_size: int = 1024,
     ks_chunk_size: int = 1024,
-    bias_func: Callable = zero_bias,  # ([B, Q, M], [B, K, M]) -> [B, H, Q, K]
 ):
-    """[Flash Attention 2](https://arxiv.org/abs/2307.08691) implementation using `jax.lax.scan`.
-
-    Implementation based on [flash-attention-jax](https://github.com/lucidrains/flash-attention-jax)
-    and Google's [memory-efficient-attention](https://bit.ly/4eFA4mC).
-    """
     (B, Q, H, D), M = qs.shape, qs_meta.shape[-1]
 
     # JAX/numpy store data in row major format, so (theoretically) putting the
@@ -337,7 +330,7 @@ def scan_attention(
         Q_c = min(Q, qs_chunk_size)
         qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
         qs_meta_chunk = lax.dynamic_slice(qs_meta, (i, 0, 0), (Q_c, B, M))
-        return i + Q_c, _sa_scan_ks(
+        return i + Q_c, _stba_scan_ks(
             qs_chunk,
             ks,
             vs,
@@ -358,7 +351,7 @@ def scan_attention(
     return rearrange(os, "C Q B H D -> B (C Q) H D")
 
 
-def _sa_scan_ks(
+def _stba_scan_ks(
     qs_chunk: jax.Array,  # [Q_c, B, H, D]
     ks: jax.Array,  # [K, B, H, D]
     vs: jax.Array,  # [K, B, H, D]
@@ -431,8 +424,63 @@ def _sa_scan_ks(
     return os / row_sums
 
 
+class ScanAttention(nn.Module):
+    r"""Performs query-key-value attention with a scan for reduced memory usage.
+
+    .. warning::
+        This does not currently support bias.
+
+    Args:
+        qs_chunk_size: Number of queries to process in each chunk of scan.
+        ks_chunk_size: Number of keys to process in each chunk of scan.
+
+    Returns:
+        A `ScanAttention` module.
+    """
+
+    qs_chunk_size: int = 1024
+    ks_chunk_size: int = 1024
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, H, D_QK_H]
+        ks: jax.Array,  # [B, K, H D_QK_H]
+        vs: jax.Array,  # [B, K, H, D_H]
+        valid_lens: Optional[jax.Array] = None,  # [B]
+        training: bool = False,
+        **kwargs,
+    ):
+        r"""Performs forward pass of network.
+
+        Args:
+            qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
+            ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
+            vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
+            bias: Bias added to attention scores.
+            valid_lens: Mask consisting of valid length per sequence of dimension
+                $\mathbb{R}^B$.
+            training: Boolean indicating whether currently training.
+
+        Returns:
+            `ctx` and `attn`, the updated values and None, respectively,
+            since scanned attention never materializes the attention matrix.
+        """
+        ks_mask = None
+        if valid_lens is not None:
+            ks_mask = mask_from_valid_lens(ks.shape[1], valid_lens)[..., 0]
+        return scan_flash_attention_2(
+            qs,
+            ks,
+            vs,
+            ks_mask,
+            self.qs_chunk_size,
+            self.ks_chunk_size,
+        ), None
+
+
 @partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size"))
-def flash_attention_2(
+def scan_flash_attention_2(
     qs: jax.Array,
     ks: jax.Array,
     vs: jax.Array,
@@ -450,7 +498,7 @@ def flash_attention_2(
     def qs_scanner(i, _):
         Q_c = min(Q, qs_chunk_size)
         qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
-        return i + Q_c, _fa2_scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size)
+        return i + Q_c, _sfa2_scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size)
 
     # JAX/numpy store data in row major format, so (theoretically) putting the
     # scanned axes first improves cache locality
@@ -468,7 +516,7 @@ def flash_attention_2(
     return rearrange(os, "C Q B H D -> B (C Q) H D")
 
 
-def _fa2_scan_ks(
+def _sfa2_scan_ks(
     qs_chunk: jax.Array,
     ks: jax.Array,
     vs: jax.Array,

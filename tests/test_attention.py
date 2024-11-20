@@ -16,7 +16,6 @@ from dl4bi.core import (
     MultiKernelAttention,
     MultiplicativeScorer,
     ScanAttention,
-    TISABias,
     exponential_scorer,
     rbf_scorer,
 )
@@ -77,20 +76,18 @@ def test_fast_attention_impl():
     assert max_error_fast < 2.0, "Fast: Large max error in approximation!"
 
 
-# TODO(danj): add bias to this test
 def test_scan_attention_impl():
-    B, L, H, D, M = 4, 313, 4, 16, 2
+    B, L, H, D = 4, 313, 4, 16
     key = random.key(42)
-    rng_qkvs, rng_meta, rng_valid, rng_init = random.split(key, 4)
+    rng_qkvs, rng_valid, rng_init = random.split(key, 3)
     bias = None
     qs, ks, vs = random.normal(rng_qkvs, (3, B, L, H, D))
-    qs_meta, ks_meta = random.normal(rng_meta, (2, B, L, M))
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
     (ctx_true, _), _ = Attention().init_with_output(
         rng_init, qs, ks, vs, bias, valid_lens
     )
     (ctx_scan, _), _ = ScanAttention().init_with_output(
-        rng_init, qs, ks, vs, qs_meta, ks_meta, valid_lens
+        rng_init, qs, ks, vs, valid_lens
     )
     mse_scan = jnp.square(ctx_true - ctx_scan).mean()
     max_error_scan = jnp.max(jnp.abs(ctx_true - ctx_scan))
@@ -156,26 +153,19 @@ def test_fast_softmax_attention_speed():
 
 # TODO(danj): add bias to this test
 def test_scan_attention_speed():
-    B, L, H, D, M, N, C = 5, 1024, 4, 16, 2, 5, 1024
+    B, L, H, D, N, C = 5, 1024, 4, 16, 5, 1024
     key = random.key(42)
     bias = None  # not yet supported
-    rng_qkv, rng_bias, rng_meta, rng_valid, rng_init = random.split(key, 5)
+    rng_qkv, rng_bias, rng_valid, rng_init = random.split(key, 4)
     qs, ks, vs = random.normal(rng_qkv, (3, B, L, H, D))
-    qs_meta, ks_meta = random.normal(rng_meta, (2, B, L, M))
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L)
     scan_attn = ScanAttention(C, C)
-    _, params = scan_attn.init_with_output(
-        rng_init, qs, ks, vs, qs_meta, ks_meta, valid_lens
-    )
+    _, params = scan_attn.init_with_output(rng_init, qs, ks, vs, valid_lens)
     jit_scan_attn = jax.jit(scan_attn.apply)  # force compile
-    jit_scan_attn(
-        params, qs, ks, vs, qs_meta, ks_meta, valid_lens, rngs={"rng_extra": key}
-    )
+    jit_scan_attn(params, qs, ks, vs, valid_lens, rngs={"rng_extra": key})
     t_scan_start = time()
     for i in range(N):
-        jit_scan_attn(
-            params, qs, ks, vs, qs_meta, ks_meta, valid_lens, rngs={"rng_extra": key}
-        )
+        jit_scan_attn(params, qs, ks, vs, valid_lens, rngs={"rng_extra": key})
     t_scan_stop = time()
     t_scan_diff = t_scan_stop - t_scan_start
     del jit_scan_attn, scan_attn, params  # free up memory
