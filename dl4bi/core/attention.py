@@ -396,7 +396,7 @@ def scan_tisa_biased_attention(
     qs_chunk_size: int = 1024,
     ks_chunk_size: int = 1024,
 ):
-    (B, Q, H, D), M = qs.shape, qs_locs.shape[-1]
+    (B, Q, H, D), S = qs.shape, qs_locs.shape[-1]
 
     # JAX/numpy store data in row major format, so (theoretically) putting the
     # scanned axes first improves cache locality
@@ -407,7 +407,7 @@ def scan_tisa_biased_attention(
     def qs_scanner(i, _):
         Q_c = min(Q, qs_chunk_size)
         qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
-        qs_locs_chunk = lax.dynamic_slice(qs_locs, (i, 0, 0), (Q_c, B, M))
+        qs_locs_chunk = lax.dynamic_slice(qs_locs, (i, 0, 0), (Q_c, B, S))
         return i + Q_c, _stba_scan_ks(
             qs_chunk,
             ks,
@@ -443,7 +443,7 @@ def _stba_scan_ks(
     ks_mask: jax.Array,  # [K, B]
     ks_chunk_size: int = 1024,
 ):
-    (Q_c, B, H, D), K, S = qs_chunk.shape, ks.shape[0], ks_locs.shape[-1]
+    (Q_c, B, H, D), (K, _, S) = qs_chunk.shape, ks_locs.shape
     K_c, F = min(K, ks_chunk_size), a.size // H
     qs_chunk /= jnp.sqrt(D)
 
