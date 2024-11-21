@@ -401,7 +401,7 @@ def scan_tisa_biased_attention(
     # JAX/numpy store data in row major format, so (theoretically) putting the
     # scanned axes first improves cache locality
     qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> L B H D"), (qs, ks, vs))
-    qs_locs, ks_locs = map(lambda x: rearrange(x, "B L M -> L B M"), (qs_locs, ks_locs))
+    qs_locs, ks_locs = map(lambda x: rearrange(x, "B L S -> L B S"), (qs_locs, ks_locs))
     ks_mask = rearrange(ks_mask, "B K -> K B")
 
     def qs_scanner(i, _):

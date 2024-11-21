@@ -2,7 +2,7 @@ defaults:
   - _self_ # use default global values below
   - model: tnp_kr
   - kernel: matern_1_2
-  - data: 30x50
+  - data: 32x32
   - test: sim
 seed: 42
 wandb: True
@@ -12,7 +12,7 @@ valid_num_steps: 1000
 finetune_num_steps: 1000
 finetune_on_real: False
 valid_interval: 1000
-plot_interval: 20000
+plot_interval: 1000
 lr_peak: 5.0e-4
 lr_pct_decay: 0.6
 lr_alpha: 0.2
