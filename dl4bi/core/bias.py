@@ -32,8 +32,8 @@ class TISABias(nn.Module):
         return x.reshape(B, H, F, Q, K).sum(axis=2)  # [B, H * F, Q, K] -> [B, H, Q, K]
 
 
-def zero_bias(qs_meta_chunk, ks_meta_chunk):
-    (B, Q, _M), K = qs_meta_chunk.shape, ks_meta_chunk.shape[1]
+def zero_bias(qs_x, ks_x):
+    (B, Q, _X), K = qs_x.shape, ks_x.shape[1]
     return jnp.zeros((B, 1, Q, K))
 
 

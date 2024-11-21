@@ -78,7 +78,7 @@ def test_fast_attention_impl():
 
 
 def test_scan_attention_impl():
-    B, L, H, D = 4, 313, 4, 16
+    B, L, H, D, C = 4, 313, 4, 16, 256
     key = random.key(42)
     rng_qkvs, rng_valid, rng_init = random.split(key, 3)
     bias = None
@@ -87,7 +87,7 @@ def test_scan_attention_impl():
     (ctx_true, _), _ = Attention().init_with_output(
         rng_init, qs, ks, vs, bias, valid_lens
     )
-    (ctx_scan, _), _ = ScanAttention().init_with_output(
+    (ctx_scan, _), _ = ScanAttention(C, C).init_with_output(
         rng_init, qs, ks, vs, valid_lens
     )
     mse_scan = jnp.square(ctx_true - ctx_scan).mean()

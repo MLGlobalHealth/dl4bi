@@ -405,7 +405,7 @@ def scan_tisa_biased_attention(
     ks_mask = rearrange(ks_mask, "B K -> K B")
 
     def qs_scanner(i, _):
-        Q_c = min(Q, qs_chunk_size)
+        Q_c = min(Q - i, qs_chunk_size)
         qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
         qs_locs_chunk = lax.dynamic_slice(qs_locs, (i, 0, 0), (Q_c, B, S))
         return i + Q_c, _stba_scan_ks(
@@ -449,17 +449,22 @@ def _stba_scan_ks(
 
     def ks_scanner(carry: tuple, _):
         i, os, row_maxs, row_sums = carry
-        K_c = min(K, ks_chunk_size)
+        K_c = min(K - i, ks_chunk_size)
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (K_c, B, H, D))
         vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (K_c, B, H, D))
         ks_locs_chunk = lax.dynamic_slice(ks_locs, (i, 0, 0), (K_c, B, S))
         ks_mask_chunk = lax.dynamic_slice(ks_mask, (i, 0), (K_c, B))
         ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
         _carry = update(
+            qs_chunk,
             ks_chunk,
             vs_chunk,
+            qs_locs_chunk,
             ks_locs_chunk,
             ks_mask_chunk,
+            a,
+            b,
+            c,
             os,
             row_maxs,
             row_sums,
@@ -469,10 +474,15 @@ def _stba_scan_ks(
     @jit
     @partial(jax.remat, prevent_cse=False)
     def update(
+        qs_chunk,
         ks_chunk,
         vs_chunk,
+        qs_locs_chunk,
         ks_locs_chunk,
         ks_mask_chunk,
+        a,
+        b,
+        c,
         os,
         row_maxs,
         row_sums,
