@@ -9,7 +9,7 @@ import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
 import numpy as np
-from einops import rearrange
+from einops import rearrange, repeat
 from jax import jit, lax, random, vmap
 from jax.lax import scan
 from jax.nn import dot_product_attention
@@ -1074,3 +1074,64 @@ class MultiKernelAttention(nn.Module):
             ctxs += [ctx]  # list of [B, Q, D_V]
             attns += [attn]  # list of [B, Q, K]
         return self.proj_out(jnp.concatenate(ctxs, axis=-1)), attns
+
+
+# TODO(danj): implement memory efficient version
+class SpatioTemporalMLPAttention(nn.Module):
+    proj_vs: nn.Module = MLP([64], nn.gelu)
+    proj_attn: nn.Module = MLP([256, 256, 1], nn.gelu)
+    proj_gate: nn.Module = MLP([256, 64], nn.gelu)
+    norm: nn.Module = nn.LayerNorm()
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, F]
+        ks: jax.Array,  # [B, K, F]
+        vs: jax.Array,  # [B, K, D]
+        qs_s: Optional[jax.Array] = None,  # [B, Q, S]
+        ks_s: Optional[jax.Array] = None,  # [B, K, S]
+        qs_t: Optional[jax.Array] = None,  # [B, Q, 1]
+        ks_t: Optional[jax.Array] = None,  # [B, K, 1]
+        vnode: Optional[jax.Array] = None,  # [B, D]
+        valid_lens: Optional[jax.Array] = None,
+        training: bool = False,
+        **kwargs,
+    ):
+        stack = lambda *args: jnp.concatenate(args, axis=-1)
+        # standard features
+        (B, Q), K = qs.shape[:-1], ks.shape[1]
+        qs = repeat(qs, "B Q F -> B Q K F", K=K)
+        ks = repeat(ks, "B K F -> B Q K F", Q=Q)
+        m = jnp.concatenate([qs, ks], axis=-1)
+        # vnode (global behavior)
+        if vnode is not None:
+            vnode = repeat(vnode, "B D -> B Q K D", Q=Q, K=K)
+            m = stack(m, vnode)
+        # spatial features
+        if qs_s is not None and ks_s is not None:
+            s_diff = qs_s[..., None, :] - ks_s[:, None, ...]
+            s_dist = jnp.linalg.norm(s_diff, axis=-1, keepdims=True)
+            s_dist_sq = jnp.square(s_dist)
+            m = stack(m, s_diff, s_dist, s_dist_sq)
+        # mask
+        if valid_lens is None:
+            valid_lens = jnp.repeat(K, B)
+        mask = v_mask = mask_from_valid_lens(K, valid_lens)  # [B, Q, 1]
+        # temporal features
+        if qs_t is not None and ks_t is not None:
+            t_diff = qs_t[..., None, :] - ks_t[:, None, ...]
+            t_mask = (t_diff > 0)[..., 0]  # [B, Q, K]
+            mask = jnp.logical_and(mask, t_mask)
+            m = stack(m, t_diff)
+        if vnode is None:
+            vnode = jnp.array([])
+        attn = self.proj_attn(m)[..., 0]
+        attn = jnp.where(mask, attn, 0)
+        # TODO(danj): use some sort of softmax normalization,
+        # even though this would prevent negative attn values?
+        ctx = self.norm(attn @ self.proj_vs(vs))  # [B, Q, D]
+        gate = self.proj_gate(vs)  # [B, Q, D]
+        # TODO(danj): is it weird to sum over the temporal dimension?
+        vnode = jnp.sum(gate * ctx, axis=1, where=v_mask)
+        return ctx, self.norm.copy()(vnode)
