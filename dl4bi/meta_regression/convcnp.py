@@ -1,8 +1,10 @@
-from typing import Optional
+from dataclasses import field
+from typing import List, Optional
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from sps.utils import build_grid
 
 from ..core import MLP, ConvCNPNet, ConvDeepSet
 
@@ -30,6 +32,9 @@ class ConvCNP(nn.Module):
 
     s_min: float = -2.5
     s_max: float = 2.5
+    grid: List[dict] = field(
+        default_factory=lambda: [{"start": -2.5, "stop": 2.5, "num": 128}]
+    )
     min_std: float = 0.0
     points_per_unit: int = 128
     enc: nn.Module = ConvDeepSet()
@@ -52,6 +57,7 @@ class ConvCNP(nn.Module):
         L_grid = self.points_per_unit * (self.s_max - self.s_min)
         s_grid = jnp.linspace(self.s_min, self.s_max, int(L_grid))
         s_grid = jnp.repeat(s_grid[None, :, None], B, axis=0)  # [B, L_grid, 1]
+        s_grid = build_grid(self.grid)
         h = self.enc(s_ctx, f_ctx, s_grid, valid_lens_ctx)  # [B, L_grid, d_out]
         h = self.conv_net(h)  # [B, L_grid, d_out]
         h = self.dec(s_grid, h, s_test)
