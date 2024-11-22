@@ -17,6 +17,7 @@ from dl4bi.core import (
     MultiplicativeScorer,
     ScanAttention,
     ScanTISABiasedAttention,
+    SpatioTemporalMLPAttention,
     exponential_scorer,
     rbf_scorer,
 )
@@ -52,6 +53,22 @@ def test_multihead_attention_impl():
         ).init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
         assert ctx.shape == (B, L, D), "Incorrect context output shape!"
         assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
+
+
+def test_spatiotemporal_mlp_impl():
+    B, L, D, S, T = 4, 7, 64, 2, 1
+    key = random.key(42)
+    rng_qkv, rng_s, rng_t, rng_init = random.split(key, 4)
+    qs, ks, vs = random.normal(rng_qkv, (3, B, L, D))
+    qs_s, ks_s = random.normal(rng_s, (2, B, L, S))
+    qs_t, ks_t = random.normal(rng_t, (2, B, L, T))
+    valid_lens = jnp.array([2, 4, 6, 3])
+    for vnode in [None, jnp.ones((B, D))]:
+        (ctx, vnode), _ = SpatioTemporalMLPAttention().init_with_output(
+            rng_init, qs, ks, vs, qs_s, ks_s, qs_t, ks_t, vnode, valid_lens
+        )
+        assert ctx.shape == (B, L, D), "Incorrect context output shape!"
+        assert vnode.shape == (B, D), "Incorrect vnode output shape!"
 
 
 def test_fast_attention_impl():

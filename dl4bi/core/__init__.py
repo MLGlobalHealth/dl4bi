@@ -12,6 +12,7 @@ from .attention import (
     ProductKernelAttention,
     ScanAttention,
     ScanTISABiasedAttention,
+    SpatioTemporalMLPAttention,
     build_elu_phi,
     build_exp_phi,
     build_gelu_phi,
