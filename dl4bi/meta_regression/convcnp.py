@@ -54,13 +54,14 @@ class ConvCNP(nn.Module):
         **kwargs,
     ):
         B = s_ctx.shape[0]
-        L_grid = self.points_per_unit * (self.s_max - self.s_min)
-        s_grid = jnp.linspace(self.s_min, self.s_max, int(L_grid))
-        s_grid = jnp.repeat(s_grid[None, :, None], B, axis=0)  # [B, L_grid, 1]
-        s_grid = build_grid(self.grid)
-        h = self.enc(s_ctx, f_ctx, s_grid, valid_lens_ctx)  # [B, L_grid, d_out]
-        h = self.conv_net(h)  # [B, L_grid, d_out]
-        h = self.dec(s_grid, h, s_test)
+        grid_dim = len(self.grid)
+        # NOTE: use "num"==num_points_in_unit*range of grid
+        s_grid = jnp.repeat(build_grid(self.grid)[None, :], B, axis=0)
+        conv_dims = s_grid.shape[:-1]
+        s_grid = s_grid.reshape(B, -1, grid_dim)
+        h = self.enc(s_ctx, f_ctx, s_grid, valid_lens_ctx)  # [B, grid_size, d_out]
+        h = self.conv_net(h.reshape(conv_dims + (-1,)))  # [B, grid_size, d_out]
+        h = self.dec(s_grid, h.reshape(B, s_grid.shape[1], -1), s_test)
         f_dist = self.head(h)
         f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
         f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)

@@ -4,7 +4,7 @@ kwargs:
   grid:
   - start: -2.5 # add 0.5 padding on each size as in ConvCNP impl
     stop: 2.5
-    num: 32
+    num: 320
   s_min: -2.5 # add 0.5 padding on each size as in ConvCNP impl
   s_max: 2.5
   points_per_unit: 64
