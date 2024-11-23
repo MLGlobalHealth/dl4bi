@@ -195,7 +195,6 @@ class FastAttention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_{Q,K}_H}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_{Q,K}_H}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times H\times D_V_H}$
-            bias: Bias added to attention scores.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$.
             training: Boolean indicating whether currently training.
@@ -282,7 +281,6 @@ class ScanAttention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
-            bias: Bias added to attention scores.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$.
             training: Boolean indicating whether currently training.
@@ -466,7 +464,6 @@ class TISABiasedScanAttention(nn.Module):
             vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
             qs_locs: Query locations of dimension $\mathbb{R}^{B\times Q\times S}$
             ks_locs: Key locations of dimension $\mathbb{R}^{B\times K\times S}$
-            bias: Bias added to attention scores.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$.
             training: Boolean indicating whether currently training.
@@ -778,7 +775,6 @@ class Attention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
-            bias: Bias added to attention scores.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$.
             training: Boolean indicating whether currently training.
@@ -849,7 +845,6 @@ class FusedAttention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
-            bias: Bias added to attention scores.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$.
             training: Boolean indicating whether currently training. Unused here.
@@ -916,7 +911,6 @@ class MultiHeadAttention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times D_QK}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times D_QK}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times D_V}$
-            bias: Bias added to attention scores of dimension $\mathbb{R}^{B\times H\times Q\times K}$.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$ or $\mathbb{R}^{B\times K}$.
             training: Boolean indicating whether currently training.
@@ -992,7 +986,6 @@ class KernelAttention(nn.Module):
             qs: Queries of dimension $\mathbb{R}^{B\times Q\times D_QK}$
             ks: Keys of dimension $\mathbb{R}^{B\times K\times D_QK}$
             vs: Values of dimension $\mathbb{R}^{B\times K\times D_V}$
-            bias: Bias added to attention scores.
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$ or $\mathbb{R}^{B\times K}$.
             training: Boolean indicating whether currently training.
