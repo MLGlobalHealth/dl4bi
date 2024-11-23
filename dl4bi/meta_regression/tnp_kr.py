@@ -7,14 +7,13 @@ import jax.numpy as jnp
 from jax import vmap
 from sps.kernels import l2_dist_sq
 
-from dl4bi.core.attention import ScanTISABiasedAttention
-
 from ..core import (
     MLP,
     DistanceBias,
     FusedAttention,
     KRBlock,
     MultiHeadAttention,
+    TISABiasedScanAttention,
 )
 
 
@@ -151,7 +150,7 @@ class ScanTNPKR(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    attn: nn.Module = MultiHeadAttention(ScanTISABiasedAttention())
+    attn: nn.Module = MultiHeadAttention(TISABiasedScanAttention())
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64], nn.gelu)
     head: nn.Module = MLP([256, 64, 2], nn.gelu)

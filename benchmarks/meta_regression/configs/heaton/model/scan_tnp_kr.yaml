@@ -11,11 +11,11 @@ kwargs:
     cls: MultiHeadAttention
     kwargs:
       attn:
-        cls: ScanTISABiasedAttention
+        cls: TISABiasedScanAttention
         kwargs:
-          num_basis: 5
           qs_chunk_size: 1024
           ks_chunk_size: 1024
+          num_basis: 5
   ffn:
     cls: MLP
     kwargs:

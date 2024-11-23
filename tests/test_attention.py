@@ -16,8 +16,8 @@ from dl4bi.core import (
     MultiKernelAttention,
     MultiplicativeScorer,
     ScanAttention,
-    ScanTISABiasedAttention,
     SpatioTemporalMLPAttention,
+    TISABiasedScanAttention,
     exponential_scorer,
     rbf_scorer,
 )
@@ -116,14 +116,14 @@ def test_scan_attention_impl():
     assert max_error_scan < 0.01, "Scan: Large max error in approximation!"
 
 
-def test_scan_tisa_biased_attention_impl():
-    B, L, H, D, S = 4, 313, 4, 16, 2
+def test_tisa_biased_scan_attention_impl():
+    B, L, H, D, S, C = 4, 313, 4, 16, 2, 256
     key = random.key(42)
     rng_qkvs, rng_locs, rng_valid, rng_init = random.split(key, 4)
     qs_s, ks_s = random.normal(rng_locs, (2, B, L, S))
     qs, ks, vs = random.normal(rng_qkvs, (3, B, L, H, D))
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
-    (ctx_scan, _), _ = ScanTISABiasedAttention().init_with_output(
+    (ctx_scan, _), _ = TISABiasedScanAttention(C, C).init_with_output(
         rng_init,
         qs,
         ks,
@@ -222,14 +222,14 @@ def test_scan_attention_speed():
 
 # NOTE: this is expected to be slower since TISA is calculating bias,
 # and regular attention is not using any bias
-def test_scan_tisa_biased_attention_speed():
+def test_tisa_biased_scan_attention_speed():
     B, L, H, D, S, N, C = 5, 1024, 4, 16, 2, 5, 1024
     key = random.key(42)
     rng_qkv, rng_s, rng_valid, rng_init = random.split(key, 4)
     qs, ks, vs = random.normal(rng_qkv, (3, B, L, H, D))
     qs_s, ks_s = random.normal(rng_s, (2, B, L, S))
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L)
-    scan_attn = ScanTISABiasedAttention(5, C, C)
+    scan_attn = TISABiasedScanAttention(C, C)
     _, params = scan_attn.init_with_output(
         rng_init, qs, ks, vs, valid_lens, qs_s=qs_s, ks_s=ks_s
     )
@@ -299,15 +299,14 @@ def test_fast_softmax_attention_scale():
 
 def test_scan_attention_scale():
     # L_ctx, L_test = 105569, 44431  # Case Study for Large Spatial Data, Heaton et al
-    B, L_ctx, L_test, L_init, H, D = 1, 110000, 50000, 3, 4, 16
+    B, L_ctx, L_test, H, D = 1, 110000, 50000, 4, 16
     key = random.key(42)
     rng_init, rng_qs, rng_kvs = random.split(key, 3)
-    x = random.normal(rng_init, (B, L_init, H, D))
     qs = random.normal(rng_qs, (B, L_test, H, D))
     kvs = random.normal(rng_kvs, (B, L_ctx, H, D))
 
     scan_attn = ScanAttention()
-    (ctx_scan_init, _), params = scan_attn.init_with_output(rng_init, x, x, x)
+    (ctx_scan_init, _), params = scan_attn.init_with_output(rng_init, qs, kvs, kvs)
     jit_scan_attn = jax.jit(
         lambda qs, ks, vs: scan_attn.apply(params, qs, ks, vs, rngs={"rng_extra": key})
     )
@@ -319,20 +318,19 @@ def test_scan_attention_scale():
     assert jnp.isfinite(ctx_scan).all(), "Non-finite values produced!"
 
 
-def test_scan_tisa_biased_attention_scale():
+def test_tisa_biased_scan_attention_scale():
     # L_ctx, L_test = 105569, 44431  # Case Study for Large Spatial Data, Heaton et al
-    B, L_ctx, L_test, L_init, H, D, S = 1, 110000, 50000, 3, 4, 16, 2
+    B, L_ctx, L_test, H, D, S = 1, 110000, 50000, 4, 16, 2
     key = random.key(42)
     rng_init, rng_qs_s, rng_ks_s, rng_qs, rng_kvs = random.split(key, 5)
     qs_s = random.normal(rng_qs_s, (B, L_test, S))
-    ks_s = random.normal(rng_qs_s, (B, L_ctx, S))
-    x = random.normal(rng_init, (B, L_init, H, D))
-    qvs = random.normal(rng_qs, (B, L_test, H, D))
+    ks_s = random.normal(rng_ks_s, (B, L_ctx, S))
+    qs = random.normal(rng_qs, (B, L_test, H, D))
     kvs = random.normal(rng_kvs, (B, L_ctx, H, D))
 
-    scan_attn = ScanTISABiasedAttention()
+    scan_attn = TISABiasedScanAttention()
     (ctx_scan_init, _), params = scan_attn.init_with_output(
-        rng_init, x, x, x, qs_s=qs_s, ks_s=ks_s
+        rng_init, qs, kvs, kvs, qs_s=qs_s, ks_s=ks_s
     )
     jit_scan_attn = jax.jit(
         lambda qs, ks, vs: scan_attn.apply(
@@ -341,7 +339,7 @@ def test_scan_tisa_biased_attention_scale():
     )
     # to view results: tensorboard --logdir /tmp/tensorboard/
     with jax.profiler.trace("/tmp/tensorboard"):
-        ctx_scan, _ = jit_scan_attn(qvs, kvs, kvs)
+        ctx_scan, _ = jit_scan_attn(qs, kvs, kvs)
 
     assert jnp.isfinite(ctx_scan_init).all(), "Non-finite values produced!"
     assert jnp.isfinite(ctx_scan).all(), "Non-finite values produced!"
