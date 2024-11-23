@@ -241,13 +241,10 @@ def evaluate(
 
 def cfg_to_run_name(cfg: DictConfig):
     name = cfg.model.cls
-    if name == "TNPKR":
-        name = "TNP-KR"
+    if "TNPKR" in name:
+        name = {"TNPKR": "TNP-KR", "ScanTNPKR": "Scan TNP-KR"}[name]
         attn_cls = OmegaConf.select(cfg, "model.kwargs.attn.kwargs.attn.cls")
-        if attn_cls == "Attention" or attn_cls is None:
-            name += "-Full"  # default for TNP-KR
-        else:
-            name += "-" + attn_cls.replace("Attention", "")  # i.e. Fused, Fast
+        name += ": " + attn_cls
     if name == "TNPD":
         name = "TNP-D"
     if name == "TNPND":
