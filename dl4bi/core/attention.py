@@ -754,7 +754,6 @@ class Attention(nn.Module):
         qs: jax.Array,  # [B, Q, H, D_QK_H]
         ks: jax.Array,  # [B, K, H D_QK_H]
         vs: jax.Array,  # [B, K, H, D_H]
-        bias: Optional[jax.Array] = None,  # [B, H, Q, K]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         **kwargs,
@@ -780,6 +779,7 @@ class Attention(nn.Module):
         ks = ks.transpose(0, 2, 1, 3).reshape(-1, K, D_QK_H)
         vs = vs.transpose(0, 2, 1, 3).reshape(-1, K, D_V_H)
         scores = self.scorer(qs.astype(self.dtype), ks.astype(self.dtype))
+        bias = kwargs.get("bias", None)
         if bias is not None:
             scores += jnp.broadcast_to(bias, (B, H, Q, K)).reshape(-1, Q, K)
         if valid_lens is not None:
@@ -825,7 +825,6 @@ class FusedAttention(nn.Module):
         qs: jax.Array,  # [B, Q, H, D_QK_H]
         ks: jax.Array,  # [B, K, H D_QK_H]
         vs: jax.Array,  # [B, K, H, D_H]
-        bias: Optional[jax.Array] = None,  # broadcastable to [B, H, Q, K]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         **kwargs,
@@ -855,7 +854,7 @@ class FusedAttention(nn.Module):
             self.norm_qs(qs),
             self.norm_ks(ks),
             jnp.bfloat16(vs),
-            bias,
+            kwargs.get("bias", None),  # broadcastable to [B, H, Q, K]
             # TODO(danj): remove when PR lands https://github.com/google/jax/issues/23349
             query_seq_lengths=jnp.repeat(L, B),
             key_value_seq_lengths=valid_lens,
@@ -892,7 +891,6 @@ class MultiHeadAttention(nn.Module):
         qs: jax.Array,  # [B, Q, H, D_QK_H]
         ks: jax.Array,  # [B, K, H, D_QK_H]
         vs: jax.Array,  # [B, K, H, D_H]
-        bias: Optional[jax.Array] = None,  # broadcastable to [B, H, Q, K]
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
         **kwargs,
@@ -917,7 +915,7 @@ class MultiHeadAttention(nn.Module):
         qs = qs.reshape(B, Q, H, D_QK // H)
         ks = ks.reshape(B, K, H, D_QK // H)
         vs = vs.reshape(B, K, H, D_V // H)
-        ctx, attn = self.attn(qs, ks, vs, bias, valid_lens, training, **kwargs)
+        ctx, attn = self.attn(qs, ks, vs, valid_lens, training, **kwargs)
         return self.proj_out(ctx.reshape(B, Q, D_V)), attn
 
 
@@ -1126,12 +1124,13 @@ class SpatioTemporalMLPAttention(nn.Module):
             m = stack(m, t_diff)
         if vnode is None:
             vnode = jnp.array([])
+        # TODO(danj): project attention and gate with single network?
         attn = self.proj_attn(m)[..., 0]
         attn = jnp.where(mask, attn, 0)
         # TODO(danj): use some sort of softmax normalization,
         # even though this would prevent negative attn values?
         ctx = self.norm(attn @ self.proj_vs(vs))  # [B, Q, D]
         gate = self.proj_gate(ctx)  # [B, Q, D]
-        # TODO(danj): is it weird to sum over the temporal dimension?
+        # TODO(danj): is it weird to collapse spatiotemporal dimensions like this?
         vnode = jnp.max(gate * ctx, axis=1, where=v_mask)
         return ctx, self.norm.copy()(vnode)

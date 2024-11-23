@@ -231,6 +231,7 @@ class KRBlock(nn.Module):
         bias_kk: Optional[jax.Array] = None,
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
+        **kwargs,
     ):
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
