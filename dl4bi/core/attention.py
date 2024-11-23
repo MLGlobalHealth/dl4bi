@@ -1133,5 +1133,5 @@ class SpatioTemporalMLPAttention(nn.Module):
         ctx = self.norm(attn @ self.proj_vs(vs))  # [B, Q, D]
         gate = self.proj_gate(ctx)  # [B, Q, D]
         # TODO(danj): is it weird to sum over the temporal dimension?
-        vnode = jnp.mean(gate * ctx, axis=1, where=v_mask)
+        vnode = jnp.max(gate * ctx, axis=1, where=v_mask)
         return ctx, self.norm.copy()(vnode)
