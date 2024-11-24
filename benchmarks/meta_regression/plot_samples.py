@@ -18,6 +18,7 @@ from sps.kernels import rbf
 from sps.utils import build_grid
 
 from dl4bi.meta_regression.train_utils import (
+    build_2d_gp_dataloader,
     build_gp_dataloader,
     instantiate,
     load_ckpts,
@@ -114,12 +115,14 @@ def plot_2d_img_samples(
 ):
     build_dataloaders, shape, cmap, cmap_std = project_parameters(cfg)
     H, W, C = shape
-    train_dataloader, *_ = build_dataloaders(
+    train_dataloader = build_dataloaders(
         batch_size=1,
         num_ctx_min=num_ctx,
         num_ctx_max=num_ctx,
         num_test_max=H * W,
     )
+    if isinstance(train_dataloader, tuple):
+        train_dataloader = train_dataloader[0]
     rng = random.key(cfg.seed)
     num_models = len(ckpts)
     for i in range(num_samples):
@@ -196,7 +199,7 @@ def project_parameters(cfg: DictConfig):
     matches = lambda pattern: re.match(pattern, cfg.project, re.IGNORECASE)
     match cfg.project:
         case _ if matches("Gaussian Processes"):
-            build_dataloaders = partial(build_dataloaders_gp_2d, cfg=cfg)
+            build_dataloaders = partial(build_2d_gp_dataloader, cfg=cfg)
             shape = (16, 16, 1)
             cmap = mpl.colormaps.get_cmap("grey")
             cmap.set_bad("blue")
@@ -212,67 +215,6 @@ def project_parameters(cfg: DictConfig):
         case _:
             raise Exception(f"No dataloader defined for {cfg.project}!")
     return build_dataloaders, shape, cmap, cmap_std
-
-
-def build_dataloaders_gp_2d(
-    batch_size: int,
-    num_ctx_min: int,
-    num_ctx_max: int,
-    num_test_max: int,
-    cfg: DictConfig,
-):
-    """A custom 2D GP dataloader for plotting 2D images.
-
-    .. note::
-        The dataloader used for training and testing uses context points
-        on a continuous domain, while this only uses points on a grid for
-        visualization purposes.
-    """
-    gp = instantiate(cfg.kernel)
-    s_dim = len(cfg.data.s)
-    s_grid = build_grid(cfg.data.s).reshape(-1, s_dim)  # flatten spatial dims
-    s = jnp.repeat(s_grid[None, ...], batch_size, axis=0)
-    L = s.shape[1]
-    obs_noise, batch_size = cfg.data.obs_noise, batch_size
-    valid_lens_test = jnp.repeat(L, batch_size)
-
-    def gen_batch(rng: jax.Array):
-        rng_gp, rng_eps, rng_valid, rng_permute, rng = random.split(rng, 5)
-        f, var, ls, period, *_ = gp.simulate(rng_gp, s_grid, batch_size)
-        f_noisy = f + obs_noise * random.normal(rng_eps, f.shape)
-        valid_lens_ctx = random.randint(
-            rng_valid,
-            (batch_size,),
-            num_ctx_min,
-            num_ctx_max,
-        )
-        permute_idx = random.choice(rng_permute, L, (L,), replace=False)
-        inv_permute_idx = jnp.argsort(permute_idx)
-        s_permuted = s[:, permute_idx, :]
-        f_permuted = f[:, permute_idx, :]
-        f_noisy_permuted = f_noisy[:, permute_idx, :]
-        s_ctx = s_permuted[:, :num_ctx_max, :]
-        f_ctx = f_noisy_permuted[:, :num_ctx_max, :]
-        s_test = s_permuted[:, :num_test_max, :]
-        f_test = f_permuted[:, :num_test_max, :]
-        return (
-            s_ctx,
-            f_ctx,
-            valid_lens_ctx,
-            s_test,
-            f_test,
-            valid_lens_test,
-            s,  # add full original for plotting
-            f,
-            inv_permute_idx,
-        )
-
-    def dataloader(rng: jax.Array):
-        while True:
-            rng_batch, rng = random.split(rng)
-            yield gen_batch(rng_batch)
-
-    return (dataloader, dataloader, dataloader)  # train, valid, test
 
 
 if __name__ == "__main__":

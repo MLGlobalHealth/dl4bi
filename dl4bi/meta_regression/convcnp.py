@@ -15,8 +15,8 @@ class ConvCNP(nn.Module):
     Based on Yann Dubois' implementation [here](https://github.com/YannDubs/Neural-Process-Family/blob/master/npf/neuralproc/convnp.py#L26).
 
     Args:
-        s_min: Lower bound of grid.
-        s_max: Upper bound of grid.
+        s_lower: Lower coordinate bound of grid.
+        s_upper: Upper coordinate bound of grid.
         points_per_unit: Number of points per unit interval on input, which is
             used to discretize the function.
         enc: An encoder module that uses context points to infer function values
@@ -30,11 +30,9 @@ class ConvCNP(nn.Module):
         An instance of `CNP`.
     """
 
-    s_min: float = -2.5
-    s_max: float = 2.5
-    grid: List[dict] = field(
-        default_factory=lambda: [{"start": -2.5, "stop": 2.5, "num": 128}]
-    )
+    s_lower: List[float] = field(default_factory=lambda: [-2.5])
+    s_upper: List[float] = field(default_factory=lambda: [2.5])
+    points_per_unit: int = 128
     min_std: float = 0.0
     enc: nn.Module = ConvDeepSet()
     conv_net: nn.Module = ConvCNPNet()
@@ -52,20 +50,20 @@ class ConvCNP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        # TODO:
-        # 1. s_lower, s_upper
-        # 2. use points_per_units -> create grid from this
-        # 3. s_grid should be a grid shape, call it just s if its a vector
-        # 4. Annotate dims
         B = s_ctx.shape[0]
-        grid_dim = len(self.grid)
-        # NOTE: use "num"==num_points_in_unit*range of grid
-        s_grid = jnp.repeat(build_grid(self.grid)[None, :], B, axis=0)
-        conv_dims = s_grid.shape[:-1]
-        s_grid = s_grid.reshape(B, -1, grid_dim)
-        h = self.enc(s_ctx, f_ctx, s_grid, valid_lens_ctx)  # [B, L_grid, D]
-        h = self.conv_net(h.reshape(conv_dims + (-1,)))  # [B, L_grid, D]
-        h = self.dec(s_grid, h.reshape(B, s_grid.shape[1], -1), s_test)
+        s_dim = len(self.s_lower)
+        s_grid = build_grid(
+            [
+                dict(start=lo, stop=up, num=int(self.points_per_unit * (up - lo)))
+                for (lo, up) in zip(self.s_lower, self.s_upper)
+            ]
+        )  # [*P... , s_dim]
+        s_grid = jnp.repeat(s_grid[None, :], B, axis=0)  # [B, *P... , s_dim]
+        conv_dims = s_grid.shape[:-1]  # [B, *P...]
+        s_vec = s_grid.reshape(B, -1, s_dim)  # [B, L_grid, s_dim]
+        h = self.enc(s_ctx, f_ctx, s_vec, valid_lens_ctx)  # [B, L_grid, D]
+        h = self.conv_net(h.reshape(conv_dims + (-1,)))  # [B, *P..., D]
+        h = self.dec(s_vec, h.reshape(B, s_vec.shape[1], -1), s_test)  # [B, L_grid, D]
         f_dist = self.head(h)
         f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
         f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)

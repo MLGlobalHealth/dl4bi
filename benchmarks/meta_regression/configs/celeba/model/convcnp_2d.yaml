@@ -1,13 +1,9 @@
 # https://github.com/YannDubs/Neural-Process-Family/blob/master/jupyter/reproducibility/ConvCNP.ipynb
 cls: ConvCNP
 kwargs:
-  grid:
-  - start: -2.5
-    stop: 2.5
-    num: 16
-  - start: -2.5
-    stop: 2.5
-    num: 16
+  s_lower: [-2, -2]
+  s_upper: [2, 2]
+  points_per_unit: 8
   enc:
     cls: ConvDeepSet
     kwargs:
@@ -16,7 +12,7 @@ kwargs:
     cls: ConvCNPNet
     kwargs:
       r_dim: 128
-      kernel: [7, 7]
+      kernel: [9, 9]
       num_blks: 5
   dec:
     cls: ConvDeepSet

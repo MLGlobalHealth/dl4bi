@@ -1,11 +1,11 @@
 from collections.abc import Callable
-from typing import Optional
 from functools import partial
+from typing import Optional
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import vmap, jit
+from jax import jit, vmap
 from jax.tree_util import Partial
 
 from .metrics import l2_dist_sq
@@ -61,11 +61,11 @@ def _deep_set(
     s_ctx: jax.Array,
     s_test: jax.Array,
     f_ctx: jax.Array,
-    valid_lens_ctx: jax.Array,
+    valid_lens_ctx: Optional[jax.Array],
     use_density: bool,
     log_ls: jax.Array,
 ):
-    B, L_ctx, d_f = f_ctx.shape
+    B, L_ctx, _ = f_ctx.shape
     d_sq = vmap(l2_dist_sq)(s_test, s_ctx)[..., None]  # [B, L_test, L_ctx, 1]
     ls = jnp.exp(log_ls)[None, None, None, :]  # [1, 1, 1, d_in]
     rbf_w = jnp.exp(-d_sq / (2 * ls**2))  # [B, L_test, L_ctx, d_in]
@@ -210,6 +210,7 @@ class ConvCNPBlock(nn.Module):
     Args:
         num_features: Number of features for convolutions.
         kernel: Tuple of kernel dimensions.
+        padding: str of padding. Either SAME, VALID, or CIRCULAR
         act_fn: Activation function to use.
         dtype: Data type to use for calculations.
 
@@ -219,6 +220,7 @@ class ConvCNPBlock(nn.Module):
 
     num_features: int
     kernel: tuple = (3, 3)
+    padding: str = "SAME"
     act_fn: Callable = nn.relu
     dtype: jnp.dtype = jnp.float32
 
@@ -243,6 +245,7 @@ class ConvCNPBlock(nn.Module):
             feature_group_count=n,
             kernel_size=self.kernel,
             use_bias=True,
+            padding=self.padding,
             dtype=self.dtype,
         )
         PointConv = Partial(
@@ -268,6 +271,7 @@ class ConvCNPNet(nn.Module):
         r_out: Dimension of latent dim, r.
         kernel: A tuple of kernel dimensions.
         num_blks: Number of `ConvCNPBlock`s to use.
+        padding: str of padding. Either SAME, VALID, or CIRCULAR
         dtype: Data type to use for calculations.
 
     Returns:
@@ -277,6 +281,7 @@ class ConvCNPNet(nn.Module):
     r_dim: int = 128
     kernel: tuple = (3, 3)
     num_blks: int = 5
+    padding: str = "SAME"
     dtype: jnp.dtype = jnp.float32
 
     @nn.compact
@@ -286,7 +291,9 @@ class ConvCNPNet(nn.Module):
         training: bool = False,
     ):
         for _ in range(self.num_blks):
-            x = ConvCNPBlock(self.r_dim, self.kernel, dtype=self.dtype)(x, training)
+            x = ConvCNPBlock(self.r_dim, self.kernel, self.padding, dtype=self.dtype)(
+                x, training
+            )
         return x
 
 

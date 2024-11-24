@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
+from functools import partial
 from pathlib import Path
 
 import hydra
 import optax
-import wandb
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 
+import wandb
 from dl4bi.meta_regression.train_utils import (
     Callback,
     build_gp_dataloader,
@@ -14,6 +15,7 @@ from dl4bi.meta_regression.train_utils import (
     cosine_annealing_lr,
     evaluate,
     instantiate,
+    log_2d_gp_plots,
     log_posterior_predictive_plots,
     save_ckpt,
     train,
@@ -44,6 +46,10 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
+    clbk = log_posterior_predictive_plots
+    if cfg.data.name == "2d":
+        H, W = cfg.data.s[0].num, cfg.data.s[1].num
+        clbk = partial(log_2d_gp_plots, shape=(H, W, 1), cfg=cfg)
     state = train(
         rng_train,
         model,
@@ -53,7 +59,7 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        callbacks=[Callback(log_posterior_predictive_plots, cfg.plot_interval)],
+        callbacks=[Callback(clbk, cfg.plot_interval)],
     )
     metrics = evaluate(rng_test, state, dataloader, cfg.valid_num_steps)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
