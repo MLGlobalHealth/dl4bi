@@ -36,7 +36,6 @@ class ConvCNP(nn.Module):
         default_factory=lambda: [{"start": -2.5, "stop": 2.5, "num": 128}]
     )
     min_std: float = 0.0
-    points_per_unit: int = 128
     enc: nn.Module = ConvDeepSet()
     conv_net: nn.Module = ConvCNPNet()
     dec: nn.Module = ConvDeepSet()
@@ -53,14 +52,19 @@ class ConvCNP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        # TODO:
+        # 1. s_lower, s_upper
+        # 2. use points_per_units -> create grid from this
+        # 3. s_grid should be a grid shape, call it just s if its a vector
+        # 4. Annotate dims
         B = s_ctx.shape[0]
         grid_dim = len(self.grid)
         # NOTE: use "num"==num_points_in_unit*range of grid
         s_grid = jnp.repeat(build_grid(self.grid)[None, :], B, axis=0)
         conv_dims = s_grid.shape[:-1]
         s_grid = s_grid.reshape(B, -1, grid_dim)
-        h = self.enc(s_ctx, f_ctx, s_grid, valid_lens_ctx)  # [B, grid_size, d_out]
-        h = self.conv_net(h.reshape(conv_dims + (-1,)))  # [B, grid_size, d_out]
+        h = self.enc(s_ctx, f_ctx, s_grid, valid_lens_ctx)  # [B, L_grid, D]
+        h = self.conv_net(h.reshape(conv_dims + (-1,)))  # [B, L_grid, D]
         h = self.dec(s_grid, h.reshape(B, s_grid.shape[1], -1), s_test)
         f_dist = self.head(h)
         f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
