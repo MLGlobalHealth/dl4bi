@@ -1,10 +1,11 @@
 from collections.abc import Callable
 from typing import Optional
+from functools import partial
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import vmap
+from jax import vmap, jit
 from jax.tree_util import Partial
 
 from .metrics import l2_dist_sq
@@ -42,26 +43,46 @@ class ConvDeepSet(nn.Module):
         valid_lens_test: Optional[jax.Array] = None,
         **kwargs,
     ):
-        B, L_ctx, d_f = f_ctx.shape
-        d_in = d_f + self.use_density
-        d_sq = vmap(l2_dist_sq)(s_test, s_ctx)[..., None]  # [B, L_test, L_ctx, 1]
+        d_in = f_ctx.shape[-1] + self.use_density
         log_ls = self.param("log_lengthscale", nn.initializers.constant(-1), (d_in,))
-        ls = jnp.exp(log_ls)[None, None, None, :]  # [1, 1, 1, d_in]
-        rbf_w = jnp.exp(-d_sq / (2 * ls**2))  # [B, L_test, L_ctx, d_in]
-        f_test = f_ctx
-        if self.use_density:
-            density = jnp.ones((B, L_ctx, 1))
-            f_test = jnp.concatenate([density, f_ctx], axis=-1)  # [B, L_ctx, d_in]
-        f_test = f_test[:, None, ...] * rbf_w  # [B, L_test, L_ctx, d_in]
-        if valid_lens_ctx is None:
-            valid_lens_ctx = jnp.repeat(L_ctx, B)
-        mask = (jnp.arange(L_ctx) < valid_lens_ctx[:, None])[:, None, :, None]
-        f_test = f_test.sum(axis=2, where=mask)  # [B, L_test, d_in]
-        if self.use_density:
-            density, conv = f_test[..., :1], f_test[..., 1:]
-            normed_conv = conv / (density + 1e-8)
-            f_test = jnp.concatenate([density, normed_conv], axis=-1)
+        f_test = _deep_set(
+            s_ctx,
+            s_test,
+            f_ctx,
+            valid_lens_ctx,
+            self.use_density,
+            log_ls,
+        )
         return nn.Dense(self.d_out, dtype=self.dtype)(f_test)  # [B, L_test, d_out]
+
+
+@partial(jit, static_argnames=("use_density",))
+def _deep_set(
+    s_ctx: jax.Array,
+    s_test: jax.Array,
+    f_ctx: jax.Array,
+    valid_lens_ctx: jax.Array,
+    use_density: bool,
+    log_ls: jax.Array,
+):
+    B, L_ctx, d_f = f_ctx.shape
+    d_sq = vmap(l2_dist_sq)(s_test, s_ctx)[..., None]  # [B, L_test, L_ctx, 1]
+    ls = jnp.exp(log_ls)[None, None, None, :]  # [1, 1, 1, d_in]
+    rbf_w = jnp.exp(-d_sq / (2 * ls**2))  # [B, L_test, L_ctx, d_in]
+    f_test = f_ctx
+    if use_density:
+        density = jnp.ones((B, L_ctx, 1))
+        f_test = jnp.concatenate([density, f_ctx], axis=-1)  # [B, L_ctx, d_in]
+    f_test = f_test[:, None, ...] * rbf_w  # [B, L_test, L_ctx, d_in]
+    if valid_lens_ctx is None:
+        valid_lens_ctx = jnp.repeat(L_ctx, B)
+    mask = (jnp.arange(L_ctx) < valid_lens_ctx[:, None])[:, None, :, None]
+    f_test = f_test.sum(axis=2, where=mask)  # [B, L_test, d_in]
+    if use_density:
+        density, conv = f_test[..., :1], f_test[..., 1:]
+        normed_conv = conv / (density + 1e-8)
+        f_test = jnp.concatenate([density, normed_conv], axis=-1)
+    return f_test
 
 
 class SimpleConv(nn.Module):
