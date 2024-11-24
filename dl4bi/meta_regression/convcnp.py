@@ -37,7 +37,7 @@ class ConvCNP(nn.Module):
     enc: nn.Module = ConvDeepSet()
     conv_net: nn.Module = ConvCNPNet()
     dec: nn.Module = ConvDeepSet()
-    head: nn.Module = MLP([128] * 4 + [2])
+    head: nn.Module = MLP([128] * 3 + [2])
 
     @nn.compact
     def __call__(

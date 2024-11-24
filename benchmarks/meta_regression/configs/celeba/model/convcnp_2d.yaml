@@ -21,4 +21,4 @@ kwargs:
   head:
     cls: MLP
     kwargs:
-      dims: [128, 128, 128, 128, 6]
+      dims: [128, 128, 128, 6]
