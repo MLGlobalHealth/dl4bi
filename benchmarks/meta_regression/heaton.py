@@ -90,7 +90,7 @@ def main(cfg: DictConfig):
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
     # NOTE: uncomment to run actual test
-    # log_test_results(rng_test, state, test_dataloader)
+    log_test_results(rng_test, state, test_dataloader)
 
 
 def build_dataloaders(
