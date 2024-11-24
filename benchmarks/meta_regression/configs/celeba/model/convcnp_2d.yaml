@@ -4,10 +4,10 @@ kwargs:
   grid:
   - start: -2.5
     stop: 2.5
-    num: 32
+    num: 16
   - start: -2.5
     stop: 2.5
-    num: 32
+    num: 16
   enc:
     cls: ConvDeepSet
     kwargs:
@@ -25,4 +25,4 @@ kwargs:
   head:
     cls: MLP
     kwargs:
-      dims: [128, 128, 128, 128, 2]
+      dims: [128, 128, 128, 128, 6]
