@@ -1,9 +1,9 @@
 # https://github.com/YannDubs/Neural-Process-Family/blob/master/jupyter/reproducibility/ConvCNP.ipynb
 cls: ConvCNP
 kwargs:
-  s_lower: [-2.5, -2.5] # add 0.5 padding on each size as in ConvCNP impl
-  s_upper: [2.5, 2.5]
-  points_per_unit: 16
+  s_lower: [-2, -2]
+  s_upper: [2, 2]
+  points_per_unit: 7 # NOTE: points_per_unit * grid length should be equal to pixel num
   enc:
     cls: ConvDeepSet
     kwargs:
