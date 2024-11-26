@@ -1,4 +1,3 @@
-import math
 import warnings
 from collections.abc import Callable, Sequence
 from functools import partial
@@ -205,21 +204,92 @@ class FastAttention(nn.Module):
             `ctx` and `attn`, the updated values and None, respectively,
             since the attention matrix is never materialized in FAVOR+.
         """
-        (B, Q, H, D_QK_H), (_, K, H, D_V_H) = qs.shape, vs.shape
+        H, D_QK_H = qs.shape[-2:]
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        gen_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_QK_H)
-        init_proj = lambda: gen_proj(self.make_rng("params"))
-        proj = self.variable("projections", "random", init_proj)
+        gen_qk_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_QK_H)
+        qk_proj = self.variable(
+            "projections",
+            "qk_orf",
+            lambda: gen_qk_proj(self.make_rng("params")),
+        )
         if kwargs.get("bias") is not None:
             warnings.warn("FastAttention does not currently support bias!")
         if redraw_random_features:
-            proj.value = gen_proj(self.make_rng("rng_extra"))
-        # [B, L, H, D_H] -> [B * H, L, D_H]
-        qs = qs.transpose(0, 2, 1, 3).reshape(-1, Q, D_QK_H)
-        ks = ks.transpose(0, 2, 1, 3).reshape(-1, K, D_QK_H)
-        vs = vs.transpose(0, 2, 1, 3).reshape(-1, K, D_V_H)
+            qk_proj.value = gen_qk_proj(self.make_rng("rng_extra"))
+        qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> (B H) L D"), (qs, ks, vs))
         normalizer = 1 / jnp.pow(D_QK_H, 0.25)
-        phi = self.build_phi(proj.value)
+        phi = self.build_phi(qk_proj.value)
+        qs_prime = phi(qs * normalizer)
+        ks_prime = phi(ks * normalizer)
+        # NOTE: mask after phi in case phi maps zero to non-zero values
+        if valid_lens is not None:
+            valid_lens = jnp.repeat(valid_lens, H, axis=0)
+            ks_prime *= mask_from_valid_lens(ks.shape[1], valid_lens)
+        ctx = fast_attend(qs_prime, ks_prime, vs)
+        ctx = rearrange(ctx, "(B H) Q D -> B Q H D", H=H)
+        return drop(ctx), None
+
+
+class DistanceBiasedFastAttention(nn.Module):
+    r"""[FAVOR+](https://arxiv.org/abs/2009.14794) implementation, Appendix B.
+
+    Implementation based on [google-research fast attention](https://github.com/google-research/google-research/blob/master/performer/fast_attention/jax/fast_attention.py) and [Teddy Koker's implementation](https://github.com/teddykoker/performer).
+    """
+
+    p_dropout: float = 0.0
+    build_phi: Callable = build_stable_positive_softmax_phi
+    num_ortho_features: int = 64
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, H, D_QK_H]
+        ks: jax.Array,  # [B, K, H D_QK_H]
+        vs: jax.Array,  # [B, K, H, D_H]
+        valid_lens: Optional[jax.Array] = None,  # [B]
+        training: bool = False,
+        redraw_random_features: bool = False,
+        **kwargs,
+    ):
+        r"""Performs forward pass of network.
+
+        Args:
+            qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_{Q,K}_H}$
+            ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_{Q,K}_H}$
+            vs: Values of dimension $\mathbb{R}^{B\times K\times H\times D_V_H}$
+            valid_lens: Mask consisting of valid length per sequence of dimension
+                $\mathbb{R}^B$.
+            training: Boolean indicating whether currently training.
+            redraw_random_features: Redraw random features used for
+                softmax kernel approximation.
+
+        Returns:
+            `ctx` and `attn`, the updated values and None, respectively,
+            since the attention matrix is never materialized in FAVOR+.
+        """
+        qs_s, ks_s = kwargs["qs_s"], kwargs["ks_s"]
+        (B, Q, H, D_QK_H), (_, K, H, D_V_H), S = qs.shape, vs.shape, qs_s.shape[-1]
+        drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        gen_proj = lambda D, rng: gaussian_orf(rng, self.num_ortho_features, D)
+        gen_qk_proj, gen_s_proj = partial(gen_proj, D_QK_H), partial(gen_proj, S)
+        qk_proj = self.variable(
+            "projections",
+            "qk_orf",
+            lambda: gen_qk_proj(self.make_rng("params")),
+        )
+        s_proj = self.variable(
+            "projections",
+            "s_orf",
+            lambda: gen_s_proj(self.make_rng("params")),
+        )
+        if kwargs.get("bias") is not None:
+            warnings.warn("FastAttention does not currently support bias!")
+        if redraw_random_features:
+            qk_proj.value = gen_qk_proj(self.make_rng("rng_extra"))
+            s_proj.value = gen_s_proj(self.make_rng("rng_extra"))
+        qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> (B H) L D"), (qs, ks, vs))
+        normalizer = 1 / jnp.pow(D_QK_H, 0.25)
+        phi = self.build_phi(qk_proj.value)
         qs_prime = phi(qs * normalizer)
         ks_prime = phi(ks * normalizer)
         # NOTE: mask after phi in case phi maps zero to non-zero values
@@ -763,7 +833,7 @@ class Attention(nn.Module):
     def __call__(
         self,
         qs: jax.Array,  # [B, Q, H, D_QK_H]
-        ks: jax.Array,  # [B, K, H D_QK_H]
+        ks: jax.Array,  # [B, K, H, D_QK_H]
         vs: jax.Array,  # [B, K, H, D_H]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
@@ -782,12 +852,9 @@ class Attention(nn.Module):
         Returns:
             `ctx` and `attn`, the updated values and attention weights.
         """
-        (B, Q, H, D_QK_H), (_, K, H, D_V_H) = qs.shape, vs.shape
+        (B, Q, H, _), K = qs.shape, ks.shape[1]
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        # [B, L, H, D_H] -> [B * H, L, D_H]
-        qs = qs.transpose(0, 2, 1, 3).reshape(-1, Q, D_QK_H)
-        ks = ks.transpose(0, 2, 1, 3).reshape(-1, K, D_QK_H)
-        vs = vs.transpose(0, 2, 1, 3).reshape(-1, K, D_V_H)
+        qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> (B H) L D"), (qs, ks, vs))
         scores = self.scorer(qs.astype(self.dtype), ks.astype(self.dtype))
         bias = kwargs.get("bias", None)
         if bias is not None:
@@ -797,8 +864,7 @@ class Attention(nn.Module):
             scores = mask_attn(scores, valid_lens)
         attn = nn.softmax(scores, axis=-1)  # [B * H, Q, K]
         ctx = drop(attn) @ vs  # [B * H, Q, D_V_H]
-        # [B * H, Q, D_V_H] -> [B, Q, H, D_V_H]
-        ctx = ctx.reshape(B, H, Q, D_V_H).transpose(0, 2, 1, 3)
+        ctx = rearrange(ctx, "(B H) Q D -> B Q H D", H=H)
         return ctx, attn.reshape(B, H, Q, K)
 
 
