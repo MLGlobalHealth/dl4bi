@@ -204,7 +204,7 @@ class FastAttention(nn.Module):
             `ctx` and `attn`, the updated values and None, respectively,
             since the attention matrix is never materialized in FAVOR+.
         """
-        H, D_QK_H = qs.shape[-2:]
+        (H, D_QK_H), K = qs.shape[-2:], ks.shape[1]
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         gen_qk_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_QK_H)
         qk_proj = self.variable(
@@ -224,12 +224,14 @@ class FastAttention(nn.Module):
         # NOTE: mask after phi in case phi maps zero to non-zero values
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
-            ks_prime *= mask_from_valid_lens(ks.shape[1], valid_lens)
+            ks_prime *= mask_from_valid_lens(K, valid_lens)
         ctx = fast_attend(qs_prime, ks_prime, vs)
         ctx = rearrange(ctx, "(B H) Q D -> B Q H D", H=H)
         return drop(ctx), None
 
 
+# TODO(danj): normalization
+# TODO(danj): add parameter to scale projection
 class DistanceBiasedFastAttention(nn.Module):
     r"""[FAVOR+](https://arxiv.org/abs/2009.14794) implementation, Appendix B.
 
@@ -268,15 +270,18 @@ class DistanceBiasedFastAttention(nn.Module):
             since the attention matrix is never materialized in FAVOR+.
         """
         qs_s, ks_s = kwargs["qs_s"], kwargs["ks_s"]
-        (B, Q, H, D_QK_H), (_, K, H, D_V_H), S = qs.shape, vs.shape, qs_s.shape[-1]
+        (H, D_QK_H), K, S = qs.shape[-2:], ks.shape[1], qs_s.shape[-1]
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        # TODO(jhoots): change this to D_QK_H + D_S
         gen_proj = lambda D, rng: gaussian_orf(rng, self.num_ortho_features, D)
+        # TODO(joots): change gen_s_proj to RFFS
         gen_qk_proj, gen_s_proj = partial(gen_proj, D_QK_H), partial(gen_proj, S)
         qk_proj = self.variable(
             "projections",
             "qk_orf",
             lambda: gen_qk_proj(self.make_rng("params")),
         )
+        # TODO(jhoots): change to RFFs proj into 16
         s_proj = self.variable(
             "projections",
             "s_orf",
@@ -290,15 +295,15 @@ class DistanceBiasedFastAttention(nn.Module):
         qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> (B H) L D"), (qs, ks, vs))
         normalizer = 1 / jnp.pow(D_QK_H, 0.25)
         phi = self.build_phi(qk_proj.value)
+        # TODO(jhoots): concatenate RFF s's with qs/ks after normalization
         qs_prime = phi(qs * normalizer)
         ks_prime = phi(ks * normalizer)
         # NOTE: mask after phi in case phi maps zero to non-zero values
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
-            ks_prime *= mask_from_valid_lens(ks.shape[1], valid_lens)
+            ks_prime *= mask_from_valid_lens(K, valid_lens)
         ctx = fast_attend(qs_prime, ks_prime, vs)
-        # [B * H, Q, D_V_H] -> [B, Q, H, D_V_H]
-        ctx = ctx.reshape(B, H, Q, D_V_H).transpose(0, 2, 1, 3)
+        ctx = rearrange(ctx, "(B H) Q D -> B Q H D", H=H)
         return drop(ctx), None
 
 
