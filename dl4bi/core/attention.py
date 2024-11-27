@@ -288,7 +288,7 @@ class DistanceBiasedFastAttention(nn.Module):
         s_proj: nn.Module = RFF_FeaturesEncoder(self.s_embd_dim)
         qs_s_proj = s_proj(qs_s)
         ks_s_proj = s_proj(ks_s)
-        a = self.param("a", init.constant(-1), (1, 1, H, 1))
+        a = self.param("a", init.constant(1), (1, 1, H, 1))
         qs_s_prime = a * qs_s_proj.reshape(B, -1, H, D_S_H)  # [B, Q, H D_S_H]
         ks_s_prime = ks_s_proj.reshape(B, -1, H, D_S_H)  # [B, K, H, D_S_H]
         if redraw_random_features:
