@@ -149,6 +149,12 @@ def plot_violin(post, f_batch, model_name, num_locations=10):
     plt.clf()
 
 
+def plot_matrix_with_colorbar(fig, axis, matrix, title, min_v=None, max_v=None):
+    im = axis.imshow(matrix, cmap="viridis", vmin=min_v, vmax=max_v)
+    axis.set_title(title)
+    fig.colorbar(im, ax=axis, fraction=0.046, pad=0.04)
+
+
 def plot_covariance(samples, conditionals, model_name, kernel, s):
     if kernel.__name__ == "periodic":
         K = kernel(
@@ -161,17 +167,12 @@ def plot_covariance(samples, conditionals, model_name, kernel, s):
     vmax = max(K.max(), mu_covariance.max())
     fig, ax = plt.subplots(2, 2, figsize=(12, 12))
 
-    def plot_matrix_with_colorbar(axis, matrix, title, min_v=None, max_v=None):
-        im = axis.imshow(matrix, cmap="viridis", vmin=min_v, vmax=max_v)
-        axis.set_title(title)
-        fig.colorbar(im, ax=axis, fraction=0.046, pad=0.04)
-
     plot_matrix_with_colorbar(ax[0, 0], K, "GT Kernel - scaled", vmin, vmax)
     plot_matrix_with_colorbar(
         ax[0, 1], mu_covariance, "Inferred covariance - scaled", vmin, vmax
     )
-    plot_matrix_with_colorbar(ax[1, 0], K, "GT Kernel")
-    plot_matrix_with_colorbar(ax[1, 1], mu_covariance, "Inferred covariance")
+    plot_matrix_with_colorbar(fig, ax[1, 0], K, "GT Kernel")
+    plot_matrix_with_colorbar(fig, ax[1, 1], mu_covariance, "Inferred covariance")
     cond_str = ", ".join([f"{k}: {v[0]:.2f}" for k, v in conditionals.items()])
     plt.title(f"Covariance Matrix for {model_name}: {cond_str}")
     plt.tight_layout()
@@ -422,7 +423,7 @@ def plot_vae_decoder_samples(
     paths = []
     for i in range(num_batches):
         rng_z, _ = jax.random.split(rng_decoder, 2)
-        fig, ax = plt.subplots(1, num_plots + 1, figsize=(5 * num_plots, 5))
+        fig, ax = plt.subplots(1, num_plots + 3, figsize=(5 * num_plots, 5))
         f_batch, _, conditionals = next(loader)
         f = f_batch[0]
         z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim))
@@ -440,6 +441,12 @@ def plot_vae_decoder_samples(
             plot_on_map(
                 ax[j + 1], gdf, f_hat[j], vmin, vmax, f"Realisation {j + 1}", "viridis"
             )
+        plot_matrix_with_colorbar(
+            fig, ax[-2], np.cov(f_batch.squeeze(), rowvar=False), "Emirical GT Cov"
+        )
+        plot_matrix_with_colorbar(
+            fig, ax[-1], np.cov(f_hat.squeeze(), rowvar=False), "Empirical decoder Cov"
+        )
         for axis in ax:
             axis.set_axis_off()
         plt.tight_layout()
@@ -497,7 +504,10 @@ def plot_vae_scatter_comp(
 
 
 def log_vae_map_plots(
-    gdf: gpd.GeoDataFrame, s: jax.Array, conds_names: list[str], z_dim: int
+    gdf: gpd.GeoDataFrame,
+    s: jax.Array,
+    conds_names: list[str],
+    z_dim: int,
 ):
     x_norm_vars, y_norm_vars = get_norm_vars(gdf)
 
