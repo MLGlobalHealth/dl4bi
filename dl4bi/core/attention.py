@@ -243,8 +243,6 @@ class DistanceBiasedFastAttention(nn.Module):
     build_phi: Callable = build_stable_positive_softmax_phi
     num_ortho_features: int = 64
     s_embd_dim: int = 64
-    # TODO(jhoott): giving a new rng each step?
-    s_proj: nn.Module = GaussianFourierEmbedding(s_embd_dim)
 
     @nn.compact
     def __call__(
@@ -287,8 +285,10 @@ class DistanceBiasedFastAttention(nn.Module):
             "qk_orf",
             lambda: gen_proj(self.make_rng("params")),
         )
-        qs_s_proj = self.s_proj(qs_s)
-        ks_s_proj = self.s_proj(ks_s)
+        # TODO(jhoott): giving a new rng each step?
+        s_proj: nn.Module = GaussianFourierEmbedding(self.s_embd_dim)
+        qs_s_proj = s_proj(qs_s)
+        ks_s_proj = s_proj(ks_s)
         a = self.param("a", init.constant(-1), (1, 1, H, 1))
         qs_s_prime = a * qs_s_proj.reshape(B, -1, H, D_S_H)  # [B, Q, H D_S_H]
         ks_s_prime = ks_s_proj.reshape(B, -1, H, D_S_H)  # [B, K, H, D_S_H]
