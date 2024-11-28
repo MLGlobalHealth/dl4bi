@@ -13,8 +13,9 @@ from jax.lax import scan
 from jax.nn import dot_product_attention
 from sps.kernels import l2_dist, outer_subtract
 
+from dl4bi.core.embed import RBFRandomFourierFeatures
+
 from .bias import rbf_basis
-from .embed import RFF_FeaturesEncoder
 from .mlp import MLP
 from .utils import mask_attn, mask_from_valid_lens
 
@@ -231,8 +232,7 @@ class FastAttention(nn.Module):
         return drop(ctx), None
 
 
-# TODO(danj): normalization
-# TODO(danj): add parameter to scale projection
+# TODO(danj): Add different RBF RFF projections per head
 class DistanceBiasedFastAttention(nn.Module):
     r"""[FAVOR+](https://arxiv.org/abs/2009.14794) implementation, Appendix B.
 
@@ -242,7 +242,7 @@ class DistanceBiasedFastAttention(nn.Module):
     p_dropout: float = 0.0
     build_phi: Callable = build_stable_positive_softmax_phi
     num_ortho_features: int = 64
-    s_embd_dim: int = 64
+    s_rbf_rff: nn.Module = RBFRandomFourierFeatures(48)  # 48 + 16 / head = 64 / head
 
     @nn.compact
     def __call__(
@@ -271,38 +271,32 @@ class DistanceBiasedFastAttention(nn.Module):
             `ctx` and `attn`, the updated values and None, respectively,
             since the attention matrix is never materialized in FAVOR+.
         """
-        qs_s, ks_s = kwargs["qs_s"], kwargs["ks_s"]
-        (H, D_QK_H), (B, K) = qs.shape[-2:], ks.shape[:2]
-        D_S_H = self.s_embd_dim // H
+        (H, D_QK_H), K = qs.shape[-2:], ks.shape[1]
+        S_RFF = self.s_rbf_rff.embed_dim
+        stack = lambda *args: jnp.concatenate(args, axis=-1)
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        gen_proj = lambda rng: gaussian_orf(
-            rng,
-            self.num_ortho_features,
-            D_QK_H + D_S_H,
-        )
         qk_proj = self.variable(
             "projections",
             "qk_orf",
-            lambda: gen_proj(self.make_rng("params")),
+            lambda: gaussian_orf(
+                self.make_rng("params"),
+                self.num_ortho_features,
+                D_QK_H + S_RFF,
+            ),
         )
-        s_proj: nn.Module = RFF_FeaturesEncoder(self.s_embd_dim)
-        qs_s_proj = s_proj(qs_s)
-        ks_s_proj = s_proj(ks_s)
         a = self.param("a", init.constant(1), (1, 1, H, 1))
-        qs_s_prime = a * qs_s_proj.reshape(B, -1, H, D_S_H)  # [B, Q, H D_S_H]
-        ks_s_prime = ks_s_proj.reshape(B, -1, H, D_S_H)  # [B, K, H, D_S_H]
-        if redraw_random_features:
-            qk_proj.value = gen_proj(self.make_rng("rng_extra"))
-        qs, ks, vs, qs_s_prime, ks_s_prime = map(
-            lambda x: rearrange(x, "B L H D -> (B H) L D"),
-            (qs, ks, vs, qs_s_prime, ks_s_prime),
-        )
+        qs_s, ks_s = self.s_rbf_rff(kwargs["qs_s"]), self.s_rbf_rff(kwargs["ks_s"])
+        qs_s, ks_s = map(lambda x: repeat(x, "B L D -> B L H D", H=H), (qs_s, ks_s))
+        qs_s *= a
         normalizer = 1 / jnp.pow(D_QK_H, 0.25)
-        phi = self.build_phi(qk_proj.value)
         qs, ks = qs * normalizer, ks * normalizer
-        # NOTE: concat locations only after normalization
-        qs_prime = phi(jnp.concatenate([qs, qs_s_prime], axis=-1))
-        ks_prime = phi(jnp.concatenate([ks, ks_s_prime], axis=-1))
+        qs, ks, vs, qs_s, ks_s = map(
+            lambda x: rearrange(x, "B L H D -> (B H) L D"),
+            (qs, ks, vs, qs_s, ks_s),
+        )
+        phi = self.build_phi(qk_proj.value)
+        # NOTE: concat locations after normalization
+        qs_prime, ks_prime = phi(stack(qs, qs_s)), phi(stack(ks, ks_s))
         # NOTE: mask after phi in case phi maps zero to non-zero values
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)

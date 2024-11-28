@@ -3,7 +3,6 @@ from time import time
 import jax
 import jax.numpy as jnp
 from jax import random
-from sps.kernels import l2_dist_sq
 
 from dl4bi.core import (
     MLP,
@@ -84,8 +83,7 @@ def test_fast_attention_impl():
     B, L, H, D = 4, 128, 4, 16
     key = random.key(42)
     rng_qkv, rng_valid, rng_init = random.split(key, 3)
-    data = random.normal(rng_qkv, (3, B, L, H, D))
-    qs, ks, vs = data[0], data[1], data[2]
+    qs, ks, vs = random.normal(rng_qkv, (3, B, L, H, D))
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
     (ctx_true, _), _ = Attention().init_with_output(rng_init, qs, ks, vs, valid_lens)
     (ctx_fast, _), _ = FastAttention().init_with_output(
@@ -98,6 +96,24 @@ def test_fast_attention_impl():
     # Source: https://tinyurl.com/google-fast-attn
     assert mse_fast < 0.05, "Fast: Large MSE error in approximation"
     assert max_error_fast < 2.0, "Fast: Large max error in approximation!"
+
+
+def test_distance_biased_fast_attention_impl():
+    B, L, H, D, S = 4, 128, 4, 16, 2
+    key = random.key(42)
+    rng_qkv, rng_s, rng_valid, rng_init = random.split(key, 4)
+    qs, ks, vs = random.normal(rng_qkv, (3, B, L, H, D))
+    qs_s, ks_s = random.normal(rng_s, (2, B, L, S))
+    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
+    (ctx_fast, _), _ = DistanceBiasedFastAttention().init_with_output(
+        rng_init, qs, ks, vs, valid_lens, qs_s=qs_s, ks_s=ks_s
+    )
+    assert ctx_fast.shape == (
+        B,
+        L,
+        H,
+        D,
+    ), "DistanceBiasedFast: incorrect context output shape!"
 
 
 def test_scan_attention_impl():

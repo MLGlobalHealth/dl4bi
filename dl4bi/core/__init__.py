@@ -39,6 +39,7 @@ from .embed import (
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
     NeRFEmbedding,
+    RBFRandomFourierFeatures,
     ResidualEmbedding,
 )
 from .metrics import (
