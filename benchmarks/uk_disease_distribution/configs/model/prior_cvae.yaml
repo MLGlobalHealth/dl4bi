@@ -1,11 +1,11 @@
 cls: PriorCVAE
 kwargs:
   encoder:
-    cls: MLP
+    cls: Conditional_MLP
     kwargs:
       dims: [363, 363]
   decoder:
-    cls: MLP
+    cls: Conditional_MLP
     kwargs:
       dims: [363, 363]
   z_dim: 363

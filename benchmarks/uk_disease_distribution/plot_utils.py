@@ -415,25 +415,26 @@ def plot_vae_decoder_samples(
     state: TrainState,
     conds_names: list[str],
     z_dim: int,
-    model: nn.Module,
+    vae_kwargs: dict,
     num_batches: int = 5,
     num_plots: int = 5,
 ):
     violin_paths = []
     paths = []
     for i in range(num_batches):
-        rng_z, _ = jax.random.split(rng_decoder, 2)
+        rng_z, rng_dr, rng_ext = jax.random.split(rng_decoder, 3)
         fig, ax = plt.subplots(1, num_plots + 3, figsize=(5 * num_plots, 5))
         f_batch, _, conditionals = next(loader)
         f = f_batch[0]
-        z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim))
-        batched_conditionals = jnp.repeat(
-            jnp.stack(conditionals).reshape(1, -1), repeats=z.shape[0], axis=0
+        z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim, 1))
+        f_hat, _, _ = state.apply_fn(
+            {"params": state.params, **state.kwargs},
+            z,
+            conditionals,
+            decode_only=True,
+            **vae_kwargs,
+            rngs={"dropout": rng_dr, "extra": rng_ext},
         )
-        f_hat = model.decoder.apply(
-            {"params": state.params["decoder"], **state.kwargs},
-            jnp.hstack([z, batched_conditionals]),
-        ).reshape((z.shape[0],) + f.shape)
         vmin = min(f.min(), f_hat.min())
         vmax = max(f.max(), f_hat.max())
         plot_on_map(ax[0], gdf, f, vmin, vmax, "GT sample", "viridis")
@@ -508,6 +509,7 @@ def log_vae_map_plots(
     s: jax.Array,
     conds_names: list[str],
     z_dim: int,
+    **kwargs,
 ):
     x_norm_vars, y_norm_vars = get_norm_vars(gdf)
 
@@ -516,7 +518,6 @@ def log_vae_map_plots(
         rng_step: int,
         state: TrainState,
         loader: Generator,
-        model: nn.Module,
         num_plots: int = 10,
     ):
         rng_drop, rng_extra, rng_dec, rng_scat = jax.random.split(rng_step, 4)
@@ -525,6 +526,7 @@ def log_vae_map_plots(
             {"params": state.params, **state.kwargs},
             f,
             conditionals,
+            **kwargs,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
         paths = plot_vae_reconstruction_samples(
@@ -539,7 +541,13 @@ def log_vae_map_plots(
             num_plots=num_plots,
         )
         paths_decoder = plot_vae_decoder_samples(
-            rng_dec, gdf, loader, state, conds_names, z_dim, model
+            rng_dec,
+            gdf,
+            loader,
+            state,
+            conds_names,
+            z_dim,
+            kwargs,
         )
         paths_scatter = plot_vae_scatter_comp(
             rng_scat,

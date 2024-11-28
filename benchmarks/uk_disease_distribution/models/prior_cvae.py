@@ -3,6 +3,21 @@ import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
 
+from dl4bi.core import MLP
+
+
+class Conditional_MLP(nn.Module):
+    dims: list[int]
+
+    @nn.compact
+    def __call__(self, x: Array, conditionals: list[Array], **kwargs):
+        B = x.shape[0]
+        batched_conditionals = jnp.repeat(
+            jnp.stack(conditionals).reshape(1, -1), repeats=B, axis=0
+        )
+        x = jnp.hstack([x.reshape(B, -1), batched_conditionals])
+        return MLP(self.dims)(x)
+
 
 class PriorCVAE(nn.Module):
     r"""[PriorCVAE](https://arxiv.org/pdf/2304.04307) approximates a Gaussian Process.
@@ -24,12 +39,14 @@ class PriorCVAE(nn.Module):
         to calculate losses involving KL divergence.
     """
 
-    encoder: nn.Module
-    decoder: nn.Module
-    z_dim: int
+    encoder: nn.Module = Conditional_MLP([363, 363])
+    decoder: nn.Module = Conditional_MLP([363, 363])
+    z_dim: int = 363
 
     @nn.compact
-    def __call__(self, f: Array, conditionals: list[Array], **kwargs):
+    def __call__(
+        self, f: Array, conditionals: list[Array], decode_only: bool = False, **kwargs
+    ):
         r"""Run module forward.
 
         Args:
@@ -43,22 +60,14 @@ class PriorCVAE(nn.Module):
             along with $\mu$ and $\log(\sigma^2)$, which are often used
             to calculate losses involving KL divergence.
         """
-        B = f.shape[0]
-        batched_conditionals = jnp.repeat(
-            jnp.stack(conditionals).reshape(1, -1), repeats=B, axis=0
-        )
-        latents = self.encoder(jnp.hstack([f.reshape(B, -1), batched_conditionals]))
-        z_mu = nn.Dense(self.z_dim)(latents)
-        z_log_var = nn.Dense(self.z_dim)(latents)
-        z_std = jnp.exp(z_log_var / 2)
-        eps = random.normal(self.make_rng("extra"), z_std.shape)
-        z = z_mu + z_std * eps
-        f_hat = self.decode(z, conditionals)
+        if decode_only:
+            z, z_mu, z_std = f, None, None
+        else:
+            latents = self.encoder(f, conditionals)
+            z_mu = nn.Dense(self.z_dim)(latents)
+            z_log_var = nn.Dense(self.z_dim)(latents)
+            z_std = jnp.exp(z_log_var / 2)
+            eps = random.normal(self.make_rng("extra"), z_std.shape)
+            z = z_mu + z_std * eps
+        f_hat = self.decoder(z, conditionals)
         return f_hat.reshape(f.shape), z_mu, z_std
-
-    def decode(self, z: Array, conditionals: list[Array]):
-        B = z.shape[0]
-        batched_conditionals = jnp.repeat(
-            jnp.stack(conditionals).reshape(1, -1), repeats=B, axis=0
-        )
-        return self.decoder(jnp.hstack([z, batched_conditionals]))

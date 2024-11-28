@@ -1,2 +1,2 @@
-from .attention_vae import TransformerVAE
-from .prior_cvae import PriorCVAE
+from .attention_vae import AttentionVAE, TransformerVAE
+from .prior_cvae import Conditional_MLP, PriorCVAE

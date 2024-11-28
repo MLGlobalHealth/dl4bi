@@ -49,8 +49,7 @@ def main(cfg: DictConfig):
     map_data = get_raw_map_data(cfg.data.name)
     s, _, _ = process_map(cfg.data)
     model = instantiate(cfg.model)
-    bias = jnp.repeat(l2_dist(s, s)[None, ...], cfg.batch_size, axis=0)
-    vae_kwargs = {"bias": bias}
+    vae_kwargs = {"bias": l2_dist(s, s)}
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -76,7 +75,9 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         callbacks=[
             Callback(
-                log_vae_map_plots(map_data, s, cond_names, cfg.model.kwargs.z_dim),
+                log_vae_map_plots(
+                    map_data, s, cond_names, cfg.model.kwargs.z_dim, **vae_kwargs
+                ),
                 cfg.plot_interval,
             )
         ],
@@ -91,7 +92,7 @@ def main(cfg: DictConfig):
         is_test=True,
     )
     log_information_completion_score(
-        rng, test_loader, state, model, cfg.model.kwargs.z_dim
+        rng, test_loader, state, cfg.model.kwargs.z_dim, vae_kwargs
     )
     data_gen_name = cfg.kernel.kwargs.kernel.func if is_gp else cfg.graph_model.name
     path = Path(
@@ -148,7 +149,6 @@ def train(
     valid_interval: int = 25000,
     log_every_n: int = 100,
     callbacks: list[Callback] = [],
-    state: Optional[TrainState] = None,
 ):
     rng_params, rng_extra, rng_train = random.split(rng, 3)
     f, z, conditionals = next(loader)
@@ -156,14 +156,11 @@ def train(
 
     x = z if is_decoder_only else f
     train_step = mse_train_step if is_decoder_only else elbo_train_step
-    kwargs = model.init(rngs, x, conditionals)
+    kwargs = model.init(rngs, x, conditionals, **vae_kwargs)
     params = kwargs.pop("params")
-    param_count = nn.tabulate(model, rngs)(x, conditionals)
+    param_count = nn.tabulate(model, rngs)(x, conditionals, **vae_kwargs)
     state = TrainState.create(
-        apply_fn=model.apply,
-        params=params if state is None else state.params,
-        kwargs=kwargs if state is None else state.kwargs,
-        tx=optimizer,
+        apply_fn=model.apply, params=params, kwargs=kwargs, tx=optimizer
     )
     print(param_count)
 
@@ -188,7 +185,7 @@ def train(
             )
         for cbk in callbacks:
             if (i + 1) % cbk.interval == 0:
-                cbk.fn(i, rng_step, state, loader, model)
+                cbk.fn(i, rng_step, state, loader)
     return state
 
 
@@ -233,23 +230,24 @@ def log_information_completion_score(
     rng,
     loader,
     state,
-    model,
     z_dim,
+    vae_kwargs,
     num_samples=10,
     num_realizations=1000,
     num_observed=150,
 ):
     unobserved_mse = np.zeros((num_samples,))
-    rng_z, rng_obs, rng_f = random.split(rng, 3)
+    rng_z, rng_obs, rng_f, rng_dr, rng_ext = random.split(rng, 5)
     f, _, conditionals = next(loader)
     f = random.choice(rng_f, f, (num_samples,), replace=False)
-    z = jax.random.normal(rng_z, shape=(num_realizations, z_dim))
-    batched_conditionals = jnp.repeat(
-        jnp.stack(conditionals).reshape(1, -1), repeats=z.shape[0], axis=0
-    )
-    f_hat = model.decoder.apply(
-        {"params": state.params["decoder"], **state.kwargs},
-        jnp.hstack([z, batched_conditionals]),
+    z = jax.random.normal(rng_z, shape=(num_realizations, z_dim, 1))
+    f_hat, _, _ = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        z,
+        conditionals,
+        decode_only=True,
+        **vae_kwargs,
+        rngs={"dropout": rng_dr, "extra": rng_ext},
     )
     obs_idxs = random.choice(rng_obs, f.shape[1], shape=(num_samples, num_observed))
     for i in range(num_samples):

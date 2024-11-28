@@ -79,9 +79,8 @@ def main(cfg: DictConfig):
         inference_model = build_baseline_inference_model(s, obs_mask, kernel, priors)
     else:
         state, _ = load_ckpt((results_dir / model_name).with_suffix(".ckpt"))
-        vae_model = (state, instantiate(cfg.model))
         inference_model = build_surrogate_inference_model(
-            vae_model, obs_mask, kernel, cfg.model.kwargs.z_dim, priors
+            state, obs_mask, kernel, cfg.model.kwargs.z_dim, priors
         )
 
     f = f_batch[0].squeeze()
@@ -174,14 +173,18 @@ def build_baseline_inference_model(s, obs_mask, kernel, priors, jitter=1e-4):
     return gp_model
 
 
-def build_surrogate_inference_model(model, obs_mask, kernel, z_dim, priors):
-    state, module = model
-
+def build_surrogate_inference_model(
+    state, obs_mask, kernel, z_dim, priors, **vae_kwargs
+):
     def z_to_y_hat(z, conditionals):
-        return module.decoder.apply(
-            {"params": state.params["decoder"], **state.kwargs},
-            jnp.hstack([z, jnp.array(conditionals)]),
+        f_hat, _, _ = state.apply_fn(
+            {"params": state.params, **state.kwargs},
+            z[..., None],
+            conditionals,
+            decode_only=True,
+            **vae_kwargs,
         )
+        return f_hat
 
     z_dist = dist.MultivariateNormal(jnp.zeros(z_dim), jnp.eye(z_dim))
 

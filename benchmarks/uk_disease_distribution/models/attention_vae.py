@@ -1,34 +1,31 @@
 #!/usr/bin/env python3
 import jax.numpy as jnp
 from flax import linen as nn
-from jax import Array, random, vmap
-from sps.kernels import l2_dist
+from jax import Array, random
 
 from dl4bi.core import MLP, TransformerEncoder, TransformerEncoderBlock
 
 
 class AttentionVAE(nn.Module):
-    feat_enc: nn.Module = MLP([64] * 2)
-    blk: nn.Module = TransformerEncoder(
-        num_blks=3,
-        blk=TransformerEncoderBlock(
-            ffn=MLP([64, 64], nn.relu),
-        ),
-    )
-    head_z_mu: nn.Module = MLP([64, 1], nn.relu)
-    head_z_log_var: nn.Module = MLP([64, 1], nn.relu)
+    feat_enc: nn.Module
+    blk: nn.Module
+    head_z_mu: nn.Module
+    head_z_log_var: nn.Module
     condition_bias: bool = True
 
     @nn.compact
     def __call__(self, f, conditionals, **kwargs):
         if self.condition_bias and kwargs.get("bias", None) is None:
             raise ValueError("Must specify a bias to condition on!")
+        conditionals = jnp.concatenate(conditionals)
         if self.condition_bias:
             bias = kwargs["bias"]
             broad_cond = jnp.broadcast_to(
                 conditionals, bias.shape + (len(conditionals),)
             )
-            kwargs["bias"] = MLP([1])(jnp.concatenate([broad_cond, bias], axis=-1))
+            kwargs["bias"] = MLP([1])(
+                jnp.concatenate([broad_cond, bias[..., None]], axis=-1)
+            ).squeeze()
         else:
             broad_cond = jnp.broadcast_to(conditionals, f.shape + (len(conditionals),))
             f = jnp.concatenate([f, broad_cond], axis=-1)
@@ -60,12 +57,14 @@ class TransformerVAE(nn.Module):
         to calculate losses involving KL divergence.
     """
 
-    z_dim: int = 363
-    condition_bias: bool = True
-    bias_attention: bool = True
+    z_dim: int
+    encoder: nn.Module
+    decoder: nn.Module
 
     @nn.compact
-    def __call__(self, f: Array, conditionals: list[Array], **kwargs):
+    def __call__(
+        self, f: Array, conditionals: list[Array], decode_only: bool = False, **kwargs
+    ):
         r"""Run module forward.
 
         Args:
@@ -79,10 +78,11 @@ class TransformerVAE(nn.Module):
             along with $\mu$ and $\log(\sigma^2)$, which are often used
             to calculate losses involving KL divergence.
         """
-        encoder: nn.Module = AttentionVAE(condition_bias=self.condition_bias)
-        decoder: nn.Module = AttentionVAE(condition_bias=self.condition_bias)
-        z_mu, z_std = encoder(f, conditionals, **kwargs)
-        eps = random.normal(self.make_rng("extra"), z_std.shape)
-        z = z_mu + z_std * eps
-        f_hat, _ = decoder(z, conditionals, **kwargs)
+        if decode_only:
+            z, z_mu, z_std = f, None, None
+        else:
+            z_mu, z_std = self.encoder(f, conditionals, **kwargs)
+            eps = random.normal(self.make_rng("extra"), z_std.shape)
+            z = z_mu + z_std * eps
+        f_hat, _ = self.decoder(z, conditionals, **kwargs)
         return f_hat.reshape(f.shape), z_mu, z_std
