@@ -13,6 +13,7 @@ import optax
 from graph_model_utils import instantiate
 from jax import random
 from map_utils import get_raw_map_data, process_map
+from models import PriorCVAE
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig, OmegaConf
 from orbax.checkpoint import PyTreeCheckpointer
@@ -25,7 +26,6 @@ from plot_utils import (
     plot_trace,
     plot_violin,
 )
-from prior_cvae import PriorCVAE
 from sps.kernels import matern_1_2, matern_3_2, matern_5_2, periodic, rbf
 from sps.priors import Prior
 from vae import gp_dataloaders

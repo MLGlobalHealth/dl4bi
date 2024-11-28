@@ -32,7 +32,7 @@ def elbo_train_step(
     def elbo_loss(params):
         f, _, conditionals = batch
         f_hat, z_mu, z_std = state.apply_fn(
-            {"params": params}, f, conditionals, rngs={"extra": rng}
+            {"params": params}, f, conditionals, **kwargs, rngs={"extra": rng}
         )
         kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
         logp = norm.logpdf(f, f_hat, 1.0).mean()
@@ -62,7 +62,7 @@ def mse_train_step(
 
     def mse_loss(params):
         f, z, conditionals = batch
-        f_hat = state.apply_fn({"params": params}, z, conditionals)
+        f_hat = state.apply_fn({"params": params}, z, conditionals, **kwargs)
         return optax.squared_error(f_hat, f.squeeze()).mean()
 
     loss, grads = value_and_grad(mse_loss)(state.params)
@@ -90,7 +90,7 @@ def prior_cvae_train_step(
     def elbo_loss(params):
         f, _, conditionals = batch
         f_hat, z_mu, z_std = state.apply_fn(
-            {"params": params}, f, conditionals, rngs={"extra": rng}
+            {"params": params}, f, conditionals, **kwargs, rngs={"extra": rng}
         )
         kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
         mse_loss = optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()

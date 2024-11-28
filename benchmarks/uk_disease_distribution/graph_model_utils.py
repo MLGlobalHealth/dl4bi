@@ -8,8 +8,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import random
+from models import *  # noqa: F403
 from omegaconf import DictConfig, OmegaConf
-from prior_cvae import PriorCVAE
 from scipy.spatial import distance_matrix
 from sps.gp import GP
 from sps.kernels import matern_3_2, periodic, rbf

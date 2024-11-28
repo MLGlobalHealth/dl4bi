@@ -15,6 +15,7 @@ from jax.scipy.stats import norm
 from map_utils import get_raw_map_data, process_map
 from omegaconf import DictConfig, OmegaConf
 from plot_utils import log_vae_map_plots
+from sps.kernels import l2_dist
 from tqdm import tqdm
 from vae_train_utils import elbo_train_step, mse_train_step
 
@@ -48,6 +49,8 @@ def main(cfg: DictConfig):
     map_data = get_raw_map_data(cfg.data.name)
     s, _, _ = process_map(cfg.data)
     model = instantiate(cfg.model)
+    bias = jnp.repeat(l2_dist(s, s)[None, ...], cfg.batch_size, axis=0)
+    vae_kwargs = {"bias": bias}
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -67,6 +70,7 @@ def main(cfg: DictConfig):
         optimizer,
         isinstance(model, (DeepChol,)),
         train_loader,
+        vae_kwargs,
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
@@ -82,6 +86,7 @@ def main(cfg: DictConfig):
         state,
         isinstance(model, (DeepChol,)),
         test_loader,
+        vae_kwargs,
         cfg.valid_num_steps,
         is_test=True,
     )
@@ -137,6 +142,7 @@ def train(
     optimizer: optax.GradientTransformation,
     is_decoder_only: bool,
     loader: Generator,
+    vae_kwargs: dict,
     train_num_steps: int = 100000,
     valid_num_steps: int = 25000,
     valid_interval: int = 25000,
@@ -165,7 +171,7 @@ def train(
     for i in (pbar := tqdm(range(train_num_steps), unit="batch", dynamic_ncols=True)):
         rng_step, rng_train = random.split(rng_train)
         batch = next(loader)
-        state, losses[i] = train_step(rng_step, state, batch)
+        state, losses[i] = train_step(rng_step, state, batch, **vae_kwargs)
         if (i + 1) % log_every_n == 0:
             avg = jnp.mean(losses[i - log_every_n : i])
             pbar.set_postfix(loss=f"{avg:.3f}")
@@ -177,6 +183,7 @@ def train(
                 state,
                 is_decoder_only,
                 loader,
+                vae_kwargs,
                 valid_num_steps,
             )
         for cbk in callbacks:
@@ -190,6 +197,7 @@ def validate(
     state: train_utils.TrainState,
     is_decoder_only: bool,
     loader: Generator,
+    vae_kwargs: dict,
     valid_num_steps: int = 5000,
     is_test: bool = False,
 ):
@@ -202,13 +210,15 @@ def validate(
         params = {"params": state.params, **state.kwargs}
         rngs = {"extra": rng_extra}
         if is_decoder_only:
-            f_hat = jit(state.apply_fn)(params, z, conditionals)
+            f_hat = jit(state.apply_fn)(params, z, conditionals, **vae_kwargs)
             losses[i] = optax.squared_error(f_hat, f.squeeze()).mean()
             mse_score[i] = losses[i]
         else:
             # TODO (jhonathan): combine with train step
             # NOTE: ELBO, assumes normal gaussian
-            f_hat, z_mu, z_std = jit(state.apply_fn)(params, f, conditionals, rngs=rngs)
+            f_hat, z_mu, z_std = jit(state.apply_fn)(
+                params, f, conditionals, **vae_kwargs, rngs=rngs
+            )
             kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
             logp = norm.logpdf(f, f_hat, 1.0).mean()
             losses[i] = -logp + kl_div.mean()

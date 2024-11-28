@@ -29,7 +29,7 @@ class PriorCVAE(nn.Module):
     z_dim: int
 
     @nn.compact
-    def __call__(self, f: Array, conditionals: list[Array]):
+    def __call__(self, f: Array, conditionals: list[Array], **kwargs):
         r"""Run module forward.
 
         Args:
