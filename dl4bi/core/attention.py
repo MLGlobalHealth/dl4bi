@@ -13,9 +13,8 @@ from jax.lax import scan
 from jax.nn import dot_product_attention
 from sps.kernels import l2_dist, outer_subtract
 
-from dl4bi.core.embed import RBFRandomFourierFeatures
-
 from .bias import rbf_basis
+from .embed import RBFRandomFourierFeatures
 from .mlp import MLP
 from .utils import mask_attn, mask_from_valid_lens
 
