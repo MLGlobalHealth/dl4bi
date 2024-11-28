@@ -15,6 +15,15 @@ kwargs:
       num_heads: 4
       attn:
         cls: DistanceBiasedFastAttention
+        kwargs:
+          num_ortho_features: 128
+          s_rbf_rff:
+            cls: RBFRandomFourierFeatures
+            kwargs:
+              embed_dim: 128
+        # cls: FastAttention
+        # kwargs:
+        #   num_ortho_features: 128
   ffn:
     cls: MLP
     kwargs:

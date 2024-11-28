@@ -231,7 +231,6 @@ class FastAttention(nn.Module):
         return drop(ctx), None
 
 
-# TODO(danj): Add different RBF RFF projections per head
 class DistanceBiasedFastAttention(nn.Module):
     r"""[FAVOR+](https://arxiv.org/abs/2009.14794) implementation, Appendix B.
 
@@ -241,7 +240,7 @@ class DistanceBiasedFastAttention(nn.Module):
     p_dropout: float = 0.0
     build_phi: Callable = build_stable_positive_softmax_phi
     num_ortho_features: int = 64
-    s_rbf_rff: nn.Module = RBFRandomFourierFeatures(48)  # 48 + 16 / head = 64 / head
+    s_rbf_rff: nn.Module = RBFRandomFourierFeatures(64)
 
     @nn.compact
     def __call__(
@@ -283,10 +282,7 @@ class DistanceBiasedFastAttention(nn.Module):
                 D_QK_H + S_RFF,
             ),
         )
-        a = self.param("a", init.constant(1), (1, 1, H, 1))
         qs_s, ks_s = self.s_rbf_rff(kwargs["qs_s"]), self.s_rbf_rff(kwargs["ks_s"])
-        qs_s, ks_s = map(lambda x: repeat(x, "B L D -> B L H D", H=H), (qs_s, ks_s))
-        qs_s *= a
         normalizer = 1 / jnp.pow(D_QK_H, 0.25)
         qs, ks = qs * normalizer, ks * normalizer
         qs, ks, vs, qs_s, ks_s = map(

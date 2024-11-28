@@ -2,7 +2,9 @@ from collections.abc import Callable
 
 import flax.linen as nn
 import jax
+import jax.nn.initializers as init
 import jax.numpy as jnp
+from einops import repeat
 from jax import jit, random, vmap
 from jax.tree_util import Partial
 
@@ -122,8 +124,11 @@ def _pe_gaussian_fourier(B: jax.Array, std: float):
     )
 
 
+# TODO(danj): add a learnable lengthscale per head
 class RBFRandomFourierFeatures(nn.Module):
-    """Generate Random Fourier Features in a bounded domain.
+    r"""Generate Random Fourier Features with learnable lengthscale and weight.
+
+    $\text{RFF}(x)\approx a * \text{RBF}(d^2 / ls^2)$
 
     Args:
         embed_dim: Embedding dimension.
@@ -133,10 +138,13 @@ class RBFRandomFourierFeatures(nn.Module):
     """
 
     embed_dim: int = 256
+    num_heads: int = 4
 
     @nn.compact
     def __call__(self, s: jax.Array):
-        ls = self.param("ls", nn.initializers.constant(1.0), (1,))
+        H = self.num_heads
+        a = self.param("a", init.constant(1.0), (1, 1, H, 1))
+        ls = self.param("ls", init.constant(1.0), (1, 1, H, 1))
         omega = self.variable(
             "projections",
             "omega",
@@ -154,10 +162,12 @@ class RBFRandomFourierFeatures(nn.Module):
                 shape=(self.embed_dim // 2,),
             ),
         )
-        proj = jnp.einsum("B L S, S D -> B L D", s, omega.value) / ls
-        return jnp.concatenate(
+        proj = jnp.einsum("B L S, S E -> B L E", s, omega.value)
+        proj = repeat(proj, "B L E -> B L H E", H=H) / ls
+        rffs = jnp.concatenate(
             [jnp.cos(proj + b.value), jnp.sin(proj + b.value)], axis=-1
         ) / jnp.sqrt(self.embed_dim // 2)
+        return a * rffs
 
 
 def _gen_omega(rng: jax.Array, embed_dim: int, s_dim: int):

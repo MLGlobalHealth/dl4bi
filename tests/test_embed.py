@@ -9,14 +9,15 @@ from dl4bi.core import RBFRandomFourierFeatures
 
 def test_rbf_random_fourier_features():
     rng = random.key(55)
-    B, L, E = 3, 103, 48
+    B, L, H, E = 3, 103, 4, 48
     s = build_grid([{"start": -2.5, "stop": 2.5, "num": L}])
     s = jnp.repeat(s[None, ...], B, axis=0)
-    rbf_rff = RBFRandomFourierFeatures(E)
+    rbf_rff = RBFRandomFourierFeatures(E, H)
     (s_rff), _ = rbf_rff.init_with_output(rng, s)
-    assert s_rff.shape == (B, L, E), "Incorrect dimensions for RBF RFF embedding!"
+    assert s_rff.shape == (B, L, H, E), "Incorrect dimensions for RBF RFF embedding!"
     rbf_dist = rbf(s[0], s[0], var=1.0, ls=1.0)
-    rff_dist = jnp.einsum("A D, B D -> A B", s_rff[0], s_rff[0])
+    s_rff_0 = s_rff[0, :, 0, :]
+    rff_dist = jnp.einsum("A D, B D -> A B", s_rff_0, s_rff_0)
     abs_error = jnp.abs(rbf_dist - rff_dist)
     assert jnp.max(abs_error) < 0.3, "Large max error for RBF distance!"
     # # plot actual dist
