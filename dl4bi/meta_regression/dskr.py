@@ -6,6 +6,7 @@ import jax
 import jax.nn.initializers as init
 import jax.numpy as jnp
 from einops import repeat
+from jraph import GraphsTuple
 
 from dl4bi.core.attention import MultiHeadAttention
 
@@ -14,6 +15,61 @@ from ..core import (
     KRBlock,
     SpatioTemporalMLPAttention,
 )
+
+# Embed x, s, t
+# Create a vnode
+# Build graph
+# Convolve
+#  qs-ks
+#  ks-ks
+#  vnode-ks
+# prediction head
+#  vnode
+#  qs
+
+
+def k_nearest_graphs(
+    s_ctx: jax.Array,
+    f_ctx: jax.Array,
+    s_test: jax.Array,
+    k: int,
+):
+    qk_receivers = jnp.repeat(s_test, k)
+    qk_senders = k_nearest(s_test, s_ctx, k).flatten()
+    kk_receivers = jnp.repeat(s_ctx, k)
+    kk_senders = k_nearest(s_ctx, s_ctx, k).flatten()
+
+
+# TODO(danj): incorporate time
+def k_nearest(x: jax.Array, y: jax.Array, k: int):
+    d = jnp.sum((x[..., None, :] - y[:, None, ...]) ** 2, axis=-1)
+    return jnp.argsort(d, axis=-1)[..., :k]
+
+
+class GDSKR(nn.Module):
+    """GDSKR
+
+    .. warning::
+        `min(valid_lens_ctx)` and `min(valid_lens_test)` must both
+        be greater than `k_nearest`.
+    """
+
+    k_nearest: int = 3
+
+    @nn.compact
+    def __call__(
+        self,
+        s_ctx: jax.Array,  # [B, L_ctx, D_S]
+        f_ctx: jax.Array,  # [B, L_ctx, D_F]
+        s_test: jax.Array,  # [B, L_test, D_S]
+        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
+        valid_lens_test: Optional[jax.Array] = None,  # [B]
+        training: bool = False,
+        **kwargs,
+    ):
+        B = s_ctx.shape[0]
+        for _ in range(B):
+            pass
 
 
 class DSKR(nn.Module):
