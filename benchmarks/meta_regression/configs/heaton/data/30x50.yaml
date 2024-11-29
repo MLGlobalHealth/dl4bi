@@ -1,17 +1,18 @@
 name: 30x50 # HxW, specified tensor dims format
 s: # each image i s ~1% the size of the original 300x500
-  - start: -1.5  # y = Lat
-    stop: 1.5
+  - start: -1.386  # y = Lat
+    stop: 1.386
     num: 30
-  - start: -2.5 # x = Lon
-    stop: 2.5
+  - start: -2.314 # x = Lon
+    stop: 2.314
     num: 50
 num_ctx:
   min: 750 # ~50%
   max: 1125 # ~75%
-mask_threshold: 1.0 # P(X > 1.0) =~ 15% for N(0, 1)
-min_pct_valid: 0.5
 batch_size: 16
 obs_noise: 0.05
+mask_pct: 0.4 # on average
+min_masked_pct: 0.05
+max_masked_pct: 0.75
 min_axes_pct: 0.05 # used for subsampling grid
 max_axes_pct: 1.0

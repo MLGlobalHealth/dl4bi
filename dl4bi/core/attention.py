@@ -500,9 +500,9 @@ class TISABiasedScanAttention(nn.Module):
         memory usage.
 
     Args:
-        num_basis: Number of basis functions for TISA bias.
         qs_chunk_size: Number of queries to process in each chunk of scan.
         ks_chunk_size: Number of keys to process in each chunk of scan.
+        num_basis: Number of basis functions for TISA bias.
 
     Returns:
         A `ScanTISABiasedAttention` module.
@@ -1141,7 +1141,6 @@ class MultiKernelAttention(nn.Module):
 class SpatioTemporalMLPAttention(nn.Module):
     proj_vs: nn.Module = MLP([64], nn.gelu)
     proj_attn: nn.Module = MLP([256, 256, 1], nn.gelu)
-    proj_gate: nn.Module = MLP([256, 64], nn.gelu)
     norm: nn.Module = nn.LayerNorm()
 
     @nn.compact
@@ -1188,8 +1187,4 @@ class SpatioTemporalMLPAttention(nn.Module):
         attn = jnp.where(mask, attn, 0)
         # TODO(danj): use some sort of softmax normalization,
         # even though this would prevent negative attn values?
-        ctx = self.norm(attn @ self.proj_vs(vs))  # [B, Q, D]
-        gate = self.proj_gate(ctx)  # [B, Q, D]
-        # TODO(danj): is it weird to collapse spatiotemporal dimensions like this?
-        vnode = jnp.max(gate * ctx, axis=1, where=v_mask, initial=-float("inf"))
-        return ctx, self.norm.copy()(vnode)
+        return self.norm(attn @ self.proj_vs(vs))  # [B, Q, D]

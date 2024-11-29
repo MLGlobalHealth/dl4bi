@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import optax
 import pandas as pd
 import wandb
-from jax import jit, random, vmap
+from jax import jit, lax, random, vmap
 from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
@@ -90,7 +90,7 @@ def main(cfg: DictConfig):
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
     # NOTE: uncomment to run actual test
-    # log_test_results(rng_test, state, test_dataloader)
+    log_test_results(rng_test, state, test_dataloader)
 
 
 def build_dataloaders(
@@ -126,20 +126,28 @@ def build_dataloaders(
         """Generates batches of random subgrids."""
         gp = instantiate(kernel)
         valid_lens_test = jnp.repeat(L_train, B)
-        pct_valid = jit(lambda f: (f < data.mask_threshold).sum(axis=(1, 2)) / L_train)
+        mask_threshold = norm.ppf(
+            1 - data.mask_pct,
+            loc=0,
+            scale=kernel.kwargs.var.kwargs.kwargs.mu,
+        )
+        pct_masked = jit(lambda f: (f > mask_threshold).sum(axis=(1, 2)) / L_train)
 
         def gen_batch(rng: jax.Array):
             rng_s, rng_f, rng_eps = random.split(rng, 3)
             s = random_subgrid(rng_s, data.s, data.min_axes_pct, data.max_axes_pct)
             s = s.reshape(-1, D)
             f, *_ = gp.simulate(rng_f, s, mB)  # f: [mB, L_train, 1]
-            # resample any sample in batch that has less than min_pct_valid locations
-            while (pct_valid(f) < data.min_pct_valid).any():
+            # resample when any sample doesn't meet masking criteria
+            while jnp.logical_or(
+                pct_masked(f) < data.min_masked_pct,
+                pct_masked(f) > data.max_masked_pct,
+            ).any():
                 rng_re, rng_f = random.split(rng_f)
                 f, *_ = gp.simulate(rng_re, s, mB)  # f: [mB, L_train, 1]
             # use the next image in the batch to mask the previous
             rot_idx = jnp.arange(1, mB + 1).at[-1].set(0)
-            f_mask = f[rot_idx] > data.mask_threshold
+            f_mask = f[rot_idx] > mask_threshold
             valid_lens_ctx = L_train - jnp.repeat(f_mask.sum(axis=(1, 2)), N_r)
             f_masked = f.at[f_mask].set(jnp.nan)
             sort_idx = vmap(jnp.argsort)(f_masked.squeeze())  # nans to end
