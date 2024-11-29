@@ -6,7 +6,10 @@ import jax
 import jax.nn.initializers as init
 import jax.numpy as jnp
 from einops import repeat
+from jax import jit
+from jax.tree_util import Partial
 from jraph import GraphsTuple
+from sps.kernels import l2_dist_sq
 
 from dl4bi.core.attention import MultiHeadAttention
 
@@ -28,22 +31,8 @@ from ..core import (
 #  qs
 
 
-def k_nearest_graphs(
-    s_ctx: jax.Array,
-    f_ctx: jax.Array,
-    s_test: jax.Array,
-    k: int,
-):
-    qk_receivers = jnp.repeat(s_test, k)
-    qk_senders = k_nearest(s_test, s_ctx, k).flatten()
-    kk_receivers = jnp.repeat(s_ctx, k)
-    kk_senders = k_nearest(s_ctx, s_ctx, k).flatten()
-
-
-# TODO(danj): incorporate time
-def k_nearest(x: jax.Array, y: jax.Array, k: int):
-    d = jnp.sum((x[..., None, :] - y[:, None, ...]) ** 2, axis=-1)
-    return jnp.argsort(d, axis=-1)[..., :k]
+def k_nearest(dist: Callable, x: jax.Array, y: jax.Array, k: int):
+    return jnp.argsort(dist(x, y), axis=-1)[:, :k]
 
 
 class GDSKR(nn.Module):
@@ -51,10 +40,11 @@ class GDSKR(nn.Module):
 
     .. warning::
         `min(valid_lens_ctx)` and `min(valid_lens_test)` must both
-        be greater than `k_nearest`.
+        be greater than `k`.
     """
 
-    k_nearest: int = 3
+    k: int = 10
+    dist: Callable = l2_dist_sq  # TODO(danj): develop spatio-temporal dist
 
     @nn.compact
     def __call__(
@@ -67,9 +57,20 @@ class GDSKR(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        B = s_ctx.shape[0]
-        for _ in range(B):
-            pass
+        (B, Q), K = s_test.shape[:-1], s_ctx.shape[1]
+        if valid_lens_ctx is None:
+            valid_lens_ctx = jnp.repeat(K, B)
+        if valid_lens_test is None:
+            valid_lens_test = jnp.repeat(Q, B)
+        receivers = jit(lambda x: jnp.repeat(x, self.k))
+        senders = jit(lambda x, y: k_nearest(self.dist, x, y, self.k).flatten())
+        graphs = []
+        for b in range(B):
+            v_c, v_t = valid_lens_ctx[b], valid_lens_test[b]
+            s_c, s_t = s_ctx[b, :v_c], s_test[b, :v_t]
+            qk_rx, qk_tx = receivers(s_t), senders(s_t, s_c)
+            kk_rx, kk_tx = receivers(s_c), senders(s_c, s_c)
+            # add features
 
 
 class DSKR(nn.Module):
