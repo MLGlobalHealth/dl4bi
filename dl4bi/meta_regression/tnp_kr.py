@@ -9,8 +9,8 @@ from sps.kernels import l2_dist_sq
 
 from ..core import (
     MLP,
-    Attention,
     DistanceBias,
+    FusedAttention,
     KRBlock,
     MultiHeadAttention,
     TISABiasedScanAttention,
@@ -52,7 +52,7 @@ class TNPKR(nn.Module):
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
     dist: Optional[Callable] = l2_dist_sq
     bias: Optional[nn.Module] = DistanceBias()
-    attn: nn.Module = MultiHeadAttention(Attention())
+    attn: nn.Module = MultiHeadAttention(FusedAttention())
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64], nn.gelu)
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
@@ -98,6 +98,8 @@ class TNPKR(nn.Module):
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
+        qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx}
+        kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx}
         if self.dist is not None:
             vdist = vmap(self.dist)
             d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
@@ -107,8 +109,8 @@ class TNPKR(nn.Module):
                 norm = self.norm.copy()
                 if self.bias is not None:
                     bias = self.bias.copy()
-                    qk_kwargs = {"bias": bias(d_qk)}
-                    kk_kwargs = {"bias": bias(d_kk)}
+                    qk_kwargs["bias"] = bias(d_qk)
+                    kk_kwargs["bias"] = bias(d_kk)
                 blk = KRBlock(attn, norm, ffn)
                 qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)
