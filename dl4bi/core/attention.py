@@ -981,11 +981,9 @@ class MultiHeadAttention(nn.Module):
         Returns:
             `ctx` and `attn`, the updated values and attention weights.
         """
+        (B, Q, D_V), H = vs.shape, self.num_heads
         qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
-        (B, Q, D_QK), (K, D_V), H = qs.shape, vs.shape[-2:], self.num_heads
-        qs = qs.reshape(B, Q, H, D_QK // H)
-        ks = ks.reshape(B, K, H, D_QK // H)
-        vs = vs.reshape(B, K, H, D_V // H)
+        qs, ks, vs = map(lambda x: rearrange(x, "B L D -> B L H E", H=H), (qs, ks, vs))
         ctx, attn = self.attn(qs, ks, vs, valid_lens, training, **kwargs)
         return self.proj_out(ctx.reshape(B, Q, D_V)), attn
 
@@ -1142,6 +1140,7 @@ class SpatioTemporalMLPAttention(nn.Module):
     proj_vs: nn.Module = MLP([64], nn.gelu)
     proj_attn: nn.Module = MLP([256, 256, 1], nn.gelu)
     norm: nn.Module = nn.LayerNorm()
+    max_dist: float = float("inf")
 
     @nn.compact
     def __call__(
@@ -1164,17 +1163,19 @@ class SpatioTemporalMLPAttention(nn.Module):
         if vnode is not None:
             vnode = repeat(vnode, "B D -> B Q K D", Q=Q, K=K)
             m = stack(m, vnode)
+        # mask
+        if valid_lens is None:
+            valid_lens = jnp.repeat(K, B)
+        mask = mask_from_valid_lens(K, valid_lens)  # [B, Q, 1]
         # spatial features
         qs_s, ks_s = kwargs.get("qs_s"), kwargs.get("ks_s")
         if qs_s is not None and ks_s is not None:
             s_diff = qs_s[..., None, :] - ks_s[:, None, ...]
             s_dist = jnp.linalg.norm(s_diff, axis=-1, keepdims=True)
             s_dist_sq = jnp.square(s_dist)
+            s_mask = (s_dist < self.max_dist)[..., 0]  # [B, Q, K]
+            mask = jnp.logical_and(mask, s_mask)
             m = stack(m, s_diff, s_dist, s_dist_sq)
-        # mask
-        if valid_lens is None:
-            valid_lens = jnp.repeat(K, B)
-        mask = v_mask = mask_from_valid_lens(K, valid_lens)  # [B, Q, 1]
         # temporal features
         qs_t, ks_t = kwargs.get("qs_t"), kwargs.get("ks_t")
         if qs_t is not None and ks_t is not None:

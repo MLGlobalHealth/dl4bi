@@ -54,7 +54,7 @@ def test_multihead_attention_impl():
         assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
 
 
-def test_spatiotemporal_mlp_impl():
+def test_spatiotemporal_mlp_attention_impl():
     B, L, D, S, T = 4, 7, 64, 2, 1
     key = random.key(42)
     rng_qkv, rng_s, rng_t, rng_init = random.split(key, 4)
@@ -63,7 +63,7 @@ def test_spatiotemporal_mlp_impl():
     qs_t, ks_t = random.normal(rng_t, (2, B, L, T))
     valid_lens = jnp.array([2, 4, 6, 3])
     for vnode in [None, jnp.ones((B, D))]:
-        (ctx, vnode), _ = SpatioTemporalMLPAttention().init_with_output(
+        ctx, _ = SpatioTemporalMLPAttention().init_with_output(
             rng_init,
             qs,
             ks,
@@ -76,7 +76,6 @@ def test_spatiotemporal_mlp_impl():
             vnode=vnode,
         )
         assert ctx.shape == (B, L, D), "Incorrect context output shape!"
-        assert vnode.shape == (B, D), "Incorrect vnode output shape!"
 
 
 def test_fast_attention_impl():
