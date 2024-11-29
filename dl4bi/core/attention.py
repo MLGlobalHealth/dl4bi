@@ -273,15 +273,12 @@ class DistanceBiasedFastAttention(nn.Module):
         S_RFF = self.s_rbf_rff.embed_dim
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        gen_qk_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_QK_H)
         qk_proj = self.variable(
-            "projections",
-            "qk_orf",
-            lambda: gaussian_orf(
-                self.make_rng("params"),
-                self.num_ortho_features,
-                D_QK_H + S_RFF,
-            ),
+            "projections", "qk_orf", lambda: gen_qk_proj(self.make_rng("params"))
         )
+        if redraw_random_features:
+            qk_proj.value = gen_qk_proj(self.make_rng("rng_extra"))
         qs_s, ks_s = self.s_rbf_rff(kwargs["qs_s"]), self.s_rbf_rff(kwargs["ks_s"])
         normalizer = 1 / jnp.pow(D_QK_H, 0.25)
         qs, ks = qs * normalizer, ks * normalizer
