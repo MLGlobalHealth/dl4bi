@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
 
-from dl4bi.core import MLP, TransformerEncoder, TransformerEncoderBlock
+from dl4bi.core import MLP
 
 
 class AttentionVAE(nn.Module):
@@ -27,7 +27,9 @@ class AttentionVAE(nn.Module):
                 jnp.concatenate([broad_cond, bias[..., None]], axis=-1)
             ).squeeze()
         else:
-            broad_cond = jnp.broadcast_to(conditionals, f.shape + (len(conditionals),))
+            broad_cond = jnp.broadcast_to(
+                conditionals, f.shape[:-1] + (len(conditionals),)
+            )
             f = jnp.concatenate([f, broad_cond], axis=-1)
         f = self.feat_enc(f)
         z = self.blk(f, None, False, **kwargs)
