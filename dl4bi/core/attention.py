@@ -1138,8 +1138,7 @@ class MultiKernelAttention(nn.Module):
 # TODO(danj): implement memory efficient version
 class SpatioTemporalMLPAttention(nn.Module):
     proj_vs: nn.Module = MLP([64], nn.gelu)
-    proj_attn: nn.Module = MLP([256, 64, 1], nn.gelu)
-    norm: nn.Module = nn.LayerNorm()
+    proj_scores: nn.Module = MLP([256, 64, 1], nn.gelu)
     max_dist: float = float("inf")
 
     @nn.compact
@@ -1166,25 +1165,26 @@ class SpatioTemporalMLPAttention(nn.Module):
         # mask
         if valid_lens is None:
             valid_lens = jnp.repeat(K, B)
-        mask = mask_from_valid_lens(K, valid_lens)  # [B, Q, 1]
+        mask = mask_from_valid_lens(K, valid_lens)  # [B, K, 1]
+        mask = repeat(mask, "B K 1 -> B Q K", Q=Q)
         # spatial features
         qs_s, ks_s = kwargs.get("qs_s"), kwargs.get("ks_s")
         if qs_s is not None and ks_s is not None:
             s_diff = qs_s[..., None, :] - ks_s[:, None, ...]
             s_dist = jnp.linalg.norm(s_diff, axis=-1, keepdims=True)
             s_dist_sq = jnp.square(s_dist)
-            s_mask = (s_dist < self.max_dist)[..., 0]  # [B, Q, K]
+            s_mask = (s_dist <= self.max_dist)[..., 0]  # [B, Q, K]
             mask = jnp.logical_and(mask, s_mask)
             m = stack(m, s_diff, s_dist, s_dist_sq)
         # temporal features
         qs_t, ks_t = kwargs.get("qs_t"), kwargs.get("ks_t")
         if qs_t is not None and ks_t is not None:
             t_diff = qs_t[..., None, :] - ks_t[:, None, ...]
-            t_mask = (t_diff > 0)[..., 0]  # [B, Q, K]
+            t_mask = (t_diff >= 0)[..., 0]  # [B, Q, K]
             mask = jnp.logical_and(mask, t_mask)
             m = stack(m, t_diff)
         # TODO(danj): gated instead of scalar attention?
-        scores = self.proj_attn(m)[..., 0]
+        scores = self.proj_scores(m)[..., 0]
         scores = jnp.where(mask, scores, -float("inf"))
         # TODO(danj): replace softmax with post-norm?
         attn = nn.softmax(scores, axis=-1)

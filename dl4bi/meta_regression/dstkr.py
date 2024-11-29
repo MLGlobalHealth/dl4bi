@@ -77,7 +77,7 @@ class DSTKR(nn.Module):
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
-        vnode = self.param("vnode", init.ones(), (kvs.shape[-1],))
+        vnode = self.param("vnode", init.ones, (kvs.shape[-1],))
         vnode = repeat(vnode, "D -> B D", B=qvs.shape[0])
         qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx, "vnode": vnode}
         kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx, "vnode": vnode}
@@ -95,5 +95,4 @@ class DSTKR(nn.Module):
         f_std = jnp.exp(f_log_var / 2)
         f_std = self.min_std + (1 - self.min_std) * f_std
         # TODO(danj): prediction head for vnode
-        f_mu, f_std = 0, 0
         return f_mu, f_std

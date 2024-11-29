@@ -60,10 +60,11 @@ def test_spatiotemporal_mlp_attention_impl():
     rng_qkv, rng_s, rng_t, rng_init = random.split(key, 4)
     qs, ks, vs = random.normal(rng_qkv, (3, B, L, D))
     qs_s, ks_s = random.normal(rng_s, (2, B, L, S))
-    qs_t, ks_t = random.normal(rng_t, (2, B, L, T))
+    ks_t = random.normal(rng_t, (B, L, T))
+    qs_t = ks_t + 1  # queries are temporally later than keys
     valid_lens = jnp.array([2, 4, 6, 3])
     for vnode in [None, jnp.ones((B, D))]:
-        ctx, _ = SpatioTemporalMLPAttention().init_with_output(
+        (ctx, attn), _ = SpatioTemporalMLPAttention().init_with_output(
             rng_init,
             qs,
             ks,
@@ -75,7 +76,9 @@ def test_spatiotemporal_mlp_attention_impl():
             ks_t=ks_t,
             vnode=vnode,
         )
+        assert jnp.isfinite(ctx).all(), "Produced non-finite output!"
         assert ctx.shape == (B, L, D), "Incorrect context output shape!"
+        assert attn.shape == (B, L, L), "Incorrect attention output shape!"
 
 
 def test_fast_attention_impl():
