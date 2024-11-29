@@ -124,7 +124,6 @@ def _pe_gaussian_fourier(B: jax.Array, std: float):
     )
 
 
-# TODO(danj): add a learnable lengthscale per head
 class RBFRandomFourierFeatures(nn.Module):
     r"""Generate Random Fourier Features with learnable lengthscale and weight.
 
