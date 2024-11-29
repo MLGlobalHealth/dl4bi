@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-import pickle
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Generator
 
 import flax.linen as nn
 import hydra
@@ -9,15 +8,22 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from graph_model_utils import bym, car, generate_adjacency_matrix, icar, instantiate
 from jax import jit, random
 from jax.scipy.stats import norm
 from map_utils import get_raw_map_data, process_map
 from omegaconf import DictConfig, OmegaConf
 from plot_utils import log_vae_map_plots
-from sps.kernels import l2_dist
 from tqdm import tqdm
-from vae_train_utils import elbo_train_step, mse_train_step
+from vae_train_utils import (
+    bym,
+    car,
+    elbo_train_step,
+    generate_adjacency_matrix,
+    get_model_kwargs,
+    icar,
+    instantiate,
+    mse_train_step,
+)
 
 import wandb
 from dl4bi.meta_regression.train_utils import (
@@ -26,15 +32,19 @@ from dl4bi.meta_regression.train_utils import (
     cosine_annealing_lr,
     save_ckpt,
 )
-from dl4bi.vae import DeepChol, train_utils
+from dl4bi.vae import train_utils
 
 
 @hydra.main("configs", config_name="default_vae", version_base=None)
 def main(cfg: DictConfig):
     is_gp = cfg.is_gp
+    decoder_only = cfg.model.kwargs.get("decoder_only", False)
     run_name = cfg.get(
         "name",
-        f"VAE_{'GP' if is_gp else cfg.graph_model.name}_{cfg.model.cls}_{cfg.data.sampling_policy}",
+        f"VAE_{'GP' if is_gp else cfg.graph_model.name}_"
+        f"{cfg.model.cls}_{cfg.model.kwargs.decoder.cls}_"
+        f"{'dec_' if decoder_only else ''}"
+        f"{cfg.data.sampling_policy.replace('centroids', '')}",
     )
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
@@ -49,7 +59,9 @@ def main(cfg: DictConfig):
     map_data = get_raw_map_data(cfg.data.name)
     s, _, _ = process_map(cfg.data)
     model = instantiate(cfg.model)
-    vae_kwargs = {"bias": l2_dist(s, s)}
+    vae_kwargs = get_model_kwargs(
+        s, cfg.data.pre_process, map_data, cfg.graph_construction
+    )
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -67,7 +79,7 @@ def main(cfg: DictConfig):
         rng_train,
         model,
         optimizer,
-        isinstance(model, (DeepChol,)),
+        decoder_only,
         train_loader,
         vae_kwargs,
         cfg.train_num_steps,
@@ -76,7 +88,12 @@ def main(cfg: DictConfig):
         callbacks=[
             Callback(
                 log_vae_map_plots(
-                    map_data, s, cond_names, cfg.model.kwargs.z_dim, **vae_kwargs
+                    map_data,
+                    s,
+                    cond_names,
+                    cfg.model.kwargs.z_dim,
+                    decoder_only,
+                    **vae_kwargs,
                 ),
                 cfg.plot_interval,
             )
@@ -85,7 +102,7 @@ def main(cfg: DictConfig):
     validate(
         rng_test,
         state,
-        isinstance(model, (DeepChol,)),
+        decoder_only,
         test_loader,
         vae_kwargs,
         cfg.valid_num_steps,
@@ -207,7 +224,9 @@ def validate(
         params = {"params": state.params, **state.kwargs}
         rngs = {"extra": rng_extra}
         if is_decoder_only:
-            f_hat = jit(state.apply_fn)(params, z, conditionals, **vae_kwargs)
+            f_hat, _, _ = jit(state.apply_fn)(
+                params, z, conditionals, **vae_kwargs, rngs=rngs
+            )
             losses[i] = optax.squared_error(f_hat, f.squeeze()).mean()
             mse_score[i] = losses[i]
         else:

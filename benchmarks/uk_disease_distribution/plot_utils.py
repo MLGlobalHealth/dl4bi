@@ -509,6 +509,7 @@ def log_vae_map_plots(
     s: jax.Array,
     conds_names: list[str],
     z_dim: int,
+    decode_only: bool,
     **kwargs,
 ):
     x_norm_vars, y_norm_vars = get_norm_vars(gdf)
@@ -521,10 +522,10 @@ def log_vae_map_plots(
         num_plots: int = 10,
     ):
         rng_drop, rng_extra, rng_dec, rng_scat = jax.random.split(rng_step, 4)
-        f, _, conditionals = next(loader)
+        f, z, conditionals = next(loader)
         f_hat, _, _ = state.apply_fn(
             {"params": state.params, **state.kwargs},
-            f,
+            z if decode_only else f,
             conditionals,
             **kwargs,
             rngs={"dropout": rng_drop, "extra": rng_extra},

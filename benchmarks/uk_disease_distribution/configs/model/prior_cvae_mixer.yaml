@@ -1,0 +1,27 @@
+cls: PriorCVAE
+kwargs:
+  encoder:
+    cls: Conditional_MLP
+    kwargs:
+      mlp_model:
+        cls: MLPMixer
+        kwargs:
+            num_cls: 363
+            num_blks: 2
+            token_dims: 363
+            channel_dims: 1
+            patch_size: 1
+            conv_dim: 363
+  decoder:
+    cls: Conditional_MLP
+    kwargs:
+      mlp_model:
+        cls: MLPMixer
+        kwargs:
+            num_cls: 363
+            num_blks: 2
+            token_dims: 363
+            channel_dims: 1
+            patch_size: 1
+            conv_dim: 363
+  z_dim: 363

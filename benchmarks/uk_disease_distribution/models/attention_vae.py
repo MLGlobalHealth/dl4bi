@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from typing import Optional
+
 import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
@@ -31,6 +33,11 @@ class AttentionVAE(nn.Module):
                 conditionals, f.shape[:-1] + (len(conditionals),)
             )
             f = jnp.concatenate([f, broad_cond], axis=-1)
+        pos_enc = kwargs.get("pos_enc", None)
+        if pos_enc is not None:
+            # TODO(jhoot): sign flip with training
+            broad_pos_enc = jnp.broadcast_to(pos_enc, (f.shape[0],) + pos_enc.shape)
+            f = jnp.concatenate([f, broad_pos_enc], axis=-1)
         f = self.feat_enc(f)
         z = self.blk(f, None, False, **kwargs)
         z_mu = self.head_z_mu(z)
@@ -60,8 +67,9 @@ class TransformerVAE(nn.Module):
     """
 
     z_dim: int
-    encoder: nn.Module
+    encoder: Optional[nn.Module]
     decoder: nn.Module
+    decoder_only: bool = False
 
     @nn.compact
     def __call__(
@@ -80,7 +88,7 @@ class TransformerVAE(nn.Module):
             along with $\mu$ and $\log(\sigma^2)$, which are often used
             to calculate losses involving KL divergence.
         """
-        if decode_only:
+        if decode_only or self.decoder_only:
             z, z_mu, z_std = f, None, None
         else:
             z_mu, z_std = self.encoder(f, conditionals, **kwargs)

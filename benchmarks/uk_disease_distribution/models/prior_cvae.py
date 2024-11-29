@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
+from typing import Optional
+
 import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
 
-from dl4bi.core import MLP
-
 
 class Conditional_MLP(nn.Module):
-    dims: list[int]
+    mlp_model: nn.Module
 
     @nn.compact
     def __call__(self, x: Array, conditionals: list[Array], **kwargs):
@@ -16,7 +16,7 @@ class Conditional_MLP(nn.Module):
             jnp.stack(conditionals).reshape(1, -1), repeats=B, axis=0
         )
         x = jnp.hstack([x.reshape(B, -1), batched_conditionals])
-        return MLP(self.dims)(x)
+        return self.mlp_model(x)
 
 
 class PriorCVAE(nn.Module):
@@ -39,9 +39,10 @@ class PriorCVAE(nn.Module):
         to calculate losses involving KL divergence.
     """
 
-    encoder: nn.Module = Conditional_MLP([363, 363])
-    decoder: nn.Module = Conditional_MLP([363, 363])
-    z_dim: int = 363
+    encoder: Optional[nn.Module]
+    decoder: nn.Module
+    z_dim: int
+    decoder_only: bool = False
 
     @nn.compact
     def __call__(
@@ -60,7 +61,7 @@ class PriorCVAE(nn.Module):
             along with $\mu$ and $\log(\sigma^2)$, which are often used
             to calculate losses involving KL divergence.
         """
-        if decode_only:
+        if decode_only or self.decoder_only:
             z, z_mu, z_std = f, None, None
         else:
             latents = self.encoder(f, conditionals)

@@ -10,7 +10,6 @@ import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 import optax
-from graph_model_utils import instantiate
 from jax import random
 from map_utils import get_raw_map_data, process_map
 from models import PriorCVAE
@@ -29,6 +28,7 @@ from plot_utils import (
 from sps.kernels import matern_1_2, matern_3_2, matern_5_2, periodic, rbf
 from sps.priors import Prior
 from vae import gp_dataloaders
+from vae_train_utils import instantiate
 
 import wandb
 from dl4bi.meta_regression.train_utils import (
