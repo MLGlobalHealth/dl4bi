@@ -102,38 +102,24 @@ class GDSKR(nn.Module):
         x_test, x_ctx = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
         # build localized graphs
         graphs = []
-        gs_tc, gs_cc = [], []
         receivers = jit(lambda n: jnp.repeat(jnp.arange(n), self.k))
         for b in range(B):
-            v_t, v_c = valid_lens_test[b], valid_lens_ctx[b]
-            s_t, s_c = s_test[b, :v_t], s_ctx[b, :v_c]
-            x_t, x_c = x_test[b, :v_t], x_ctx[b, :v_c]
-            rx_tc, rx_cc = receivers(s_t), receivers(s_c)
-            tx_tc, d_tc = self.k_nearest_senders(s_t, s_c, self.k)
+            n_c, n_t = valid_lens_ctx[b], valid_lens_test[b]
+            s_c, s_t = s_ctx[b, :n_c], s_test[b, :n_t]
+            x_c, x_t = x_ctx[b, :n_c], x_test[b, :n_t]
             tx_cc, d_cc = self.k_nearest_senders(s_c, s_c, self.k)
-            # TODO(danj): create a single graph with all edges
-            gs_tc += [
-                GraphsTuple(
-                    nodes=stack(x_t, x_c),
-                    edges=d_tc,
-                    receivers=rx_tc,
-                    senders=v_t + tx_tc,  # offset in node features
-                    n_node=v_t + v_c,
-                    n_edge=d_tc.size,
-                    globals=None,
-                )
-            ]
-            gs_cc += [
-                GraphsTuple(
-                    nodes=x_c,
-                    edges=d_cc,
-                    receivers=rx_cc,
-                    senders=tx_cc,
-                    n_node=v_c,
-                    n_edge=d_cc.size,
-                    globals=None,
-                )
-            ]
+            tx_ct, d_ct = self.k_nearest_senders(s_t, s_c, self.k)
+            rx_cc, rx_ct = receivers(s_c), receivers(s_t)
+            g = GraphsTuple(
+                nodes=stack(x_c, x_t),
+                edges=stack(d_cc, d_ct),
+                senders=stack(tx_cc, tx_ct),
+                receivers=stack(rx_cc, n_c + rx_ct),
+                n_node=n_c + n_t,
+                n_edge=(n_c + n_t) * self.k,
+                globals=jnp.max(x_c, axis=0, keepdims=True),
+            )
+            graphs += [g]
 
 
 class DSKR(nn.Module):
