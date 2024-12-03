@@ -2,7 +2,6 @@ from datetime import datetime
 from typing import Generator, Optional
 
 import arviz as az
-import flax.linen as nn
 import geopandas as gpd
 import jax
 import jax.numpy as jnp
@@ -167,9 +166,9 @@ def plot_covariance(samples, conditionals, model_name, kernel, s):
     vmax = max(K.max(), mu_covariance.max())
     fig, ax = plt.subplots(2, 2, figsize=(12, 12))
 
-    plot_matrix_with_colorbar(ax[0, 0], K, "GT Kernel - scaled", vmin, vmax)
+    plot_matrix_with_colorbar(fig, ax[0, 0], K, "GT Kernel - scaled", vmin, vmax)
     plot_matrix_with_colorbar(
-        ax[0, 1], mu_covariance, "Inferred covariance - scaled", vmin, vmax
+        fig, ax[0, 1], mu_covariance, "Inferred covariance - scaled", vmin, vmax
     )
     plot_matrix_with_colorbar(fig, ax[1, 0], K, "GT Kernel")
     plot_matrix_with_colorbar(fig, ax[1, 1], mu_covariance, "Inferred covariance")
@@ -409,7 +408,7 @@ def plot_vae_reconstruction_samples(
 
 
 def plot_vae_decoder_samples(
-    rng_decoder,
+    rng: jax.Array,
     gdf: gpd.GeoDataFrame,
     loader: Generator,
     state: TrainState,
@@ -419,11 +418,10 @@ def plot_vae_decoder_samples(
     num_batches: int = 5,
     num_plots: int = 5,
 ):
-    violin_paths = []
     paths = []
     for i in range(num_batches):
-        rng_z, rng_dr, rng_ext = jax.random.split(rng_decoder, 3)
-        fig, ax = plt.subplots(1, num_plots + 3, figsize=(5 * num_plots, 5))
+        rng_z, rng_dr, rng_ext, rng = jax.random.split(rng, 4)
+        fig, ax = plt.subplots(1, num_plots + 1, figsize=(5 * num_plots, 5))
         f_batch, _, conditionals = next(loader)
         f = f_batch[0]
         z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim, 1))
@@ -442,12 +440,6 @@ def plot_vae_decoder_samples(
             plot_on_map(
                 ax[j + 1], gdf, f_hat[j], vmin, vmax, f"Realisation {j + 1}", "viridis"
             )
-        plot_matrix_with_colorbar(
-            fig, ax[-2], np.cov(f_batch.squeeze(), rowvar=False), "Emirical GT Cov"
-        )
-        plot_matrix_with_colorbar(
-            fig, ax[-1], np.cov(f_hat.squeeze(), rowvar=False), "Empirical decoder Cov"
-        )
         for axis in ax:
             axis.set_axis_off()
         plt.tight_layout()
@@ -459,9 +451,51 @@ def plot_vae_decoder_samples(
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
         plt.close(fig)
-        violin_paths.append(
-            plot_violin({"obs_idxs": jnp.arange(f.shape[0]), "obs": f_hat}, f_batch, "")
+    return paths
+
+
+def plot_dist_analysis_plots(
+    rng: jax.Array,
+    loader: Generator,
+    state: TrainState,
+    conds_names: list[str],
+    z_dim: int,
+    vae_kwargs: dict,
+    num_batches: int = 5,
+):
+    paths = []
+    for i in range(num_batches):
+        rng_z, rng_dr, rng_ext, rng = jax.random.split(rng, 4)
+        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+        f_batch, _, conditionals = next(loader)
+        f = f_batch[0]
+        z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim, 1))
+        f_hat, _, _ = state.apply_fn(
+            {"params": state.params, **state.kwargs},
+            z,
+            conditionals,
+            decode_only=True,
+            **vae_kwargs,
+            rngs={"dropout": rng_dr, "extra": rng_ext},
         )
+        plot_matrix_with_colorbar(
+            fig, ax[0], np.cov(f_batch.squeeze(), rowvar=False), "Empirical GT Cov"
+        )
+        plot_matrix_with_colorbar(
+            fig, ax[1], np.cov(f_hat.squeeze(), rowvar=False), "Empirical decoder Cov"
+        )
+        for axis in ax:
+            axis.set_axis_off()
+        plt.tight_layout()
+        timestamp = datetime.now().isoformat()
+        title = f"Sample {i} {conds_to_title(conds_names, conditionals)}"
+        paths.append(f"/tmp/VAE_cov {timestamp} - {title}.png")
+        fig.suptitle(title)
+        fig.subplots_adjust(top=0.86)
+        fig.savefig(paths[-1], dpi=125)
+        plt.clf()
+        plt.close(fig)
+        plot_violin({"obs_idxs": jnp.arange(f.shape[0]), "obs": f_hat}, f_batch, title)
     return paths
 
 
@@ -510,6 +544,7 @@ def log_vae_map_plots(
     conds_names: list[str],
     z_dim: int,
     decode_only: bool,
+    large_batch_loader: Generator,
     **kwargs,
 ):
     x_norm_vars, y_norm_vars = get_norm_vars(gdf)
@@ -521,7 +556,7 @@ def log_vae_map_plots(
         loader: Generator,
         num_plots: int = 10,
     ):
-        rng_drop, rng_extra, rng_dec, rng_scat = jax.random.split(rng_step, 4)
+        rng_drop, rng_extra, rng_dec, rng_scat, rng_dist = jax.random.split(rng_step, 5)
         f, z, conditionals = next(loader)
         f_hat, _, _ = state.apply_fn(
             {"params": state.params, **state.kwargs},
@@ -530,7 +565,7 @@ def log_vae_map_plots(
             **kwargs,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
-        paths = plot_vae_reconstruction_samples(
+        paths_rec = plot_vae_reconstruction_samples(
             gdf,
             x_norm_vars,
             y_norm_vars,
@@ -557,9 +592,18 @@ def log_vae_map_plots(
             conditionals,
             conds_names,
         )
+        path_dist = plot_dist_analysis_plots(
+            rng_dist,
+            large_batch_loader,
+            state,
+            conds_names,
+            z_dim,
+            kwargs,
+        )
         wandb.log({f"Scatter {step}": [wandb.Image(p) for p in paths_scatter]})
-        wandb.log({f"Reconstruction {step}": [wandb.Image(p) for p in paths]})
+        wandb.log({f"Reconstruction {step}": [wandb.Image(p) for p in paths_rec]})
         wandb.log({f"Decoder {step}": [wandb.Image(p) for p in paths_decoder]})
+        wandb.log({f"Distribution {step}": [wandb.Image(p) for p in path_dist]})
 
     return log_posterior_predictive_plots
 

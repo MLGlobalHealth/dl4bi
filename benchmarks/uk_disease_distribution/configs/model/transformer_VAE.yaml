@@ -12,7 +12,7 @@ kwargs:
       blk:
         cls: TransformerEncoder
         kwargs:
-          num_blks: 3
+          num_blks: 5
           blk:
             cls: TransformerEncoderBlock
             kwargs:
@@ -29,29 +29,9 @@ kwargs:
         kwargs:
           dims: [64, 32, 1]
   decoder:
-    cls: AttentionVAE
+    cls: Conditional_MLP
     kwargs:
-      condition_bias: true
-      feat_enc:
+      mlp_model:
         cls: MLP
         kwargs:
-          dims: [64, 64]
-      blk:
-        cls: TransformerEncoder
-        kwargs:
-          num_blks: 3
-          blk:
-            cls: TransformerEncoderBlock
-            kwargs:
-              ffn:
-                cls: MLP
-                kwargs:
-                  dims: [64, 64]
-      head_z_mu:
-        cls: MLP
-        kwargs:
-          dims: [64, 32, 1]
-      head_z_log_var:
-        cls: MLP
-        kwargs:
-          dims: [64, 32, 1]
+          dims: [363, 363]

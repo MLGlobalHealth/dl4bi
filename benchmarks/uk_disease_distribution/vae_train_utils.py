@@ -78,7 +78,7 @@ def mse_train_step(
         f_hat, _, _ = state.apply_fn(
             {"params": params}, z, conditionals, **kwargs, rngs={"extra": rng}
         )
-        return optax.squared_error(f_hat, f.squeeze()).mean()
+        return optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
 
     loss, grads = value_and_grad(mse_loss)(state.params)
     return state.apply_gradients(grads=grads), loss
@@ -134,7 +134,7 @@ def get_model_kwargs(
     if bias is not None:
         model_kwargs["bias"] = globals()[bias](s, s, graph_data)
     if pos_enc is not None:
-        model_kwargs["pos_enc"] = globals()[pos_enc](graph_data)
+        model_kwargs["pos_enc"] = globals()[pos_enc](s, graph_data)
     return model_kwargs
 
 
@@ -152,14 +152,18 @@ def effective_resistance(s_ctx, s_test, graph_data):
     return diag_Gamma[:, None] + diag_Gamma[None, :] - 2 * Gamma
 
 
-def laplacian_pos_enc(graph_data):
+def laplacian_pos_enc(s, graph_data, max_k=50):
     A = graph_data["adjecency_matrix"]
     num_nodes = A.shape[0]
     D = jnp.fill_diagonal(jnp.zeros_like(A), jnp.sum(A, axis=1), inplace=False)
     D_norm = jnp.pow(D, -0.5)
     L_norm = jnp.eye(num_nodes) - (D_norm @ A @ D_norm)
     evals, evects = jnp.linalg.eigh(L_norm)
-    return jnp.concatenate([evals[..., None], evects], axis=-1)
+    return jnp.concatenate([evals[..., None], evects], axis=-1)[..., :max_k]
+
+
+def location_pos_enc(s, graph_data):
+    return s.copy()
 
 
 def instantiate(d: Union[dict, DictConfig]):
@@ -196,11 +200,11 @@ def icar(batch_size, adj_mat, graph_model):
     K = jnp.linalg.pinv(precision_matrix, hermitian=True)
     tau_sampler = instantiate(graph_model.tau)
 
-    def icar_loader(rng):
+    def icar_loader(rng, bs=batch_size):
         while True:
             rng, z_rng, tau_rng = random.split(rng, 3)
             tau = tau_sampler.sample(tau_rng)
-            z = random.normal(z_rng, shape=(batch_size, num_nodes))
+            z = random.normal(z_rng, shape=(bs, num_nodes))
             f = cholesky(num_nodes, (1 / tau) * K, z)
             yield f, z, [tau]
 
@@ -224,14 +228,14 @@ def car(batch_size, adj_mat, graph_model):
     tau_sampler = instantiate(graph_model.tau)
     alpha_sampler = instantiate(graph_model.alpha)
 
-    def car_loader(rng):
+    def car_loader(rng, bs=batch_size):
         while True:
             rng, z_rng, tau_rng, alpha_rng = random.split(rng, 4)
             tau = tau_sampler.sample(tau_rng)
             alpha = alpha_sampler.sample(alpha_rng)
             precision_matrix = D - (alpha * adj_mat)
             K = jnp.linalg.pinv(precision_matrix, hermitian=True)
-            z = random.normal(z_rng, shape=(batch_size, num_nodes))
+            z = random.normal(z_rng, shape=(bs, num_nodes))
             f = cholesky(num_nodes, (1 / tau) * K, z)
             yield f, z, [tau, alpha]
 
@@ -256,14 +260,14 @@ def bym(batch_size, adj_mat, graph_model):
     alpha_sampler = instantiate(graph_model.alpha)
     v_sampler = instantiate(graph_model.v)
 
-    def bym_loader(rng):
+    def bym_loader(rng, bs=batch_size):
         while True:
             rng, z_rng, tau_rng, alpha_rng, v_rng = random.split(rng, 5)
             tau = tau_sampler.sample(tau_rng)
             alpha = alpha_sampler.sample(alpha_rng)
             v = v_sampler.sample(v_rng)
             R = jnp.linalg.pinv(D - (alpha * adj_mat), hermitian=True)
-            z = random.normal(z_rng, shape=(batch_size, num_nodes))
+            z = random.normal(z_rng, shape=(bs, num_nodes))
             f = cholesky(num_nodes, (1 / v) * I_n + (1 / tau) * R, z)
             yield f, z, [tau, alpha, v]
 

@@ -94,5 +94,5 @@ class TransformerVAE(nn.Module):
             z_mu, z_std = self.encoder(f, conditionals, **kwargs)
             eps = random.normal(self.make_rng("extra"), z_std.shape)
             z = z_mu + z_std * eps
-        f_hat, _ = self.decoder(z, conditionals, **kwargs)
+        f_hat = self.decoder(z, conditionals, **kwargs)
         return f_hat.reshape(f.shape), z_mu, z_std

@@ -56,7 +56,7 @@ def main(cfg: DictConfig):
         f"results/{cfg.project}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}"
     )
 
-    gp_loader, _, conditionals_names = gp_dataloaders(rng, cfg, s)
+    gp_loader, _, _, conditionals_names = gp_dataloaders(rng, cfg, s)
     f_batch, _, conditionals = next(iter(gp_loader))
     conditionals = dict(zip(conditionals_names, conditionals))
     map_data = get_raw_map_data(cfg.data.name)
@@ -186,7 +186,7 @@ def build_surrogate_inference_model(
         )
         return f_hat
 
-    z_dist = dist.MultivariateNormal(jnp.zeros(z_dim), jnp.eye(z_dim))
+    z_dist = dist.MultivariateNormal(jnp.zeros((1, z_dim)), jnp.eye(z_dim))
 
     def gp_deep_sample_model(y=None):
         variance = numpyro.sample("var", priors["var"])
@@ -197,7 +197,7 @@ def build_surrogate_inference_model(
         z = numpyro.sample("z", z_dist)
         # NOTE: hyperparams must be added in the same order as conditional names
         # because the underlying VAE assumes they are stacked that way
-        mu = numpyro.deterministic("mu", z_to_y_hat(z, conditionals))
+        mu = numpyro.deterministic("mu", z_to_y_hat(z, conditionals).squeeze())
         sigma = numpyro.sample("sigma", priors["sigma"])
         with numpyro.handlers.mask(mask=obs_mask):
             numpyro.sample("obs", dist.Normal(mu, sigma), obs=y)

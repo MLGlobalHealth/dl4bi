@@ -71,10 +71,19 @@ def main(cfg: DictConfig):
         optax.clip_by_global_norm(cfg.clip_max_norm),
         optax.yogi(lr_schedule),
     )
+    # NOTE: large_batch_loader is used to compare the decoder distribution with true data
     if is_gp:
-        train_loader, test_loader, cond_names = gp_dataloaders(rng, cfg, s)
+        train_loader, test_loader, large_batch_loader, cond_names = gp_dataloaders(
+            rng,
+            cfg,
+            s,
+        )
     else:
-        train_loader, test_loader, cond_names = graph_dataloaders(rng, cfg, map_data)
+        train_loader, test_loader, large_batch_loader, cond_names = graph_dataloaders(
+            rng,
+            cfg,
+            map_data,
+        )
     state = train(
         rng_train,
         model,
@@ -93,6 +102,7 @@ def main(cfg: DictConfig):
                     cond_names,
                     cfg.model.kwargs.z_dim,
                     decoder_only,
+                    large_batch_loader,
                     **vae_kwargs,
                 ),
                 cfg.plot_interval,
@@ -124,34 +134,45 @@ def gp_dataloaders(
     cfg: DictConfig,
     s: jax.Array,
     approx: bool = False,
+    large_batch_size=2048,
 ):
     batch_size = cfg.batch_size
     gp = instantiate(cfg.kernel)
-    rng_train, rng_test = random.split(rng)
+    rng_train, rng_test, rng_large_batch = random.split(rng, 3)
     conditionals_names = ["var", "ls"]
     if gp.kernel.__name__ == "periodic":
         conditionals_names += ["period"]
 
-    def dataloader(data_rng):
+    def dataloader(data_rng, bs=batch_size):
         while True:
             rng_batch, data_rng = random.split(data_rng)
-            f, var, ls, period, z = gp.simulate(rng_batch, s, batch_size, approx)
+            f, var, ls, period, z = gp.simulate(rng_batch, s, bs, approx)
             yield (
                 f,
                 z,
                 ([var, ls] if gp.kernel.__name__ != "periodic" else [var, ls, period]),
             )
 
-    return dataloader(rng_train), dataloader(rng_test), conditionals_names
+    return (
+        dataloader(rng_train),
+        dataloader(rng_test),
+        dataloader(rng_large_batch, bs=large_batch_size),
+        conditionals_names,
+    )
 
 
-def graph_dataloaders(rng, cfg, map_data):
+def graph_dataloaders(rng, cfg, map_data, large_batch_size=2048):
     adj_mat = generate_adjacency_matrix(map_data, cfg.graph_construction)
-    rng_train, rng_test = random.split(rng)
+    rng_train, rng_test, rng_large_batch = random.split(rng, 3)
     dataloader, conditionals_names = {"car": car, "icar": icar, "bym": bym}[
         cfg.graph_model.name
     ](cfg.batch_size, adj_mat, cfg.graph_model)
-    return dataloader(rng_train), dataloader(rng_test), conditionals_names
+    return (
+        dataloader(rng_train),
+        dataloader(rng_test),
+        dataloader(rng_large_batch, bs=large_batch_size),
+        conditionals_names,
+    )
 
 
 def train(
@@ -227,7 +248,7 @@ def validate(
             f_hat, _, _ = jit(state.apply_fn)(
                 params, z, conditionals, **vae_kwargs, rngs=rngs
             )
-            losses[i] = optax.squared_error(f_hat, f.squeeze()).mean()
+            losses[i] = optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
             mse_score[i] = losses[i]
         else:
             # TODO (jhonathan): combine with train step
