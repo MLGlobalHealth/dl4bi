@@ -24,6 +24,16 @@ class TrainState(train_state.TrainState):
     kwargs: FrozenDict = FrozenDict({})
 
 
+def generate_model_name(cfg: DictConfig, is_gp: bool, decoder_only: bool):
+    return cfg.get(
+        "name",
+        f"VAE_{'GP' if is_gp else cfg.graph_model.name}_"
+        f"{cfg.model.cls}_{cfg.model.kwargs.decoder.cls}_"
+        f"{'dec' if decoder_only else ''}"
+        f"{cfg.data.sampling_policy.replace('centroids', '')}",
+    )
+
+
 @jit
 def elbo_train_step(
     rng: jax.Array,

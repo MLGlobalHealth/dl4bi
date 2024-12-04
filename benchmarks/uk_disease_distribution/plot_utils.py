@@ -18,8 +18,8 @@ from dl4bi.meta_regression.train_utils import TrainState
 
 def plot_infer_observed_coverage(post, map_data, model_name, hdi_prob=0.95, log=True):
     obs_idxs, f, f_hat = post["obs_idxs"], post["f"], post["obs"]
-    vmin, vmax = min(f.min(), f_hat.min()), max(f.max(), f_hat.max())
     f_hat_mean, f_hat_std = f_hat.mean(axis=0), f_hat.std(axis=0)
+    vmin, vmax = min(f.min(), f_hat_mean.min()), max(f.max(), f_hat_mean.max())
     fig, ax = plt.subplots(1, 5, figsize=(30, 10))
     plot_on_map(ax[0], map_data, f, vmin, vmax, "y obs - noised", "viridis")
     plot_on_map(ax[1], map_data, f_hat_mean, vmin, vmax, "Mean MCMC Samples", "viridis")
@@ -183,7 +183,9 @@ def plot_covariance(samples, conditionals, model_name, kernel, s):
 
 
 def plot_trace(samples, mcmc, conditionals, obs_noise, model_name):
-    var_names = [str(c) for c in conditionals.keys()] + ["sigma"]
+    var_names = [
+        str(c) for c in conditionals.keys()
+    ]  # TODO(jhoott) add noise+ ["sigma"]
     az.plot_trace(az.from_numpyro(mcmc), var_names=var_names)
     conditional_means = {c: samples[str(c)].mean().item() for c in var_names}
     axes = plt.gcf().get_axes()
@@ -192,7 +194,8 @@ def plot_trace(samples, mcmc, conditionals, obs_noise, model_name):
     title = f"Trace for {model_name}: " + ", ".join(
         [f"{name}: {cond[0]:g}" for name, cond in conditionals.items()]
     )
-    title += f" sigma: {obs_noise}"
+    # TODO(jhoott) add noise
+    # title += f" sigma: {obs_noise}"
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     timestamp = datetime.now().isoformat()
     path = f"/tmp/trace_{model_name}_{timestamp}.png"
@@ -202,11 +205,12 @@ def plot_trace(samples, mcmc, conditionals, obs_noise, model_name):
 
 
 def plot_histograms(samples, conditionals, obs_noise, model_name, priors):
-    num_plots = len(conditionals) + 1
+    num_plots = len(conditionals)  # TODO(jhoott) add noise + 1
     _, axes = plt.subplots(1, num_plots, figsize=(12, 4))
-    for i, (name, actual_val) in enumerate(
-        {**conditionals, "sigma": [obs_noise]}.items()
-    ):
+    for i, (name, actual_val) in enumerate(conditionals.items()):
+        # TODO(jhoott) add noise?
+        #     {**conditionals, "sigma": [obs_noise]}.items()
+        # ):
         ax = axes[i]
         sample_values = samples[str(name)]
         ax.hist(

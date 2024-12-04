@@ -11,14 +11,17 @@ import optax
 from jax import jit, random
 from jax.scipy.stats import norm
 from map_utils import get_raw_map_data, process_map
+from numpyro.distributions import Normal
 from omegaconf import DictConfig, OmegaConf
 from plot_utils import log_vae_map_plots
 from tqdm import tqdm
 from vae_train_utils import (
     bym,
     car,
+    cholesky,
     elbo_train_step,
     generate_adjacency_matrix,
+    generate_model_name,
     get_model_kwargs,
     icar,
     instantiate,
@@ -39,17 +42,11 @@ from dl4bi.vae import train_utils
 def main(cfg: DictConfig):
     is_gp = cfg.is_gp
     decoder_only = cfg.model.kwargs.get("decoder_only", False)
-    run_name = cfg.get(
-        "name",
-        f"VAE_{'GP' if is_gp else cfg.graph_model.name}_"
-        f"{cfg.model.cls}_{cfg.model.kwargs.decoder.cls}_"
-        f"{'dec_' if decoder_only else ''}"
-        f"{cfg.data.sampling_policy.replace('centroids', '')}",
-    )
+    model_name = generate_model_name(cfg, is_gp, decoder_only)
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
-        name=run_name,
+        name=model_name,
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
     )
@@ -123,7 +120,7 @@ def main(cfg: DictConfig):
     )
     data_gen_name = cfg.kernel.kwargs.kernel.func if is_gp else cfg.graph_model.name
     path = Path(
-        f"results/{cfg.project}/{cfg.data.name}/{data_gen_name}/{cfg.seed}/{run_name}"
+        f"results/{cfg.project}/{cfg.data.name}/{data_gen_name}/{cfg.seed}/{model_name}"
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -133,20 +130,30 @@ def gp_dataloaders(
     rng: jax.Array,
     cfg: DictConfig,
     s: jax.Array,
-    approx: bool = False,
-    large_batch_size=2048,
+    large_batch_size: int = 2048,
+    jitter: float = 1e-4,
 ):
+    n_locations = s.shape[0]
     batch_size = cfg.batch_size
     gp = instantiate(cfg.kernel)
     rng_train, rng_test, rng_large_batch = random.split(rng, 3)
     conditionals_names = ["var", "ls"]
     if gp.kernel.__name__ == "periodic":
         conditionals_names += ["period"]
+    z_dist = Normal()
 
     def dataloader(data_rng, bs=batch_size):
         while True:
-            rng_batch, data_rng = random.split(data_rng)
-            f, var, ls, period, z = gp.simulate(rng_batch, s, bs, approx)
+            rng_var, rng_ls, rng_period, rng_z, data_rng = random.split(data_rng, 5)
+            var = gp.var.sample(rng_var)
+            ls = gp.var.sample(rng_ls)
+            if gp.kernel.__name__ == "periodic":
+                period = gp.period.sample(rng_period)
+                K = gp.kernel(s, s, var, ls, period)
+            else:
+                K = gp.kernel(s, s, var, ls)
+            z = z_dist.sample(rng_z, (bs, n_locations))
+            f = cholesky(n_locations, K, z, jitter)[..., None]
             yield (
                 f,
                 z,

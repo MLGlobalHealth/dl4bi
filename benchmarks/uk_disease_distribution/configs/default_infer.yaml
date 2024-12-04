@@ -6,5 +6,6 @@ defaults:
   - infer: baseline
 seed: 42
 wandb: True
+is_gp: True
 project: UK_disease_distribution
 batch_size: 1024

@@ -4,6 +4,7 @@ import pickle
 from pathlib import Path
 from typing import Union
 
+import geopandas as gpd
 import hydra
 import jax
 import jax.numpy as jnp
@@ -27,8 +28,8 @@ from plot_utils import (
 )
 from sps.kernels import matern_1_2, matern_3_2, matern_5_2, periodic, rbf
 from sps.priors import Prior
-from vae import gp_dataloaders
-from vae_train_utils import instantiate
+from vae import gp_dataloaders, graph_dataloaders
+from vae_train_utils import generate_model_name, instantiate
 
 import wandb
 from dl4bi.meta_regression.train_utils import (
@@ -39,7 +40,9 @@ from dl4bi.meta_regression.train_utils import (
 
 @hydra.main("configs", config_name="default_infer", version_base=None)
 def main(cfg: DictConfig):
-    model_name = f"VAE_GP_{cfg.model.cls}_{cfg.data.sampling_policy}"
+    is_gp = cfg.is_gp
+    decoder_only = cfg.model.kwargs.get("decoder_only", False)
+    model_name = generate_model_name(cfg, is_gp, decoder_only)
     if cfg.infer.run_gp_baseline:
         model_name = "Baseline_GP"
     run_name = cfg.get("name", f"Infer_{model_name}")
@@ -55,11 +58,12 @@ def main(cfg: DictConfig):
     results_dir = Path(
         f"results/{cfg.project}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}"
     )
-
-    gp_loader, _, _, conditionals_names = gp_dataloaders(rng, cfg, s)
-    f_batch, _, conditionals = next(iter(gp_loader))
-    conditionals = dict(zip(conditionals_names, conditionals))
     map_data = get_raw_map_data(cfg.data.name)
+    infer_loader, conditionals_names = infer_model_dataloader(
+        rng, cfg, s, map_data, is_gp
+    )
+    f_batch, conditionals = next(iter(infer_loader))
+    conditionals = dict(zip(conditionals_names, conditionals))
     # NOTE: obs_idxs taking all LTAs as samples, it's possible to give partial information also
     obs_idxs, obs_mask = jnp.arange(len(map_data)), True
     if cfg.infer.get("num_context_points") is not None:
@@ -72,6 +76,7 @@ def main(cfg: DictConfig):
         "var": dist.HalfNormal(),
         "ls": dist.HalfNormal(),
         "period": dist.HalfNormal(),
+        "beta": dist.Normal(),
         "sigma": dist.Gamma(1, 2),
     }
     kernel = globals()[cfg.kernel.kwargs.kernel.func]
@@ -80,14 +85,15 @@ def main(cfg: DictConfig):
     else:
         state, _ = load_ckpt((results_dir / model_name).with_suffix(".ckpt"))
         inference_model = build_surrogate_inference_model(
-            state, obs_mask, kernel, cfg.model.kwargs.z_dim, priors
+            state, obs_mask, kernel, cfg.model.kwargs.z_dim, s.shape[0], priors
         )
 
     f = f_batch[0].squeeze()
-    if cfg.data.obs_noise > 0:
-        f += random.multivariate_normal(
-            noise_rng, jnp.zeros_like(f), cfg.data.obs_noise * jnp.eye(f.shape[0])
-        )
+    # TODO (jhoott) where to add noise?
+    # if cfg.data.obs_noise > 0:
+    #     f += random.multivariate_normal(
+    #         noise_rng, jnp.zeros_like(f), cfg.data.obs_noise * jnp.eye(f.shape[0])
+    #     )
     hmc_res = _hmc(cfg, inference_model, s, f, conditionals, obs_idxs)
     log_inference_run(
         rng_plot,
@@ -123,6 +129,93 @@ def _hmc(cfg, model, s, f, conditionals, obs_idxs):
     return samples, mcmc, post
 
 
+def infer_model_dataloader(
+    rng: jax.Array,
+    cfg: DictConfig,
+    s: jax.Array,
+    map_data: gpd.GeoDataFrame,
+    is_gp: bool,
+):
+    rng_beta, rng_loader = random.split(rng)
+    beta = random.normal(rng_beta, shape=(s.shape[0], 1))
+    beta = jnp.repeat(beta[None, ...], cfg.batch_size, axis=0)
+    if is_gp:
+        loader, _, _, cond_names = gp_dataloaders(
+            rng_loader,
+            cfg,
+            s,
+        )
+    else:
+        loader, _, _, cond_names = graph_dataloaders(
+            rng_loader,
+            cfg,
+            map_data,
+        )
+
+    def infer_loader(rng_infer):
+        while True:
+            rng_poisson, rng_infer = random.split(rng_infer)
+            mu_batch, _, conditionals = next(loader)
+            lambda_ = jnp.exp(mu_batch + beta)
+            yield random.poisson(rng_poisson, lambda_), conditionals
+
+    return infer_loader(rng_loader), cond_names
+
+
+def build_baseline_inference_model(s, obs_mask, kernel, priors, jitter=1e-4):
+    I_jitter = jitter * jnp.eye(s.shape[0])
+
+    def gp_model(y=None):
+        variance = numpyro.sample("var", priors["var"])
+        lengthscale = numpyro.sample("ls", priors["ls"])
+        if kernel.__name__ == "periodic":
+            period = numpyro.sample("period", priors["period"])
+            K = kernel(s, s, variance, lengthscale, period) + I_jitter
+        else:
+            K = kernel(s, s, variance, lengthscale) + I_jitter
+        mu = numpyro.sample("mu", dist.MultivariateNormal(0, K))
+        sigma = numpyro.sample("sigma", priors["sigma"])
+        with numpyro.handlers.mask(mask=obs_mask):
+            numpyro.sample("obs", dist.Normal(mu, sigma), obs=y)
+
+    return gp_model
+
+
+def build_surrogate_inference_model(
+    state, obs_mask, kernel, z_dim, n_locations, priors, **vae_kwargs
+):
+    def z_to_y_hat(z, conditionals):
+        f_hat, _, _ = state.apply_fn(
+            {"params": state.params, **state.kwargs},
+            z[..., None],
+            conditionals,
+            decode_only=True,
+            **vae_kwargs,
+        )
+        return f_hat
+
+    z_dist = dist.Normal()
+
+    def gp_deep_sample_model(y=None):
+        variance = numpyro.sample("var", priors["var"])
+        lengthscale = numpyro.sample("ls", priors["ls"])
+        conditionals = [jnp.array([variance]), jnp.array([lengthscale])]
+        if kernel.__name__ == "periodic":
+            conditionals += [numpyro.sample("period", priors["period"])]
+        z = numpyro.sample("z", z_dist, sample_shape=(1, z_dim))
+        # NOTE: hyperparams must be added in the same order as conditional names
+        # because the underlying VAE assumes they are stacked that way
+        mu = numpyro.deterministic("mu", z_to_y_hat(z, conditionals).squeeze())
+        beta = numpyro.sample("beta", priors["beta"], sample_shape=(n_locations,))
+        lambda_ = jnp.exp(beta + mu)
+        # TODO(jhoot): where do we noise?
+        # sigma = numpyro.sample("sigma", priors["sigma"])
+        with numpyro.handlers.mask(mask=obs_mask):
+            numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
+
+    return gp_deep_sample_model
+
+
 def log_inference_run(
     rng_plot,
     hmc_res,
@@ -152,57 +245,6 @@ def log_inference_run(
     plot_histograms(samples, conditionals, obs_noise, model_name, priors)
     plot_violin(post, f_batch, model_name)
     plot_kl_on_map(map_data, kl_per_location, model_name)
-
-
-def build_baseline_inference_model(s, obs_mask, kernel, priors, jitter=1e-4):
-    I_jitter = jitter * jnp.eye(s.shape[0])
-
-    def gp_model(y=None):
-        variance = numpyro.sample("var", priors["var"])
-        lengthscale = numpyro.sample("ls", priors["ls"])
-        if kernel.__name__ == "periodic":
-            period = numpyro.sample("period", priors["period"])
-            K = kernel(s, s, variance, lengthscale, period) + I_jitter
-        else:
-            K = kernel(s, s, variance, lengthscale) + I_jitter
-        mu = numpyro.sample("mu", dist.MultivariateNormal(0, K))
-        sigma = numpyro.sample("sigma", priors["sigma"])
-        with numpyro.handlers.mask(mask=obs_mask):
-            numpyro.sample("obs", dist.Normal(mu, sigma), obs=y)
-
-    return gp_model
-
-
-def build_surrogate_inference_model(
-    state, obs_mask, kernel, z_dim, priors, **vae_kwargs
-):
-    def z_to_y_hat(z, conditionals):
-        f_hat, _, _ = state.apply_fn(
-            {"params": state.params, **state.kwargs},
-            z[..., None],
-            conditionals,
-            decode_only=True,
-            **vae_kwargs,
-        )
-        return f_hat
-
-    z_dist = dist.MultivariateNormal(jnp.zeros((1, z_dim)), jnp.eye(z_dim))
-
-    def gp_deep_sample_model(y=None):
-        variance = numpyro.sample("var", priors["var"])
-        lengthscale = numpyro.sample("ls", priors["ls"])
-        conditionals = [variance, lengthscale]
-        if kernel.__name__ == "periodic":
-            conditionals += [numpyro.sample("period", priors["period"])]
-        z = numpyro.sample("z", z_dist)
-        # NOTE: hyperparams must be added in the same order as conditional names
-        # because the underlying VAE assumes they are stacked that way
-        mu = numpyro.deterministic("mu", z_to_y_hat(z, conditionals).squeeze())
-        sigma = numpyro.sample("sigma", priors["sigma"])
-        with numpyro.handlers.mask(mask=obs_mask):
-            numpyro.sample("obs", dist.Normal(mu, sigma), obs=y)
-
-    return gp_deep_sample_model
 
 
 def compute_kl_divergence(f_batch, post):
