@@ -146,7 +146,7 @@ def gp_dataloaders(
         while True:
             rng_var, rng_ls, rng_period, rng_z, data_rng = random.split(data_rng, 5)
             var = gp.var.sample(rng_var)
-            ls = gp.var.sample(rng_ls)
+            ls = gp.ls.sample(rng_ls)
             if gp.kernel.__name__ == "periodic":
                 period = gp.period.sample(rng_period)
                 K = gp.kernel(s, s, var, ls, period)
