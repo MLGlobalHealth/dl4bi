@@ -1064,6 +1064,7 @@ class DeepKernelAttention(nn.Module):
         if valid_lens is not None:
             ks *= mask_from_valid_lens(K, valid_lens)
         vs = self.proj_vs(vs).astype(self.dtype)
+        # TODO(danj): add normalization?
         kvs = jnp.einsum("B K D, B K V -> B D V", ks, vs)
         ctx = jnp.einsum("B Q D, B D V -> B Q V", qs, kvs)
         return self.proj_out(nn.LayerNorm()(ctx)), None
