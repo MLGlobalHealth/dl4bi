@@ -1011,6 +1011,10 @@ def exponential_scorer(qs: jax.Array, ks: jax.Array):  # [B, L, D]
     return jnp.exp(scores / jnp.sqrt(ks.shape[-1]))
 
 
+# TODO(danj): make multiheaded??
+# TODO(danj): try separate qk projections
+# TODO(danj): incorporate location directly?
+# TODO(danj): add normalization?
 class DeepKernelAttention(nn.Module):
     r"""Performs query-key-value attention with learned feature maps.
 
@@ -1024,8 +1028,6 @@ class DeepKernelAttention(nn.Module):
         An `DeepKernelAttention` module.
     """
 
-    # TODO(danj): make multiheaded??
-    # TODO(danj): try separate qk projections
     proj_qks: Callable = MLP([128, 64], nn.gelu)
     proj_vs: nn.Module = MLP([64])
     proj_out: nn.Module = MLP([64])
@@ -1056,7 +1058,6 @@ class DeepKernelAttention(nn.Module):
             `ctx` and `attn`, the updated values and `None` for the `attn`
             since it is never materialized.
         """
-        # TODO(danj): incorporate location directly?
         K = ks.shape[1]
         if kwargs.get("bias") is not None:
             warnings.warn("DeepKernelAttention does not support bias!")
@@ -1064,7 +1065,6 @@ class DeepKernelAttention(nn.Module):
         if valid_lens is not None:
             ks *= mask_from_valid_lens(K, valid_lens)
         vs = self.proj_vs(vs).astype(self.dtype)
-        # TODO(danj): add normalization?
         kvs = jnp.einsum("B K D, B K V -> B D V", ks, vs)
         ctx = jnp.einsum("B Q D, B D V -> B Q V", qs, kvs)
         return self.proj_out(nn.LayerNorm()(ctx)), None
