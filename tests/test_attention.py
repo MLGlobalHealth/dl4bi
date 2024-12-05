@@ -8,6 +8,7 @@ from dl4bi.core import (
     MLP,
     AdditiveScorer,
     Attention,
+    DeepKernelAttention,
     DistanceBiasedFastAttention,
     DotScorer,
     FastAttention,
@@ -365,18 +366,31 @@ def test_tisa_biased_scan_attention_scale():
     assert jnp.isfinite(ctx_scan).all(), "Non-finite values produced!"
 
 
-def test_kernel_attention():
-    B, L, D = 4, 128, 16
+def test_kernel_attention_impl():
+    B, L, D = 4, 128, 64
     key = random.key(42)
     rng_qkv, rng_valid, rng_init = random.split(key, 3)
     qs, ks, vs = random.normal(rng_qkv, (3, B, L, D))
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
     for kernel in [rbf_scorer, exponential_scorer]:
-        (ctx, _), _ = KernelAttention(kernel, proj_out=MLP([D])).init_with_output(
+        (ctx, _), _ = KernelAttention(kernel).init_with_output(
             rng_init, qs, ks, vs, valid_lens
         )
         assert jnp.isfinite(ctx).all(), "KernelAttention produced non-finite values!"
         assert ctx.shape == (B, L, D), "Incorrect context output shape!"
+
+
+def test_deep_kernel_attention_impl():
+    B, L, D = 4, 128, 64
+    key = random.key(42)
+    rng_qkv, rng_valid, rng_init = random.split(key, 3)
+    qs, ks, vs = random.normal(rng_qkv, (3, B, L, D))
+    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
+    (ctx, _), _ = DeepKernelAttention().init_with_output(
+        rng_init, qs, ks, vs, valid_lens
+    )
+    assert jnp.isfinite(ctx).all(), "KernelAttention produced non-finite values!"
+    assert ctx.shape == (B, L, D), "Incorrect context output shape!"
 
 
 def test_multikernel_attention():

@@ -1,6 +1,7 @@
 from .attention import (
     AdditiveScorer,
     Attention,
+    DeepKernelAttention,
     DistanceBiasedFastAttention,
     DotScorer,
     FastAttention,

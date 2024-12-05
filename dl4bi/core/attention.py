@@ -991,6 +991,12 @@ class MultiHeadAttention(nn.Module):
         return self.proj_out(ctx), attn
 
 
+# TODO(danj): can make this more efficient by doing (QK^T)V -> Q(K^TV)
+@jit
+def dot_scorer(qs: jax.Array, ks: jax.Array):
+    return jnp.einsum("B Q D, B K D -> B Q K", qs, ks)
+
+
 @jit
 def rbf_scorer(qs: jax.Array, ks: jax.Array):  # [B, L, D]
     r"""Calculates $\exp\left(-\frac{\lVert xW_x - yW_y\rVert^2}{\sqrt{d_k}}\right)$."""
@@ -1005,13 +1011,72 @@ def exponential_scorer(qs: jax.Array, ks: jax.Array):  # [B, L, D]
     return jnp.exp(scores / jnp.sqrt(ks.shape[-1]))
 
 
-# TODO(danj): add learnable variance and lengthscale?
+class DeepKernelAttention(nn.Module):
+    r"""Performs query-key-value attention with learned feature maps.
+
+    Args:
+        proj_qks: A module for projecting queries.
+        proj_vs: A module for projecting values.
+        proj_out: A module for projecting output.
+        dtype: A data type to use for calculations.
+
+    Returns:
+        An `DeepKernelAttention` module.
+    """
+
+    proj_qks: Callable = MLP([256, 256, 64], nn.gelu)
+    proj_vs: nn.Module = MLP([64])
+    proj_out: nn.Module = MLP([64])
+    dtype: jnp.dtype = jnp.float32
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, D_QK]
+        ks: jax.Array,  # [B, K, D_QK]
+        vs: jax.Array,  # [B, K, D_V]
+        valid_lens: Optional[jax.Array] = None,
+        training: bool = False,
+        **kwargs,
+    ):
+        r"""Performs forward pass of network.
+
+        Args:
+            qs: Queries of dimension $\mathbb{R}^{B\times Q\times D_QK}$
+            ks: Keys of dimension $\mathbb{R}^{B\times K\times D_QK}$
+            vs: Values of dimension $\mathbb{R}^{B\times K\times D_V}$
+            valid_lens: Mask consisting of valid length per sequence of dimension
+                $\mathbb{R}^B$ or $\mathbb{R}^{B\times K}$.
+            training: Boolean indicating whether currently training.
+            kwargs: Additional kwargs passed on to attention module.
+
+        Returns:
+            `ctx` and `attn`, the updated values and `None` for the `attn`
+            since it is never materialized.
+        """
+        K = ks.shape[1]
+        if kwargs.get("bias") is not None:
+            warnings.warn("DeepKernelAttention does not support bias!")
+        qs, ks = map(lambda x: self.proj_qks(x).astype(self.dtype), (qs, ks))
+        if valid_lens is not None:
+            ks *= mask_from_valid_lens(K, valid_lens)
+        vs = self.proj_vs(vs).astype(self.dtype)
+        kvs = jnp.einsum("B K D, B K V -> B D V", ks, vs)
+        ctx = jnp.einsum("B Q D, B D V -> B Q V", qs, kvs)
+        return self.proj_out(ctx), None
+
+
+# TODO(danj): add learnable kernel parameters?
 class KernelAttention(nn.Module):
     r"""Performs query-key-value attention with the given kernel.
 
     .. note::
         To make a kernel symmetric, provide the same dense projection
         matrix for `proj_qs` and `proj_ks`.
+
+    .. note::
+        To use regular kernels, set `proj_qs` and `proj_ks` to the identity
+        function and pass in locations rather than embeddings.
 
     Args:
         kernel_scorer: A kernel function that operates on two `[L, D]` arrays and
@@ -1027,8 +1092,8 @@ class KernelAttention(nn.Module):
     """
 
     kernel_scorer: Callable = rbf_scorer
-    proj_qs: nn.Module = MLP([64])
-    proj_ks: nn.Module = MLP([64])
+    proj_qs: Callable = MLP([64])
+    proj_ks: Callable = MLP([64])
     proj_vs: nn.Module = MLP([64])
     proj_out: nn.Module = MLP([64])
     dtype: jnp.dtype = jnp.float32
@@ -1057,6 +1122,8 @@ class KernelAttention(nn.Module):
         Returns:
             `ctx` and `attn`, the updated values and attention weights.
         """
+        if kwargs.get("bias") is not None:
+            warnings.warn("KernelAttention does not support bias!")
         qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
         attn = self.kernel_scorer(qs.astype(self.dtype), ks.astype(self.dtype))
         if valid_lens is not None:
