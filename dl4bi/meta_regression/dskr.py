@@ -50,6 +50,13 @@ def k_nearest_senders(rx: jax.Array, tx: jax.Array, k: int):
     return idx.flatten(), d.flatten()
 
 
+# TODO(danj): try KDTree on cuda
+# https://docs.cupy.dev/en/latest/reference/generated/cupyx.scipy.spatial.KDTree.html
+# https://arxiv.org/abs/2211.00120
+def k_nearest_senders_gpu(rx: jax.Array, tx: jax.Array, k: int):
+    pass
+
+
 class GraphKR(nn.Module):
     attn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
