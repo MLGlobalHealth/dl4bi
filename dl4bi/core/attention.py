@@ -1011,8 +1011,7 @@ def exponential_scorer(qs: jax.Array, ks: jax.Array):  # [B, L, D]
     return jnp.exp(scores / jnp.sqrt(ks.shape[-1]))
 
 
-# TODO(danj): try multiheaded
-# TODO(danj): try passing in location with projection
+# TODO(danj): does multiheaded do anything here?
 class DeepKernelAttention(nn.Module):
     r"""Performs query-key-value attention with learned feature maps.
 
@@ -1026,9 +1025,8 @@ class DeepKernelAttention(nn.Module):
         An `DeepKernelAttention` module.
     """
 
-    proj_qks: Callable = MLP([64] * 3)
-    proj_vs: nn.Module = MLP([64])
-    proj_out: nn.Module = MLP([64])
+    proj_qks: Callable = MLP([128, 64], nn.gelu)
+    proj_vs: nn.Module = MLP([128, 64], nn.gelu)
     dtype: jnp.dtype = jnp.float32
 
     @nn.compact
@@ -1059,6 +1057,8 @@ class DeepKernelAttention(nn.Module):
         K, D = ks.shape[-2:]
         if kwargs.get("bias") is not None:
             warnings.warn("DeepKernelAttention does not support bias!")
+        stack = lambda *args: jnp.concatenate(args, axis=-1)
+        qs, ks = stack(qs, kwargs["qs_s"]), stack(ks, kwargs["ks_s"])
         qs, ks = map(lambda x: self.proj_qks(x) / jnp.pow(D, 0.25), (qs, ks))
         if valid_lens is not None:
             ks *= mask_from_valid_lens(K, valid_lens)
@@ -1066,8 +1066,7 @@ class DeepKernelAttention(nn.Module):
         vs = self.proj_vs(vs).astype(self.dtype)
         kvs = jnp.einsum("B K D, B K V -> B D V", ks, vs)
         ctx = jnp.einsum("B Q D, B D V -> B Q V", qs, kvs)
-        return self.proj_out(ctx), None
-        # return self.proj_out(nn.LayerNorm()(ctx)), None
+        return ctx, None
 
 
 # TODO(danj): add learnable kernel parameters?

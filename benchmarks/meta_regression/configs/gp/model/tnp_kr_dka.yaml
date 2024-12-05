@@ -15,7 +15,12 @@ kwargs:
       proj_qks:
         cls: MLP
         kwargs:
-          dims: [64, 64, 64]
+          dims: [128, 64]
+          act_fn: gelu
+      proj_vs:
+        cls: MLP
+        kwargs:
+          dims: [128, 64]
           act_fn: gelu
   ffn:
     cls: MLP
