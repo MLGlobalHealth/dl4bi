@@ -41,7 +41,7 @@ def plot_infer_observed_coverage(post, map_data, model_name, hdi_prob=0.95, log=
     path = f"/tmp/Sampeled vs GT {timestamp}.png"
     fig.savefig(path, dpi=125)
     if log:
-        wandb.log({f"Sampeled vs GT - {model_name}": wandb.Image(path)})
+        wandb.log({"Sampeled vs GT": wandb.Image(path)})
     plt.clf()
     return path
 
@@ -88,7 +88,7 @@ def plot_infer_realizations(
     timestamp = datetime.now().isoformat()
     path = f"/tmp/Inferred Realisations {timestamp}.png"
     fig.savefig(path, dpi=250)
-    wandb.log({f"Inferred Realisations - {model_name}": wandb.Image(path)})
+    wandb.log({"Inferred Realisations": wandb.Image(path)})
     plt.clf()
 
 
@@ -109,7 +109,7 @@ def plot_kl_on_map(
     timestamp = datetime.now().isoformat()
     path = f"/tmp/KL divergence {timestamp}.png"
     fig.savefig(path, dpi=125)
-    wandb.log({f"KL divergence - {model_name}": wandb.Image(path)})
+    wandb.log({"KL divergence": wandb.Image(path)})
     plt.clf()
 
 
@@ -144,7 +144,7 @@ def plot_violin(post, f_batch, model_name, num_locations=10):
     timestamp = datetime.now().isoformat()
     path = f"/tmp/violin_{model_name}_{timestamp}.png"
     plt.savefig(path, dpi=200)
-    wandb.log({f"Violin Plot {model_name}": wandb.Image(path)})
+    wandb.log({"Violin Plot": wandb.Image(path)})
     plt.clf()
 
 
@@ -178,7 +178,7 @@ def plot_covariance(samples, conditionals, model_name, kernel, s):
     timestamp = datetime.now().isoformat()
     path = f"/tmp/covariance_{model_name}_{timestamp}.png"
     plt.savefig(path, dpi=300)
-    wandb.log({f"Covariance Matrix - {model_name}": wandb.Image(path)})
+    wandb.log({"Covariance Matrix": wandb.Image(path)})
     plt.clf()
 
 
@@ -200,7 +200,7 @@ def plot_trace(samples, mcmc, conditionals, obs_noise, model_name):
     timestamp = datetime.now().isoformat()
     path = f"/tmp/trace_{model_name}_{timestamp}.png"
     plt.savefig(path, dpi=300)
-    wandb.log({title: wandb.Image(str(path))})
+    wandb.log({"Trace Plot": wandb.Image(str(path))})
     plt.clf()
 
 
@@ -242,7 +242,7 @@ def plot_histograms(samples, conditionals, obs_noise, model_name, priors):
     timestamp = datetime.now().isoformat()
     path = f"/tmp/histograms_{model_name}_{timestamp}.png"
     plt.savefig(path, dpi=300)
-    wandb.log({f"Histograms for Conditionals - {model_name}": wandb.Image(path)})
+    wandb.log({"Histograms for Conditionals": wandb.Image(path)})
     plt.clf()
 
 
