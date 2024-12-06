@@ -1025,8 +1025,10 @@ class DeepKernelAttention(nn.Module):
         An `DeepKernelAttention` module.
     """
 
+    num_heads: int = 4
     proj_qks: Callable = MLP([128, 64], nn.gelu)
     proj_vs: nn.Module = MLP([128, 64], nn.gelu)
+    proj_out: nn.Module = MLP([64])
     dtype: jnp.dtype = jnp.float32
 
     @nn.compact
@@ -1054,19 +1056,23 @@ class DeepKernelAttention(nn.Module):
             `ctx` and `attn`, the updated values and `None` for the `attn`
             since it is never materialized.
         """
-        K, D = ks.shape[-2:]
+        (K, D), H = ks.shape[-2:], self.num_heads
         if kwargs.get("bias") is not None:
             warnings.warn("DeepKernelAttention does not support bias!")
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         qs, ks = stack(qs, kwargs["qs_s"]), stack(ks, kwargs["ks_s"])
         qs, ks = map(lambda x: self.proj_qks(x) / jnp.pow(D, 0.25), (qs, ks))
+        vs = self.proj_vs(vs).astype(self.dtype)
         if valid_lens is not None:
             ks *= mask_from_valid_lens(K, valid_lens)
             vs /= valid_lens[:, None, None]  # average to prevent overflow in ctx
-        vs = self.proj_vs(vs).astype(self.dtype)
-        kvs = jnp.einsum("B K D, B K V -> B D V", ks, vs)
-        ctx = jnp.einsum("B Q D, B D V -> B Q V", qs, kvs)
-        return nn.LayerNorm()(ctx), None
+        qs, ks, vs = map(
+            lambda x: rearrange(x, "B L (H D) -> B H L D", H=H), (qs, ks, vs)
+        )
+        kvs = jnp.einsum("B H K D, B H K V -> B H D V", ks, vs)
+        ctx = jnp.einsum("B H Q D, B H D V -> B H Q V", qs, kvs)
+        ctx = rearrange(ctx, "B H Q V -> B Q (H V)")
+        return nn.LayerNorm()(self.proj_out(ctx)), None
 
 
 # TODO(danj): add learnable kernel parameters?
