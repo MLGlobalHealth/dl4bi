@@ -1066,7 +1066,7 @@ class DeepKernelAttention(nn.Module):
         vs = self.proj_vs(vs).astype(self.dtype)
         kvs = jnp.einsum("B K D, B K V -> B D V", ks, vs)
         ctx = jnp.einsum("B Q D, B D V -> B Q V", qs, kvs)
-        return ctx, None
+        return nn.LayerNorm()(ctx), None
 
 
 # TODO(danj): add learnable kernel parameters?
