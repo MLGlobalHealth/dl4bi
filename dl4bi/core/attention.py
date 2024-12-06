@@ -1026,7 +1026,7 @@ class DeepKernelAttention(nn.Module):
     """
 
     num_heads: int = 4
-    proj_qks: Callable = MLP([128, 64], nn.gelu)
+    proj_qks: Callable = MLP([128, 128], nn.gelu)
     proj_vs: nn.Module = MLP([128, 64], nn.gelu)
     proj_out: nn.Module = MLP([64])
     dtype: jnp.dtype = jnp.float32
@@ -1059,23 +1059,20 @@ class DeepKernelAttention(nn.Module):
         (K, D), H = ks.shape[-2:], self.num_heads
         if kwargs.get("bias") is not None:
             warnings.warn("DeepKernelAttention does not support bias!")
-        mask = jnp.array([1])
-        if valid_lens is not None:
-            mask = mask_from_valid_lens(K, valid_lens)
-            vs /= valid_lens[:, None, None]  # TODO(danj) necessary?
         stack = lambda *args: jnp.concatenate(args, axis=-1)
-        # vnode = ks.mean(axis=1, where=mask, keepdims=True)
-        # vnode = repeat(vnode, "B 1 V -> B K V", K=K)
-        # qs, ks = stack(vnode, kwargs["qs_s"], qs), stack(vnode, kwargs["ks_s"], ks)
         qs, ks = stack(kwargs["qs_s"], qs), stack(kwargs["ks_s"], ks)
         qs, ks = map(
             lambda x: self.proj_qks(x).astype(self.dtype) / jnp.pow(D, 0.25), (qs, ks)
         )
         vs = self.proj_vs(vs).astype(self.dtype)
-        ks *= mask
+        if valid_lens is not None:
+            ks *= mask_from_valid_lens(K, valid_lens)
+            vs /= valid_lens[:, None, None]  # TODO(danj) necessary?
         qs, ks, vs = map(
             lambda x: rearrange(x, "B L (H D) -> B H L D", H=H), (qs, ks, vs)
         )
+        # TODO(danj): try different numbers of attention heads
+        # TODO(danj): run kvs through a non-linear activation?
         kvs = jnp.einsum("B H K D, B H K V -> B H D V", ks, vs)
         ctx = jnp.einsum("B H Q D, B H D V -> B H Q V", qs, kvs)
         ctx = rearrange(ctx, "B H Q V -> B Q (H V)")
