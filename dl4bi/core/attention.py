@@ -670,7 +670,7 @@ def tisa_biased_scan_ks(
 
     def chunk_ks(i, k_c):
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (k_c, B, H, D))
-        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D))
+        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, vs.shape[-1]))
         ks_s_chunk = lax.dynamic_slice(ks_s, (i, 0, 0), (k_c, B, S))
         ks_mask_chunk = jnp.array(True)
         if ks_mask is not None:
@@ -1025,7 +1025,7 @@ class DeepKernelAttention(nn.Module):
         An `DeepKernelAttention` module.
     """
 
-    num_heads: int = 2
+    num_heads: int = 1
     proj_qks: Callable = MLP([128, 128], nn.gelu)
     proj_vs: nn.Module = MLP([128, 64], nn.gelu)
     dtype: jnp.dtype = jnp.float32

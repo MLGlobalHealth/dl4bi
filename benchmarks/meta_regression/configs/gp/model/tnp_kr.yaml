@@ -12,14 +12,26 @@ kwargs:
   bias:
     cls: TISABias
     kwargs:
-      num_basis: 2
+      num_basis: 5
       num_heads: 4
   attn:
     cls: MultiHeadAttention
     kwargs:
       num_heads: 4
       attn:
-        cls: FusedAttention
+        cls: Attention
+      proj_qs:
+        cls: MLP
+        kwargs:
+          dims: [128]
+      proj_ks:
+        cls: MLP
+        kwargs:
+          dims: [128]
+      proj_vs:
+        cls: MLP
+        kwargs:
+          dims: [128, 64]
   ffn:
     cls: MLP
     kwargs:
