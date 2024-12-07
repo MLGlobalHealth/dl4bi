@@ -84,7 +84,7 @@ class DSKR(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        (B, N_t), N_c = s_test.shape[:-1], s_ctx.shape[1]
+        (B, N_t), (N_c, S), K = s_test.shape[:-1], s_ctx.shape[-1:], self.k
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(N_c, B)
         # construct node features
@@ -95,16 +95,24 @@ class DSKR(nn.Module):
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         x_ctx, x_test = self.norm(self.embed_all(ctx)), self.norm(self.embed_all(test))
+        nodes = jnp.vstack([x_ctx.reshape(B * N_c, -1), x_test(B * N_t, -1)])
         # build localized graphs
         mask = mask_from_valid_lens(N_c, valid_lens_ctx)
         s_send = jnp.where(mask, s_ctx, jnp.inf)  # masked values = far away for kNN
-        knn = jit(lambda r, s: self.k_nearest_senders(r, s, self.k))
-        (s_ctx, d_ctx), (s_test, d_test) = knn(s_ctx, s_send), knn(s_test, s_send)
-        # TODO(danj): sort out senders, x_*, and d_*
+        knn = jit(lambda r, s: self.k_nearest_senders(r, s, K))
+        (tx_ctx, d_ctx), (tx_test, d_test) = knn(s_ctx, s_send), knn(s_test, s_send)
+        tx_ctx = tx_ctx.reshape(B * N_c, K) + jnp.repeat(jnp.arange(B) * (N_c * K), N_c)
+        tx_test = (
+            B * N_c  # offset
+            + tx_ctx.reshape(B * N_t, self.k)
+            + jnp.repeat(jnp.arange(B) * (N_t * K), N_t)
+        )
+
+        # TODO(danj): sort out senders, x_*, and d_* -> stack(X_c, X_t)
         g = GraphsTuple(
-            nodes=jnp.vstack([x_ctx, x_test]),
-            edges=distances,
-            senders=senders,
+            nodes=nodes,
+            edges=edges,
+            senders=stack(tx_ctx, tx_test),
             receivers=jnp.arange(B * (N_c + N_t)),
             n_node=jnp.array(B * [N_c + N_t]),
             n_edge=jnp.array(B * [(N_c + N_t) * self.k]),
@@ -114,7 +122,7 @@ class DSKR(nn.Module):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
                 g = blk(g, training)
-        x_t = g.nodes.reshape(B, N_c + N_t, -1)[:, -N_t:, :]
+        x_t = g.nodes[:, -B * N_t :, :]
         f_dist = self.head(x_t, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
         f_std = jnp.exp(f_log_var / 2)
