@@ -250,10 +250,11 @@ class GraphKRBlock(nn.Module):
     bias: nn.Module = TISABias()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64], nn.gelu)
+    p_dropout: float = 0.0
 
     @nn.compact
     def __call__(self, g: GraphsTuple, training: bool, **kwargs):
-        n_0, e_0, receivers, senders, globals, _, _ = g
+        n_0, e_0, receivers, senders, globals, _n_node, _n_edge = g
         N, H = n_0.shape[0], self.num_heads
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         to_mh = jit(lambda n: rearrange(n, "N (H D) -> N H D", H=H))

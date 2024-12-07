@@ -62,6 +62,7 @@ class DSKR(nn.Module):
     k_nearest_senders: Callable = k_nearest_senders
     num_blks: int = 6
     num_reps: int = 1
+    min_std: float = 0.0
     embed_s: Callable = lambda x: x
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
@@ -84,43 +85,46 @@ class DSKR(nn.Module):
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(N_c, B)
         # construct node features
-        f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
-        obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
-        unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
+        f_test = jnp.zeros((*s_test.shape[:-1], f_ctx.shape[-1]))
+        obs, unobs = jnp.ones((B, N_c, 1)), jnp.zeros((B, N_t, 1))
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         x_ctx, x_test = stack(obs, s_ctx, f_ctx), stack(unobs, s_test, f_test)
 
         def embed_node_fn(x: jax.Array) -> jax.Array:
-            obs, s, f = x[..., :1], x[..., 1 : 1 + S], x[..., 1 + S :]
+            obs, s, f = x[..., 0], x[..., 1 : 1 + S], x[..., 1 + S :]
+            obs = obs.astype(jnp.uint8)
             sep = stack(self.embed_obs(obs), self.embed_s(s), self.embed_f(f))
-            return self.norm(self.embed_all(sep))
+            return nn.LayerNorm()(self.embed_all(sep))
 
         # build localized graphs
         graphs = []
-        receivers = jit(lambda n: jnp.repeat(jnp.arange(n), self.k))
+        receivers = lambda n: jnp.repeat(jnp.arange(n), self.k)
         for b in range(B):
             n_c = valid_lens_ctx[b]
             s_c, s_t = s_ctx[b, :n_c], s_test[b, :N_t]
             x_c, x_t = x_ctx[b, :n_c], x_test[b, :N_t]
             tx_cc, d_cc = self.k_nearest_senders(s_c, s_c, self.k)
             tx_ct, d_ct = self.k_nearest_senders(s_t, s_c, self.k)
-            rx_cc, rx_ct = receivers(s_c), receivers(s_t)
+            rx_cc, rx_ct = receivers(n_c), receivers(N_t)
             g = GraphsTuple(
-                nodes=stack(x_c, x_t),
+                nodes=jnp.vstack([x_c, x_t]),
                 edges=stack(d_cc, d_ct),
                 senders=stack(tx_cc, tx_ct),
                 receivers=stack(rx_cc, n_c + rx_ct),
-                n_node=n_c + N_t,
-                n_edge=(n_c + N_t) * self.k,
+                n_node=jnp.array([n_c + N_t]),
+                n_edge=jnp.array([(n_c + N_t) * self.k]),
                 globals=jnp.max(x_c, axis=0, keepdims=True),  # TODO(danj): attn?
             )
             graphs += [g]
         graphs = jraph.batch(graphs)
-        graphs = jraph.GraphMapFeatures(embed_node_fn=embed_node_fn)
+        graphs = jraph.GraphMapFeatures(embed_node_fn=embed_node_fn)(graphs)
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
                 graphs = blk(graphs, training)
         x_t = jnp.stack([g.nodes[-N_t:] for g in jraph.unbatch(graphs)])
-        f_mu, f_sigma = self.head(x_t)
-        return f_mu, f_sigma
+        f_dist = self.head(x_t, training)
+        f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
+        f_std = jnp.exp(f_log_var / 2)
+        f_std = self.min_std + (1 - self.min_std) * f_std
+        return f_mu, f_std
