@@ -6,8 +6,14 @@ from typing import Optional
 
 import flax.linen as nn
 import jax
+import jax.numpy as jnp
+import jraph
+from einops import rearrange
+from jax import jit
+from jraph import GraphsTuple
 
 from .attention import MultiHeadAttention
+from .bias import TISABias
 from .mlp import MLP
 
 
@@ -233,3 +239,53 @@ class KRBlock(nn.Module):
         qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)
         qvs_5, kvs_5 = self.ffn(qvs_4, training), self.ffn(kvs_4, training)
         return qvs_3 + drop(qvs_5), kvs_3 + drop(kvs_5)
+
+
+class GraphKRBlock(nn.Module):
+    num_heads: int = 4
+    proj_qks: nn.Module = MLP([64])
+    proj_vs: nn.Module = MLP([64])
+    proj_out: nn.Module = MLP([64])
+    bias: nn.Module = TISABias()
+    norm: nn.Module = nn.LayerNorm()
+    ffn: nn.Module = MLP([256, 64], nn.gelu)
+
+    @nn.compact
+    def __call__(self, g: GraphsTuple, training: bool, **kwargs):
+        drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        mha_fwd = jit(lambda n: rearrange(n, "N (H D) -> N H D", H=H))
+        mha_bwd = jit(lambda n: rearrange(n, "N H D -> N (H D)"))
+        bias_fwd = jit(lambda e: rearrange(e, "N -> N 1 1"))
+        bias_bwd = jit(lambda e: rearrange(e, "N H 1 1 -> N H"))
+        nodes, edges, receivers, senders, globals, _, _ = g
+        N, H = nodes.shape[0], self.num_heads
+        n_1 = self.norm(nodes)
+        n_1_qks, n_1_vs = self.proj_qks(n_1), self.proj_vs(n_1)
+        n_1_qks, n_1_vs = map(mha_fwd, (n_1_qks, n_1_vs))
+        r_1_qks, s_1_qks = n_1_qks[receivers], n_1_qks[senders]
+        s_1_vs = n_1_vs[senders]
+        scores = jnp.einsum("N H D, N H D -> N H", r_1_qks, s_1_qks)
+        scores += bias_bwd(self.bias(bias_fwd(edges)))
+        # TODO(danj): need to separate this for MHA...
+        attn = jraph.segment_softmax(scores, receivers, N)
+        n_2 = jnp.einsum("N H, N H D -> N D", attn, s_1_vs)
+        # qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
+        # qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, valid_lens, training, **qk_kwargs)
+        # kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, valid_lens, training, **kk_kwargs)
+        # qvs_3, kvs_3 = qvs + drop(qvs_2), kvs + drop(kvs_2)
+        # norm_2 = self.norm.copy()
+        # qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)
+        # qvs_5, kvs_5 = self.ffn(qvs_4, training), self.ffn(kvs_4, training)
+        # return qvs_3 + drop(qvs_5), kvs_3 + drop(kvs_5)
+
+        # nodes = attention_query_fn(nodes)
+        # sent_attributes = nodes[senders]
+        # received_attributes = nodes[receivers]
+        # softmax_logits = attention_logit_fn(sent_attributes, received_attributes, edges)
+        # weights = utils.segment_softmax(
+        #     softmax_logits, segment_ids=receivers, num_segments=sum_n_node
+        # )
+        # messages = sent_attributes * weights
+        # nodes = utils.segment_sum(messages, receivers, num_segments=sum_n_node)
+        # nodes = node_update_fn(nodes)
+        return g._replace(nodes=nodes)

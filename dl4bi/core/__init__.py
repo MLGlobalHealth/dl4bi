@@ -52,6 +52,7 @@ from .metrics import (
 from .mle import gp_mle_bfgs, gp_mle_sgd
 from .mlp import MLP, MLPMixer, MLPMixerBlock
 from .transformer import (
+    GraphKRBlock,
     KRBlock,
     TransformerDecoder,
     TransformerDecoderBlock,

@@ -12,11 +12,11 @@ from jraph import GraphsTuple
 from scipy.spatial import KDTree
 from sps.kernels import l2_dist
 
-from dl4bi.core.attention import MultiHeadAttention
-
 from ..core import (
     MLP,
+    GraphKRBlock,
     KRBlock,
+    MultiHeadAttention,
     SpatioTemporalMLPAttention,
 )
 
@@ -55,17 +55,6 @@ def k_nearest_senders(rx: jax.Array, tx: jax.Array, k: int):
 # https://arxiv.org/abs/2211.00120
 def k_nearest_senders_gpu(rx: jax.Array, tx: jax.Array, k: int):
     pass
-
-
-class GraphKR(nn.Module):
-    attn: nn.Module = MultiHeadAttention()
-    norm: nn.Module = nn.LayerNorm()
-    ffn: nn.Module = MLP([256, 64], nn.gelu)
-    head: nn.Module = MLP([256, 64, 2], nn.gelu)
-
-    @nn.compact
-    def __call__(self, g: GraphsTuple):
-        pass
 
 
 # TODO(danj): graph padding??
