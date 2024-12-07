@@ -5,7 +5,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import jit
+from jax import jit, vmap
 from jraph import GraphsTuple
 from scipy.spatial import KDTree
 from sps.kernels import l2_dist
@@ -99,20 +99,14 @@ class DSKR(nn.Module):
         # build localized graphs
         mask = mask_from_valid_lens(N_c, valid_lens_ctx)
         s_send = jnp.where(mask, s_ctx, jnp.inf)  # masked values = far away for kNN
-        knn = jit(lambda r, s: self.k_nearest_senders(r, s, K))
-        (tx_ctx, d_ctx), (tx_test, d_test) = knn(s_ctx, s_send), knn(s_test, s_send)
-        tx_ctx = tx_ctx.reshape(B * N_c, K) + jnp.repeat(jnp.arange(B) * (N_c * K), N_c)
-        tx_test = (
-            B * N_c  # offset
-            + tx_ctx.reshape(B * N_t, self.k)
-            + jnp.repeat(jnp.arange(B) * (N_t * K), N_t)
-        )
-
-        # TODO(danj): sort out senders, x_*, and d_* -> stack(X_c, X_t)
+        knn = vmap(lambda r, s: self.k_nearest_senders(r, s, K))
+        (s_cc, d_ctx), (s_ct, d_test) = knn(s_ctx, s_send), knn(s_test, s_send)
+        s_cc = s_cc.flatten() + jnp.repeat(jnp.arange(B) * (N_c * K), N_c * K)
+        s_ct = s_ct.flatten() + jnp.repeat(jnp.arange(B) * (N_t * K), N_t * K)
         g = GraphsTuple(
             nodes=nodes,
-            edges=edges,
-            senders=stack(tx_ctx, tx_test),
+            edges=stack(d_ctx.flatten(), d_test.flatten()),
+            senders=stack(s_cc, s_ct),
             receivers=jnp.arange(B * (N_c + N_t)),
             n_node=jnp.array(B * [N_c + N_t]),
             n_edge=jnp.array(B * [(N_c + N_t) * self.k]),
