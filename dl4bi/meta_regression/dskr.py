@@ -101,9 +101,11 @@ class DSKR(nn.Module):
         (s_cc, d_cc), (s_ct, d_ct) = knn(s_ctx, s_send), knn(s_test, s_send)
         s_cc = s_cc.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_c * K)
         s_ct = s_ct.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_t * K)
+        nodes = jnp.vstack([x_ctx.reshape(B * N_c, -1), x_test.reshape(B * N_t, -1)])
+        edges = stack(d_cc.flatten(), d_ct.flatten())
         g = GraphsTuple(
-            nodes=jnp.vstack([x_ctx.reshape(B * N_c, -1), x_test.reshape(B * N_t, -1)]),
-            edges=stack(d_cc.flatten(), d_ct.flatten()),
+            nodes,
+            edges,
             senders=stack(s_cc, s_ct),
             receivers=jnp.arange(B * (N_c + N_t) * K),
             n_node=jnp.array(B * [N_c + N_t]),
@@ -113,8 +115,8 @@ class DSKR(nn.Module):
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
-                bias = self.bias.copy()
-                g = blk(g, training)
+                bias = self.bias.copy()(edges[:, None, None]).squeeze()
+                g = blk(g, training, bias=bias)
         x_t = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         f_dist = self.head(x_t, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)

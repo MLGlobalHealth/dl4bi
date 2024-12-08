@@ -1013,7 +1013,6 @@ class MultiHeadGraphAttention(nn.Module):
     proj_qks: nn.Module = MLP([64])
     proj_vs: nn.Module = MLP([64])
     proj_out: nn.Module = MLP([64])
-    bias: nn.Module = TISABias()
 
     @nn.compact
     def __call__(self, g: jraph.GraphsTuple, training: bool = False, **kwargs):
@@ -1035,7 +1034,7 @@ class MultiHeadGraphAttention(nn.Module):
         qks, vs = map(to_mh, (qks, vs))
         qks_r, qks_s = qks[receivers], qks[senders]
         scores = jnp.einsum("N H D, N H D -> N H", qks_r, qks_s)
-        scores += self.bias(edges[:, None, None]).squeeze()
+        scores += kwargs.get("bias", 0)
         attn = jraph.segment_softmax(scores, receivers, N)
         messages = from_mh(attn[..., None] * vs[senders])
         ctx = self.proj_out(jraph.segment_sum(messages, receivers, N))

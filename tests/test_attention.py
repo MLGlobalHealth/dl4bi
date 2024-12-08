@@ -57,13 +57,15 @@ def test_multihead_attention_impl():
         assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
 
 
+# TODO(danj): finish
 def test_multihead_graph_attention_impl():
     B, H, L, D = 4, 4, 7, 64
     key = random.key(42)
-    rng_qkv, rng_bias, rng_init = random.split(key, 3)
-    qs, ks, vs = random.normal(rng_qkv, (3, B, L, D))
-    bias = random.normal(rng_bias, (B, H, L, L))
-    valid_lens = jnp.array([2, 4, 6, 3])
+    rng_nodes, rng_edges, rng_bias, rng_init = random.split(key, 3)
+    nodes = random.normal(rng_nodes, (B * L, D))
+    edges = random.normal(rng_edges, (B * L * L,))
+    bias = random.normal(rng_bias, (B * L * L, H))
+    valid_lens = jnp.array([L, L, L, L])
     (ctx, attn), _ = MultiHeadGraphAttention(H).init_with_output(
         rng_init, qs, ks, vs, valid_lens, bias=bias
     )
