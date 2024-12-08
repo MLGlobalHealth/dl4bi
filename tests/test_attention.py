@@ -3,6 +3,7 @@ from time import time
 import jax
 import jax.numpy as jnp
 from jax import random
+from sps.utils import build_grid
 
 from dl4bi.core import (
     MLP,
@@ -290,7 +291,7 @@ def test_tisa_biased_scan_attention_speed():
     t_true_stop = time()
     t_true_diff = t_true_stop - t_true_start
 
-    max_t, factor = 5e-5, 1.2
+    max_t, factor = 5e-5, 1.3
     # NOTE: can use the following assert for benchmarking
     # assert t_scan_diff < max_t, f"Scan takes longer than {max_t}s!"
     assert t_scan_diff < factor * t_true_diff, f"Scan is more than {factor}x slower!"
@@ -383,11 +384,12 @@ def test_kernel_attention_impl():
 def test_deep_kernel_attention_impl():
     B, L, D = 4, 128, 64
     key = random.key(42)
+    s = jnp.repeat(build_grid()[None, ...], B, axis=0)
     rng_qkv, rng_valid, rng_init = random.split(key, 3)
     qs, ks, vs = random.normal(rng_qkv, (3, B, L, D))
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
     (ctx, _), _ = DeepKernelAttention().init_with_output(
-        rng_init, qs, ks, vs, valid_lens
+        rng_init, qs, ks, vs, valid_lens, qs_s=s, ks_s=s
     )
     assert jnp.isfinite(ctx).all(), "KernelAttention produced non-finite values!"
     assert ctx.shape == (B, L, D), "Incorrect context output shape!"

@@ -9,23 +9,26 @@ kwargs:
       act_fn: gelu
   dist: null
   bias: null
-  attn:
-    cls: MultiHeadAttention
+  blk:
+    cls: KRBlock
     kwargs:
-      num_heads: 4
       attn:
-        cls: DistanceBiasedFastAttention
+        cls: MultiHeadAttention
         kwargs:
-          num_ortho_features: 64
-          s_rbf_rff:
-            cls: RBFRandomFourierFeatures
+          num_heads: 4
+          attn:
+            cls: DistanceBiasedFastAttention
             kwargs:
-              embed_dim: 48
-  ffn:
-    cls: MLP
-    kwargs:
-      dims: [256, 64]
-      act_fn: gelu
+              num_ortho_features: 64
+              s_rbf_rff:
+                cls: RBFRandomFourierFeatures
+                kwargs:
+                  embed_dim: 48
+      ffn:
+        cls: MLP
+        kwargs:
+          dims: [256, 64]
+          act_fn: gelu
   head:
     cls: MLP
     kwargs:

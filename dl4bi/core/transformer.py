@@ -12,7 +12,7 @@ from einops import rearrange
 from jax import jit
 from jraph import GraphsTuple
 
-from .attention import MultiHeadAttention
+from .attention import MultiHeadAttention, MultiHeadGraphAttention
 from .bias import TISABias
 from .mlp import MLP
 
@@ -216,7 +216,7 @@ class KRBlock(nn.Module):
 
     attn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
-    ffn: nn.Module = MLP([128, 64])
+    ffn: nn.Module = MLP([256, 64])
     p_dropout: float = 0.0
 
     @nn.compact
@@ -243,35 +243,16 @@ class KRBlock(nn.Module):
 
 # TODO(danj): test conditioning on globals
 class GraphKRBlock(nn.Module):
-    num_heads: int = 4
-    proj_qks: nn.Module = MLP([64])
-    proj_vs: nn.Module = MLP([64])
-    proj_out: nn.Module = MLP([64])
-    bias: nn.Module = TISABias()
+    attn: nn.Module = MultiHeadGraphAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64], nn.gelu)
     p_dropout: float = 0.0
 
     @nn.compact
     def __call__(self, g: GraphsTuple, training: bool, **kwargs):
-        n_0, e_0, receivers, senders, globals, _n_node, _n_edge = g
-        N, H = n_0.shape[0], self.num_heads
+        n_0, *_ = g
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        to_mh = jit(lambda n: rearrange(n, "N (H D) -> N H D", H=H))
-        from_mh = jit(lambda n: rearrange(n, "N H D -> N (H D)"))
-        # multihead attention residual path
-        n_1 = self.norm(n_0)
-        n_1_qks, n_1_vs = self.proj_qks(n_1), self.proj_vs(n_1)
-        n_1_qks, n_1_vs = map(to_mh, (n_1_qks, n_1_vs))
-        r_1_qks, s_1_qks = n_1_qks[receivers], n_1_qks[senders]
-        scores = jnp.einsum("N H D, N H D -> N H", r_1_qks, s_1_qks)
-        scores += self.bias(e_0[:, None, None]).squeeze()
-        attn = jraph.segment_softmax(scores, receivers, N)
-        messages = from_mh(attn[..., None] * n_1_vs[senders])
-        n_2 = self.proj_out(jraph.segment_sum(messages, receivers, N))
-        n_3 = n_0 + drop(n_2)
-        # ffn residual path
-        n_4 = self.norm.copy()(n_3)
-        n_5 = self.ffn(n_4, training)
-        n_6 = n_3 + drop(n_5)
-        return g._replace(nodes=n_6)
+        n_1, _ = self.attn(g._replace(nodes=self.norm(n_0)), training)
+        n_2 = n_0 + drop(n_1)
+        n_3 = self.ffn(self.norm.copy()(n_2), training)
+        return g._replace(nodes=n_2 + drop(n_3))

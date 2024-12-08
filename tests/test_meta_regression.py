@@ -8,6 +8,7 @@ from dl4bi.core import (
     DeepKernelAttention,
     FastAttention,
     FusedAttention,
+    KRBlock,
     MultiHeadAttention,
 )
 from dl4bi.meta_regression import (
@@ -74,7 +75,7 @@ def test_tnp_kr_fast_scale():
     s_test = jnp.linspace(0, 1.0, L_test)[None, :, None]  # [1, L_test, 1]
     f_init = random.normal(rng_init, (B, L_init, D_f))
     f_ctx = random.normal(rng_ctx, (B, L_ctx, D_f))
-    m = TNPKR(attn=MultiHeadAttention(FastAttention()))
+    m = TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention())))
     params = m.init(rng_init, s_init, f_init, s_init)
     jit_m = jit(lambda *args: m.apply(params, *args))
     jit_m(s_init, f_init, s_init)  # dummy run to compile
@@ -104,15 +105,15 @@ def test_context_data_leaks():
         ANP,
         CANP,
         BANP,
-        DSKR,
+        ConvCNP,
         TNPD,
         TNPND,
-        lambda: TNPKR(attn=MultiHeadAttention(Attention())),
-        lambda: TNPKR(attn=MultiHeadAttention(FusedAttention())),
-        lambda: TNPKR(attn=MultiHeadAttention(FastAttention())),
-        lambda: TNPKR(attn=DeepKernelAttention()),
         ScanTNPKR,
-        ConvCNP,
+        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
+        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FusedAttention()))),
+        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
+        lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
+        lambda: DSKR(k=N),
     ]:
         print(np)
         m = np()

@@ -9,29 +9,32 @@ kwargs:
       act_fn: gelu
   dist: null
   bias: null
-  attn:
-    cls: MultiHeadAttention
+  blk:
+    cls: KRBlock
     kwargs:
-      num_heads: 4
       attn:
-        cls: FastAttention
-      proj_qs:
+        cls: MultiHeadAttention
+        kwargs:
+          num_heads: 4
+          attn:
+            cls: FastAttention
+          proj_qs:
+            cls: MLP
+            kwargs:
+              dims: [128]
+          proj_ks:
+            cls: MLP
+            kwargs:
+              dims: [128]
+          proj_vs:
+            cls: MLP
+            kwargs:
+              dims: [128, 64]
+      ffn:
         cls: MLP
         kwargs:
-          dims: [128]
-      proj_ks:
-        cls: MLP
-        kwargs:
-          dims: [128]
-      proj_vs:
-        cls: MLP
-        kwargs:
-          dims: [128, 64]
-  ffn:
-    cls: MLP
-    kwargs:
-      dims: [256, 64]
-      act_fn: gelu
+          dims: [256, 64]
+          act_fn: gelu
   head:
     cls: MLP
     kwargs:

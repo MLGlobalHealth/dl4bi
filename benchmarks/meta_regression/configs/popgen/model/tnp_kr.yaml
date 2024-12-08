@@ -14,17 +14,20 @@ kwargs:
     cls: DistanceBias
     kwargs:
       num_heads: 4
-  attn:
-    cls: MultiHeadAttention
+  blk:
+    cls: KRBlock
     kwargs:
-      num_heads: 4
       attn:
-        cls: FusedAttention
-  ffn:
-    cls: MLP
-    kwargs:
-      dims: [256, 64]
-      act_fn: gelu
+        cls: MultiHeadAttention
+        kwargs:
+          num_heads: 4
+          attn:
+            cls: FusedAttention
+      ffn:
+        cls: MLP
+        kwargs:
+          dims: [256, 64]
+          act_fn: gelu
   head:
     cls: MLP
     kwargs:

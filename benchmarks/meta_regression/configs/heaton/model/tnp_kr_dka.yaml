@@ -9,25 +9,28 @@ kwargs:
       act_fn: gelu
   dist: null
   bias: null
-  attn:
-    cls: DeepKernelAttention
+  blk:
+    cls: KRBlock
     kwargs:
-      num_heads: 1
-      proj_qks:
+      attn:
+        cls: DeepKernelAttention
+        kwargs:
+          num_heads: 1
+          proj_qks:
+            cls: MLP
+            kwargs:
+              dims: [128, 128]
+              act_fn: gelu
+          proj_vs:
+            cls: MLP
+            kwargs:
+              dims: [128, 64]
+              act_fn: gelu
+      ffn:
         cls: MLP
         kwargs:
-          dims: [128, 128]
+          dims: [256, 64]
           act_fn: gelu
-      proj_vs:
-        cls: MLP
-        kwargs:
-          dims: [128, 64]
-          act_fn: gelu
-  ffn:
-    cls: MLP
-    kwargs:
-      dims: [256, 64]
-      act_fn: gelu
   head:
     cls: MLP
     kwargs:

@@ -7,13 +7,14 @@ import flax.linen as nn
 import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
+import jraph
 from einops import rearrange, repeat
 from jax import jit, lax, random, vmap
 from jax.lax import scan
 from jax.nn import dot_product_attention
 from sps.kernels import l2_dist, outer_subtract
 
-from .bias import rbf_basis
+from .bias import TISABias, rbf_basis
 from .embed import RBFRandomFourierFeatures
 from .mlp import MLP
 from .utils import mask_attn, mask_from_valid_lens
@@ -991,6 +992,54 @@ class MultiHeadAttention(nn.Module):
         ctx, attn = self.attn(qs, ks, vs, valid_lens, training, **kwargs)
         ctx = rearrange(ctx, "B L H D -> B L (H D)")
         return self.proj_out(ctx), attn
+
+
+class MultiHeadGraphAttention(nn.Module):
+    r"""Performs multihead query-key-value attention.
+
+    Args:
+        num_heads: Number of heads for attention module.
+        proj_qs: A module for projecting queries.
+        proj_ks: A module for projecting keys.
+        proj_vs: A module for projecting values.
+        proj_out: A module for projecting output.
+
+    Returns:
+        A `MultiHeadGraphAttention` module.
+
+    """
+
+    num_heads: int = 4
+    proj_qks: nn.Module = MLP([64])
+    proj_vs: nn.Module = MLP([64])
+    proj_out: nn.Module = MLP([64])
+    bias: nn.Module = TISABias()
+
+    @nn.compact
+    def __call__(self, g: jraph.GraphsTuple, training: bool = False, **kwargs):
+        r"""Performs forward pass of network.
+
+        Args:
+            g: A `jraph.GraphsTuple`.
+            training: Boolean indicating whether currently training.
+            kwargs: Additional kwargs passed on to attention module.
+
+        Returns:
+            `ctx` and `attn`, the updated values and attention weights.
+        """
+        nodes, edges, receivers, senders, globals, _n_node, _n_edge = g
+        N, H = nodes.shape[0], self.num_heads
+        to_mh = jit(lambda n: rearrange(n, "N (H D) -> N H D", H=H))
+        from_mh = jit(lambda n: rearrange(n, "N H D -> N (H D)"))
+        qks, vs = self.proj_qks(nodes), self.proj_vs(nodes)
+        qks, vs = map(to_mh, (qks, vs))
+        qks_r, qks_s = qks[receivers], qks[senders]
+        scores = jnp.einsum("N H D, N H D -> N H", qks_r, qks_s)
+        scores += self.bias(edges[:, None, None]).squeeze()
+        attn = jraph.segment_softmax(scores, receivers, N)
+        messages = from_mh(attn[..., None] * vs[senders])
+        ctx = self.proj_out(jraph.segment_sum(messages, receivers, N))
+        return ctx, attn
 
 
 # TODO(danj): can make this more efficient by doing (QK^T)V -> Q(K^TV)

@@ -10,7 +10,6 @@ from sps.kernels import l2_dist_sq
 from ..core import (
     MLP,
     DistanceBias,
-    FusedAttention,
     KRBlock,
     MultiHeadAttention,
     TISABiasedScanAttention,
@@ -52,9 +51,8 @@ class TNPKR(nn.Module):
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
     dist: Optional[Callable] = l2_dist_sq
     bias: Optional[nn.Module] = DistanceBias()
-    attn: nn.Module = MultiHeadAttention(FusedAttention())
+    blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
-    ffn: nn.Module = MLP([256, 64], nn.gelu)
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
 
     @nn.compact
@@ -91,27 +89,26 @@ class TNPKR(nn.Module):
         Returns:
             $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
+        norm = nn.LayerNorm()
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
         unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
-        qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
+        qvs, kvs = norm(self.embed_all(test)), norm(self.embed_all(ctx))
         qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx}
         kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx}
         if self.dist is not None:
             vdist = vmap(self.dist)
             d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
         for _ in range(self.num_blks):
-            attn, ffn = self.attn.copy(), self.ffn.copy()
+            blk = self.blk.copy()  # new bias for every blk & rep
             for _ in range(self.num_reps):
-                norm = self.norm.copy()
                 if self.bias is not None:
                     bias = self.bias.copy()
                     qk_kwargs["bias"] = bias(d_qk)
                     kk_kwargs["bias"] = bias(d_kk)
-                blk = KRBlock(attn, norm, ffn)
                 qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)
         f_dist = self.head(qvs, training)
@@ -155,9 +152,8 @@ class ScanTNPKR(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    attn: nn.Module = MultiHeadAttention(TISABiasedScanAttention())
+    blk: nn.Module = KRBlock(MultiHeadAttention(TISABiasedScanAttention()))
     norm: nn.Module = nn.LayerNorm()
-    ffn: nn.Module = MLP([256, 64], nn.gelu)
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
 
     @nn.compact
@@ -204,10 +200,8 @@ class ScanTNPKR(nn.Module):
         qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx}
         kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx}
         for _ in range(self.num_blks):
-            attn, ffn = self.attn.copy(), self.ffn.copy()
+            blk = self.blk.copy()
             for _ in range(self.num_reps):
-                attn, norm, ffn = self.attn.copy(), self.norm.copy(), self.ffn.copy()
-                blk = KRBlock(attn, norm, ffn)
                 qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)
         f_dist = self.head(qvs, training)
