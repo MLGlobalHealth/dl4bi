@@ -98,8 +98,8 @@ class DSKR(nn.Module):
         x_ctx, x_test = self.norm(self.embed_all(ctx)), self.norm(self.embed_all(test))
         knn = vmap(lambda r, s: self.k_nearest_senders(r, s, K))
         (s_cc, d_cc), (s_ct, d_ct) = knn(s_ctx, s_send), knn(s_test, s_send)
-        s_cc = s_cc.flatten() + jnp.repeat(jnp.arange(B) * (N_c * K), N_c * K)
-        s_ct = s_ct.flatten() + jnp.repeat(jnp.arange(B) * (N_c * K), N_t * K)
+        s_cc = s_cc.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_c * K)
+        s_ct = s_ct.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_t * K)
         g = GraphsTuple(
             nodes=jnp.vstack([x_ctx.reshape(B * N_c, -1), x_test.reshape(B * N_t, -1)]),
             edges=stack(d_cc.flatten(), d_ct.flatten()),
