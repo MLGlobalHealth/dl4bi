@@ -108,11 +108,11 @@ def test_context_data_leaks():
         ConvCNP,
         TNPD,
         TNPND,
-        ScanTNPKR,
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FusedAttention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
+        ScanTNPKR,
         lambda: DSKR(k=N),
     ]:
         print(np)
