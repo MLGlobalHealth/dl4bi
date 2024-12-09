@@ -4,3 +4,19 @@ mcmc:
   num_warmup: 4000
   num_samples: 10000
   num_chains: 4
+# NOTE: priors must be Numpyro distribution names, as these are sampled within a model
+priors: 
+  beta:
+    numpyro_dist: Normal
+  var:
+    numpyro_dist: Uniform
+    kwargs:
+      low: 0.5
+      high: 1.5
+  ls:
+    numpyro_dist: Beta
+    kwargs:
+      concentration1: 3.0
+      concentration0: 7.0
+  period:
+    numpyro_dist: HalfNormal

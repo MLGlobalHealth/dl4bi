@@ -7,5 +7,7 @@ sampling_grid:
   grid_densities: [1000, 800, 1200]
 obs_noise: 0.1
 pre_process:
-  bias: dist_bias
+  bias: null
   pos_enc: null
+graph_construction:
+  self_loop: false

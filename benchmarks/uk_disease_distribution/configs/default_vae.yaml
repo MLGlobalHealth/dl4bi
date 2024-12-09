@@ -4,7 +4,6 @@ defaults:
   - kernel: rbf
   - model: prior_cvae
   - graph_model: icar
-  - graph_construction: default_graph
 seed: 42
 is_gp: True
 wandb: True

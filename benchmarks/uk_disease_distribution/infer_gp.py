@@ -29,7 +29,7 @@ from plot_utils import (
 from sps.kernels import matern_1_2, matern_3_2, matern_5_2, periodic, rbf
 from sps.priors import Prior
 from vae import gp_dataloaders, graph_dataloaders
-from vae_train_utils import generate_model_name, instantiate
+from vae_train_utils import generate_model_name, get_model_kwargs, instantiate
 
 import wandb
 from dl4bi.meta_regression.train_utils import (
@@ -53,7 +53,7 @@ def main(cfg: DictConfig):
         project=cfg.project,
         reinit=True,
     )
-    rng, rng_plot, noise_rng, idxs_rng = random.split(random.key(cfg.seed), 4)
+    rng, rng_plot, idxs_rng = random.split(random.key(cfg.seed), 3)
     s, _, _ = process_map(cfg.data)
     results_dir = Path(
         f"results/{cfg.project}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}"
@@ -71,29 +71,26 @@ def main(cfg: DictConfig):
             idxs_rng, obs_idxs, (cfg.infer.num_context_points,), replace=False
         )
         obs_mask = jnp.array([i in obs_idxs for i in range(len(s))])
-    # TODO(jhonathan): Add customizable priors
-    priors = {
-        "var": dist.HalfNormal(),
-        "ls": dist.HalfNormal(),
-        "period": dist.HalfNormal(),
-        "beta": dist.Normal(),
-        "sigma": dist.Gamma(1, 2),
-    }
-    kernel = globals()[cfg.kernel.kwargs.kernel.func]
+    priors = {pr: instantiate(pr_dist) for pr, pr_dist in cfg.infer.priors.items()}
+    kernel = instantiate(cfg.kernel.kwargs.kernel)
     if cfg.infer.run_gp_baseline:
         inference_model = build_baseline_inference_model(s, obs_mask, kernel, priors)
     else:
         state, _ = load_ckpt((results_dir / model_name).with_suffix(".ckpt"))
+        vae_kwargs = get_model_kwargs(
+            s, cfg.data.pre_process, map_data, cfg.data.graph_construction
+        )
         inference_model = build_surrogate_inference_model(
-            state, obs_mask, kernel, cfg.model.kwargs.z_dim, s.shape[0], priors
+            state,
+            obs_mask,
+            kernel,
+            cfg.model.kwargs.z_dim,
+            s.shape[0],
+            priors,
+            **vae_kwargs,
         )
 
     f = f_batch[0].squeeze()
-    # TODO (jhoott) where to add noise?
-    # if cfg.data.obs_noise > 0:
-    #     f += random.multivariate_normal(
-    #         noise_rng, jnp.zeros_like(f), cfg.data.obs_noise * jnp.eye(f.shape[0])
-    #     )
     hmc_res = _hmc(cfg, inference_model, s, f, conditionals, obs_idxs)
     log_inference_run(
         rng_plot,
@@ -103,7 +100,6 @@ def main(cfg: DictConfig):
         conditionals,
         kernel,
         priors,
-        cfg.data.obs_noise,
         map_data,
         model_name,
         results_dir,
@@ -163,20 +159,22 @@ def infer_model_dataloader(
 
 
 def build_baseline_inference_model(s, obs_mask, kernel, priors, jitter=1e-4):
-    I_jitter = jitter * jnp.eye(s.shape[0])
+    n_locations = s.shape[0]
+    I_jitter = jitter * jnp.eye(n_locations)
 
     def gp_model(y=None):
-        variance = numpyro.sample("var", priors["var"])
-        lengthscale = numpyro.sample("ls", priors["ls"])
+        variance = numpyro.sample("var", priors["var"]).squeeze()
+        lengthscale = numpyro.sample("ls", priors["ls"]).squeeze()
         if kernel.__name__ == "periodic":
             period = numpyro.sample("period", priors["period"])
             K = kernel(s, s, variance, lengthscale, period) + I_jitter
         else:
             K = kernel(s, s, variance, lengthscale) + I_jitter
         mu = numpyro.sample("mu", dist.MultivariateNormal(0, K))
-        sigma = numpyro.sample("sigma", priors["sigma"])
+        beta = numpyro.sample("beta", priors["beta"], sample_shape=(n_locations,))
+        lambda_ = jnp.exp(beta + mu)
         with numpyro.handlers.mask(mask=obs_mask):
-            numpyro.sample("obs", dist.Normal(mu, sigma), obs=y)
+            numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
 
     return gp_model
 
@@ -197,8 +195,8 @@ def build_surrogate_inference_model(
     z_dist = dist.Normal()
 
     def gp_deep_sample_model(y=None):
-        variance = numpyro.sample("var", priors["var"])
-        lengthscale = numpyro.sample("ls", priors["ls"])
+        variance = numpyro.sample("var", priors["var"]).squeeze()
+        lengthscale = numpyro.sample("ls", priors["ls"]).squeeze()
         conditionals = [jnp.array([variance]), jnp.array([lengthscale])]
         if kernel.__name__ == "periodic":
             conditionals += [numpyro.sample("period", priors["period"])]
@@ -208,8 +206,6 @@ def build_surrogate_inference_model(
         mu = numpyro.deterministic("mu", z_to_y_hat(z, conditionals).squeeze())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=(n_locations,))
         lambda_ = jnp.exp(beta + mu)
-        # TODO(jhoot): where do we noise?
-        # sigma = numpyro.sample("sigma", priors["sigma"])
         with numpyro.handlers.mask(mask=obs_mask):
             numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
 
@@ -224,7 +220,6 @@ def log_inference_run(
     conditionals,
     kernel,
     priors,
-    obs_noise,
     map_data,
     model_name,
     results_dir,
@@ -232,19 +227,14 @@ def log_inference_run(
     samples, mcmc, post = hmc_res
     with open(results_dir / f"{model_name}_hmc_samples.pkl", "wb") as out_file:
         pickle.dump(samples, out_file)
-    kl_per_location, kl_total = compute_kl_divergence(f_batch, post)
-    post.update(
-        {"sigma": obs_noise, "kl_per_location": kl_per_location, "kl_mean": kl_total}
-    )
     with open(results_dir / f"{model_name}_hmc_pp.pkl", "wb") as out_file:
         pickle.dump(post, out_file)
-    plot_infer_observed_coverage(post, map_data, model_name)
-    plot_infer_realizations(rng_plot, map_data, f_batch, post, model_name)
-    plot_trace(samples, mcmc, conditionals, obs_noise, model_name)
+    plot_infer_observed_coverage(post, map_data)
+    plot_infer_realizations(rng_plot, map_data, f_batch, post)
+    plot_trace(samples, mcmc, conditionals, model_name)
     plot_covariance(samples, conditionals, model_name, kernel, s)
-    plot_histograms(samples, conditionals, obs_noise, model_name, priors)
-    plot_violin(post, f_batch, model_name)
-    plot_kl_on_map(map_data, kl_per_location, model_name)
+    plot_histograms(samples, conditionals, model_name, priors)
+    plot_violin(post, f_batch, model_name, log_scale=True)
 
 
 def compute_kl_divergence(f_batch, post):

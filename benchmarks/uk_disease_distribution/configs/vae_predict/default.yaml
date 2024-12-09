@@ -1,4 +1,0 @@
-num_samples_predict: 100
-num_samples_plot: 10
-distance_metric: mse
-num_context_points: 200

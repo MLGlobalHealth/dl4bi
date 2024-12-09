@@ -11,6 +11,7 @@ from flax.training import train_state
 from jax import jit, random, value_and_grad
 from jax.scipy.stats import norm
 from models import *  # noqa: F403
+from numpyro.distributions import Beta, Dirichlet, HalfNormal, Normal, Uniform
 from omegaconf import DictConfig, OmegaConf
 from scipy.spatial import distance_matrix
 from sps.gp import GP
@@ -188,6 +189,12 @@ def instantiate(d: Union[dict, DictConfig]):
             elif isinstance(kwargs[k], dict):
                 kwargs[k] = instantiate(kwargs[k])
         return globals()[cls](**kwargs)
+    if "numpyro_dist" in d:  # Case for NumPyro distributions
+        dist_cls, kwargs = d["numpyro_dist"], d.get("kwargs", {})
+        kwargs = {
+            k: (jnp.array(i) if isinstance(i, list) else i) for k, i in kwargs.items()
+        }
+        return globals()[dist_cls](**kwargs)
     elif "func" in d:
         return eval(d["func"])
     return d
@@ -340,5 +347,5 @@ def cholesky(
     Returns:
         `Lz`: samples from the kernel combined with a random vector `z`.
     """
-    L = jax.lax.linalg.cholesky(K + jitter * jnp.eye(num_locations))
+    L = jnp.linalg.cholesky(K + jitter * jnp.eye(num_locations))
     return jnp.einsum("ij,bj->bi", L, z)

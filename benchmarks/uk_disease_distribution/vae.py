@@ -57,7 +57,7 @@ def main(cfg: DictConfig):
     s, _, _ = process_map(cfg.data)
     model = instantiate(cfg.model)
     vae_kwargs = get_model_kwargs(
-        s, cfg.data.pre_process, map_data, cfg.graph_construction
+        s, cfg.data.pre_process, map_data, cfg.data.graph_construction
     )
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
@@ -169,7 +169,7 @@ def gp_dataloaders(
 
 
 def graph_dataloaders(rng, cfg, map_data, large_batch_size=2048):
-    adj_mat = generate_adjacency_matrix(map_data, cfg.graph_construction)
+    adj_mat = generate_adjacency_matrix(map_data, cfg.data.graph_construction)
     rng_train, rng_test, rng_large_batch = random.split(rng, 3)
     dataloader, conditionals_names = {"car": car, "icar": icar, "bym": bym}[
         cfg.graph_model.name

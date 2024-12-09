@@ -16,13 +16,14 @@ import wandb
 from dl4bi.meta_regression.train_utils import TrainState
 
 
-def plot_infer_observed_coverage(post, map_data, model_name, hdi_prob=0.95, log=True):
+def plot_infer_observed_coverage(post, map_data, hdi_prob=0.95):
     obs_idxs, f, f_hat = post["obs_idxs"], post["f"], post["obs"]
     f_hat_mean, f_hat_std = f_hat.mean(axis=0), f_hat.std(axis=0)
-    vmin, vmax = min(f.min(), f_hat_mean.min()), max(f.max(), f_hat_mean.max())
+    log_f, log_f_hat = jnp.log(f + 1), jnp.log(f_hat_mean + 1)
+    vmin, vmax = min(log_f.min(), log_f_hat.min()), max(log_f.max(), log_f_hat.max())
     fig, ax = plt.subplots(1, 5, figsize=(30, 10))
-    plot_on_map(ax[0], map_data, f, vmin, vmax, "y obs - noised", "viridis")
-    plot_on_map(ax[1], map_data, f_hat_mean, vmin, vmax, "Mean MCMC Samples", "viridis")
+    plot_on_map(ax[0], map_data, log_f, vmin, vmax, "y obs (log scale)")
+    plot_on_map(ax[1], map_data, log_f_hat, vmin, vmax, "Mean MCMC Samples (log scale)")
     plot_on_map(ax[2], map_data, f_hat_std, title="MCMC STD", cmap="plasma")
     z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
     f_lower = f_hat_mean - z_score * f_hat_std
@@ -40,15 +41,12 @@ def plot_infer_observed_coverage(post, map_data, model_name, hdi_prob=0.95, log=
     timestamp = datetime.now().isoformat()
     path = f"/tmp/Sampeled vs GT {timestamp}.png"
     fig.savefig(path, dpi=125)
-    if log:
-        wandb.log({"Sampeled vs GT": wandb.Image(path)})
+    wandb.log({"Sampeled vs GT": wandb.Image(path)})
     plt.clf()
     return path
 
 
-def plot_infer_realizations(
-    rng_plot, map_data, f_batch, post, model_name, num_samples=10
-):
+def plot_infer_realizations(rng_plot, map_data, f_batch, post, num_samples=10):
     fig, ax = plt.subplots(2, num_samples, figsize=(3 * num_samples, 16))
     samples_f = post["obs"]
     rng_true, rng_samples = jax.random.split(rng_plot)
@@ -66,19 +64,19 @@ def plot_infer_realizations(
         plot_on_map(
             ax[0, i],
             map_data,
-            f_batch[t_idx],
-            vmin=vmin,
-            vmax=vmax,
-            title=f"True realisation {i}" if i > 0 else "y obs - noiseless",
+            jnp.log(f_batch[t_idx] + 1),
+            vmin=jnp.log(vmin + 1),
+            vmax=jnp.log(vmax + 1),
+            title=(f"True realisation {i}" if i > 0 else "y obs") + "(Log scale)",
             legend=False,
         )
         plot_on_map(
             ax[1, i],
             map_data,
-            samples_f[s_idx],
-            vmin=vmin,
-            vmax=vmax,
-            title=f"Inferred realisation {i}",
+            jnp.log(samples_f[s_idx] + 1),
+            vmin=jnp.log(vmin + 1),
+            vmax=jnp.log(vmax + 1),
+            title=f"Inferred realisation {i} (Log scale)",
             legend=False,
         )
         ax[0, i].set_axis_off()
@@ -92,9 +90,7 @@ def plot_infer_realizations(
     plt.clf()
 
 
-def plot_kl_on_map(
-    map_data: gpd.GeoDataFrame, kl_per_location: jax.Array, model_name: str
-):
+def plot_kl_on_map(map_data: gpd.GeoDataFrame, kl_per_location: jax.Array):
     fig, ax = plt.subplots(1, 1, figsize=(15, 10))
     plot_on_map(
         ax,
@@ -113,11 +109,14 @@ def plot_kl_on_map(
     plt.clf()
 
 
-def plot_violin(post, f_batch, model_name, num_locations=10):
+def plot_violin(post, f_batch, model_name, num_locations=10, log_scale: bool = False):
     obs_idxs = post["obs_idxs"]
     random_idxs = np.random.choice(post["obs"].shape[1], num_locations, replace=False)
     obs_data = [post["obs"][:, idx] for idx in random_idxs]
     true_data = f_batch[:, random_idxs, :].squeeze(axis=-1)
+    if log_scale:
+        obs_data = [jnp.log(obs_d + 1) for obs_d in obs_data]
+        true_data = jnp.log(true_data + 1)
     data = []
     for i, (obs, true) in enumerate(zip(obs_data, true_data.T)):
         obs_str = " obs" if random_idxs[i] in obs_idxs else ""
@@ -136,7 +135,8 @@ def plot_violin(post, f_batch, model_name, num_locations=10):
         inner="quartile",
         linewidth=1.2,
     )
-    plt.title(f"True vs Sampeled Distributions {model_name}", fontsize=16)
+    title = f"True vs Sampeled Distributions {model_name}{' (log_scale)' if log_scale else ''}"
+    plt.title(title, fontsize=16)
     plt.xlabel("Locations", fontsize=14)
     plt.ylabel("Observation Value", fontsize=14)
     plt.legend(title="Distribution Type", loc="upper right", fontsize=12)
@@ -182,7 +182,7 @@ def plot_covariance(samples, conditionals, model_name, kernel, s):
     plt.clf()
 
 
-def plot_trace(samples, mcmc, conditionals, obs_noise, model_name):
+def plot_trace(samples, mcmc, conditionals, model_name):
     var_names = [
         str(c) for c in conditionals.keys()
     ]  # TODO(jhoott) add noise+ ["sigma"]
@@ -191,11 +191,6 @@ def plot_trace(samples, mcmc, conditionals, obs_noise, model_name):
     axes = plt.gcf().get_axes()
     for i, (name, mean_val) in enumerate(conditional_means.items()):
         axes[(i * 2) + 1].set_title(f"{name} (mean: {mean_val:.2f})", fontsize=10)
-    title = f"Trace for {model_name}: " + ", ".join(
-        [f"{name}: {cond[0]:g}" for name, cond in conditionals.items()]
-    )
-    # TODO(jhoott) add noise
-    # title += f" sigma: {obs_noise}"
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     timestamp = datetime.now().isoformat()
     path = f"/tmp/trace_{model_name}_{timestamp}.png"
@@ -204,13 +199,10 @@ def plot_trace(samples, mcmc, conditionals, obs_noise, model_name):
     plt.clf()
 
 
-def plot_histograms(samples, conditionals, obs_noise, model_name, priors):
-    num_plots = len(conditionals)  # TODO(jhoott) add noise + 1
+def plot_histograms(samples, conditionals, model_name, priors):
+    num_plots = len(conditionals)
     _, axes = plt.subplots(1, num_plots, figsize=(12, 4))
     for i, (name, actual_val) in enumerate(conditionals.items()):
-        # TODO(jhoott) add noise?
-        #     {**conditionals, "sigma": [obs_noise]}.items()
-        # ):
         ax = axes[i]
         sample_values = samples[str(name)]
         ax.hist(
