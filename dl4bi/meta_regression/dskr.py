@@ -27,9 +27,12 @@ def custom_k_nearest_senders(
     return idx[:, :k].flatten(), d[:, :k].flatten()
 
 
-# TODO(danj): use jax.pure_callback to make this jit-compatible
-def k_nearest_senders(rx: jax.Array, tx: jax.Array, k: int):
-    d, idx = KDTree(tx).query(rx, k)
+@partial(jit, static_argnames=("k",))
+def scipy_k_nearest_senders(r: jax.Array, s: jax.Array, k: int):
+    d_shape = jax.ShapeDtypeStruct((r.shape[0], k), jnp.float32)
+    idx_shape = jax.ShapeDtypeStruct((r.shape[0], k), jnp.int32)
+    f = lambda r, s, k: KDTree(s).query(r, k)
+    d, idx = jax.pure_callback(f, (d_shape, idx_shape), r, s, k)
     return idx.flatten(), d.flatten()
 
 
@@ -61,7 +64,7 @@ class DSKR(nn.Module):
     """
 
     k: int = 10
-    k_nearest_senders: Callable = custom_k_nearest_senders
+    k_nearest_senders: Callable = scipy_k_nearest_senders
     num_blks: int = 6
     num_reps: int = 1
     min_std: float = 0.0
@@ -90,7 +93,7 @@ class DSKR(nn.Module):
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(N_c, B)
         mask = mask_from_valid_lens(N_c, valid_lens_ctx)
-        s_send = jnp.where(mask, s_ctx, -jnp.inf)  # masked values = far away for kNN
+        s_send = jnp.where(mask, s_ctx, jnp.inf)  # masked values = far away for kNN
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
         unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
