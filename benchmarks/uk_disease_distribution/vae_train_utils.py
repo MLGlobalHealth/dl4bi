@@ -349,3 +349,18 @@ def cholesky(
     """
     L = jnp.linalg.cholesky(K + jitter * jnp.eye(num_locations))
     return jnp.einsum("ij,bj->bi", L, z)
+
+
+def compute_kl_divergence(f_batch, post):
+    obs = post["obs"]
+    true_mean = jnp.mean(f_batch, axis=0).squeeze()
+    true_var = jnp.var(f_batch, axis=0).squeeze()
+    post_mean = jnp.mean(obs, axis=0).squeeze()
+    post_var = jnp.var(obs, axis=0).squeeze()
+    kl_per_location = (
+        jnp.log(jnp.sqrt(post_var) / jnp.sqrt(true_var))
+        + (true_var + (true_mean - post_mean) ** 2) / (2 * post_var)
+        - 0.5
+    )
+    kl_total = jnp.mean(kl_per_location)
+    return kl_per_location, kl_total

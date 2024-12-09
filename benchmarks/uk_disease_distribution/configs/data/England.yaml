@@ -3,9 +3,9 @@ sampling_policy: 'centroids'
 num_ctx:
   min: 20
   max: 100
-sampling_grid:
   grid_densities: [1000, 800, 1200]
 obs_noise: 0.1
+sampling_grid: # used when creating grid over map (offline)
 pre_process:
   bias: null
   pos_enc: null

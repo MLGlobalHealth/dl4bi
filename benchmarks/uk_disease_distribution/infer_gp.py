@@ -2,7 +2,7 @@ import pickle
 
 #!/usr/bin/env python3
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import geopandas as gpd
 import hydra
@@ -22,7 +22,6 @@ from plot_utils import (
     plot_histograms,
     plot_infer_observed_coverage,
     plot_infer_realizations,
-    plot_kl_on_map,
     plot_trace,
     plot_violin,
 )
@@ -73,23 +72,17 @@ def main(cfg: DictConfig):
         obs_mask = jnp.array([i in obs_idxs for i in range(len(s))])
     priors = {pr: instantiate(pr_dist) for pr, pr_dist in cfg.infer.priors.items()}
     kernel = instantiate(cfg.kernel.kwargs.kernel)
-    if cfg.infer.run_gp_baseline:
-        inference_model = build_baseline_inference_model(s, obs_mask, kernel, priors)
-    else:
+    z_to_y_hat_fn, z_dim, vae_kwargs = None, None, {}
+    if not cfg.infer.run_gp_baseline:
         state, _ = load_ckpt((results_dir / model_name).with_suffix(".ckpt"))
         vae_kwargs = get_model_kwargs(
             s, cfg.data.pre_process, map_data, cfg.data.graph_construction
         )
-        inference_model = build_surrogate_inference_model(
-            state,
-            obs_mask,
-            kernel,
-            cfg.model.kwargs.z_dim,
-            s.shape[0],
-            priors,
-            **vae_kwargs,
-        )
-
+        z_to_y_hat_fn = decoder_z_to_y_hat(state, **vae_kwargs)
+        z_dim = cfg.model.kwargs.z_dim
+    inference_model = build_inference_model(
+        s, obs_mask, kernel, priors, z_to_y_hat_fn, z_dim
+    )
     f = f_batch[0].squeeze()
     hmc_res = _hmc(cfg, inference_model, s, f, conditionals, obs_idxs)
     log_inference_run(
@@ -106,7 +99,15 @@ def main(cfg: DictConfig):
     )
 
 
-def _hmc(cfg, model, s, f, conditionals, obs_idxs):
+def _hmc(
+    cfg: DictConfig,
+    model,
+    s: jax.Array,
+    f: jax.Array,
+    conditionals: dict,
+    obs_idxs: jax.Array,
+):
+    """runs HMC on given model and observed f"""
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
     k1, k2 = jax.random.split(jax.random.PRNGKey(0))
     mcmc = MCMC(nuts, **cfg.infer.mcmc)
@@ -132,6 +133,20 @@ def infer_model_dataloader(
     map_data: gpd.GeoDataFrame,
     is_gp: bool,
 ):
+    """Generates the dataloader for inference model. Wraps GP
+    or graph based models with additional complexities like
+    Poisson.
+
+    Args:
+        rng (jax.Array)
+        cfg (DictConfig): config dict
+        s (jax.Array): locations
+        map_data (gpd.GeoDataFrame): original geopandas
+        is_gp (bool): flags whether to wrap GPs or graph based models
+
+    Returns:
+        the inference dataloader
+    """
     rng_beta, rng_loader = random.split(rng)
     beta = random.normal(rng_beta, shape=(s.shape[0], 1))
     beta = jnp.repeat(beta[None, ...], cfg.batch_size, axis=0)
@@ -158,71 +173,89 @@ def infer_model_dataloader(
     return infer_loader(rng_loader), cond_names
 
 
-def build_baseline_inference_model(s, obs_mask, kernel, priors, jitter=1e-4):
+def build_inference_model(
+    s: jax.Array,
+    obs_mask: Union[bool, jax.Array],
+    kernel,
+    priors: dict,
+    z_to_y_hat_fn=None,
+    z_dim: Optional[int] = None,
+    jitter: float = 1e-4,
+):
+    """
+    Builds an inference model for both GP baseline and surrogate inference.
+
+    Args:
+        s: Locations (n_locations, dim_s).
+        obs_mask: Mask for observed data.
+        kernel: Kernel function.
+        priors: Dictionary of prior distributions.
+        state: (Optional) State for the surrogate model.
+        surrogate_z_dim: (Optional) Dimensionality of the latent space (z).
+        z_to_y_hat_fn: (Optional) Function to map z to predictions (surrogate only).
+        jitter: Small jitter value for numerical stability.
+        vae_kwargs: (Optional) Additional arguments for surrogate decoding.
+
+    Returns:
+        A NumPyro model function.
+    """
     n_locations = s.shape[0]
     I_jitter = jitter * jnp.eye(n_locations)
+    if z_to_y_hat_fn is not None:
+        z_dist = dist.Normal()
 
-    def gp_model(y=None):
-        variance = numpyro.sample("var", priors["var"]).squeeze()
-        lengthscale = numpyro.sample("ls", priors["ls"]).squeeze()
-        if kernel.__name__ == "periodic":
-            period = numpyro.sample("period", priors["period"])
-            K = kernel(s, s, variance, lengthscale, period) + I_jitter
-        else:
-            K = kernel(s, s, variance, lengthscale) + I_jitter
-        mu = numpyro.sample("mu", dist.MultivariateNormal(0, K))
-        beta = numpyro.sample("beta", priors["beta"], sample_shape=(n_locations,))
-        lambda_ = jnp.exp(beta + mu)
-        with numpyro.handlers.mask(mask=obs_mask):
-            numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
-
-    return gp_model
-
-
-def build_surrogate_inference_model(
-    state, obs_mask, kernel, z_dim, n_locations, priors, **vae_kwargs
-):
-    def z_to_y_hat(z, conditionals):
-        f_hat, _, _ = state.apply_fn(
-            {"params": state.params, **state.kwargs},
-            z[..., None],
-            conditionals,
-            decode_only=True,
-            **vae_kwargs,
-        )
-        return f_hat
-
-    z_dist = dist.Normal()
-
-    def gp_deep_sample_model(y=None):
+    def inference_model(y=None):
         variance = numpyro.sample("var", priors["var"]).squeeze()
         lengthscale = numpyro.sample("ls", priors["ls"]).squeeze()
         conditionals = [jnp.array([variance]), jnp.array([lengthscale])]
         if kernel.__name__ == "periodic":
             conditionals += [numpyro.sample("period", priors["period"])]
-        z = numpyro.sample("z", z_dist, sample_shape=(1, z_dim))
-        # NOTE: hyperparams must be added in the same order as conditional names
-        # because the underlying VAE assumes they are stacked that way
-        mu = numpyro.deterministic("mu", z_to_y_hat(z, conditionals).squeeze())
+        if z_to_y_hat_fn is None:
+            K = kernel(s, s, *conditionals) + I_jitter
+            mu = numpyro.sample("mu", dist.MultivariateNormal(0, K))
+        else:
+            z = numpyro.sample("z", z_dist, sample_shape=(1, z_dim))
+            mu = numpyro.deterministic("mu", z_to_y_hat_fn(z, conditionals).squeeze())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=(n_locations,))
         lambda_ = jnp.exp(beta + mu)
         with numpyro.handlers.mask(mask=obs_mask):
             numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
 
-    return gp_deep_sample_model
+    return inference_model
+
+
+def decoder_z_to_y_hat(state: TrainState, **vae_kwargs):
+    """Wraps a VAE model to issue decoder only calls within numpyro model
+
+    Args:
+        state (TrainState): state to wrap
+
+    Returns: the decoding function
+    """
+
+    def z_to_y_hat_fn(z, conditionals):
+        return state.apply_fn(
+            {"params": state.params, **state.kwargs},
+            z[..., None],
+            conditionals,
+            decode_only=True,
+            **vae_kwargs,
+        )[0]
+
+    return z_to_y_hat_fn
 
 
 def log_inference_run(
-    rng_plot,
-    hmc_res,
-    s,
-    f_batch,
-    conditionals,
+    rng_plot: jax.Array,
+    hmc_res: tuple[dict, MCMC, dict],
+    s: jax.Array,
+    f_batch: jax.Array,
+    conditionals: dict,
     kernel,
-    priors,
-    map_data,
-    model_name,
-    results_dir,
+    priors: dict,
+    map_data: gpd.GeoDataFrame,
+    model_name: str,
+    results_dir: Path,
 ):
     samples, mcmc, post = hmc_res
     with open(results_dir / f"{model_name}_hmc_samples.pkl", "wb") as out_file:
@@ -235,21 +268,6 @@ def log_inference_run(
     plot_covariance(samples, conditionals, model_name, kernel, s)
     plot_histograms(samples, conditionals, model_name, priors)
     plot_violin(post, f_batch, model_name, log_scale=True)
-
-
-def compute_kl_divergence(f_batch, post):
-    obs = post["obs"]
-    true_mean = jnp.mean(f_batch, axis=0).squeeze()
-    true_var = jnp.var(f_batch, axis=0).squeeze()
-    post_mean = jnp.mean(obs, axis=0).squeeze()
-    post_var = jnp.var(obs, axis=0).squeeze()
-    kl_per_location = (
-        jnp.log(jnp.sqrt(post_var) / jnp.sqrt(true_var))
-        + (true_var + (true_mean - post_mean) ** 2) / (2 * post_var)
-        - 0.5
-    )
-    kl_total = jnp.mean(kl_per_location)
-    return kl_per_location, kl_total
 
 
 def load_ckpt(path: Union[str, Path]):

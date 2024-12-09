@@ -1,10 +1,10 @@
 num_context_points: null
-run_gp_baseline: True
+run_gp_baseline: False
 mcmc:
   num_warmup: 4000
   num_samples: 10000
   num_chains: 4
-# NOTE: priors must be Numpyro distribution names, as these are sampled within a model
+# priors names and args must be compat with Numpyro distributions
 priors: 
   beta:
     numpyro_dist: Normal

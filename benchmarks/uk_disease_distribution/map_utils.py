@@ -1,5 +1,7 @@
 import os
 import zipfile
+from pathlib import Path
+from typing import Union
 from urllib import request
 
 import geopandas as gpd
@@ -17,7 +19,7 @@ MAP_REMOTE_PATH = {
 }
 
 
-def download_and_extract_map(map_name, raw_path):
+def download_and_extract_map(map_name: str, raw_path: Union[Path, str]):
     # NOTE if downloads fail due to file size\virus scan, then
     # Manually download from the link above
     if not os.path.exists(raw_path):
@@ -38,7 +40,7 @@ def download_and_extract_map(map_name, raw_path):
         print(f"Deleted {zip_path}")
 
 
-def get_raw_map_data(map_name):
+def get_raw_map_data(map_name: str):
     raw_path = MAPS_DATA_PATH.format(data_type="raw", map_name=map_name)
     download_and_extract_map(map_name, raw_path)
     return gpd.read_file(raw_path)

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from typing import Optional
 
 import jax.numpy as jnp
@@ -16,7 +15,21 @@ class AttentionVAE(nn.Module):
     condition_bias: bool = True
 
     @nn.compact
-    def __call__(self, f, conditionals, **kwargs):
+    def __call__(self, f: Array, conditionals: list[Array], **kwargs):
+        r"""Run module forward.
+
+        Args:
+            f: The function values, an array of shape `(B, K, D)`.
+            or the latent 'z' if the model is used in decoder only mode.
+            conditionals: list of conditional variavles to condition the
+            output on. NOTE: Must ensure same ordering of conditional
+            at all times, as the model implicitly learns this order.
+
+        Returns:
+            $\mathbf{z}_{\mu}$, $\mathbf{z}_{\sigma}$, the
+            distribution of the latents, or simply the reconstruction
+            if used a decoder.
+        """
         if self.condition_bias and kwargs.get("bias", None) is None:
             raise ValueError("Must specify a bias to condition on!")
         conditionals = jnp.concatenate(conditionals)
@@ -50,20 +63,15 @@ class TransformerVAE(nn.Module):
     r"""Transformer based VAE.
 
     Once trained, the module's `decoder` can be used as a generative
-    model to simulate a GP from the samples it was trained on.
+    model to simulate a processses from the samples it was trained on.
 
     Args:
-        encoder: A module used to encode GP realizations and
-            their hyperparamters.
-        decoder: A module used to decode random vectors and
-            GP hyperparameters into GP samples.
-        z_dim: The size of the hidden dimension.
-
-    Returns:
-        An instance of the PriorCVAE network.
-        $\hat{\mathbf{f}}$, a recreation of the original $\mathbf{f}$,
-        along with $\mu$ and $\log(\sigma^2)$, which are often used
-        to calculate losses involving KL divergence.
+        encoder: A module used to encode processes and
+            their conditional values.
+        decoder: A module used to decode normal(0,1) vectors and
+            conditionals into their priors.
+        z_dim: The size of the hidden dimension (input of the decoder).
+        decoder_only: whether to use always only the decoder, for deepChol models
     """
 
     z_dim: int
@@ -78,7 +86,8 @@ class TransformerVAE(nn.Module):
         r"""Run module forward.
 
         Args:
-            f: The function values, an array of shape `(B, K, 1)`.
+            f: The function values, an array of shape `(B, L, D)`.
+            or the latent 'z' if the model is used in decoder only mode.
             conditionals: list of conditional variavles to condition the
             output on. NOTE: Must ensure same ordering of conditional
             at all times, as the model implicitly learns this order.
