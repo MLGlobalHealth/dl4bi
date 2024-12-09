@@ -131,7 +131,7 @@ def gp_dataloaders(
     cfg: DictConfig,
     s: jax.Array,
     large_batch_size: int = 2048,
-    jitter: float = 1e-4,
+    jitter: float = 1.1e-4,
 ):
     n_locations = s.shape[0]
     batch_size = cfg.batch_size
