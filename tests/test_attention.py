@@ -3,6 +3,7 @@ from time import time
 import jax
 import jax.numpy as jnp
 from jax import random
+from jraph import GraphsTuple
 from sps.utils import build_grid
 
 from dl4bi.core import (
@@ -59,18 +60,37 @@ def test_multihead_attention_impl():
 
 # TODO(danj): finish
 def test_multihead_graph_attention_impl():
-    B, H, L, D = 4, 4, 7, 64
+    B, H, N_c, N_t, D, K = 4, 4, 7, 9, 64, 12
     key = random.key(42)
-    rng_nodes, rng_edges, rng_bias, rng_init = random.split(key, 3)
-    nodes = random.normal(rng_nodes, (B * L, D))
-    edges = random.normal(rng_edges, (B * L * L,))
-    bias = random.normal(rng_bias, (B * L * L, H))
-    valid_lens = jnp.array([L, L, L, L])
-    (ctx, attn), _ = MultiHeadGraphAttention(H).init_with_output(
-        rng_init, qs, ks, vs, valid_lens, bias=bias
+    (
+        rng_nodes,
+        rng_edges,
+        rng_bias,
+        rng_init,
+        rng_k_cc,
+        rng_k_ct,
+    ) = random.split(key, 6)
+    nodes = random.normal(rng_nodes, (B * (N_c + N_t), D))
+    edges = random.normal(rng_edges, (B * (N_c + N_t) * K,))
+    bias = random.normal(rng_bias, (B * (N_c + N_t) * K, H))
+    s_cc = random.randint(rng_k_cc, (B, N_c, K), 0, N_c)
+    s_cc = s_cc.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_c * K)
+    s_ct = random.randint(rng_k_ct, (B, N_t, K), 0, N_c)
+    s_ct = s_ct.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_t * K)
+    g = GraphsTuple(
+        nodes,
+        edges,
+        senders=jnp.hstack([s_cc, s_ct]),
+        receivers=jnp.repeat(jnp.arange(B * (N_c + N_t)), K),
+        globals=None,
+        n_node=jnp.array([B * (N_c + N_t)]),
+        n_edge=jnp.array([B * (N_c + N_t) * K]),
     )
-    assert ctx.shape == (B, L, D), "Incorrect context output shape!"
-    assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
+    (ctx, attn), _ = MultiHeadGraphAttention(H).init_with_output(
+        rng_init, g, training=False, bias=bias
+    )
+    assert ctx.shape == (B * (N_c + N_t), D), "Incorrect context output shape!"
+    assert attn.shape == (B * (N_c + N_t) * K, H), "Incorrect attention output shape!"
 
 
 def test_spatiotemporal_mlp_attention_impl():

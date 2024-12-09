@@ -1,0 +1,7 @@
+cls: DSKR
+kwargs:
+  head:
+    cls: MLP
+    kwargs:
+      dims: [256, 64, 6]
+      act_fn: gelu

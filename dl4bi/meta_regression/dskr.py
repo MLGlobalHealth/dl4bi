@@ -108,8 +108,8 @@ class DSKR(nn.Module):
             edges,
             senders=stack(s_cc, s_ct),
             receivers=jnp.repeat(jnp.arange(B * (N_c + N_t)), K),
-            n_node=jnp.array(B * [N_c + N_t]),
-            n_edge=jnp.array(B * [(N_c + N_t) * self.k]),
+            n_node=jnp.array([B * (N_c + N_t)]),
+            n_edge=jnp.array([B * (N_c + N_t) * self.k]),
             globals=None,
         )
         for _ in range(self.num_blks):
