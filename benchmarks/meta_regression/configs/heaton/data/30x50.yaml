@@ -6,9 +6,6 @@ s: # each image i s ~1% the size of the original 300x500
   - start: -2.314 # x = Lon
     stop: 2.314
     num: 50
-num_ctx:
-  min: 750 # ~50%
-  max: 1125 # ~75%
 batch_size: 16
 obs_noise: 0.05
 mask_pct: 0.4 # on average
