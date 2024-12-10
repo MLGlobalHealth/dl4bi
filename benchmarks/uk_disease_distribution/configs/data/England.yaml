@@ -10,4 +10,4 @@ pre_process:
   bias: null
   pos_enc: null
 graph_construction:
-  self_loop: false
+  self_loops: false

@@ -2,19 +2,7 @@ cls: TransformerVAE
 kwargs:
   decoder_only: true
   z_dim: 363
-  encoder:
-    cls: AttentionVAE
-    kwargs:
-      condition_bias: false
-      feat_enc:
-        cls: MLP
-        kwargs:
-          dims: [64, 64]
-      head:
-        cls: MLP
-        kwargs:
-          dims: [64, 32, 1]
-      
+  encoder: null
   decoder:
     cls: AttentionVAE
     kwargs:

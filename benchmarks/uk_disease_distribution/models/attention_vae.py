@@ -4,15 +4,17 @@ import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
 
-from dl4bi.core import MLP
+from dl4bi.core import MLP, DistanceBias, TransformerEncoderBlock
 
 
 class AttentionVAE(nn.Module):
     feat_enc: nn.Module
-    blk: nn.Module
-    head_z_mu: nn.Module
-    head_z_log_var: nn.Module
+    head: nn.Module
     condition_bias: bool = True
+    blk: nn.Module = TransformerEncoderBlock()
+    norm: nn.Module = nn.LayerNorm()
+    bias_fn: Optional[nn.Module] = DistanceBias()
+    num_blks: int = 6
 
     @nn.compact
     def __call__(self, f: Array, conditionals: list[Array], **kwargs):
@@ -32,9 +34,10 @@ class AttentionVAE(nn.Module):
         """
         if self.condition_bias and kwargs.get("bias", None) is None:
             raise ValueError("Must specify a bias to condition on!")
+        B = f.shape[0]
+        bias = kwargs.get("bias", None)
         conditionals = jnp.concatenate(conditionals)
         if self.condition_bias:
-            bias = kwargs["bias"]
             broad_cond = jnp.broadcast_to(
                 conditionals, bias.shape + (len(conditionals),)
             )
@@ -52,11 +55,15 @@ class AttentionVAE(nn.Module):
             broad_pos_enc = jnp.broadcast_to(pos_enc, (f.shape[0],) + pos_enc.shape)
             f = jnp.concatenate([f, broad_pos_enc], axis=-1)
         f = self.feat_enc(f)
-        z = self.blk(f, None, False, **kwargs)
-        z_mu = self.head_z_mu(z)
-        z_log_var = self.head_z_log_var(z)
-        z_std = jnp.exp(z_log_var / 2)
-        return z_mu, z_std
+        if bias is not None:
+            bias = jnp.repeat(bias[None, ...], B, axis=0)
+        for _ in range(self.num_blks):
+            if bias is not None and self.bias_fn is not None:
+                kwargs["bias"] = self.bias_fn.copy()(bias)
+            f, _ = self.blk.copy()(f, None, False, **kwargs)
+        if self.blk.pre_norm:
+            f = self.norm(f)
+        return self.head(f)
 
 
 class TransformerVAE(nn.Module):
@@ -99,8 +106,12 @@ class TransformerVAE(nn.Module):
         """
         if decode_only or self.decoder_only:
             z, z_mu, z_std = f, None, None
+            if len(z.shape) < 3:
+                z = z[..., None]
         else:
-            z_mu, z_std = self.encoder(f, conditionals, **kwargs)
+            z_mu_std = self.encoder(f, conditionals, **kwargs)
+            z_mu = z_mu_std[..., 0]
+            z_std = z_mu_std[..., 1]
             eps = random.normal(self.make_rng("extra"), z_std.shape)
             z = z_mu + z_std * eps
         f_hat = self.decoder(z, conditionals, **kwargs)
