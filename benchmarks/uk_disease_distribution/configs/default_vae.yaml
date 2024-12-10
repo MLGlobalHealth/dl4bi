@@ -1,8 +1,8 @@
 defaults:
   - _self_ # use default global values below
   - data: England
-  - kernel: rbf
-  - model: prior_cvae
+  - kernel: rbf_vae
+  - model: deep_cholesky.yaml
   - graph_model: icar
 seed: 42
 is_gp: True

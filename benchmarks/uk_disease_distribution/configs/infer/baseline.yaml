@@ -9,10 +9,9 @@ priors:
   beta:
     numpyro_dist: Normal
   var:
-    numpyro_dist: Uniform
+    numpyro_dist: Dirichlet
     kwargs:
-      low: 0.5
-      high: 1.5
+      concentration: [1.0]
   ls:
     numpyro_dist: Beta
     kwargs:
