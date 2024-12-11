@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import jit, lax, random, vmap
 from jax.tree_util import Partial
-import networkx as nx
+# from .preprocess import convert_graph_to_mask
 
 
 @jit
@@ -28,83 +28,23 @@ def mask_attn(x: jax.Array, valid_lens: jax.Array, fill=-jnp.inf):
     # visualize_graph(m.reshape(B, Q, K)[0,:,:], 'Mask_Attn[0]')
     return jnp.where(m, x, fill).reshape(B, Q, K)
 
-def load_adj_list(file_path):
-    graph = {}  # Dictionary to store adjacency list
-    with open(file_path, 'r') as file:
-        for neighbors in file:
-            # Convert neighbors to a list of integers
-            if '#' not in neighbors:
-                node_list = [int(n) for n in neighbors.strip().split(' ')]
-                # Add node and its neighbors to the graph
-                curr_node = node_list[0]
-                if curr_node not in graph:
-                    graph[curr_node] = node_list[1:]
-                else:
-                    graph[curr_node] += node_list[1:]
-                for neighbor in node_list[1:]:
-                    if neighbor not in graph:
-                        graph[neighbor] = [curr_node]
-                    else:
-                        graph[neighbor].append(curr_node)
-    return graph
-
-def convert_graph_to_mask(graph, inv_permute_idx=None):
-    L = len(graph)
-    # if inv_permute_idx is None:
-    #     permute_idx = jnp.arange(L)
-    # else:
-    permute_idx = inv_permute_idx.argsort()
-    mask = jnp.zeros((L, L), dtype=bool)
-    
-    # num_edges = sum(len(neighbors) for neighbors in graph.values())
-    # print(f'Number of edges: {num_edges}') # 960
-    
-    for node in graph:
-        mask = mask.at[node, node].set(True)
-        mask = mask.at[node, graph[node]].set(True)
-    mask = mask[permute_idx, :][:, permute_idx]
-    
-    # visualize_graph(mask, 'Mask_Adj')
-    
-    # Set some random indices of mask to be True to decrease its sparsity
-    # rng = random.PRNGKey(0)
-    # num_random_entries = L * L // 10  # Number of random entries to set to True
-    # random_indices = random.randint(rng, (num_random_entries, 2), 0, L)
-    # mask = mask.at[random_indices[:, 0], random_indices[:, 1]].set(True)
-    
-    # if inv_permute_idx is not None:
-    #     mask_inv = mask[inv_permute_idx, :][:, inv_permute_idx]
-    # visualize_graph(mask, 'Mask_Adj_Random')
-    # visualize_graph(mask_inv, 'Mask_adj_permuted')
-    
-    return mask
-    
-import matplotlib.pyplot as plt
-
-def visualize_graph(matrix, name='Adjacency_Matrix'):
-    plt.imshow(np.array(matrix), cmap='viridis', interpolation='none')
-    plt.colorbar()
-    plt.title(name)
-    plt.savefig('cache/outbreaks/' + name + '.png')
-    plt.clf()
-
 # @jit
-def mask_attn_graph(x: jax.Array, inv_permute_idx, fill=-jnp.inf):
-    r"""Mask `x` with `fill` using adjancency matrix from graph.
+# def mask_attn_graph(x: jax.Array, inv_permute_idx, fill=-jnp.inf):
+#     r"""Mask `x` with `fill` using adjancency matrix from graph.
     
-    Args: 
-        x: Values of dimension $\mathbb{R}^{B\times Q\times K}$
+#     Args: 
+#         x: Values of dimension $\mathbb{R}^{B\times Q\times K}$
         
-    Returns:
-        `x` with filled values according to mask.
-    """
-    adj_matrix_path = 'cache/outbreaks/dim16_lattice.adjilist'
-    graph = load_adj_list(adj_matrix_path)
-    mask = convert_graph_to_mask(graph, inv_permute_idx)
-    B, Q, K = x.shape
-    mask = jnp.broadcast_to(mask, (B, Q, K))
-    x = jnp.where(mask, x, fill)
-    return x
+#     Returns:
+#         `x` with filled values according to mask.
+#     """
+#     adj_matrix_path = 'cache/outbreaks/adj_matrix.npy'
+#     adj_matrix = jnp.load(adj_matrix_path)
+#     mask = convert_graph_to_mask(adj_matrix, inv_permute_idx)
+#     B, Q, K = x.shape
+#     mask = jnp.broadcast_to(mask, (B, Q, K))
+#     x = jnp.where(mask, x, fill)
+#     return x
 
 def mask_from_valid_lens(max_len: int, valid_lens: jax.Array):
     """Return a boolean mask using `valid_lens`.

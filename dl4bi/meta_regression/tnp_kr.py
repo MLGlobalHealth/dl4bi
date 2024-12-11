@@ -96,14 +96,13 @@ class TNPKR(nn.Module):
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
-        
-        # TODO: pass path as an argument
-        path = "cache/outbreaks/distances.npy" 
-        if not os.path.exists(path):
+        # graph_dist_path = "cache/outbreaks_SB_low/distances_masked_threshold.npy"
+        graph_dist_path = 'None'
+        if not os.path.exists(graph_dist_path):
             d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
         else:
             permute_idx = inv_permute_idx.argsort()
-            permuted_graph_dist = self.graphdist(permute_idx, permute_idx, path) # L x L
+            permuted_graph_dist = self.graphdist(permute_idx, permute_idx, graph_dist_path) # L x L
             d_qk = jnp.repeat(permuted_graph_dist[None, :, :], len(s_ctx), axis=0) # B x L x L
             d_kk = jnp.repeat(permuted_graph_dist[None, :, :], len(s_ctx), axis=0) # B x L x L
             # print(d_qk.shape, d_kk.shape)

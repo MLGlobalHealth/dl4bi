@@ -14,6 +14,8 @@ import optax
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
+import json
+import networkx as nx
 
 import wandb
 from dl4bi.meta_regression.train_utils import (
@@ -22,7 +24,7 @@ from dl4bi.meta_regression.train_utils import (
     cosine_annealing_lr,
     evaluate,
     instantiate,
-    log_img_plots,
+    log_temporal_graph_plots,
     save_ckpt,
     train,
 )
@@ -42,9 +44,9 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader = build_dataloader(cfg.temporal_data, cfg.batch_size)
+    train_dataloader = build_dataloader(cfg.data_path, cfg.temporal_data, cfg.batch_size)
     # plot_temporal_dataloader(train_dataloader(rng))
-    valid_dataloader = build_dataloader(cfg.temporal_data, cfg.batch_size)
+    valid_dataloader = build_dataloader(cfg.data_path, cfg.temporal_data, cfg.batch_size)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -58,8 +60,11 @@ def main(cfg: DictConfig):
     cmap = mpl.colormaps.get_cmap("grey")
     cmap.set_bad("blue")
     norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
+    with open(cfg.data_path + 'graph_pos.json', 'r') as infile:
+            pos = json.load(infile)
+    graph = nx.read_adjlist(cfg.data_path + 'graph.adjlist')
     img_cbk = Callback(
-        partial(log_img_plots, shape=(16, 16, 1), cmap=cmap, norm=norm),
+        partial(log_temporal_graph_plots, pos=pos, graph=graph, norm=norm),
         cfg.plot_interval,
     )
     state = train(
@@ -79,20 +84,29 @@ def main(cfg: DictConfig):
 
 
 def build_dataloader(
+    data_path: str,
     temporal_cfg: DictConfig,
     batch_size: int = 16,
-    min_ctx_valid_pct: float = 0.3,
-    max_ctx_valid_pct: float = 0.7,
+    min_ctx_valid_pct: float = 0.05,
+    max_ctx_valid_pct: float = 0.5,
     num_test_max: int = 256,
 ):
-    B, L = batch_size, 16 * 16
-    time_frame_size = 101
-    path = "cache/outbreaks/outbreaks.npy"  # contains [time, f_test]
-    dataset = np.load(path, mmap_mode="r")
+    path = data_path + "outbreaks.npz"  # contains [time, f_test]
+    dataset = np.load(path, mmap_mode="r")['outbreaks']
+    B = batch_size
+    L = dataset.shape[1] - 1
+    time_frame_size = dataset.shape[0] // 100000
+    assert dataset.shape[0] % time_frame_size == 0
+    print('dataset shape:', dataset.shape)
+    print('time_frame_size:', time_frame_size)
+    print('L:', L)
+    
     num_samples = int(dataset.shape[0] // time_frame_size)
-    s_grid = build_grid(
-        [dict(start=-2.0, stop=2.0, num=16)] * 2 + [dict(start=1, stop=1, num=1)]
-    ).reshape(L, 3)
+    # s_grid = build_grid(
+    #     [dict(start=-2.0, stop=2.0, num=16)] * 2 + [dict(start=1, stop=1, num=1)]
+    # ).reshape(L, 3)
+    s_grid = build_grid([dict(start=-2.0, stop=2.0, num=int(np.ceil(np.sqrt(L))))] * 2 + [dict(start=1, stop=1, num=1)]).reshape(-1,1)[:L* 3].reshape(L, 3)
+    
     s_grid = jnp.repeat(s_grid[None, ...], B, axis=0)  # [L, 3] -> [B, L, 3]
     valid_lens_test = jnp.repeat(num_test_max, B)
     dataset = dataset.reshape(num_samples, time_frame_size, -1)
@@ -148,6 +162,8 @@ def build_dataloader(
             )[..., 1:].reshape(B, -1)
             permute_idx_ctx = random.permutation(rng_perm, L * time_step_ctx_num)
             permute_idx_test = random.permutation(rng_perm, L)
+            inv_permute_idx_ctx = jnp.argsort(permute_idx_ctx)
+            inv_permute_idx_test = jnp.argsort(permute_idx_test)
             valid_lens_ctx = random.randint(
                 rng_val,
                 (B,),
@@ -163,7 +179,7 @@ def build_dataloader(
                 valid_lens_test,
                 s_test,  # add full originals for use in callbacks, e.g. log_plots
                 f_test[..., None],
-                (permute_idx_ctx, permute_idx_test),
+                (inv_permute_idx_ctx, inv_permute_idx_test),
             )
 
     return dataloader
@@ -188,7 +204,7 @@ def plot_temporal_dataloader(dataloader: Generator, sample_idx: int = 0):
         _,
         s_test,
         f_test,
-        (permute_idx_ctx, permute_idx_test),
+        (inv_permute_idx_ctx, inv_permute_idx_test),
     ) = next(dataloader)
     num_ctx, img_size = s_ctx_permuted.shape[1] // 256, 16
     ctx_times = s_ctx_permuted[sample_idx, :, -1].reshape(num_ctx, -1)
@@ -196,11 +212,11 @@ def plot_temporal_dataloader(dataloader: Generator, sample_idx: int = 0):
     valid_len_ctx = valid_lens_ctx[sample_idx]
     f_ctx_permuted = f_ctx_permuted.at[sample_idx, valid_len_ctx:].set(np.nan)
     f_ctx_unperm_images = f_ctx_permuted[
-        sample_idx, jnp.argsort(permute_idx_ctx)
+        sample_idx, inv_permute_idx_ctx
     ].reshape(-1, img_size, img_size)
     f_test_perm_image = f_test_permuted[sample_idx].reshape(img_size, img_size)
     f_test_unperm_image = f_test_permuted[
-        sample_idx, jnp.argsort(permute_idx_test)
+        sample_idx, inv_permute_idx_test
     ].reshape(img_size, img_size)
     f_test_direct_image = f_test[sample_idx].reshape(img_size, img_size)
     fig, axes = plt.subplots(2, max(3, num_ctx), figsize=(5 * max(3, num_ctx), 12))
@@ -225,7 +241,7 @@ def plot_temporal_dataloader(dataloader: Generator, sample_idx: int = 0):
     for ax in axes.flatten():
         ax.axis("off")
     plt.tight_layout()
-    save_path = f"/tmp/temporal_plot_{datetime.now().isoformat()}.png"
+    save_path = f"cache/outbreaks/temporal_plot_{datetime.now().isoformat()}.png"
     plt.savefig(save_path, dpi=150)
     plt.close(fig)
     print(f"Plot saved to {save_path}")

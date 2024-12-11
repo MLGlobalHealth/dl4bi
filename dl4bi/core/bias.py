@@ -16,6 +16,14 @@ def graph_distance(x_idx: ArrayLike, y_idx: ArrayLike, path=None) -> ArrayLike:
         Matrix of all pairwise distances.
     """
     distance_matrix = jnp.load(path)
+    # import matplotlib.pyplot as plt
+    # import numpy as np
+    # plt.imshow(np.array(distance_matrix), cmap='viridis', interpolation='none')
+    # plt.colorbar()
+    # name = 'distances_in_bias'
+    # plt.title(name)
+    # plt.savefig('cache/outbreaks/' + name + '.png')
+    # raise ValueError("Graph distance is not implemented.")
     distances = distance_matrix[x_idx, :][:, y_idx]
     return distances
 

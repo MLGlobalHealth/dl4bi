@@ -74,6 +74,7 @@ def train(
     valid_num_steps: Optional[int] = None,
     valid_interval: int = 25000,
     log_loss_interval: int = 100,
+    distance_path: Optional[str] = None,
     callbacks: list[Callback] = [],
     monitor_metric: str = "NLL",  # validation metric to monitor
     early_stop_patience: Optional[int] = None,
@@ -931,7 +932,281 @@ def f_std_to_img_task(shape: tuple[int, int, int], f_std: jax.Array):
         task = task.mean(axis=-1)
     return task
 
+import networkx as nx
 
+def log_graph_plots(
+    step: int,
+    rng_step: int,
+    state: TrainState,
+    batch: tuple,
+    pos: dict[str, float],
+    graph: nx.Graph,
+    num_plots: int = 16,
+    norm=None,
+    norm_std=None,
+):
+    """Logs `num_plots` from the given batch."""
+    rng_dropout, rng_extra = random.split(rng_step)
+    (
+        s_ctx,
+        f_ctx,
+        valid_lens_ctx,
+        s_test,
+        f_test,
+        valid_lens_test,
+        s_test_full,
+        f_test_full,
+        inv_permute_idx,
+    ) = batch
+    if inv_permute_idx is tuple: # deal with temporal tuple
+        inv_permute_idx = inv_permute_idx[0]
+    f_mu, f_std, *_ = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        s_ctx,
+        f_ctx,
+        s_test_full,
+        valid_lens_ctx,
+        valid_lens_test=None,
+        inv_permute_idx=inv_permute_idx,
+        rngs={"dropout": rng_dropout, "extra": rng_extra},
+    )
+    paths = []
+    for i in range(num_plots):
+        inv_idx_i = inv_permute_idx
+        if inv_permute_idx.ndim > 1:  # each row was permuted separately
+            inv_idx_i = inv_permute_idx[i]
+        v = valid_lens_ctx[i]
+        f_ctx_i = f_ctx[i, :v, :]
+        f_mu_i = f_mu[i]
+        f_std_i = f_std[i]
+        f_test_full_i = f_test_full[i]
+        if f_mu.shape != f_test.shape:  # bootstrapped
+            K = f_mu.shape[0] // f_test.shape[0]
+            s = i * K
+            f_mu_i = f_mu[s : s + K].mean(axis=0)
+            # Law of total variance: V[Y] = V[E[Y|X]] + E[V[Y|X]]
+            f_std_i = f_mu[s : s + K].std(axis=0) + f_std[s : s + K].mean(axis=0)
+        
+        fig = plot_graph(
+            i,
+            f_ctx_i,
+            f_mu_i,
+            f_std_i,
+            f_test_full_i,
+            inv_idx_i,
+            pos,
+            graph,
+            norm=norm,
+            norm_std=norm_std,
+        )
+        paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
+        fig.savefig(paths[-1], dpi=125)
+        plt.clf()
+        plt.close(fig)
+    wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
+    
+def log_temporal_graph_plots(
+    step: int,
+    rng_step: int,
+    state: TrainState,
+    batch: tuple,
+    pos: dict[str, float],
+    graph: nx.Graph,
+    num_plots: int = 16,
+    norm=None,
+    norm_std=None,
+):
+    """Logs `num_plots` from the given batch."""
+    rng_dropout, rng_extra = random.split(rng_step)
+    (
+        s_ctx,
+        f_ctx,
+        valid_lens_ctx,
+        s_test,
+        f_test,
+        valid_lens_test,
+        s_test_full,
+        f_test_full,
+        (inv_permute_idx, inv_permute_idx_test),
+    ) = batch
+    if inv_permute_idx is tuple: # deal with temporal tuple
+        inv_permute_idx = inv_permute_idx[0]
+    f_mu, f_std, *_ = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        s_ctx,
+        f_ctx,
+        s_test_full,
+        valid_lens_ctx,
+        valid_lens_test=None,
+        inv_permute_idx=inv_permute_idx,
+        rngs={"dropout": rng_dropout, "extra": rng_extra},
+    )
+    paths = []
+    for i in range(num_plots):
+        inv_idx_i = inv_permute_idx
+        if inv_permute_idx.ndim > 1:  # each row was permuted separately
+            inv_idx_i = inv_permute_idx[i]
+        v = valid_lens_ctx[i]
+        f_ctx_i = f_ctx[i, :v, :]
+        f_mu_i = f_mu[i]
+        f_std_i = f_std[i]
+        f_test_full_i = f_test_full[i]
+        if f_mu.shape != f_test.shape:  # bootstrapped
+            K = f_mu.shape[0] // f_test.shape[0]
+            s = i * K
+            f_mu_i = f_mu[s : s + K].mean(axis=0)
+            # Law of total variance: V[Y] = V[E[Y|X]] + E[V[Y|X]]
+            f_std_i = f_mu[s : s + K].std(axis=0) + f_std[s : s + K].mean(axis=0)
+        
+        fig = plot_graph(
+            i,
+            f_ctx_i,
+            f_mu_i,
+            f_std_i,
+            f_test_full_i,
+            inv_idx_i,
+            pos,
+            graph,
+            norm=norm,
+            norm_std=norm_std,
+        )
+        paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
+        fig.savefig(paths[-1], dpi=125)
+        plt.clf()
+        plt.close(fig)
+    wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
+    
+def log_temporal_img_plots(
+    step: int,
+    rng_step: int,
+    state: TrainState,
+    batch: tuple,
+    shape: tuple[int, int, int],
+    num_plots: int = 16,
+    cmap=mpl.colormaps.get_cmap("grey"),
+    cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
+    norm=None,
+    norm_std=None,
+):
+    """Logs `num_plots` from the given batch."""
+    rng_dropout, rng_extra = random.split(rng_step)
+    (
+        s_ctx,
+        f_ctx,
+        valid_lens_ctx,
+        s_test,
+        f_test,
+        valid_lens_test,
+        s_test_full,
+        f_test_full,
+        (inv_permute_idx, inv_permute_idx_test),
+    ) = batch
+    f_mu, f_std, *_ = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        s_ctx,
+        f_ctx,
+        s_test_full,
+        valid_lens_ctx,
+        valid_lens_test=None,
+        inv_permute_idx=inv_permute_idx,
+        rngs={"dropout": rng_dropout, "extra": rng_extra},
+    )
+    paths = []
+    for i in range(num_plots):
+        inv_idx_i = inv_permute_idx
+        if inv_permute_idx.ndim > 1:  # each row was permuted separately
+            inv_idx_i = inv_permute_idx[i]
+        v = valid_lens_ctx[i]
+        f_ctx_i = f_ctx[i, :v, :]
+        f_mu_i = f_mu[i]
+        f_std_i = f_std[i]
+        f_test_full_i = f_test_full[i]
+        if f_mu.shape != f_test.shape:  # bootstrapped
+            K = f_mu.shape[0] // f_test.shape[0]
+            s = i * K
+            f_mu_i = f_mu[s : s + K].mean(axis=0)
+            # Law of total variance: V[Y] = V[E[Y|X]] + E[V[Y|X]]
+            f_std_i = f_mu[s : s + K].std(axis=0) + f_std[s : s + K].mean(axis=0)
+        fig = plot_img(
+            i,
+            shape,
+            f_ctx_i,
+            f_mu_i,
+            f_std_i,
+            f_test_full_i,
+            inv_idx_i,
+            cmap=cmap,
+            cmap_std=cmap_std,
+            norm=norm,
+            norm_std=norm_std,
+        )
+        paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
+        fig.savefig(paths[-1], dpi=125)
+        plt.clf()
+        plt.close(fig)
+    wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
+
+def plot_graph(
+        id: int,
+        f_ctx: jax.Array,  # [L_ctx, 1]
+        f_mu: jax.Array,  # [L, 1]
+        f_std: jax.Array,  # [L, 1]
+        f_test: jax.Array,  # [L, 1]
+        inv_permute_idx: jax.Array,  # [L]
+        pos: dict[str, float],
+        graph: nx.Graph,
+        axs: Optional[mpl.axes.Axes] = None,
+        node_size: int = 60,
+        edge_width: float = 1,
+        cmap_task=mpl.colormaps.get_cmap("bwr"),
+        cmap_state=mpl.colormaps.get_cmap("bwr"),
+        cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
+        norm=None,
+        norm_std=None
+        ):
+        
+        """Plots a triptych of [task, uncertainty, pred, truth]."""
+        if axs is None:
+            _, axs = plt.subplots(1, 4, figsize=(20, 5))
+
+        # plot task
+        L, L_ctx = f_test.shape[0], f_ctx.shape[0]
+        task = jnp.pad(f_ctx, ((0, L - L_ctx), (0, 0)))  # [L_ctx, 1] -> [L, 1]
+        task = task.at[L_ctx:, :].set(jnp.nan)  # set to RGB black
+        task = task[inv_permute_idx, :]  # permute back to original ordering
+        axs[0].set_title("Task")
+        # map node to colours, with nan set to black
+        # norm = Normalize(vmin=-1, vmax=1)
+        nan_mask = np.isnan(task)
+        node_colors = cmap_task(norm(task))
+        node_colors[nan_mask] = [0, 0, 0, 1]
+
+        nx.draw(graph, pos, ax=axs[0], node_color=node_colors,
+                node_size=node_size, width=edge_width)
+        
+        # plot uncertainty
+        axs[1].set_title("Uncertainty")
+        nx.draw(graph, pos, ax=axs[1], node_color=f_std, cmap=cmap_std, vmin=0,
+                node_size=node_size, width=edge_width)
+        
+        # plot prediction
+        axs[2].set_title("Prediction")
+        nx.draw(graph, pos, ax=axs[2], node_color=f_mu, cmap=cmap_state, vmin=-1, vmax=1,
+                node_size=node_size, width=edge_width)
+
+        # plot ground truth
+        axs[3].set_title("Ground Truth")
+        nx.draw(graph, pos, ax=axs[3], node_color=f_test, cmap=cmap_state, vmin=-1, vmax=1,
+                node_size=node_size, width=edge_width)
+        
+        # set dimension of each plot
+        for ax in axs:
+               ax.set_aspect('equal')
+               ax.set_axis_off()
+        plt.tight_layout()
+        
+        return plt.gcf()
+    
 def log_wandb_line(vec: jax.Array, title: str):
     wandb_key = title.lower().replace(" ", "_")
     tbl = wandb.Table(data=[[i, v] for i, v in enumerate(vec)], columns=["i", "v"])

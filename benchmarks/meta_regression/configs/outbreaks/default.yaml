@@ -13,3 +13,4 @@ batch_size: 16
 lr_peak: 1.0e-3
 lr_pct_warmup: 0.0
 clip_max_norm: 3.0
+data_path: cache/outbreaks_SB_high/

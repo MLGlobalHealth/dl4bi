@@ -10,7 +10,7 @@ from jax.nn import dot_product_attention
 from sps.kernels import outer_subtract
 
 from .mlp import MLP
-from .utils import mask_attn, mask_from_valid_lens, mask_attn_graph
+from .utils import mask_attn, mask_from_valid_lens
 
 
 def gaussian_orf(key: jax.Array, m: int, d: int, structured: bool = True):

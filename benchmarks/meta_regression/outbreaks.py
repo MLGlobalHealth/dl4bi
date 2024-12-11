@@ -12,6 +12,8 @@ import wandb
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
+import json
+import networkx as nx
 
 from dl4bi.meta_regression.train_utils import (
     Callback,
@@ -19,7 +21,7 @@ from dl4bi.meta_regression.train_utils import (
     cosine_annealing_lr,
     evaluate,
     instantiate,
-    log_img_plots,
+    log_graph_plots,
     save_ckpt,
     train,
 )
@@ -39,8 +41,8 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader = build_dataloader(cfg.batch_size)
-    valid_dataloader = build_dataloader(cfg.batch_size)
+    train_dataloader = build_dataloader(cfg.data_path, cfg.batch_size)
+    valid_dataloader = build_dataloader(cfg.data_path, cfg.batch_size)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -54,8 +56,13 @@ def main(cfg: DictConfig):
     cmap = mpl.colormaps.get_cmap("grey")
     cmap.set_bad("blue")
     norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
+    
+    with open(cfg.data_path + 'graph_pos.json', 'r') as infile:
+            pos = json.load(infile)
+    graph = nx.read_adjlist(cfg.data_path + 'graph.adjlist')
+    
     img_cbk = Callback(
-        partial(log_img_plots, shape=(16, 16, 1), cmap=cmap, norm=norm),
+        partial(log_graph_plots, pos=pos, graph=graph, norm=norm),
         cfg.plot_interval,
     )
     state = train(
@@ -75,16 +82,26 @@ def main(cfg: DictConfig):
 
 
 def build_dataloader(
+    data_path: str,
     batch_size: int = 16,
-    num_ctx_min: int = 16,
-    num_ctx_max: int = 128,
-    num_test_max: int = 256,
+    min_ctx_valid_pct: float = 0.05,
+    max_ctx_valid_pct: float = 0.5,
 ):
-    B, L = batch_size, 16 * 16
-    path = "cache/outbreaks/outbreaks.npy"  # contains [time, f_test]
-    dataset = np.load(path, mmap_mode="r")
-    s_grid = build_grid([dict(start=-2.0, stop=2.0, num=16)] * 2).reshape(L, 2)
-    s_grid = jnp.repeat(s_grid[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
+    path = data_path + "outbreaks.npz"  # contains [time, f_test]
+    dataset = np.load(path, mmap_mode="r")['outbreaks']
+    B = batch_size
+    L = dataset.shape[1] - 1
+    num_ctx_min = int(L * min_ctx_valid_pct)
+    num_ctx_max = int(L * max_ctx_valid_pct)
+    num_test_max = L
+    
+    # TODO: better embedding/representation of nodes
+    # node_embedding = build_grid([dict(start=-2.0, stop=2.0, num=16)] * 2).reshape(L, 2)
+    node_embedding = build_grid([dict(start=-2.0, stop=2.0, num=int(np.ceil(np.sqrt(L))))] * 2).reshape(-1,1)[:L* 2].reshape(L, 2)
+    # node_embedding = np.load(data_path + "node_embeddings.npy")
+    # assert node_embedding.shape[0] == L
+    # print("Node Embeddings:\n", node_embedding)
+    s_grid = jnp.repeat(node_embedding[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
     valid_lens_test = jnp.repeat(num_test_max, B)
     N = dataset.shape[0]
 
