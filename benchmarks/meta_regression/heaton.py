@@ -19,6 +19,7 @@ from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
 from optax.schedules import cosine_decay_schedule
 from sps.utils import random_subgrid
+from tqdm import tqdm
 
 from dl4bi.meta_regression.train_utils import (
     Callback,
@@ -45,8 +46,10 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    rng_data, rng_train, rng_test, rng = random.split(rng, 4)
-    dataloaders = build_dataloaders(rng_data, cfg.data, cfg.kernel, cfg.test)
+    rng_train, rng_test = random.split(rng)
+    if not Path(cfg.data.train_rngs_path).exists():
+        generate_train_rngs(rng_train, cfg.train_num_steps, cfg.kernel, cfg.data)
+    dataloaders = build_dataloaders(cfg.data, cfg.kernel, cfg.test)
     train_dataloader, valid_dataloader, test_dataloader = dataloaders
     num_decay_steps = int(cfg.lr_pct_decay * cfg.train_num_steps)
     lr_schedule = cosine_decay_schedule(cfg.lr_peak, num_decay_steps, cfg.lr_alpha)
@@ -94,12 +97,7 @@ def main(cfg: DictConfig):
     log_test_results(rng_test, state, test_dataloader)
 
 
-def build_dataloaders(
-    rng: jax.Array,
-    data: DictConfig,
-    kernel: DictConfig,
-    test: DictConfig,
-):
+def build_dataloaders(data: DictConfig, kernel: DictConfig, test: DictConfig):
     """
     The image consists of ~105k observed locations and ~45k unobserved
     locations. For training, we partition the 105k observed locations into train
@@ -117,12 +115,9 @@ def build_dataloaders(
     L_train = jnp.prod(jnp.array([dim.num for dim in data.s]))
     num_ctx_min = math.floor((1 - data.max_masked_pct) * L_train)
     num_ctx_max = math.ceil((1 - data.min_masked_pct) * L_train)
-    permute_idx = random.choice(rng, L_obs, (L_obs,), replace=False)
-    s_obs, f_obs = s_obs[permute_idx], f_obs[permute_idx]
-    B, D = data.batch_size, len(data.s)
     # NOTE: these reflections assume the data is centered on the origin (0,)*D
     reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [-1, -1]])[:, None, :]
-    N_r = len(reflections)
+    B, N_r = data.batch_size, len(reflections)
     mB = B // N_r
 
     def build_train_dataloader():
@@ -148,7 +143,7 @@ def build_dataloaders(
                 fs += [jnp.stack([f[i, sort_idx[i], :]] * N_r)]
             s_ord, f_ord = jnp.vstack(ss), jnp.vstack(fs)
             f_ord_noisy = f_ord + data.obs_noise * random.normal(rng_eps, f_ord.shape)
-            return rng, (
+            return (
                 s_ord[:, :num_ctx_max, :],
                 f_ord_noisy[:, :num_ctx_max, :],
                 valid_lens_ctx,
@@ -164,11 +159,22 @@ def build_dataloaders(
         def dataloader(rng: jax.Array):
             while True:
                 rng_batch, rng = random.split(rng)
-                # TODO(danj): Save & load rng_used to reproduce this...
-                rng_used, batch = gen_batch(rng_batch)
-                yield batch
+                yield gen_batch(rng_batch)
 
-        return dataloader
+        def build_deterministic_dataloader(rngs: jax.Array):
+            def dataloader(_rng: jax.Array):
+                for rng in rngs:
+                    yield gen_batch(rng)
+
+            return dataloader
+
+        loader = dataloader
+        train_rngs_path = data.get("train_rngs_path")
+        if Path(train_rngs_path).exists():
+            train_rngs = jnp.load(train_rngs_path, allow_pickle=True)
+            loader = build_deterministic_dataloader(train_rngs)
+
+        return loader
 
     def valid_dataloader(rng: jax.Array):
         valid_lens_test = jnp.repeat(L_train, B)
@@ -226,29 +232,43 @@ def split_observed(df: pd.DataFrame):
     )
 
 
-@partial(jit, static_argnums=(1, 2, 3))
+def generate_train_rngs(
+    rng: jax.Array,
+    num_batches: int,
+    kernel: DictConfig,
+    data: DictConfig,
+):
+    rngs = []
+    pbar = tqdm(range(1, num_batches + 1), unit=" batches", dynamic_ncols=True)
+    for i in pbar:
+        rng_i, rng = random.split(rng)
+        rng, *_ = sample_constrained_s_f(rng, kernel, data)
+        rngs += [rng]
+    jnp.save(data.train_rngs_path, jax.random.key_data(jnp.stack(rngs)))
+
+
 def sample_constrained_s_f(rng: jax.Array, kernel: DictConfig, data: DictConfig):
     valid_pct, var = 1 - data.mask_pct, kernel.kwargs.var.kwargs.kwargs.mu
     threshold = norm.ppf(valid_pct, loc=0, scale=var)
-    s, f = sample_s_f(rng)
+    s, f = sample_s_f(rng, kernel, data)
     pct_masked = (f > threshold).mean(axis=(1, 2))
     while jnp.logical_or(
         pct_masked < data.min_masked_pct,
         pct_masked > data.max_masked_pct,
-    ):
+    ).any():
         rng, _ = random.split(rng)
         s, f = sample_s_f(rng, kernel, data)
         pct_masked = (f > threshold).mean(axis=(1, 2))
     return rng, s, f
 
 
-@partial(jit, static_argnums=(1, 2))
 def sample_s_f(rng: jax.Array, kernel: DictConfig, data: DictConfig):
     rng_s, rng_f = random.split(rng)
     s = random_subgrid(rng_s, data.s, data.min_axes_pct, data.max_axes_pct)
     s = s.reshape(-1, s.shape[-1])
     gp = instantiate(kernel)
-    f, *_ = gp.simulate(rng_f, s, data.batch_size // 4)  # reflections
+    # divide by 4 to account for reflections added later
+    f, *_ = gp.simulate(rng_f, s, data.batch_size // 4)
     return s, f
 
 

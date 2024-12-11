@@ -13,3 +13,4 @@ min_masked_pct: 0.05
 max_masked_pct: 0.75
 min_axes_pct: 0.05 # used for subsampling grid
 max_axes_pct: 1.0
+train_rngs_path: train_rngs_min_5_max_75.npy

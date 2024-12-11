@@ -22,7 +22,7 @@ kwargs:
         kwargs:
           num_heads: 4
           attn:
-            cls: FusedAttention
+            cls: Attention
       ffn:
         cls: MLP
         kwargs:
