@@ -24,7 +24,7 @@ from dl4bi.meta_regression.train_utils import (
     cosine_annealing_lr,
     evaluate,
     instantiate,
-    log_temporal_graph_plots,
+    log_graph_plots,
     save_ckpt,
     train,
 )
@@ -44,9 +44,9 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader = build_dataloader(cfg.data_path, cfg.temporal_data, cfg.batch_size)
+    train_dataloader = build_dataloader(cfg.data_path, cfg.graph_dist, cfg.temporal_data, cfg.batch_size)
     # plot_temporal_dataloader(train_dataloader(rng))
-    valid_dataloader = build_dataloader(cfg.data_path, cfg.temporal_data, cfg.batch_size)
+    valid_dataloader = build_dataloader(cfg.data_path, cfg.graph_dist, cfg.temporal_data, cfg.batch_size)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -64,7 +64,7 @@ def main(cfg: DictConfig):
             pos = json.load(infile)
     graph = nx.read_adjlist(cfg.data_path + 'graph.adjlist')
     img_cbk = Callback(
-        partial(log_temporal_graph_plots, pos=pos, graph=graph, norm=norm),
+        partial(log_graph_plots, pos=pos, graph=graph, norm=norm),
         cfg.plot_interval,
     )
     state = train(
@@ -85,6 +85,7 @@ def main(cfg: DictConfig):
 
 def build_dataloader(
     data_path: str,
+    graph_dist_path: str,
     temporal_cfg: DictConfig,
     batch_size: int = 16,
     min_ctx_valid_pct: float = 0.05,
@@ -100,6 +101,9 @@ def build_dataloader(
     print('dataset shape:', dataset.shape)
     print('time_frame_size:', time_frame_size)
     print('L:', L)
+    
+    graph_dist_path = data_path + graph_dist_path
+    graph_dist = jnp.load(graph_dist_path)
     
     num_samples = int(dataset.shape[0] // time_frame_size)
     # s_grid = build_grid(
@@ -180,6 +184,7 @@ def build_dataloader(
                 s_test,  # add full originals for use in callbacks, e.g. log_plots
                 f_test[..., None],
                 (inv_permute_idx_ctx, inv_permute_idx_test),
+                graph_dist
             )
 
     return dataloader

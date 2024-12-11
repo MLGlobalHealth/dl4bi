@@ -41,8 +41,8 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader = build_dataloader(cfg.data_path, cfg.batch_size)
-    valid_dataloader = build_dataloader(cfg.data_path, cfg.batch_size)
+    train_dataloader = build_dataloader(cfg.data_path, cfg.graph_dist, cfg.batch_size)
+    valid_dataloader = build_dataloader(cfg.data_path, cfg.graph_dist, cfg.batch_size)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -83,6 +83,7 @@ def main(cfg: DictConfig):
 
 def build_dataloader(
     data_path: str,
+    graph_dist_path: str,
     batch_size: int = 16,
     min_ctx_valid_pct: float = 0.05,
     max_ctx_valid_pct: float = 0.5,
@@ -94,6 +95,9 @@ def build_dataloader(
     num_ctx_min = int(L * min_ctx_valid_pct)
     num_ctx_max = int(L * max_ctx_valid_pct)
     num_test_max = L
+    
+    graph_dist_path = data_path + graph_dist_path
+    graph_dist = jnp.load(graph_dist_path)
     
     # TODO: better embedding/representation of nodes
     # node_embedding = build_grid([dict(start=-2.0, stop=2.0, num=16)] * 2).reshape(L, 2)
@@ -138,7 +142,8 @@ def build_dataloader(
                 valid_lens_test,
                 s_test,  # add full originals for use in callbacks, e.g. log_plots
                 f_test,
-                inv_permute_idx,
+                (inv_permute_idx, inv_permute_idx),
+                graph_dist,
             )
 
     return dataloader

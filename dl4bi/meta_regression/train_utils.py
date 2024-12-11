@@ -82,9 +82,9 @@ def train(
 ):
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
     batches = train_dataloader(rng_data)
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, _, _, inv_permute_idx = next(batches)
+    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, _, _, (inv_permute_idx, inv_permute_idx_test), graph_dist = next(batches)
     rngs = {"params": rng_params, "extra": rng_extra}
-    kwargs = model.init(rngs, s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test, inv_permute_idx=inv_permute_idx)
+    kwargs = model.init(rngs, s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test, inv_permute_idx=inv_permute_idx, inv_permute_idx_test=inv_permute_idx_test, graph_dist=graph_dist)
     params = kwargs.pop("params")
     # param_count = nn.tabulate(model, rngs)(
     #     s_ctx,
@@ -167,7 +167,7 @@ def evaluate(
         # early stopping for infinite dataloaders
         if i >= num_steps:
             break
-        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, _,_,inv_permute_idx = batch
+        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, _,_,(inv_permute_idx, inv_permute_idx_test), graph_dist = batch
         f_mu, f_std, *_ = jit(state.apply_fn)(
             {"params": state.params, **state.kwargs},
             s_ctx,
@@ -176,6 +176,8 @@ def evaluate(
             valid_lens_ctx,
             valid_lens_test,
             inv_permute_idx=inv_permute_idx,
+            inv_permute_idx_test=inv_permute_idx_test,
+            graph_dist=graph_dist,
             rngs={"extra": rng_extra},
         )
         mask_test = mask_from_valid_lens(s_test.shape[1], valid_lens_test)
@@ -409,7 +411,7 @@ def vanilla_train_step(
     """
     rng_dropout, rng_extra = random.split(rng)
     def loss_fn(params):
-        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, _,_,inv_permute_idx = batch
+        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, _,_,(inv_permute_idx, inv_permute_idx_test), graph_dist = batch
         (B, L_test, _) = s_test.shape
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(L_test, B)
@@ -423,6 +425,8 @@ def vanilla_train_step(
             valid_lens_test,
             training=True,
             inv_permute_idx = inv_permute_idx,
+            inv_permute_idx_test = inv_permute_idx_test,
+            graph_dist = graph_dist,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
         )
         return -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
@@ -956,10 +960,9 @@ def log_graph_plots(
         valid_lens_test,
         s_test_full,
         f_test_full,
-        inv_permute_idx,
+        (inv_permute_idx, inv_permute_idx_test),
+        graph_dist
     ) = batch
-    if inv_permute_idx is tuple: # deal with temporal tuple
-        inv_permute_idx = inv_permute_idx[0]
     f_mu, f_std, *_ = state.apply_fn(
         {"params": state.params, **state.kwargs},
         s_ctx,
@@ -968,13 +971,13 @@ def log_graph_plots(
         valid_lens_ctx,
         valid_lens_test=None,
         inv_permute_idx=inv_permute_idx,
+        inv_permute_idx_test=inv_permute_idx_test,
+        graph_dist = graph_dist,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
     paths = []
     for i in range(num_plots):
         inv_idx_i = inv_permute_idx
-        if inv_permute_idx.ndim > 1:  # each row was permuted separately
-            inv_idx_i = inv_permute_idx[i]
         v = valid_lens_ctx[i]
         f_ctx_i = f_ctx[i, :v, :]
         f_mu_i = f_mu[i]
@@ -1005,76 +1008,6 @@ def log_graph_plots(
         plt.close(fig)
     wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
     
-def log_temporal_graph_plots(
-    step: int,
-    rng_step: int,
-    state: TrainState,
-    batch: tuple,
-    pos: dict[str, float],
-    graph: nx.Graph,
-    num_plots: int = 16,
-    norm=None,
-    norm_std=None,
-):
-    """Logs `num_plots` from the given batch."""
-    rng_dropout, rng_extra = random.split(rng_step)
-    (
-        s_ctx,
-        f_ctx,
-        valid_lens_ctx,
-        s_test,
-        f_test,
-        valid_lens_test,
-        s_test_full,
-        f_test_full,
-        (inv_permute_idx, inv_permute_idx_test),
-    ) = batch
-    if inv_permute_idx is tuple: # deal with temporal tuple
-        inv_permute_idx = inv_permute_idx[0]
-    f_mu, f_std, *_ = state.apply_fn(
-        {"params": state.params, **state.kwargs},
-        s_ctx,
-        f_ctx,
-        s_test_full,
-        valid_lens_ctx,
-        valid_lens_test=None,
-        inv_permute_idx=inv_permute_idx,
-        rngs={"dropout": rng_dropout, "extra": rng_extra},
-    )
-    paths = []
-    for i in range(num_plots):
-        inv_idx_i = inv_permute_idx
-        if inv_permute_idx.ndim > 1:  # each row was permuted separately
-            inv_idx_i = inv_permute_idx[i]
-        v = valid_lens_ctx[i]
-        f_ctx_i = f_ctx[i, :v, :]
-        f_mu_i = f_mu[i]
-        f_std_i = f_std[i]
-        f_test_full_i = f_test_full[i]
-        if f_mu.shape != f_test.shape:  # bootstrapped
-            K = f_mu.shape[0] // f_test.shape[0]
-            s = i * K
-            f_mu_i = f_mu[s : s + K].mean(axis=0)
-            # Law of total variance: V[Y] = V[E[Y|X]] + E[V[Y|X]]
-            f_std_i = f_mu[s : s + K].std(axis=0) + f_std[s : s + K].mean(axis=0)
-        
-        fig = plot_graph(
-            i,
-            f_ctx_i,
-            f_mu_i,
-            f_std_i,
-            f_test_full_i,
-            inv_idx_i,
-            pos,
-            graph,
-            norm=norm,
-            norm_std=norm_std,
-        )
-        paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
-        fig.savefig(paths[-1], dpi=125)
-        plt.clf()
-        plt.close(fig)
-    wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
     
 def log_temporal_img_plots(
     step: int,
