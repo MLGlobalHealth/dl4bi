@@ -121,8 +121,13 @@ def process_map(data: DictConfig):
             [map_data.bounds.miny.min(), map_data.bounds.maxy.max()],
         ]
     )
-    all_map_data = dict(jnp.load(processed_path))
-    sample_grid, s_map = all_map_data["all_grid_points"], all_map_data["s_map"]
+    if os.path.exists(processed_path):
+        all_map_data = dict(jnp.load(processed_path))
+        sample_grid, s_map = all_map_data["all_grid_points"], all_map_data["s_map"]
+    else:
+        centroids = map_data.geometry.centroid
+        s_map = jnp.stack([centroids.x.values, centroids.y.values], axis=-1)
+        sample_grid = None
     return s_map, sample_grid, bounds
 
 
