@@ -2,7 +2,7 @@ defaults:
   - _self_ # use default global values below
   - data: England
   - kernel: rbf_vae
-  - model: deep_cholesky.yaml
+  - model: deep_cholesky
   - graph_model: icar
 seed: 42
 is_gp: True
