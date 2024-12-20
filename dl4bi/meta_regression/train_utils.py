@@ -19,7 +19,6 @@ import wandb
 from flax.core import FrozenDict
 from flax.training import orbax_utils, train_state
 from jax import jit, random, vmap
-from jax.lib import xla_bridge
 from jax.scipy.special import logsumexp
 from jax.scipy.stats import norm
 from omegaconf import DictConfig, OmegaConf
@@ -40,6 +39,7 @@ from sps.utils import build_grid
 from tqdm import tqdm
 
 from ..core import *
+from ..core.utils import running_on_cpu
 from .anp import ANP
 from .banp import BANP
 from .bnp import BNP
@@ -389,10 +389,6 @@ def load_ckpts(
             state, tmp_cfg = load_ckpt(p)
             ckpt[cfg_to_run_name(tmp_cfg)] = {"state": state, "cfg": tmp_cfg}
     return ckpt
-
-
-def running_on_cpu():
-    return xla_bridge.get_backend().platform == "cpu"
 
 
 def load_ckpt(path: Union[str, Path]):

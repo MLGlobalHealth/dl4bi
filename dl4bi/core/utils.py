@@ -4,7 +4,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import jit, lax, random, vmap
+from jax.lib import xla_bridge
 from jax.tree_util import Partial
+
+def running_on_cpu():
+    return xla_bridge.get_backend().platform == "cpu"
 
 
 @jit
