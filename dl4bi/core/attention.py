@@ -16,7 +16,7 @@ from sps.kernels import l2_dist, outer_subtract
 from .bias import rbf_basis
 from .embed import RBFRandomFourierFeatures
 from .mlp import MLP
-from .utils import mask_attn, mask_from_valid_lens
+from .utils import mask_attn, mask_from_valid_lens, running_on_cpu
 
 
 def gaussian_orf(key: jax.Array, m: int, d: int, structured: bool = True):
@@ -930,7 +930,7 @@ class FusedAttention(nn.Module):
             # TODO(danj): remove when PR lands https://github.com/google/jax/issues/23349
             query_seq_lengths=jnp.repeat(L, B),
             key_value_seq_lengths=valid_lens,
-            implementation="cudnn",
+            implementation="cudnn" if not running_on_cpu() else None,
         ), None
 
 
