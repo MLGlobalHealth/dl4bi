@@ -14,3 +14,4 @@ __pycache__
 **/wandb/**
 *log.txt
 .python-version
+.DS_Store
