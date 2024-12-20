@@ -66,7 +66,7 @@ def plot_1d_gp_samples(
     num_rows, num_cols = len(ckpts), len(lengthscales)
     fig_size = (6 * num_cols, 4 * num_rows)
     for i in range(num_samples):
-        fig, axs = plt.subplots(num_rows, num_cols, figsize=fig_size)
+        fig, axs = plt.subplots(num_rows, num_cols, figsize=fig_size, squeeze=False)
         rng_i, rng_data = random.split(rng_data)
         for col_idx, ls in enumerate(lengthscales):
             cfg.kernel.kwargs.ls.kwargs.kwargs = {"value": ls}
