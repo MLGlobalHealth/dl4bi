@@ -19,9 +19,11 @@ import wandb
 from flax.core import FrozenDict
 from flax.training import orbax_utils, train_state
 from jax import jit, random, vmap
+from jax.lib import xla_bridge
 from jax.scipy.special import logsumexp
 from jax.scipy.stats import norm
 from omegaconf import DictConfig, OmegaConf
+import os
 from orbax.checkpoint import PyTreeCheckpointer
 from sps.gp import GP
 from sps.kernels import (
@@ -389,10 +391,22 @@ def load_ckpts(
     return ckpt
 
 
+def running_on_cpu():
+    return xla_bridge.get_backend().platform == "cpu"
+
+
 def load_ckpt(path: Union[str, Path]):
     "Load a checkpoint."
     if not isinstance(path, Path):
         path = Path(path)
+
+    # temporarily change sharding file to run on CPU
+    if running_on_cpu():
+        (path / "_sharding").rename(path / "_sharding.bak")
+        sharding = (path / "_sharding.bak").read_text()
+        cpu_device_str = str(jax.devices("cpu")[0])
+        (path / "_sharding").write_text(sharding.replace("cuda:0", cpu_device_str))
+
     ckptr = PyTreeCheckpointer()
     ckpt = ckptr.restore(path.absolute())
     cfg = OmegaConf.create(ckpt["config"])
@@ -404,6 +418,12 @@ def load_ckpt(path: Union[str, Path]):
         params=ckpt["state"]["params"],
         kwargs=ckpt["state"]["kwargs"],
     )
+
+    # restore original sharding file
+    if running_on_cpu():
+        os.remove(path / "_sharding")
+        (path / "_sharding.bak").rename(path / "_sharding")
+
     return state, cfg
 
 
@@ -681,7 +701,9 @@ def npf_elbo_train_step(
             0.5 * ((z_mu_test - z_mu_ctx) / z_std_ctx) ** 2
             + 0.5 * jnp.expm1(2 * diff_log_scale)
             - diff_log_scale
-        ).sum(axis=-1) / valid_lens_test  # [B] <- avg KL per valid test loc
+        ).sum(
+            axis=-1
+        ) / valid_lens_test  # [B] <- avg KL per valid test loc
         nll = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
         return nll + kl_div.mean()
 
