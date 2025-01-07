@@ -1,4 +1,4 @@
-cls: ScanTNPKR
+cls: TNPKR
 kwargs:
   num_blks: 6
   num_reps: 1
@@ -7,30 +7,25 @@ kwargs:
     kwargs:
       dims: [256, 128, 64]
       act_fn: gelu
+  dist: null
+  bias: null
   blk:
     cls: KRBlock
     kwargs:
       attn:
-        cls: MultiHeadAttention
+        cls: DeepKernelAttention
         kwargs:
-          attn:
-            cls: TISABiasedScanAttention
-            kwargs:
-              qs_chunk_size: 1024
-              ks_chunk_size: 1024
-              num_basis: 5
-          proj_qs:
+          num_heads: 1
+          proj_qks:
             cls: MLP
             kwargs:
-              dims: [128]
-          proj_ks:
-            cls: MLP
-            kwargs:
-              dims: [128]
+              dims: [128, 128]
+              act_fn: gelu
           proj_vs:
             cls: MLP
             kwargs:
               dims: [128, 64]
+              act_fn: gelu
       ffn:
         cls: MLP
         kwargs:

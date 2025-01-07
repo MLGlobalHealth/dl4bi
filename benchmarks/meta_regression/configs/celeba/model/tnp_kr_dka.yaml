@@ -13,17 +13,19 @@ kwargs:
     cls: KRBlock
     kwargs:
       attn:
-        cls: MultiHeadAttention
+        cls: DeepKernelAttention
         kwargs:
-          num_heads: 4
-          attn:
-            cls: DistanceBiasedFastAttention
+          num_heads: 1
+          proj_qks:
+            cls: MLP
             kwargs:
-              num_ortho_features: 64
-              s_rbf_rff:
-                cls: RBFRandomFourierFeatures
-                kwargs:
-                  embed_dim: 48
+              dims: [128, 128]
+              act_fn: gelu
+          proj_vs:
+            cls: MLP
+            kwargs:
+              dims: [128, 64]
+              act_fn: gelu
       ffn:
         cls: MLP
         kwargs:
@@ -32,5 +34,5 @@ kwargs:
   head:
     cls: MLP
     kwargs:
-      dims: [256, 64, 2]
+      dims: [256, 64, 6]
       act_fn: gelu

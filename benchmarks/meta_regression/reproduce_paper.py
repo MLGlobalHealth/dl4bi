@@ -37,19 +37,16 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     gp_kernels_2d = ["rbf"]
     models = [
         "tnp_d",
-        "tnp_kr",
-        "np",
-        "bnp",
-        "cnp",
-        "anp",
-        "canp",
-        "banp",
-        "convcnp",
-    ]
-    models_1d_long = [
-        "tnp_d",
-        "tnp_kr",
-        "convcnp_long",
+        "tnp_kr_scan",
+        "tnp_kr_dka",
+        "tnp_kr_performer",
+        # "np",
+        # "bnp",
+        # "cnp",
+        # "anp",
+        # "canp",
+        # "banp",
+        # "convcnp",
     ]
     exclude_2d = ["bnp", "banp", "convcnp"]
     models_2d = [m for m in models if m not in exclude_2d] + ["convcnp_2d"]
@@ -67,25 +64,6 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         "1d",
         gp_kernels_1d,
         models,
-        bayes_opt_main,
-        overrides,
-        "TNP-KR - Bayesian Optimization",
-        "TNP-KR - Gaussian Processes,",
-    )
-    gp_benchmark(
-        seeds,
-        "1d_long",
-        gp_kernels_1d,
-        models_1d_long,
-        gp_main,
-        overrides,
-        "TNP-KR - Gaussian Processes",
-    )
-    gp_benchmark(
-        seeds,
-        "1d_long",
-        gp_kernels_1d,
-        models_1d_long,
         bayes_opt_main,
         overrides,
         "TNP-KR - Bayesian Optimization",
@@ -254,7 +232,7 @@ def parse_args(argv):
         "-s",
         "--seed",
         type=int,
-        default=8,
+        default=86,
         help="One seed to rule (seed) them all.",
     )
     parser.add_argument(
