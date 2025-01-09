@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 import re
-from functools import partial
-from math import prod
 from pathlib import Path
 
 import hydra
-import jax
-import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from celeba import build_dataloaders as build_dataloaders_celeba
@@ -14,24 +10,20 @@ from cifar_10 import build_dataloaders as build_dataloaders_cifar_10
 from jax import random
 from mnist import build_dataloaders as build_dataloaders_mnist
 from omegaconf import DictConfig
-from sps.kernels import rbf
-from sps.utils import build_grid
 
 from dl4bi.meta_regression.train_utils import (
     build_2d_grid_gp_dataloader,
     build_gp_dataloader,
-    instantiate,
     load_ckpts,
     plot_img,
     plot_posterior_predictive,
-    train,
 )
 
 
 @hydra.main(config_name="default", version_base=None)
 def main(cfg: DictConfig):
-    gp_tasks = re.compile("Gaussian Processes", re.IGNORECASE)
-    img_tasks = re.compile("MNIST|CelebA|Cifar", re.IGNORECASE)
+    gp_tasks = re.compile(".*Gaussian Processes.*", re.IGNORECASE)
+    img_tasks = re.compile(".*(MNIST|CelebA|Cifar).*", re.IGNORECASE)
     only_regex = re.compile(cfg.get("only", ".*"), re.IGNORECASE)
     exclude_regex = re.compile(cfg.get("exclude", r"^$"), re.IGNORECASE)
     num_ctx = cfg.get("num_ctx", 10)
@@ -44,6 +36,7 @@ def main(cfg: DictConfig):
             return plot_1d_gp_samples(cfg, ckpts, num_ctx, num_samples, results_dir)
         return plot_2d_img_samples(cfg, ckpts, num_ctx, num_samples, results_dir)
     elif img_tasks.match(cfg.project):
+        print("IMG!")
         results_dir /= f"{cfg.seed}"
         ckpts = load_ckpts(results_dir, only_regex, exclude_regex)
         return plot_2d_img_samples(cfg, ckpts, num_ctx, num_samples, results_dir)
@@ -201,19 +194,19 @@ def project_parameters(cfg: DictConfig):
     # example project names include "TNP-KR - MNIST", "MNIST", etc, so match
     matches = lambda pattern: re.match(pattern, cfg.project, re.IGNORECASE)
     match cfg.project:
-        case _ if matches("Gaussian Processes"):
+        case _ if matches(".*Gaussian Processes.*"):
             build_dataloaders = build_2d_grid_gp_dataloader
             shape = (16, 16, 1)
             cmap = mpl.colormaps.get_cmap("grey")
             cmap.set_bad("blue")
-        case _ if matches("MNIST"):
+        case _ if matches(".*MNIST.*"):
             build_dataloaders = build_dataloaders_mnist
             shape = (28, 28, 1)
             cmap = mpl.colormaps.get_cmap("grey")
             cmap.set_bad("blue")
-        case _ if matches("CelebA"):
+        case _ if matches(".*CelebA.*"):
             build_dataloaders = build_dataloaders_celeba
-        case _ if matches("Cifar"):
+        case _ if matches(".*Cifar.*"):
             build_dataloaders = build_dataloaders_cifar_10
         case _:
             raise Exception(f"No dataloader defined for {cfg.project}!")

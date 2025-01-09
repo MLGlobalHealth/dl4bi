@@ -40,17 +40,16 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         "tnp_kr_scan",
         "tnp_kr_dka",
         "tnp_kr_performer",
-        # "np",
-        # "bnp",
-        # "cnp",
-        # "anp",
-        # "canp",
-        # "banp",
-        # "convcnp",
+        "np",
+        "bnp",
+        "cnp",
+        "anp",
+        "canp",
+        "banp",
+        "convcnp",
     ]
     exclude_2d = ["bnp", "banp", "convcnp"]
     include_2d = ["convcnp_2d"]
-    include_2d = []  # TODO(danj): remove
     models_2d = [m for m in models if m not in exclude_2d] + include_2d
     gp_benchmark(
         seeds,
