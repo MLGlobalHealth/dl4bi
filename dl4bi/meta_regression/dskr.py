@@ -6,8 +6,9 @@ import jax
 import jax.numpy as jnp
 from jax import vmap
 from jraph import GraphsTuple
+from sps.kernels import l2_dist
 
-from ..core import MLP, GraphKRBlock, TISABias, k_nearest_senders, mask_from_valid_lens
+from ..core import MLP, GraphKRBlock, TISABias, knn, mask_from_valid_lens
 
 
 # TODO(danj): include global vnode conditioning
@@ -25,8 +26,9 @@ class DSKR(nn.Module):
         be greater than `k`.
     """
 
-    k: int = 10
-    k_nearest_senders: Callable = k_nearest_senders
+    k: int = 16
+    dist: Callable = l2_dist
+    dist_batch_size: Optional[int] = None
     num_blks: int = 6
     num_reps: int = 1
     min_std: float = 0.0
@@ -62,8 +64,8 @@ class DSKR(nn.Module):
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         x_ctx, x_test = self.norm(self.embed_all(ctx)), self.norm(self.embed_all(test))
-        knn = vmap(lambda r, s: self.k_nearest_senders(r, s, K))
-        (s_cc, d_cc), (s_ct, d_ct) = knn(s_ctx, s_send), knn(s_test, s_send)
+        vknn = vmap(lambda r, s: knn(r, s, K, self.dist, self.dist_batch_size))
+        (s_cc, d_cc), (s_ct, d_ct) = vknn(s_ctx, s_send), vknn(s_test, s_send)
         s_cc = s_cc.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_c * K)
         s_ct = s_ct.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_t * K)
         nodes = jnp.vstack([x_ctx.reshape(B * N_c, -1), x_test.reshape(B * N_t, -1)])

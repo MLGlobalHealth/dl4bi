@@ -11,9 +11,9 @@ from sps.kernels import l2_dist
 
 
 @partial(jit, static_argnames=("k", "dist", "batch_size"))
-def k_nearest_senders(
+def knn(
+    q: jax.Array,
     r: jax.Array,
-    s: jax.Array,
     k: int,
     dist: Callable = l2_dist,
     batch_size: Optional[int] = None,
@@ -21,35 +21,36 @@ def k_nearest_senders(
     r"""Parellelized brute force kNN with optional `batch_size`.
 
     Args:
-        r: Reciever positions.
-        s: Sender positions.
-        k: Number of neighbors per receiver.
+        q: Query points.
+        r: Reference points.
+        k: Number of neighbors per query point to retrieve.
         dist: Distance function to use.
-        batch_size: Number of receivers to run in parallel. By default,
+        batch_size: Number of queries to run in parallel. By default,
             the method runs all of them, i.e. is a `vmap`.
 
     Returns:
         Index and distance arrays, each of dimension |r| x k.
     """
     if batch_size is None:
-        batch_size = r.shape[0]
+        batch_size = q.shape[0]
 
-    def process_batch(r_i: jax.Array):
-        # add leading dim to r_i since map processes each r_i individually,
+    def process_batch(q_i: jax.Array):
+        # add leading dim to q_i since map processes each q_i individually,
         # even when batch_size is >= 1
-        d = dist(r_i[None, ...], s)
+        d = dist(q_i[None, ...], r)
         idx = jnp.argsort(d, axis=-1)
         d = jnp.take_along_axis(d, idx, axis=-1)
-        return idx[:, :k].flatten(), d[:, :k].flatten()
+        return idx[:, :k].flatten(), d[:, :k]
 
-    return jax.lax.map(process_batch, r, batch_size=batch_size)
+    idx, d = jax.lax.map(process_batch, q, batch_size=batch_size)
+    return idx, d.squeeze()  # d: [B, L, 1, K] -> [B, L, K]
 
 
 @partial(jit, static_argnames=("k",))
-def scipy_k_nearest_senders(r: jax.Array, s: jax.Array, k: int):
+def scipy_knn(q: jax.Array, r: jax.Array, k: int):
     r"""Slower than JAX's O(n^2) implementation for small tasks, but scales in $O(N\log N)$."""
-    d_shape = jax.ShapeDtypeStruct((r.shape[0], k), jnp.float32)
-    idx_shape = jax.ShapeDtypeStruct((r.shape[0], k), jnp.int32)
-    f = lambda r, s, k: spKDTree(np.array(s)).query(np.array(r), int(k))
-    d, idx = jax.pure_callback(f, (d_shape, idx_shape), r, s, k)
-    return idx.flatten(), d.flatten()
+    d_shape = jax.ShapeDtypeStruct((q.shape[0], k), jnp.float32)
+    idx_shape = jax.ShapeDtypeStruct((q.shape[0], k), jnp.int32)
+    f = lambda q, r, k: spKDTree(np.array(r)).query(np.array(q), int(k))
+    d, idx = jax.pure_callback(f, (d_shape, idx_shape), q, r, k)
+    return idx, d
