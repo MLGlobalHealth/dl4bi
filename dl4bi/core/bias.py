@@ -14,6 +14,17 @@ class DistanceBias(nn.Module):
         d = jnp.repeat(d[:, None, ...], self.num_heads, axis=1)
         a = self.param("a", init.constant(-1), (1, self.num_heads, 1, 1))
         return a * d  # [B, H, Q, K]
+    
+class GraphDistanceBias(nn.Module):
+    num_heads: int = 4
+
+    @nn.compact
+    def __call__(self, d: jax.Array, d2: jax.Array):
+        d = jnp.repeat(d[:, None, ...], self.num_heads, axis=1)
+        d2 = jnp.repeat(d2[:, None, ...], self.num_heads, axis=1)
+        a = self.param("a", init.constant(-1), (1, self.num_heads, 1, 1))
+        b = self.param("b", init.constant(-1), (1, self.num_heads, 1, 1))
+        return a * d + b * d2 # [B, H, Q, K]
 
 
 class TISABias(nn.Module):

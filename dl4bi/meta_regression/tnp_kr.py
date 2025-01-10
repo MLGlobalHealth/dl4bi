@@ -5,9 +5,9 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from jax import vmap
-from sps.kernels import l2_dist_sq
+from sps.kernels import l2_dist_sq, l2_dist
 
-from ..core import MLP, DistanceBias, FusedAttention, KRBlock, MultiHeadAttention
+from ..core import MLP, DistanceBias, GraphDistanceBias, FusedAttention, KRBlock, MultiHeadAttention
 import os
 
 
@@ -44,8 +44,8 @@ class TNPKR(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    dist: Callable = l2_dist_sq
-    bias: nn.Module = DistanceBias()
+    dist: Callable = l2_dist
+    bias: nn.Module = GraphDistanceBias()
     attn: nn.Module = MultiHeadAttention(FusedAttention())
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64], nn.gelu)
@@ -95,6 +95,8 @@ class TNPKR(nn.Module):
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
         # d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
+        d_qk, d_kk = vdist(s_test[:,:,0], s_ctx[:,:,0]), vdist(s_ctx[:,:,0], s_ctx[:,:,0])
+        # d_qk, d_kk = jnp.zeros_like(d_qk), jnp.zeros_like(d_kk) # ignore the distance
         
         graph_dist = kwargs['graph_dist']
         inv_permute_idx = kwargs['inv_permute_idx']
@@ -104,14 +106,14 @@ class TNPKR(nn.Module):
         permute_idx_test = inv_permute_idx_test.argsort()
         d_qk_permuted = graph_dist[permute_idx_test][:, permute_idx]
         d_kk_permuted = graph_dist[permute_idx][:, permute_idx]
-        d_qk = jnp.repeat(d_qk_permuted[None,:,:], len(s_ctx), axis=0) # B x L x L
-        d_kk = jnp.repeat(d_kk_permuted[None,:,:], len(s_ctx), axis=0) # B x L x L
+        d_qk_graph = jnp.repeat(d_qk_permuted[None,:,:], len(s_ctx), axis=0) # B x L x L
+        d_kk_graph = jnp.repeat(d_kk_permuted[None,:,:], len(s_ctx), axis=0) # B x L x L
         
         for _ in range(self.num_blks):
             attn, ffn = self.attn.copy(), self.ffn.copy()
             for _ in range(self.num_reps):
                 bias, norm = self.bias.copy(), self.norm.copy()
-                b_qk, b_kk = bias(d_qk), bias(d_kk)
+                b_qk, b_kk = bias(d_qk, d_qk_graph), bias(d_kk, d_kk_graph)
                 blk = KRBlock(attn, norm, ffn)
                 qvs, kvs = blk(qvs, kvs, b_qk, b_kk, valid_lens_ctx, training, inv_permute_idx)
         qvs = self.norm.copy()(qvs)

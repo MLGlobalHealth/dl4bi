@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import optax
 from jax import random
 from omegaconf import DictConfig, OmegaConf
@@ -25,6 +26,7 @@ from dl4bi.meta_regression.train_utils import (
     evaluate,
     instantiate,
     log_graph_plots,
+    log_temporal_img_plots,
     save_ckpt,
     train,
 )
@@ -44,9 +46,9 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader = build_dataloader(cfg.data_path, cfg.graph_dist, cfg.temporal_data, cfg.batch_size)
+    train_dataloader = build_dataloader(cfg.data_path, cfg.file_name, cfg.graph_dist, cfg.temporal_data, cfg.batch_size)
     # plot_temporal_dataloader(train_dataloader(rng))
-    valid_dataloader = build_dataloader(cfg.data_path, cfg.graph_dist, cfg.temporal_data, cfg.batch_size)
+    valid_dataloader = build_dataloader(cfg.data_path, cfg.file_name, cfg.graph_dist, cfg.temporal_data, cfg.batch_size)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -57,16 +59,24 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
-    cmap = mpl.colormaps.get_cmap("grey")
-    cmap.set_bad("blue")
-    norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
+    # cmap = mpl.colormaps.get_cmap("grey")
+    cmap = mpl.colormaps.get_cmap("coolwarm")
+    # cmap.set_bad("blue")
+    cmap.set_bad("black")
+    norm = mpl.colors.Normalize(vmin=cfg.vmin, vmax=cfg.vmax, clip=True)
     with open(cfg.data_path + 'graph_pos.json', 'r') as infile:
             pos = json.load(infile)
     graph = nx.read_adjlist(cfg.data_path + 'graph.adjlist')
-    img_cbk = Callback(
-        partial(log_graph_plots, pos=pos, graph=graph, norm=norm),
+    if 'lattice' in cfg.data_path:
+        img_cbk = Callback(
+        partial(log_temporal_img_plots, shape=(16, 16, 1), cmap=cmap, norm=norm),
         cfg.plot_interval,
     )
+    else:
+        img_cbk = Callback(
+            partial(log_graph_plots, pos=pos, graph=graph, norm=norm),
+            cfg.plot_interval,
+        )
     state = train(
         rng_train,
         model,
@@ -85,6 +95,7 @@ def main(cfg: DictConfig):
 
 def build_dataloader(
     data_path: str,
+    file_name: str,
     graph_dist_path: str,
     temporal_cfg: DictConfig,
     batch_size: int = 16,
@@ -92,11 +103,16 @@ def build_dataloader(
     max_ctx_valid_pct: float = 0.5,
     num_test_max: int = 256,
 ):
-    path = data_path + "outbreaks.npz"  # contains [time, f_test]
+    path = data_path +  file_name # contains [time, f_test]
     dataset = np.load(path, mmap_mode="r")['outbreaks']
+    dataset = dataset[:, 1:]  # remove sim_id
     B = batch_size
     L = dataset.shape[1] - 1
-    time_frame_size = dataset.shape[0] // 100000
+    if 'SB_high' in path:
+        time_frame_size = 60
+    else:
+        time_frame_size = 100
+    # time_frame_size = dataset.shape[0] // 100000
     assert dataset.shape[0] % time_frame_size == 0
     print('dataset shape:', dataset.shape)
     print('time_frame_size:', time_frame_size)

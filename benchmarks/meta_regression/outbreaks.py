@@ -41,8 +41,8 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader = build_dataloader(cfg.data_path, cfg.graph_dist, cfg.batch_size)
-    valid_dataloader = build_dataloader(cfg.data_path, cfg.graph_dist, cfg.batch_size)
+    train_dataloader = build_dataloader(cfg.data_path, cfg.file_name, cfg.graph_dist, cfg.batch_size)
+    valid_dataloader = build_dataloader(cfg.data_path, cfg.file_name, cfg.graph_dist, cfg.batch_size)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -55,14 +55,14 @@ def main(cfg: DictConfig):
     model = instantiate(cfg.model)
     cmap = mpl.colormaps.get_cmap("grey")
     cmap.set_bad("blue")
-    norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
+    norm = mpl.colors.Normalize(vmin=cfg.vmin, vmax=cfg.vmax, clip=True)
     
     with open(cfg.data_path + 'graph_pos.json', 'r') as infile:
             pos = json.load(infile)
     graph = nx.read_adjlist(cfg.data_path + 'graph.adjlist')
     
     img_cbk = Callback(
-        partial(log_graph_plots, pos=pos, graph=graph, norm=norm),
+        partial(log_graph_plots, pos=pos, graph=graph, norm=norm, vmin=cfg.vmin, vmax=cfg.vmax),
         cfg.plot_interval,
     )
     state = train(
@@ -83,13 +83,15 @@ def main(cfg: DictConfig):
 
 def build_dataloader(
     data_path: str,
+    file_name: str,
     graph_dist_path: str,
     batch_size: int = 16,
     min_ctx_valid_pct: float = 0.05,
     max_ctx_valid_pct: float = 0.5,
 ):
-    path = data_path + "outbreaks.npz"  # contains [time, f_test]
+    path = data_path + file_name  # contains [time, f_test]
     dataset = np.load(path, mmap_mode="r")['outbreaks']
+    dataset = dataset[:, 1:]  # remove sim_id
     B = batch_size
     L = dataset.shape[1] - 1
     num_ctx_min = int(L * min_ctx_valid_pct)

@@ -13,5 +13,8 @@ batch_size: 16
 lr_peak: 1.0e-3
 lr_pct_warmup: 0.0
 clip_max_norm: 3.0
-data_path: cache/outbreaks_SB_low/
-graph_dist: distances_Thr05.npy
+data_path: cache/outbreaks_lattice/
+file_name: SIR_outbreaks_continuous.npz
+graph_dist: distances_UT.npy
+vmin: 0
+vmax: 1

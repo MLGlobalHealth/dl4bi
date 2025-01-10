@@ -13,6 +13,7 @@ import jax
 import jraph
 from flax import linen as nn
 from node2vec import Node2Vec
+from tqdm import tqdm
 
 def load_adj_matrix(save_path):
     # load the graph
@@ -148,7 +149,7 @@ def visualize_matrix(matrix, save_path, name='Adjacency_Matrix'):
     plt.savefig(save_path + name + '.png')
     plt.clf()
     
-def visualize_graph(adjlist_path, save_path, outbreaks=None, step='0'):
+def visualize_graph(adjlist_path, save_path, outbreaks=None, step='0', vmin=0, vmax=1, cmap='bwr'):
     # read in graph
     graph = nx.read_adjlist(adjlist_path)
     # map node names to integers
@@ -170,13 +171,14 @@ def visualize_graph(adjlist_path, save_path, outbreaks=None, step='0'):
     else:
         fig, ax = plt.subplots(figsize=(5, 5))
         pos = {int(k): v for k, v in pos.items()}  # Ensure positions are correctly assigned to nodes
+        # vmin, vmax = np.min(outbreaks), np.max(outbreaks)
         nx.draw(graph, pos, with_labels=False, node_size=30, ax=ax)
-        nx.draw_networkx_nodes(graph, pos, node_size=30, node_color=outbreaks, cmap='bwr', ax=ax, vmin=0, vmax=1)
-        plt.colorbar(plt.cm.ScalarMappable(cmap='bwr'), ax=ax)
+        nx.draw_networkx_nodes(graph, pos, node_size=30, node_color=outbreaks, cmap=cmap, ax=ax, vmin=vmin, vmax=vmax)
+        plt.colorbar(plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vmin, vmax=vmax)), ax=ax)
     plt.title('Graph with Outbreaks at Step ' + step)
     plt.savefig(save_path + 'graph_' + step + '.png')
     
-def vis_ave_outbreaks(outbreaks, steps, path):
+def vis_ave_outbreaks(outbreaks, steps, path, outbreak_name, vmin=0, vmax=1, cmap='bwr'):
     # Take average of outbreaks where the first column equals to 0
     
     for step in steps:
@@ -186,7 +188,7 @@ def vis_ave_outbreaks(outbreaks, steps, path):
             average_outbreaks = average_outbreaks[1:] #.reshape(16, 16)
             # print("Average of filtered outbreaks:", average_outbreaks)
             # visualize_matrix(average_outbreaks, 'Average_Outbreaks')
-            visualize_graph(path + 'graph.adjlist', path, outbreaks=average_outbreaks, step=str(step))
+            visualize_graph(path + 'graph.adjlist', path, outbreaks=average_outbreaks, step=str(step), vmin=vmin, vmax=vmax, cmap=cmap)
         else:
             print("No outbreaks with the first column equal to ", step) 
             
@@ -198,47 +200,64 @@ def vis_ave_outbreaks(outbreaks, steps, path):
             if os.path.exists(image_path):
                 images.append(imageio.imread(image_path))
         
-        gif_path = path + 'graph_outbreaks.gif'
+        gif_path = path + outbreak_name +'_graph.gif'
         for step in steps:
             image_path = f'{path}graph_{step}.png'
             if os.path.exists(image_path):
                 os.remove(image_path)
         imageio.mimsave(gif_path, images, duration=1)
         print(f"GIF saved at {gif_path}")
-        
-def load_simulations(path):
-    # Load the simulation data   
-    if os.path.exists(path + 'outbreaks.npz'):
-        outbreaks = np.load(path + 'outbreaks.npz')['outbreaks']
-        outbreaks_with_sim_num = None
-    elif os.path.exists(path + 'outbreaks.npy'):
-        outbreaks = np.load(path + 'outbreaks.npy')
-        outbreaks_with_sim_num = None
-    elif os.path.exists(path + 'outbreaks.csv'):
-        outbreaks_with_sim_num = pd.read_csv(path + 'outbreaks.csv').to_numpy()
-        outbreaks = outbreaks_with_sim_num[:,1:].astype(np.int32)
-    else:
-        raise ValueError("Invalid file format. Please provide a .npy or .csv file.") 
     
-    if 'SB_high' in path:
-        step  = 60
-    else:
-        step = 100
-    outbreaks = outbreaks[outbreaks[:, 0] <=step]
-    np.savez_compressed(path + 'outbreaks.npz', outbreaks=outbreaks)   
+def vis_col_distribution(outbreaks, path, outbreak_file, use_step, vmin=0, vmax=1, cmap='bwr'):
+    # Plot the distribution of the first column values in outbreaks
+    plt.hist(outbreaks[:, 1], bins=range(int(outbreaks[:, 1].min()), int(outbreaks[:, 1].max()) + 1), edgecolor='black')
+    plt.xlabel('Time steps')
+    plt.ylabel('Frequency')
+    plt.title('Distribution of Time Steps in Outbreaks')
+    plt.savefig(path + 'time_distribution.png')
+    plt.clf()
     
-    print("Outbreaks:", outbreaks)
-    print("Outbreaks shape:", outbreaks.shape)
-    print("Outbreaks time steps:", outbreaks[:1000, 0])
-    
-    
-    # vis_ave_outbreaks(outbreaks, 0)
-    if outbreaks_with_sim_num is not None:
-        vis_ave_outbreaks(outbreaks_with_sim_num[outbreaks_with_sim_num[:, 0] == 1][:,1:], list(range(0, step)), path)
-    else:
-        vis_ave_outbreaks(outbreaks[:step], list(range(0, step)), path)
-    return outbreaks
+    # Plot the distribution of each column from the 3rd to the last column in outbreaks
+    for col in np.random.choice(np.arange(2, outbreaks.shape[1]), 5, replace=False):
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
 
+        # Original distribution
+        axs[0].hist(outbreaks[:, col], bins=30, edgecolor='black')
+        axs[0].set_xlabel(f'Column {col + 1} Values')
+        axs[0].set_ylabel('Frequency')
+        axs[0].set_title(f'Distribution of Column {col + 1} Values in Outbreaks')
+
+        # Log-transformed distribution
+        # from scipy.stats import boxcox
+        # log_values = np.log1p(outbreaks[:, col])  # Use log1p to handle zero values
+        # transformed_values, _ = boxcox(outbreaks[:, col] + 1)
+        from sklearn.preprocessing import PowerTransformer
+        power = PowerTransformer(method='yeo-johnson', standardize=True)
+        transformed_values = power.fit_transform(outbreaks[:, col].reshape(-1, 1))
+        axs[1].hist(transformed_values, bins=30, edgecolor='black')
+        axs[1].set_xlabel(f'Power Transformation of Column {col + 1} Values')
+        axs[1].set_ylabel('Frequency')
+        axs[1].set_title(f'Power Transformed Distribution of Column {col + 1} Values in Outbreaks')
+
+        plt.tight_layout()
+        plt.savefig(f'{path}column_{col + 1}_distribution.png')
+        plt.clf()
+
+    # Plot the distribution of the average of columns from the 3rd to the last column in outbreaks
+    # average_values = np.mean(outbreaks[:, 2:], axis=0)
+    # plt.hist(average_values, bins=30, edgecolor='black')
+    # plt.xlabel('Average Values')
+    # plt.ylabel('Frequency')
+    # plt.title('Distribution of Average Values from in Outbreaks')
+    # plt.savefig(path + 'average_labels_distribution.png')
+    # plt.clf()
+    
+    unique_sim_ids = np.unique(outbreaks[:, 0])
+    sampled_sim_ids = np.random.choice(unique_sim_ids, 5, replace=False)
+    for vis_sim_id in sampled_sim_ids:
+        vis_outbreaks = outbreaks[outbreaks[:, 0] == vis_sim_id][:use_step+1, 1:]
+        vis_ave_outbreaks(vis_outbreaks, list(range(0, use_step)), path, outbreak_file.split('.')[0] + '_sim_' + str(vis_sim_id), vmin=vmin, vmax=vmax, cmap=cmap)
+    
 def node2vec_features(adj_matrix, dimensions=8):
     # Create Node2Vec object
     graph = nx.from_numpy_array(adj_matrix)  # Convert to NetworkX graph
@@ -249,9 +268,81 @@ def node2vec_features(adj_matrix, dimensions=8):
     embeddings = np.array([model.wv[str(node)] for node in range(adj_matrix.shape[0])])
     return embeddings
 
-def main():
-    save_path = 'cache/outbreaks_SB_low/'
+def read_csvs(path, csv_file, save_path, save_name, filter_flag=False, use_step=99, normalise_population=None):
+    # Decompress all tar.gz files under the specified path
+    if not any(file_name.endswith('.csv') for file_name in os.listdir(path)):
+        for file_name in os.listdir(path):
+            if file_name.endswith('.tar.gz'):
+                file_path = os.path.join(path, file_name)
+                with tarfile.open(file_path, 'r:gz') as tar:
+                    tar.extractall(path)
+                print(f"Decompressed {file_name}")
+            
+    combined_df = pd.DataFrame()
+    if csv_file is None:
+        file_names = os.listdir(path)
+    elif isinstance(csv_file, str):
+        file_names = [csv_file]
+    for file_name in file_names:
+        if file_name.endswith('.csv'):
+            file_path = os.path.join(path, file_name)
+            df = pd.read_csv(file_path)
+            print(df.shape)
+            print(df.head())
+            df = df[df['time'] <=use_step]
+            print("after filtering largest time steps: ", df.shape)
+            valid_sim_ids = df.groupby('sim_id')['time'].apply(lambda x: set(x) == set(range(use_step + 1)))
+            valid_sim_ids = valid_sim_ids[valid_sim_ids].index
+            print("valid sim ids: ", len(valid_sim_ids))
+            df = df[df['sim_id'].isin(valid_sim_ids)]
     
+            combined_df = pd.concat([combined_df, df], ignore_index=True, axis=0)
+    if normalise_population is not None:
+        combined_df.iloc[:, 2:] = combined_df.iloc[:, 2:] / normalise_population
+        from sklearn.preprocessing import MinMaxScaler, PowerTransformer
+        scaler = MinMaxScaler()
+        combined_df.iloc[:, 2:] = scaler.fit_transform(combined_df.iloc[:, 2:])
+        # power = PowerTransformer(method='yeo-johnson', standardize=True)
+        # combined_df.iloc[:, 2:] = power.fit_transform(combined_df.iloc[:, 2:])
+        
+    combined_df.iloc[:, 0] = combined_df.iloc[:, 0].astype(int)
+    combined_df.iloc[:, 1] = combined_df.iloc[:, 1].astype(int)
+            
+    print("combine csvs: ", combined_df.shape)
+    # if filter_flag:
+    #     if 'sim_id' in combined_df.columns: 
+    #         # Filter out rows with sim_id that only have one time=0 in the second column
+    #         # sim_counts = combined_df.groupby('sim_id').size()
+    #         # valid_sim_ids = sim_counts[sim_counts.iloc[:, 1] > 1][:,0].unique()
+    #         # valid_sim_ids = sim_counts[sim_counts > use_step].index
+    #         # print("sim ids: ", len(combined_df['sim_id'].unique()))
+    #         # valid_sim_ids = combined_df[combined_df['time'] > use_step]['sim_id'].unique()
+    #         print(combined_df.shape)
+    #         combined_df = combined_df[combined_df['time'] <=use_step]
+    #         print("after filtering largest time steps: ", combined_df.shape)
+    #         valid_sim_ids = combined_df.groupby('sim_id')['time'].apply(lambda x: set(x) == set(range(use_step + 1)))
+    #         valid_sim_ids = valid_sim_ids[valid_sim_ids].index
+    #         print("valid sim ids: ", len(valid_sim_ids))
+    #         combined_df = combined_df[combined_df['sim_id'].isin(valid_sim_ids)]
+            
+            
+    #     else:
+    #         raise ValueError("Invalid CSV file format. Please provide a CSV file with a 'sim_id' column.")
+    #         # TODO
+    #     print("with valid sim ids: ", combined_df.shape)
+    #     combined_df = combined_df[combined_df['time'] <=use_step]
+    #     print("after filtering: ", combined_df.shape)
+    #     # Verify each simulation has exactly 0 to use_step time steps
+    #     sim_time_counts = combined_df.groupby('sim_id')['time'].nunique()
+    #     valid_sim_ids = sim_time_counts[sim_time_counts == (use_step + 1)].index
+    #     combined_df = combined_df[combined_df['sim_id'].isin(valid_sim_ids)]
+    #     print("after checking: ", combined_df.shape)
+        
+    combined_npz_path = os.path.join(save_path, save_name)
+    np.savez_compressed(combined_npz_path, outbreaks=combined_df.to_numpy())
+    print(f"Combined CSV data saved to {combined_npz_path}")
+
+def load_distances(save_path):
     if not os.path.exists(save_path + 'adj_matrix.npy'): 
         adj_matrix = load_adj_matrix(save_path)
     else:
@@ -290,19 +381,90 @@ def main():
     # print("Node2Vec Features shape:", node_embeddings.shape)
     # np.save(save_path + 'node_embeddings.npy', node_embeddings)
     
-    # print('load simulations')
-    # load_simulations(save_path)
+
+def preprocess_SIR_continous_data(load_csv=False, graph='SB_high'):
+    save_path = 'cache/outbreaks_' + graph + '/'
+    load_csv_path = 'cache/synthetic-graphs/' + graph + '/'
+    # load_csv_path = None
+    file_name = None
+    outbreak_file = 'SIR_outbreaks_continuous.npz'
+    outbreak_path = save_path + outbreak_file
+    vmin = 0
+    vmax = 1
+    cmap = 'coolwarm'
+    if 'SB_high' in save_path:
+        use_step  = 59
+    else:
+        use_step = 99
     
-    # x_idx = np.array([0, 3])
-    # y_idx = np.array([1, 2])
-    # distances = distances[x_idx, :][:, y_idx]
-    # if np.isinf(distances).any():
-    #     inf_indices = np.argwhere(np.isinf(distances))
-    #     print("Warning: There are infinite values in the distances matrix at indices:", inf_indices)
-    # else:
-    #     print("All distances are finite.")
+    # print('load distances')
+    # load_distances(save_path)
     
-    # print("Distances:", distances)
+    if load_csv:
+        print('load simulations')
+        
+        filter = True
+        normalise_population = 10000
+        
+        if load_csv_path is not None:
+            print("Loading CSV files from", load_csv_path)
+            read_csvs(load_csv_path, file_name, save_path, save_name=outbreak_file, filter_flag=filter, use_step=use_step, normalise_population=normalise_population)
+    
+    print("Loading outbreaks from", outbreak_path)
+    outbreaks = np.load(outbreak_path)['outbreaks']
+    
+    print("Outbreaks:", outbreaks)
+    print("Outbreaks shape:", outbreaks.shape)
+    vis_col_distribution(outbreaks, save_path, outbreak_file, use_step, vmin=vmin, vmax=vmax, cmap=cmap)
+    
+    # plt.hist(outbreaks[:, 1], bins=range(int(outbreaks[:, 1].min()), int(outbreaks[:, 1].max()) + 1), edgecolor='black')
+    # plt.xlabel('Time steps')
+    # plt.ylabel('Frequency')
+    # plt.title('Distribution of Time Steps in Outbreaks')
+    # plt.savefig(save_path + 'time_distribution.png')
+    # plt.clf()
+    
+def preprocess_SIR_categorical_data(load_csv=False):
+    save_path = 'cache/outbreaks/'
+    load_csv_path = save_path
+    file_name = 'SIR_outbreaks.csv'
+    outbreak_file = file_name.split('.')[0] + '.npz'
+    vmin = 0
+    vmax = 2
+    cmap = 'brg'
+    
+    if load_csv:
+        print('load CSVs')
+        if 'SB_high' in save_path:
+            use_step  = 59
+        else:
+            use_step = 99
+        filter = True
+        
+        if load_csv_path is not None:
+            print("Loading CSV files from", load_csv_path)
+            read_csvs(load_csv_path, file_name, save_path, save_name=outbreak_file, filter_flag=filter, use_step=use_step)
+        print("Loading outbreaks from", save_path)
+    
+    outbreak_path = save_path + outbreak_file
+    outbreaks = np.load(outbreak_path)['outbreaks']
+    
+    print("Outbreaks:", outbreaks)
+    print("Outbreaks shape:", outbreaks.shape)
+    vis_col_distribution(outbreaks, save_path, outbreak_file, use_step, vmin=vmin, vmax=vmax, cmap=cmap)
+    
+def read_us_outbreaks():
+    path = 'cache/US_outbreaks/'
+    file_name = 'sir_metapop_beta_0.5_gamma_0.2_S_10.csv'
+    adj_matrix_name = 'theta_matrix.csv'
+    
+    outbreaks = pd.read_csv(path + file_name)
+    print(outbreaks.head())
+    
+    adj_matrix = pd.read_csv(path + adj_matrix_name).to_numpy()
+    print(adj_matrix.shape)
     
 if __name__ == "__main__":
-    main()
+    # preprocess_SIR_categorical_data(load_csv=True)
+    preprocess_SIR_continous_data(load_csv=False, graph='lattice')
+    # read_us_outbreaks()

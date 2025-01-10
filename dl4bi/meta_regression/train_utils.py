@@ -947,6 +947,8 @@ def log_graph_plots(
     graph: nx.Graph,
     num_plots: int = 16,
     norm=None,
+    vmin=None,
+    vmax=None,
     norm_std=None,
 ):
     """Logs `num_plots` from the given batch."""
@@ -1000,6 +1002,8 @@ def log_graph_plots(
             pos,
             graph,
             norm=norm,
+            vmin=vmin,
+            vmax=vmax,
             norm_std=norm_std,
         )
         paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
@@ -1033,6 +1037,7 @@ def log_temporal_img_plots(
         s_test_full,
         f_test_full,
         (inv_permute_idx, inv_permute_idx_test),
+        graph_dist
     ) = batch
     f_mu, f_std, *_ = state.apply_fn(
         {"params": state.params, **state.kwargs},
@@ -1042,6 +1047,8 @@ def log_temporal_img_plots(
         valid_lens_ctx,
         valid_lens_test=None,
         inv_permute_idx=inv_permute_idx,
+        inv_permute_idx_test=inv_permute_idx_test,
+        graph_dist = graph_dist,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
     paths = []
@@ -1091,10 +1098,16 @@ def plot_graph(
         axs: Optional[mpl.axes.Axes] = None,
         node_size: int = 60,
         edge_width: float = 1,
-        cmap_task=mpl.colormaps.get_cmap("bwr"),
-        cmap_state=mpl.colormaps.get_cmap("bwr"),
+        # cmap_task=mpl.colormaps.get_cmap("bwr"),
+        # cmap_state=mpl.colormaps.get_cmap("bwr"),
+        # cmap_task=mpl.colormaps.get_cmap("brg"),
+        # cmap_state=mpl.colormaps.get_cmap("brg"),
+        cmap_task=mpl.colormaps.get_cmap("coolwarm"),
+        cmap_state=mpl.colormaps.get_cmap("coolwarm"),
         cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
         norm=None,
+        vmin=None,
+        vmax=None,
         norm_std=None
         ):
         
@@ -1124,13 +1137,16 @@ def plot_graph(
         
         # plot prediction
         axs[2].set_title("Prediction")
-        nx.draw(graph, pos, ax=axs[2], node_color=f_mu, cmap=cmap_state, vmin=-1, vmax=1,
+        nx.draw(graph, pos, ax=axs[2], node_color=f_mu, cmap=cmap_state, vmin=vmin, vmax=vmax,
                 node_size=node_size, width=edge_width)
 
         # plot ground truth
         axs[3].set_title("Ground Truth")
-        nx.draw(graph, pos, ax=axs[3], node_color=f_test, cmap=cmap_state, vmin=-1, vmax=1,
+        # print('f_test:', f_test)
+        nx.draw(graph, pos, ax=axs[3], node_color=f_test, cmap=cmap_state, vmin=vmin, vmax=vmax,
                 node_size=node_size, width=edge_width)
+        
+        plt.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap_state), ax=axs[3])
         
         # set dimension of each plot
         for ax in axs:
