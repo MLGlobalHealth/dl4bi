@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import optax
 import pandas as pd
 import wandb
-from jax import jit, random, vmap
+from jax import random, vmap
 from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf

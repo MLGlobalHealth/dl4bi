@@ -34,8 +34,10 @@ def k_nearest_senders(
     if batch_size is None:
         batch_size = r.shape[0]
 
-    def process_batch(r_b: jax.Array):
-        d = dist(r_b, s)
+    def process_batch(r_i: jax.Array):
+        # add leading dim to r_i since map processes each r_i individually,
+        # even when batch_size is >= 1
+        d = dist(r_i[None, ...], s)
         idx = jnp.argsort(d, axis=-1)
         d = jnp.take_along_axis(d, idx, axis=-1)
         return idx[:, :k].flatten(), d[:, :k].flatten()
