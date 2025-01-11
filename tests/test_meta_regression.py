@@ -10,6 +10,7 @@ from dl4bi.core import (
     FusedAttention,
     KRBlock,
     MultiHeadAttention,
+    kNN,
 )
 from dl4bi.meta_regression import (
     ANP,
@@ -45,7 +46,7 @@ def test_models():
         ANP,
         CANP,
         BANP,
-        lambda: DSKR(k=L),
+        lambda: DSKR(kNN(k=L)),
         TNPD,
         TNPND,
         TNPKR,
@@ -113,7 +114,7 @@ def test_context_data_leaks():
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
         ScanTNPKR,
-        lambda: DSKR(k=32, num_blks=1),
+        lambda: DSKR(kNN(k=32), num_blks=1),
     ]:
         print(np)
         m = np()
@@ -160,7 +161,7 @@ def test_train_step_loss():
         ANP,
         CANP,
         BANP,
-        lambda: DSKR(k=L),
+        lambda: DSKR(kNN(k=L)),
         TNPD,
         TNPND,
         TNPKR,

@@ -1,22 +1,45 @@
 from collections.abc import Callable
 from functools import partial
-from typing import Optional
 
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import jit
+from jax import jit, vmap
 from scipy.spatial import KDTree as spKDTree
 from sps.kernels import l2_dist
 
 
-@partial(jit, static_argnames=("k", "dist", "batch_size"))
-def knn(
+class kNN(nn.Module):
+    r"""Parellelized brute force kNN with optional `batch_size`.
+
+    Args:
+        k: Number of neighbors per query point to retrieve.
+        dist: Distance function to use.
+        num_q_parallel: Number of queries to run in parallel for each element in
+            the batch.
+
+    Returns:
+        An instance of `kNN`.
+    """
+
+    k: int = 16
+    dist: Callable = l2_dist
+    num_q_parallel: int = 1024
+
+    @nn.compact
+    def __call__(self, q, r):
+        vknn = vmap(lambda q, r: bf_knn(q, r, self.k, self.dist, self.num_q_parallel))
+        return vknn(q, r)
+
+
+@partial(jit, static_argnames=("k", "dist", "num_q_parallel"))
+def bf_knn(
     q: jax.Array,
     r: jax.Array,
     k: int,
     dist: Callable = l2_dist,
-    batch_size: Optional[int] = None,
+    num_q_parallel: int = 1024,
 ):
     r"""Parellelized brute force kNN with optional `batch_size`.
 
@@ -25,14 +48,11 @@ def knn(
         r: Reference points.
         k: Number of neighbors per query point to retrieve.
         dist: Distance function to use.
-        batch_size: Number of queries to run in parallel. By default,
-            the method runs all of them, i.e. is a `vmap`.
+        batch_size: Number of queries to run in parallel.
 
     Returns:
         Index and distance arrays, each of dimension |r| x k.
     """
-    if batch_size is None:
-        batch_size = q.shape[0]
 
     def process_batch(q_i: jax.Array):
         # add leading dim to q_i since map processes each q_i individually,
@@ -42,7 +62,7 @@ def knn(
         d = jnp.take_along_axis(d, idx, axis=-1)
         return idx[:, :k].flatten(), d[:, :k]
 
-    idx, d = jax.lax.map(process_batch, q, batch_size=batch_size)
+    idx, d = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
     return idx, d.squeeze()  # d: [B, L, 1, K] -> [B, L, K]
 
 

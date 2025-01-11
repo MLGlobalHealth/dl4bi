@@ -38,7 +38,8 @@ from .conv import (
     UNet,
 )
 from .dist import (
-    knn,
+    kNN,
+    bf_knn,
     scipy_knn,
 )
 from .embed import (

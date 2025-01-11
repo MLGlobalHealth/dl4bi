@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 from jax import random, vmap
 
-from dl4bi.core import knn, mask_from_valid_lens, scipy_knn
+from dl4bi.core import bf_knn, mask_from_valid_lens, scipy_knn
 
 
 def test_knn():
@@ -11,7 +11,7 @@ def test_knn():
     v = random.randint(rng, (B,), 0, L)
     m = mask_from_valid_lens(L, v)
     r = jnp.where(m, q, 1e6)
-    idx, d = vmap(lambda q, r: knn(q, r, K))(q, r)
+    idx, d = vmap(lambda q, r: bf_knn(q, r, K))(q, r)
     idx_s, d_s = vmap(lambda q, r: scipy_knn(q, r, K))(q, r)
     assert (idx == idx_s).all(), "Indices do not match!"
     assert jnp.allclose(d, d_s), "Distances are not close!"
