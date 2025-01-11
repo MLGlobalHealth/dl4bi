@@ -27,6 +27,7 @@ tensorflow-datasets = "^4.9.7"
 tiktoken = "^0.8.0"
 tqdm = "^4.67.1"
 wandb = "^0.19.0"
+ucimlrepo = "^0.0.7"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.4"
