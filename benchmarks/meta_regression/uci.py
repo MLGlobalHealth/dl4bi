@@ -38,9 +38,9 @@ def main(cfg: DictConfig):
         rng_dataloaders,
         cfg.data.name,
         cfg.data.batch_size,
-        cfg.data.num_ctx_min,
-        cfg.data.num_ctx_max,
-        cfg.num_test,
+        cfg.data.num_ctx.min,
+        cfg.data.num_ctx.max,
+        cfg.data.num_test,
     )
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
@@ -90,7 +90,7 @@ def build_dataloaders(
 
     def build_dataloader(df):
         L = df.shape[0]
-        valid_lens_test = jnp.repeat(B, num_ctx_max + num_test)
+        valid_lens_test = jnp.repeat(num_ctx_max + num_test, B)
 
         def dataloader(rng: jax.Array):
             while True:
@@ -132,6 +132,7 @@ def load_dataset(name: str):
     if path.exists():
         df = pd.read_csv(path)
         return df, target
+    path.parent.mkdir(parents=True, exist_ok=True)
     match name:
         case "bike":
             data = fetch_ucirepo(id=275)
