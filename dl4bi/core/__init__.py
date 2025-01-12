@@ -38,8 +38,8 @@ from .conv import (
     UNet,
 )
 from .dist import (
-    kNN,
     bf_knn,
+    kNN,
     scipy_knn,
 )
 from .embed import (
@@ -57,6 +57,7 @@ from .metrics import (
 )
 from .mle import gp_mle_bfgs, gp_mle_sgd
 from .mlp import MLP, MLPMixer, MLPMixerBlock
+from .preprocess import Whitener, condition_number
 from .transformer import (
     GraphKRBlock,
     KRBlock,

@@ -9,8 +9,10 @@ import pandas as pd
 import wandb
 from jax import random
 from omegaconf import DictConfig, OmegaConf
+from sklearn.preprocessing import StandardScaler
 from ucimlrepo import fetch_ucirepo
 
+from dl4bi.core import Whitener
 from dl4bi.meta_regression.train_utils import (
     cfg_to_run_name,
     cosine_annealing_lr,
@@ -82,11 +84,18 @@ def build_dataloaders(
     N, B = df.shape[0], batch_size
     N_train, N_test = int(N * 4 / 9), int(N * 3 / 9)  # same as 1M GP paper
     permute_idx = random.choice(rng, N, (N,), replace=False)
-    # TODO(danj): perform whitening
     df = df.iloc[permute_idx]
     df_train = df[:N_train]
     df_valid = df[N_train:-N_test]
     df_test = df[-N_test:]
+    whitener, standardizer = Whitener(), StandardScaler()
+    df_train[features] = whitener.fit_transform(df_train[features])
+    df_valid[features] = whitener.transform(df_valid[features])
+    df_test[features] = whitener.transform(df_test[features])
+    # TODO(danj): should I whiten target column instead of standardizing?
+    df_train[target] = standardizer.fit_transform(df_train[target])
+    df_valid[target] = standardizer.transform(df_valid[target])
+    df_test[target] = standardizer.transform(df_test[target])
 
     def build_dataloader(df):
         L = df.shape[0]
