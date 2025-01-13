@@ -210,7 +210,7 @@ class ConvCNPBlock(nn.Module):
     Args:
         num_features: Number of features for convolutions.
         kernel: Tuple of kernel dimensions.
-        padding: str of padding. Either SAME, VALID, or CIRCULAR
+        padding: str of padding. Either SAME, VALID, or CIRCULAR.
         act_fn: Activation function to use.
         dtype: Data type to use for calculations.
 
