@@ -48,6 +48,7 @@ from .dkr import DKR
 from .np import NP
 from .tnp_d import TNPD
 from .tnp_kr import TNPKR
+from .stg_tnpkr import STGTNPKR
 from .tnp_nd import TNPND
 
 
