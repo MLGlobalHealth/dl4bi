@@ -145,10 +145,10 @@ def preprocess(rng: jax.Array, df: pd.DataFrame, target: str):
     whitener = Pipeline([("whitener", Whitener()), ("standardizer", StandardScaler())])
     standardizer = StandardScaler()
     s_train = whitener.fit_transform(df_train[features].values)
-    s_valid = whitener.fit_transform(df_valid[features].values)
+    s_valid = whitener.transform(df_valid[features].values)
     s_test = whitener.transform(df_test[features].values)
     f_train = standardizer.fit_transform(df_train[[target]].values)
-    f_valid = standardizer.fit_transform(df_valid[[target]].values)
+    f_valid = standardizer.transform(df_valid[[target]].values)
     f_test = standardizer.transform(df_test[[target]].values)
     return s_train, f_train, s_valid, f_valid, s_test, f_test
 
