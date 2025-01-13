@@ -13,7 +13,7 @@ kwargs:
     kwargs:
       r_dim: 128
       kernel: [9, 9]
-      num_blks: 9
+      num_blks: 8
   dec:
     cls: ConvDeepSet
     kwargs:
