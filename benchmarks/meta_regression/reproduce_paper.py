@@ -35,49 +35,48 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     overrides = [overrides]  # expects list[list[str]]
     gp_kernels_1d = ["periodic", "rbf", "matern_3_2"]
     gp_kernels_2d = ["rbf"]
-    models = [
+    models_1d = [
+        "convcnp",
         "tnp_d",
         "tnp_kr_scan",
         "tnp_kr_dka",
         "tnp_kr_performer",
-        "np",
+        "np",  # TODO(danj): run in second wave
         "bnp",
         "cnp",
         "anp",
         "canp",
         "banp",
-        "convcnp",
     ]
-    exclude_2d = ["bnp", "banp", "convcnp"]
-    include_2d = ["convcnp_2d_xl"]
-    models_2d = [m for m in models if m not in exclude_2d] + include_2d
+    models_2d = [m for m in models_1d]
+    models_2d[models_2d.index("convcnp")] = "convcnp_xl"
     gp_benchmark(
         seeds,
         "1d",
         gp_kernels_1d,
-        models,
+        [f"1d/{m}" for m in models_1d],
         gp_main,
         overrides,
-        "TNP-KR - Gaussian Processes",
+        "TNP-KR (ICML) - Gaussian Processes",
     )
     gp_benchmark(
         seeds,
         "1d",
         gp_kernels_1d,
-        models,
+        [f"1d/{m}" for m in models_1d],
         bayes_opt_main,
         overrides,
-        "TNP-KR - Bayesian Optimization",
-        "TNP-KR - Gaussian Processes",
+        "TNP-KR (ICML) - Bayesian Optimization",
+        "TNP-KR (ICML) - Gaussian Processes",
     )
     gp_benchmark(
         seeds,
         "2d",
         gp_kernels_2d,
-        models_2d,
+        [f"2d/{m}" for m in models_1d],
         gp_main,
         overrides,
-        "TNP-KR - Gaussian Processes",
+        "TNP-KR (ICML) - Gaussian Processes",
     )
     img_benchmark(
         seeds,
@@ -85,7 +84,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         models_2d,
         mnist_main,
         overrides,
-        "TNP-KR - MNIST",
+        "TNP-KR (ICML) - MNIST",
     )
     img_benchmark(
         seeds,
@@ -93,7 +92,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         models_2d,
         celeba_main,
         overrides,
-        "TNP-KR - CelebA",
+        "TNP-KR (ICML) - CelebA",
     )
     img_benchmark(
         seeds,
@@ -101,7 +100,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         models_2d,
         cifar_10_main,
         overrides,
-        "TNP-KR - Cifar 10",
+        "TNP-KR (ICML) - Cifar 10",
     )
 
 
