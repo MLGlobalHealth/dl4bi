@@ -41,12 +41,12 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         "tnp_kr_scan",
         "tnp_kr_dka",
         "tnp_kr_performer",
-        "np",  # TODO(danj): run in second wave
-        "bnp",
-        "cnp",
-        "anp",
-        "canp",
-        "banp",
+        # "np",  # TODO(danj): run in second wave
+        # "bnp",
+        # "cnp",
+        # "anp",
+        # "canp",
+        # "banp",
     ]
     models = [f"icml/{m}" for m in models]
     gp_benchmark(
@@ -231,7 +231,7 @@ def parse_args(argv):
         "-s",
         "--seed",
         type=int,
-        default=86,
+        default=88,
         help="One seed to rule (seed) them all.",
     )
     parser.add_argument(
