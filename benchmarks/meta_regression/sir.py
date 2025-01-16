@@ -21,7 +21,7 @@ from dl4bi.meta_regression.train_utils import (
     instantiate,
     log_img_plots,
     save_ckpt,
-    select_train_step,
+    select_steps,
     train,
 )
 
@@ -50,7 +50,7 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
-    train_step = select_train_step(model, is_categorical=True)
+    train_step, valid_step = select_steps(model, is_categorical=True)
     cmap = mpl.colormaps.get_cmap("grey")
     cmap.set_bad("blue")
     norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
@@ -67,6 +67,7 @@ def main(cfg: DictConfig):
         model,
         optimizer,
         train_step,
+        valid_step,
         dataloader,
         dataloader,
         cfg.train_num_steps,
@@ -74,7 +75,13 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         callbacks=[Callback(cbk, cfg.plot_interval)],
     )
-    metrics = evaluate(rng_test, state, dataloader, cfg.valid_num_steps)
+    metrics = evaluate(
+        rng_test,
+        state,
+        valid_step,
+        dataloader,
+        cfg.valid_num_steps,
+    )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)

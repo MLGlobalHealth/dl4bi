@@ -18,7 +18,7 @@ from dl4bi.meta_regression.train_utils import (
     log_2d_grid_gp_plots,
     log_posterior_predictive_plots,
     save_ckpt,
-    select_train_step,
+    select_steps,
     train,
 )
 
@@ -56,12 +56,13 @@ def main(cfg: DictConfig):
             data=cfg.data,
             kernel=cfg.kernel,
         )
-    train_step = select_train_step(model)
+    train_step, valid_step = select_steps(model)
     state = train(
         rng_train,
         model,
         optimizer,
         train_step,
+        valid_step,
         dataloader,
         dataloader,
         cfg.train_num_steps,
@@ -69,7 +70,13 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         callbacks=[Callback(clbk, cfg.plot_interval)],
     )
-    metrics = evaluate(rng_test, state, dataloader, cfg.valid_num_steps)
+    metrics = evaluate(
+        rng_test,
+        state,
+        valid_step,
+        dataloader,
+        cfg.valid_num_steps,
+    )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = f"results/{cfg.project}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
     path = Path(path)

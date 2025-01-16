@@ -20,7 +20,7 @@ from dl4bi.meta_regression.train_utils import (
     evaluate,
     instantiate,
     save_ckpt,
-    select_train_step,
+    select_steps,
     train,
 )
 
@@ -55,7 +55,7 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
-    train_step = select_train_step(model)
+    train_step, valid_step = select_steps(model)
     state = train(
         rng_train,
         model,
