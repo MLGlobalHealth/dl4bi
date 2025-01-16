@@ -86,7 +86,7 @@ def build_dataloaders(
     train_ds = 2 * (np.load("cache/celeba/train.npy", mmap_mode="r") / 255.0 - 0.5)
     valid_ds = 2 * (np.load("cache/celeba/valid.npy", mmap_mode="r") / 255.0 - 0.5)
     test_ds = 2 * (np.load("cache/celeba/test.npy", mmap_mode="r") / 255.0 - 0.5)
-    s_test = build_grid([dict(start=-1.0, stop=1.0, num=32)] * 2).reshape(L, 2)
+    s_test = build_grid([dict(start=-2.0, stop=2.0, num=32)] * 2).reshape(L, 2)
     s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
     valid_lens_test = jnp.repeat(num_test_max, B)  # similar to ANP, Appendix D
 

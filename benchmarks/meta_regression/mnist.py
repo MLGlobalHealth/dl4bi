@@ -92,7 +92,7 @@ def build_dataloaders(
     train_ds = train_ds.shuffle(buffer_size, seed=42, reshuffle_each_iteration=True)
     train_ds = train_ds.batch(batch_size, drop_remainder=True).prefetch(1)
     valid_ds = valid_ds.batch(batch_size, drop_remainder=True).prefetch(1)
-    s_test = build_grid([dict(start=-1.0, stop=1.0, num=28)] * 2).reshape(L, 2)
+    s_test = build_grid([dict(start=-2.0, stop=2.0, num=28)] * 2).reshape(L, 2)
     s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
     valid_lens_test = jnp.repeat(num_test_max, B)  # similar to ANP, Appendix D
 
