@@ -24,6 +24,7 @@ from dl4bi.meta_regression.train_utils import (
     select_steps,
     train,
 )
+from dl4bi.meta_regression.transform import pointwise_multinomial
 
 
 # TODO(danj): configure plotting cmap
@@ -52,16 +53,15 @@ def main(cfg: DictConfig):
     )
     model = instantiate(cfg.model)
     train_step, valid_step = select_steps(model, is_categorical=True)
-    cmap = mpl.colormaps.get_cmap("grey")
-    cmap.set_bad("blue")
-    norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
+    cmap = mpl.colormaps.get_cmap("Spectral_r")
+    cmap.set_bad("grey")
     dims = [dim.num for dim in cfg.data.s]
     clbk = partial(
         log_img_plots,
-        shape=(*dims, 1),
-        num_plots=cfg.data.batch_size,
+        shape=(*dims, 3),
+        num_plots=16,
         cmap=cmap,
-        norm=norm,
+        transform_model_output=pointwise_multinomial,
     )
     state = train(
         rng_train,
@@ -74,7 +74,7 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        # callbacks=[Callback(clbk, cfg.plot_interval)],
+        callbacks=[Callback(clbk, cfg.plot_interval)],
     )
     metrics = evaluate(
         rng_test,

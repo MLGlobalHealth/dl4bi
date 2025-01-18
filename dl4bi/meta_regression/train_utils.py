@@ -996,6 +996,7 @@ def log_img_plots(
     cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
     norm=None,
     norm_std=None,
+    transform_model_output: Callable = lambda x: x,
 ):
     """Logs `num_plots` from the given batch."""
     rng_dropout, rng_extra = random.split(rng_step)
@@ -1010,7 +1011,7 @@ def log_img_plots(
         f_test_full,
         inv_permute_idx,
     ) = batch
-    f_mu, f_std, *_ = state.apply_fn(
+    output = state.apply_fn(
         {"params": state.params, **state.kwargs},
         s_ctx,
         f_ctx,
@@ -1019,6 +1020,7 @@ def log_img_plots(
         valid_lens_test=None,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
+    f_mu, f_std, *_ = transform_model_output(output)
     paths = []
     for i in range(num_plots):
         inv_idx_i = inv_permute_idx
