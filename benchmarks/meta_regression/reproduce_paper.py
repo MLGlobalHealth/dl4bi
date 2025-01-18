@@ -19,6 +19,7 @@ from gp import main as gp_main
 from hydra import compose, initialize
 from jax import random
 from mnist import main as mnist_main
+from sir import main as sir_main
 
 
 def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
@@ -100,6 +101,14 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         cifar_10_main,
         overrides,
         "_ICML_ TNP-KR - Cifar 10",
+    )
+    img_benchmark(
+        seeds,
+        "configs/sir",
+        models,
+        sir_main,
+        overrides,
+        "_ICML_ TNP-KR - SIR",
     )
 
 
