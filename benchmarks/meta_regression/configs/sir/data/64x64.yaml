@@ -10,5 +10,5 @@ num_ctx:
   min: 128 # ~3%
   max: 512 # 12.5%
 num_test: 768  # 18.75%
-num_steps: 100
-batch_size: 16
+num_steps: 25
+batch_size: 8
