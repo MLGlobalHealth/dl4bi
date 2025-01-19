@@ -21,3 +21,4 @@ kwargs:
       kwargs:
         minval: 1.0
         maxval: 5.0
+  kernel_width: 9

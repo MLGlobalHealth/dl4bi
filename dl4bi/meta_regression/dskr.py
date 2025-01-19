@@ -44,7 +44,7 @@ class DSKR(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        stack = lambda *args: jnp.concatenate(args, axis=-1)
+        stack = lambda *args: jnp.concatenate([x for x in args if x.size > 0], axis=-1)
         (B, N_t), N_c, K = s_test.shape[:-1], s_ctx.shape[1], self.knn.k
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(N_c, B)

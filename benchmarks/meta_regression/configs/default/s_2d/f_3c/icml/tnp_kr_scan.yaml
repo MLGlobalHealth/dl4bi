@@ -2,6 +2,8 @@ cls: ScanTNPKR
 kwargs:
   num_blks: 6
   num_reps: 1
+  embed_s:
+    func: 'lambda s: jnp.array([])'
   embed_all:
     cls: MLP
     kwargs:

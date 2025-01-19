@@ -90,7 +90,7 @@ class TNPKR(nn.Module):
             $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
         norm = nn.LayerNorm()
-        stack = lambda *args: jnp.concatenate(args, axis=-1)
+        stack = lambda *args: jnp.concatenate([x for x in args if x.size > 0], axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
         unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
@@ -184,7 +184,7 @@ class ScanTNPKR(nn.Module):
         Returns:
             $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
-        stack = lambda *args: jnp.concatenate(args, axis=-1)
+        stack = lambda *args: jnp.concatenate([x for x in args if x.size > 0], axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
         unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
