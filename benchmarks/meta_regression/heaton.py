@@ -61,12 +61,12 @@ def main(cfg: DictConfig):
     H, W = cfg.data.s[0].num, cfg.data.s[1].num
     cmap = mpl.colormaps.get_cmap("Spectral_r")
     cmap.set_bad("grey")
-    callback = Callback(
+    clbk = Callback(
         partial(log_img_plots, shape=(H, W, 1), cmap=cmap),
         cfg.plot_interval,
     )
     state = None
-    finetune_path = cfg.get("finetune", None)
+    finetune_path = cfg.get("finetune_path", None)
     train_num_steps = cfg.train_num_steps
     if finetune_path:
         state, _ = load_ckpt(Path(finetune_path))
@@ -81,12 +81,13 @@ def main(cfg: DictConfig):
         optimizer,
         train_step,
         valid_step,
-        train_dataloader,
+        # train_dataloader,
+        valid_dataloader,
         valid_dataloader,
         train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        callbacks=[callback],
+        # callbacks=[clbk],
         monitor_metric=cfg.monitor_metric,
         early_stop_patience=cfg.early_stop_patience,
         state=state,
@@ -178,7 +179,8 @@ def build_dataloaders(data: DictConfig, kernel: DictConfig, test: DictConfig):
         return loader
 
     def valid_dataloader(rng: jax.Array):
-        valid_lens_test = jnp.repeat(L_train, B)
+        num_ctx_min, num_ctx_max = 75, 375  # 5-25% of 1500
+        valid_lens_test = jnp.repeat(L_train - num_ctx_max, B)
         while True:
             rng_idx, rng_valid, rng = random.split(rng, 3)
             ss, fs = [], []
@@ -196,8 +198,8 @@ def build_dataloaders(data: DictConfig, kernel: DictConfig, test: DictConfig):
                 s[:, :num_ctx_max, :],
                 f[:, :num_ctx_max, :],
                 valid_lens_ctx,
-                s,
-                f,
+                s[:, num_ctx_max:, :],
+                f[:, num_ctx_max:, :],
                 valid_lens_test,
             )
 
