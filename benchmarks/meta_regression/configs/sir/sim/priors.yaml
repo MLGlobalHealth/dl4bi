@@ -5,8 +5,8 @@ kwargs:
     kwargs:
       dist: beta
       kwargs:
-        a: 5.0
-        b: 10.0
+        a: 2.0
+        b: 8.0
   gamma:
     cls: Prior
     kwargs:
