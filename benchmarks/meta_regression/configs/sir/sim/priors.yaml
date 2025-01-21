@@ -17,8 +17,8 @@ kwargs:
   num_init:
     cls: Prior
     kwargs:
-      dist: uniform
+      dist: randint
       kwargs:
-        minval: 1.0
-        maxval: 5.0
+        minval: 1
+        maxval: 5
   kernel_width: 9

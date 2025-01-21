@@ -32,7 +32,7 @@ from dl4bi.meta_regression.transform import pointwise_multinomial
 #   model=icml/tnp_kr_scan \
 #   data=128x128 \
 #   data.batch_size=1 \
-#   valid_num_steps=1 \
+#   valid_num_steps=100 \
 #   wandb=False \
 #   evaluate_only=True
 
