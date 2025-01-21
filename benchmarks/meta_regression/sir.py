@@ -34,7 +34,7 @@ from dl4bi.meta_regression.transform import pointwise_multinomial
 #   data.batch_size=1 \
 #   valid_num_steps=1 \
 #   wandb=False \
-#   +evaluate=True
+#   evaluate_only=True
 
 
 @hydra.main("configs/sir", config_name="default", version_base=None)
@@ -63,7 +63,7 @@ def main(cfg: DictConfig):
     )
     model = instantiate(cfg.model)
     train_step, valid_step = select_steps(model, is_categorical=True)
-    if cfg.evaluate:
+    if cfg.evaluate_only:
         state, _ = load_ckpt(path.with_suffix(".ckpt"))
         # run once to compile
         evaluate(rng_test, state, valid_step, dataloader, cfg.valid_num_steps)

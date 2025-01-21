@@ -13,3 +13,4 @@ plot_interval: 100000
 lr_peak: 1.0e-3
 lr_pct_warmup: 0.0
 clip_max_norm: 3.0
+evaluate_only: False
