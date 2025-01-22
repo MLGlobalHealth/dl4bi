@@ -46,13 +46,20 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     num_tasks, budget, num_init = 100, 50, 10
     rng = random.key(cfg.seed)
-    rng_data, rng_opt = random.split(rng)
+    rng_data, rng_opt, rng_eps = random.split(rng, 3)
     dataloader = build_gp_dataloader(cfg.data, cfg.kernel)
     model_state, _ = load_ckpt(path.with_suffix(".ckpt"))
     model_fn = jit_model_fn(model_state)
     s_test, f_test = build_dataset(rng_data, dataloader, num_tasks)
+    f_test_noisy = f_test + cfg.data.obs_noise * random.normal(rng_eps, f_test.shape)
     regret, s_ctx, f_ctx, f_mu, f_std = optimize(
-        rng_opt, s_test, f_test, model_fn, num_init, budget
+        rng_opt,
+        s_test,
+        f_test,
+        f_test_noisy,
+        model_fn,
+        num_init,
+        budget,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     jnp.save(path.with_suffix(".npy"), regret)
@@ -118,6 +125,7 @@ def optimize(
     rng: jax.Array,
     s_test: jax.Array,  # [B, L, D_s]
     f_test: jax.Array,  # [B, L, D_f]
+    f_test_noisy: jax.Array,  # [B, L, D_f]
     model_fn: Callable,
     num_init: int = 1,
     budget: int = 50,
@@ -130,13 +138,22 @@ def optimize(
     assert f_test.shape[-1] == 1, "Can only optimize functions with a single output!"
     s_ctx = jnp.zeros((B, L_ctx, D_s))
     f_ctx = jnp.zeros((B, L_ctx, 1))
+    f_ctx_denoised = jnp.zeros((B, L_ctx, 1))
     s_ctx = s_ctx.at[:, :num_init, :].set(s_test[:, :num_init, :])
-    f_ctx = f_ctx.at[:, :num_init, :].set(f_test[:, :num_init, :])
+    f_ctx = f_ctx.at[:, :num_init, :].set(f_test_noisy[:, :num_init, :])
+    f_ctx_denoised = f_ctx_denoised.at[:, :num_init, :].set(f_test[:, :num_init, :])
     valid_lens_ctx = jnp.repeat(num_init, B)
     mask = mask_from_valid_lens(L_ctx, valid_lens_ctx)
     opt_min = jnp.full((B, budget + 1, 1), jnp.inf)
-    opt_min = opt_min.at[:, 0, :].set(f_ctx.min(axis=1, where=mask, initial=jnp.inf))
+    opt_min_denoised = jnp.full((B, budget + 1, 1), jnp.inf)
     B_idx = jnp.arange(B)
+    f_ctx_temp = jnp.where(mask, f_ctx, jnp.inf)
+    opt_min_idx = f_ctx_temp.argmin(axis=1).squeeze()
+    opt_min = opt_min.at[:, 0, :].set(f_ctx[B_idx, opt_min_idx])
+    opt_min_denoised = opt_min_denoised.at[:, 0, :].set(
+        f_ctx_denoised[B_idx, opt_min_idx]
+    )
+
     for i in tqdm(range(budget), desc="Optimizing"):
         rng_extra, rng = random.split(rng)
         f_mu, f_std, *_ = model_fn(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
@@ -151,14 +168,21 @@ def optimize(
         ei = expected_improvement(opt_min[:, [i], :], f_mu, f_std)
         min_idx = jnp.argmax(ei, axis=1).squeeze()  # [B]
         s_ctx = s_ctx.at[B_idx, num_init + i, :].set(s_test[B_idx, min_idx, :])
-        f_ctx = f_ctx.at[B_idx, num_init + i, :].set(f_test[B_idx, min_idx, :])
+        f_ctx = f_ctx.at[B_idx, num_init + i, :].set(f_test_noisy[B_idx, min_idx, :])
+        f_ctx_denoised = f_ctx_denoised.at[B_idx, num_init + i, :].set(
+            f_test[B_idx, min_idx, :]
+        )
         valid_lens_ctx += 1
         mask = mask_from_valid_lens(L_ctx, valid_lens_ctx)
-        opt_min = opt_min.at[:, i + 1, :].set(
-            f_ctx.min(axis=1, where=mask, initial=jnp.inf)
+        f_ctx_temp = jnp.where(mask, f_ctx, jnp.inf)
+        opt_min_idx = f_ctx_temp.argmin(axis=1).squeeze()
+        opt_min = opt_min.at[:, i + 1, :].set(f_ctx[B_idx, opt_min_idx])
+        opt_min_denoised = opt_min_denoised.at[:, i + 1, :].set(
+            f_ctx_denoised[B_idx, opt_min_idx]
         )
+
     global_min = f_test.min(axis=1, keepdims=True)
-    regret = opt_min - global_min
+    regret = opt_min_denoised - global_min
     return regret.squeeze(), s_ctx, f_ctx, f_mu, f_std
 
 
@@ -237,7 +261,7 @@ def log_worst_regret(
         ax.plot(s_ctx_i[opt_min_idx], f_ctx_i[opt_min_idx], "ro", alpha=0.5)
         ax.plot(s_test_i[global_min_idx], f_test_i[global_min_idx], "go", alpha=0.5)
         paths += [
-            f"/tmp/{datetime.now().isoformat()} worst regret {rank+1} sample {i}.png"
+            f"/tmp/{datetime.now().isoformat()} worst regret {rank + 1} sample {i}.png"
         ]
         fig.suptitle(f"Sample {i}, Regret {regret[i, -1]:.3f}")
         fig.savefig(paths[-1], dpi=125)
