@@ -217,7 +217,7 @@ def vanilla_train_step(
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(L_test, B)
         mask_test = mask_from_valid_lens(L_test, valid_lens_test)
-        output, *_ = state.apply_fn(
+        output = state.apply_fn(
             {"params": params, **state.kwargs},
             s_ctx,
             f_ctx,
@@ -245,7 +245,7 @@ def vanilla_valid_step(
     **kwargs,
 ):
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
-    output, *_ = jit(state.apply_fn)(
+    output = jit(state.apply_fn)(
         {"params": state.params, **state.kwargs},
         s_ctx,
         f_ctx,
@@ -254,6 +254,8 @@ def vanilla_valid_step(
         valid_lens_test,
         rngs={"extra": rng},
     )
+    if isinstance(output[1], tuple):  # latent model
+        output, _ = output  # latent zs aren't used in validation
     B, L_test, _ = s_test.shape
     if valid_lens_test is None:
         valid_lens_test = jnp.repeat(L_test, B)
@@ -299,7 +301,7 @@ def npf_elbo_train_step(
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(L_test, B)
         mask_test = mask_from_valid_lens(L_test, valid_lens_test)
-        output, (z_mu_ctx, z_std_ctx), *_ = state.apply_fn(
+        output, (z_mu_ctx, z_std_ctx) = state.apply_fn(
             {"params": params, **state.kwargs},
             s_ctx,
             f_ctx,
@@ -368,7 +370,7 @@ def bootstrap_train_step(
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(L_test, B)
         mask_test = mask_from_valid_lens(L_test, valid_lens_test)
-        output_boot, output, *_ = state.apply_fn(
+        output_boot, output = state.apply_fn(
             {"params": params, **state.kwargs},
             s_ctx,
             f_ctx,
@@ -411,9 +413,9 @@ def bootstrap_valid_step(
     **kwargs,
 ):
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
-    # at prediction time, bootstrapped output is used
-    # at training time, standard output is also used
-    output_boot, *_ = jit(state.apply_fn)(
+    # at inference/validation time, only bootstrapped output is used
+    # at training time, base output (ignored here) is also used
+    output_boot, _ = jit(state.apply_fn)(
         {"params": state.params, **state.kwargs},
         s_ctx,
         f_ctx,
@@ -827,7 +829,10 @@ def sample(
     valid_lens_ctx = jnp.repeat(L_ctx, B)
     for i in range(L_test):
         rng_extra, rng_eps, rng = random.split(rng, 3)
-        f_mu, f_std, *_ = apply(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
+        output = apply(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
+        if isinstance(output[0], tuple):  # latent or bootstrapped
+            output, _ = output  # throw away latent / base samples
+        f_mu, f_std = output
         f_mu_i, f_std_i = f_mu[:, i, :], f_std[:, i, :]
         f_test_i = f_mu_i + f_std_i * random.normal(rng_eps, f_std_i.shape)
         f_ctx = f_ctx.at[:, L_ctx + i, :].set(f_test_i)

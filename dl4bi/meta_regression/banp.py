@@ -84,7 +84,7 @@ class BANP(nn.Module):
         r_ctx_boot = self.encode_deterministic(
             s_ctx_boot, f_ctx_boot, valid_lens_ctx_boot, training
         )
-        f_mu_boot, f_std_boot = self.decode(
+        output_boot = self.decode(
             rep(r_ctx),
             rep(s_ctx),
             rep(s_test),
@@ -92,8 +92,8 @@ class BANP(nn.Module):
             training,
             r_ctx_boot,
         )
-        f_mu, f_std = self.decode(r_ctx, s_ctx, s_test, valid_lens_ctx, training)
-        return f_mu_boot, f_std_boot, f_mu, f_std
+        output = self.decode(r_ctx, s_ctx, s_test, valid_lens_ctx, training)
+        return output_boot, output
 
     def sample_with_replacement(
         self,

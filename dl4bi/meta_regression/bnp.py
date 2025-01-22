@@ -58,11 +58,9 @@ class BNP(nn.Module):
         r_ctx_boot = self.encode_deterministic(
             s_ctx_boot, f_ctx_boot, valid_lens_ctx_boot, training
         )
-        f_mu_boot, f_std_boot = self.decode(
-            rep(r_ctx), rep(s_test), training, r_ctx_boot
-        )
-        f_mu, f_std = self.decode(r_ctx, s_test, training)
-        return f_mu_boot, f_std_boot, f_mu, f_std
+        output_boot = self.decode(rep(r_ctx), rep(s_test), training, r_ctx_boot)
+        output = self.decode(r_ctx, s_test, training)
+        return output_boot, output
 
     def sample_with_replacement(
         self,
