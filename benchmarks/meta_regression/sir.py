@@ -123,8 +123,8 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
 
     def dataloader(rng: jax.Array):
         while True:
-            rng_si, rng_eps, rng_valid, rng_permute_steps, rng = random.split(rng, 5)
-            steps, *_ = sir.simulate(rng_si, dims, N)  # f: [N, *dims]
+            rng_sir, rng_eps, rng_valid, rng_permute_steps, rng = random.split(rng, 5)
+            steps, *_ = sir.simulate(rng_sir, dims, N)  # f: [N, *dims]
             # convert RSI categories to GBR (RGB) one-hot color vectors;
             # serves dual purpose of one-hot encoding and easier plotting
             steps = rsi_to_rgb(steps)

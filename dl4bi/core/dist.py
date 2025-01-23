@@ -10,27 +10,41 @@ from scipy.spatial import KDTree as spKDTree
 from sps.kernels import l2_dist
 
 
-class kNN(nn.Module):
-    r"""Parellelized brute force kNN with optional `batch_size`.
+@partial(jit, static_argnames=("k", "dist", "num_q_parallel"))
+def approx_knn(
+    q: jax.Array,
+    r: jax.Array,
+    k: int,
+    dist: Callable = l2_dist,
+    num_q_parallel: int = 1024,
+    recall_target: float = 0.95,
+):
+    r"""Parellelized approximate kNN.
 
     Args:
+        q: Query points.
+        r: Reference points.
         k: Number of neighbors per query point to retrieve.
         dist: Distance function to use.
-        num_q_parallel: Number of queries to run in parallel for each element in
-            the batch.
+        num_q_parallel: Number of queries to run in parallel.
+        recall_target: Target percent of returned k values
+            are actually in top-k. Less than 1.0 can result in
+            much faster runtimes.
+
 
     Returns:
-        An instance of `kNN`.
+        Index and distance arrays, each of dimension |r| x k.
     """
 
-    k: int = 16
-    dist: Callable = l2_dist
-    num_q_parallel: int = 1024
+    def process_batch(q_i: jax.Array):
+        # add leading dim to q_i since map processes each q_i individually,
+        # even when batch_size is >= 1
+        d = dist(q_i[None, ...], r)
+        d, idx = jax.lax.approx_min_k(d, k, recall_target=recall_target)
+        return idx.flatten(), d
 
-    @nn.compact
-    def __call__(self, q, r):
-        vknn = vmap(lambda q, r: bf_knn(q, r, self.k, self.dist, self.num_q_parallel))
-        return vknn(q, r)
+    idx, d = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
+    return idx, d.squeeze()  # d: [B, L, 1, K] -> [B, L, K]
 
 
 @partial(jit, static_argnames=("k", "dist", "num_q_parallel"))
@@ -41,14 +55,14 @@ def bf_knn(
     dist: Callable = l2_dist,
     num_q_parallel: int = 1024,
 ):
-    r"""Parellelized brute force kNN with optional `batch_size`.
+    r"""Parellelized brute force kNN.
 
     Args:
         q: Query points.
         r: Reference points.
         k: Number of neighbors per query point to retrieve.
         dist: Distance function to use.
-        batch_size: Number of queries to run in parallel.
+        num_q_parallel: Number of queries to run in parallel.
 
     Returns:
         Index and distance arrays, each of dimension |r| x k.
@@ -74,3 +88,29 @@ def scipy_knn(q: jax.Array, r: jax.Array, k: int):
     f = lambda q, r, k: spKDTree(np.array(r)).query(np.array(q), int(k))
     d, idx = jax.pure_callback(f, (d_shape, idx_shape), q, r, k)
     return idx, d
+
+
+class kNN(nn.Module):
+    r"""Parellelized brute force kNN with optional `batch_size`.
+
+    Args:
+        k: Number of neighbors per query point to retrieve.
+        dist: Distance function to use.
+        num_q_parallel: Number of queries to run in parallel for each element in
+            the batch.
+
+    Returns:
+        An instance of `kNN`.
+    """
+
+    k: int = 16
+    dist: Callable = l2_dist
+    num_q_parallel: int = 1024
+    method: Callable = approx_knn
+
+    @nn.compact
+    def __call__(self, q, r):
+        vknn = vmap(
+            lambda q, r: self.method(q, r, self.k, self.dist, self.num_q_parallel)
+        )
+        return vknn(q, r)

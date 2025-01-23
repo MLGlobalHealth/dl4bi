@@ -38,6 +38,7 @@ from .conv import (
     UNet,
 )
 from .dist import (
+    approx_knn,
     bf_knn,
     kNN,
     scipy_knn,
