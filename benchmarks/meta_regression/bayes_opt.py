@@ -178,6 +178,18 @@ def expected_improvement(
     return d * stats.norm.cdf(z) + f_std * stats.norm.pdf(z)
 
 
+@jit
+def upper_confidence_bound(
+    f_min: jax.Array,
+    f_mu: jax.Array,
+    f_std: jax.Array,
+    num_samples: int,
+    kappa: float = 2.0,
+):
+    kappa *= jnp.log(num_samples + 1)  # scale as training set increases
+    return -f_mu + f_std * kappa * jnp.log(num_samples + 1)
+
+
 def log_regret_dist(regret: jax.Array, hdi_prob: float = 0.95):
     regret = regret[:, 1:]  # ignore iteration 0, before model selected anything
     mu, std = regret.mean(axis=0), regret.std(axis=0)
