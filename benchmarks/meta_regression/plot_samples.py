@@ -144,7 +144,7 @@ def plot_2d_img_samples(
         min_std, max_std = float("inf"), -float("inf")
         for row_idx, run_name in enumerate(sorted(ckpts)):
             state = ckpts[run_name]["state"]
-            f_mu, f_std, *_ = state.apply_fn(
+            output = state.apply_fn(
                 {"params": state.params, **state.kwargs},
                 s_ctx,
                 f_ctx,
@@ -153,6 +153,9 @@ def plot_2d_img_samples(
                 valid_lens_test,
                 rngs={"dropout": rng_dropout, "extra": rng_extra},
             )
+            if isinstance(output[1], tuple):  # latent or bootstrapped
+                output, _ = output  # throw away latent zs or base samples
+            f_mu, f_std = output
             preds[run_name] = (f_mu, f_std)
             min_std = min(min_std, f_std.min())
             max_std = max(max_std, f_std.max())
