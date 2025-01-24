@@ -190,6 +190,17 @@ def upper_confidence_bound(
     return -f_mu + f_std * kappa * jnp.log(num_samples + 1)
 
 
+@jit
+def probability_of_improvement(
+    f_min: jax.Array,
+    f_mu: jax.Array,
+    f_std: jax.Array,
+    f_std_jitter: float = 1e-5,
+):
+    z = (f_min - f_mu) / (f_std + f_std_jitter)
+    return stats.norm.cdf(z)
+
+
 def log_regret_dist(regret: jax.Array, hdi_prob: float = 0.95):
     regret = regret[:, 1:]  # ignore iteration 0, before model selected anything
     mu, std = regret.mean(axis=0), regret.std(axis=0)
