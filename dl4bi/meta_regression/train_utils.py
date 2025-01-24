@@ -117,7 +117,8 @@ def train(
         state, loss = train_step(rng_train_step, state, batch)
         losses += [loss]
         if i % log_loss_interval == 0:
-            train_nll = np.mean(losses[i - log_loss_interval : i])
+            train_nll = np.mean(losses)
+            losses = []
             wandb.log({"Train NLL": train_nll})
         if i % valid_interval == 0:
             rng_valid, rng_train = random.split(rng_train)

@@ -42,74 +42,74 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         "tnp_kr_scan",
         "tnp_kr_dka",
         "tnp_kr_performer",
-        "np",
-        "cnp",
-        "anp",
-        "canp",
-        "bnp",
-        "banp",
+        # "np",
+        # "cnp",
+        # "anp",
+        # "canp",
+        # "bnp",
+        # "banp",
     ]
     models = [f"icml/{m}" for m in models]
-    gp_benchmark(
-        seeds,
-        "1d",
-        gp_kernels_1d,
-        [f"1d/{m}" for m in models],
-        gp_main,
-        overrides,
-        "_ICML_ TNP-KR - Gaussian Processes",
-        dry_run=dry_run,
-    )
-    gp_benchmark(
-        seeds,
-        "1d",
-        gp_kernels_1d,
-        [f"1d/{m}" for m in models],
-        bayes_opt_main,
-        overrides,
-        "_ICML_ TNP-KR - Bayesian Optimization",
-        "_ICML_ TNP-KR - Gaussian Processes",
-        dry_run=dry_run,
-    )
-    gp_benchmark(
-        seeds,
-        "2d",
-        gp_kernels_2d,
-        [f"2d/{m}" for m in models],
-        gp_main,
-        overrides,
-        "_ICML_ TNP-KR - Gaussian Processes",
-        dry_run=dry_run,
-    )
+    # gp_benchmark(
+    #     seeds,
+    #     "1d",
+    #     gp_kernels_1d,
+    #     [f"1d/{m}" for m in models],
+    #     gp_main,
+    #     overrides,
+    #     "_ICML_ TNP-KR - Gaussian Processes",
+    #     dry_run=dry_run,
+    # )
+    # gp_benchmark(
+    #     seeds,
+    #     "1d",
+    #     gp_kernels_1d,
+    #     [f"1d/{m}" for m in models],
+    #     bayes_opt_main,
+    #     overrides,
+    #     "_ICML_ TNP-KR - Bayesian Optimization",
+    #     "_ICML_ TNP-KR - Gaussian Processes",
+    #     dry_run=dry_run,
+    # )
+    # gp_benchmark(
+    #     seeds,
+    #     "2d",
+    #     gp_kernels_2d,
+    #     [f"2d/{m}" for m in models],
+    #     gp_main,
+    #     overrides,
+    #     "_ICML_ TNP-KR - Gaussian Processes",
+    #     dry_run=dry_run,
+    # )
+    # img_benchmark(
+    #     seeds,
+    #     "configs/mnist",
+    #     models,
+    #     mnist_main,
+    #     overrides,
+    #     "_ICML_ TNP-KR - MNIST",
+    #     dry_run=dry_run,
+    # )
+    # img_benchmark(
+    #     seeds,
+    #     "configs/celeba",
+    #     models,
+    #     celeba_main,
+    #     overrides,
+    #     "_ICML_ TNP-KR - CelebA",
+    #     dry_run=dry_run,
+    # )
+    # img_benchmark(
+    #     seeds,
+    #     "configs/cifar_10",
+    #     models,
+    #     cifar_10_main,
+    #     overrides,
+    #     "_ICML_ TNP-KR - Cifar 10",
+    #     dry_run=dry_run,
+    # )
     img_benchmark(
-        seeds,
-        "configs/mnist",
-        models,
-        mnist_main,
-        overrides,
-        "_ICML_ TNP-KR - MNIST",
-        dry_run=dry_run,
-    )
-    img_benchmark(
-        seeds,
-        "configs/celeba",
-        models,
-        celeba_main,
-        overrides,
-        "_ICML_ TNP-KR - CelebA",
-        dry_run=dry_run,
-    )
-    img_benchmark(
-        seeds,
-        "configs/cifar_10",
-        models,
-        cifar_10_main,
-        overrides,
-        "_ICML_ TNP-KR - Cifar 10",
-        dry_run=dry_run,
-    )
-    img_benchmark(
-        seeds,
+        seeds[2:],
         "configs/sir",
         # BNP & BANP use residual bootstrapping, which doesn't work
         # for categorical data
