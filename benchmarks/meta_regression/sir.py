@@ -114,7 +114,7 @@ def main(cfg: DictConfig):
 def build_dataloader(data: DictConfig, priors: DictConfig):
     """A 2D Lattice SIR dataloader."""
     sir = instantiate(priors)
-    dims, D_s = [dim.num for dim in data.s], len(data.s)
+    dims, D_s = tuple([dim.num for dim in data.s]), len(data.s)
     Lc_min, Lc_max, Lt = data.num_ctx.min, data.num_ctx.max, data.num_test
     L, B, N = math.prod(dims), data.batch_size, data.num_steps
     s_grid = build_grid(data.s).reshape(-1, D_s)  # flatten spatial dims
