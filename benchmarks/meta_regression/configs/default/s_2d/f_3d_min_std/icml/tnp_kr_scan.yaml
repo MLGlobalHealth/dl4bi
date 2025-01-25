@@ -1,0 +1,45 @@
+cls: ScanTNPKR
+kwargs:
+  num_blks: 6
+  num_reps: 1
+  embed_all:
+    cls: MLP
+    kwargs:
+      dims: [256, 128, 64]
+      act_fn: gelu
+  blk:
+    cls: KRBlock
+    kwargs:
+      attn:
+        cls: MultiHeadAttention
+        kwargs:
+          attn:
+            cls: TISABiasedScanAttention
+            kwargs:
+              qs_chunk_size: 1024
+              ks_chunk_size: 1024
+              num_basis: 5
+          proj_qs:
+            cls: MLP
+            kwargs:
+              dims: [128]
+          proj_ks:
+            cls: MLP
+            kwargs:
+              dims: [128]
+          proj_vs:
+            cls: MLP
+            kwargs:
+              dims: [128, 64]
+      ffn:
+        cls: MLP
+        kwargs:
+          dims: [256, 64]
+          act_fn: gelu
+  head:
+    cls: MLP
+    kwargs:
+      dims: [256, 64, 6]
+      act_fn: gelu
+  output_fn:
+    func: 'lambda x: diagonal_mvn(x, min_std=0.05)'
