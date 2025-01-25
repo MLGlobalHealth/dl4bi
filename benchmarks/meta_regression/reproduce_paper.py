@@ -57,7 +57,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         [f"1d/{m}" for m in models],
         gp_main,
         overrides,
-        "_ICML_ TNP-KR - Gaussian Processes",
+        "ICML TNP-KR - Gaussian Processes",
         dry_run=dry_run,
     )
     gp_benchmark(
@@ -67,8 +67,8 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         [f"1d/{m}" for m in models],
         bayes_opt_main,
         overrides,
-        "_ICML_ TNP-KR - Bayesian Optimization",
-        "_ICML_ TNP-KR - Gaussian Processes",
+        "ICML TNP-KR - Bayesian Optimization",
+        "ICML TNP-KR - Gaussian Processes",
         dry_run=dry_run,
     )
     gp_benchmark(
@@ -78,7 +78,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         [f"2d/{m}" for m in models],
         gp_main,
         overrides,
-        "_ICML_ TNP-KR - Gaussian Processes",
+        "ICML TNP-KR - Gaussian Processes",
         dry_run=dry_run,
     )
     img_benchmark(
@@ -87,7 +87,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         models,
         mnist_main,
         overrides,
-        "_ICML_ TNP-KR - MNIST",
+        "ICML TNP-KR - MNIST",
         dry_run=dry_run,
     )
     img_benchmark(
@@ -96,7 +96,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         models,
         celeba_main,
         overrides,
-        "_ICML_ TNP-KR - CelebA",
+        "ICML TNP-KR - CelebA",
         dry_run=dry_run,
     )
     img_benchmark(
@@ -105,7 +105,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         models,
         cifar_10_main,
         overrides,
-        "_ICML_ TNP-KR - Cifar 10",
+        "ICML TNP-KR - Cifar 10",
         dry_run=dry_run,
     )
     img_benchmark(
@@ -116,7 +116,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         [m for m in models if m not in ["icml/bnp", "icml/banp"]],
         sir_main,
         overrides,
-        "_ICML_ TNP-KR - SIR",
+        "ICML TNP-KR - SIR",
         dry_run=dry_run,
     )
 
