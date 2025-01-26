@@ -85,7 +85,7 @@ def main(cfg: DictConfig):
 
 
 def build_dataloaders(
-    batch_size: int = 32,
+    batch_size: int = 16,
     num_ctx_min: int = 16,
     num_ctx_max: int = 128,
     num_test_max: int = 256,
