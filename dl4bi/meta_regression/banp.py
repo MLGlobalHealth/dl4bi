@@ -126,7 +126,6 @@ class BANP(nn.Module):
             s_ctx_boot, f_ctx_boot, valid_lens_ctx_boot
         )
         s_ctx_rep = rep(s_ctx)
-        # TODO(danj): update residual sampling to work with multidim f
         # TODO(danj): update residual sampling to work with categorical dists
         f_ctx_mu_boot, f_ctx_std_boot = self.decode(
             r_ctx_boot, s_ctx_rep, s_ctx_rep, valid_lens_ctx_boot

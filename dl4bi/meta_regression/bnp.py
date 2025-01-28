@@ -94,7 +94,6 @@ class BNP(nn.Module):
         )
         s_ctx_rep = rep(s_ctx)
         f_ctx_mu_boot, f_ctx_std_boot = self.decode(r_ctx_boot, s_ctx_rep)
-        # TODO(danj): update residual sampling to work with multidim f
         # TODO(danj): update residual sampling to work with categorical dists
         res = (rep(f_ctx) - f_ctx_mu_boot) / f_ctx_std_boot
         res_boot, _ = bootstrap(rng_res_boot, res, valid_lens_ctx_boot)
