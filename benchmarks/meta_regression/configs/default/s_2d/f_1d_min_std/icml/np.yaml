@@ -18,4 +18,4 @@ kwargs:
       dims: [256, 256, 128, 128, 2]
   n_z: 1
   output_fn:
-    func: 'lambda x: diagonal_mvn(x, min_std=0.05)'
+    func: 'lambda x: latent_diagonal_mvn(x, min_std=0.05)'
