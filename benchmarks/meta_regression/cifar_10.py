@@ -110,7 +110,7 @@ def build_dataloaders(
                 f_test = dataset[batch_idx]
                 f_test = f_test.reshape(B, -1, 3)  # [B, H, W, 3] -> [B, L, 3]
                 inv_permute_idx = jnp.argsort(permute_idx)
-
+                # permute the order and select the first valid_lens_ctx for context
                 s_test_permuted = s_test[:, permute_idx, :]
                 f_test_permuted = f_test[:, permute_idx, :]
                 s_test_permuted = s_test_permuted[:, :num_test_max, :]
