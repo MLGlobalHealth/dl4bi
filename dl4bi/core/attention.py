@@ -1154,6 +1154,7 @@ class DeepKernelAttention(nn.Module):
             lambda x: self.proj_qks(x).astype(self.dtype) / jnp.pow(D, 0.25), (qs, ks)
         )
         vs = self.proj_vs(vs).astype(self.dtype)
+        # TODO(danj): update for when valid_lens is None
         if valid_lens is not None:
             ks *= mask_from_valid_lens(K, valid_lens)
             vs /= valid_lens[:, None, None]
