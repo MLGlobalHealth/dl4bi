@@ -49,6 +49,8 @@ python plot_samples.py --config-path=configs/celeba project="TNP-KR - CelebA" se
 python plot_samples.py --config-path=configs/mnist project="TNP-KR - MNIST" seed=20 +num_ctx=128
 # Cifar 10
 python plot_samples.py --config-path=configs/cifar_10 project="TNP-KR - Cifar 10" seed=20 +num_ctx=128
+# SIR
+python plot_samples.py --config-path=configs/sir project="TNP-KR - SIR" seed=20 +num_ctx=128
 ```
 
 Examples with options:

@@ -10,6 +10,8 @@ from cifar_10 import build_dataloaders as build_dataloaders_cifar_10
 from jax import random
 from mnist import build_dataloaders as build_dataloaders_mnist
 from omegaconf import DictConfig
+from sir import build_dataloader as build_dataloader_sir
+from sir import remap_colors as remap_colors_sir
 
 from dl4bi.meta_regression.train_utils import (
     build_2d_grid_gp_dataloader,
@@ -19,12 +21,13 @@ from dl4bi.meta_regression.train_utils import (
     plot_posterior_predictive,
     regression_to_rgb,
 )
+from dl4bi.meta_regression.transform import pointwise_multinomial
 
 
 @hydra.main(config_name="default", version_base=None)
 def main(cfg: DictConfig):
     gp_tasks = re.compile(".*Gaussian Processes.*", re.IGNORECASE)
-    img_tasks = re.compile(".*(MNIST|CelebA|Cifar).*", re.IGNORECASE)
+    img_tasks = re.compile(".*(MNIST|CelebA|Cifar|SIR).*", re.IGNORECASE)
     only_regex = re.compile(cfg.get("only", ".*"), re.IGNORECASE)
     exclude_regex = re.compile(cfg.get("exclude", r"^$"), re.IGNORECASE)
     num_ctx = cfg.get("num_ctx", 10)
@@ -123,11 +126,16 @@ def plot_2d_img_samples(
     num_samples: int = 16,
     results_dir: Path = Path("."),
 ):
-    build_dataloaders, shape, cmap, cmap_std, remap_colors = project_parameters(cfg)
+    build_dataloaders, shape, cmap, cmap_std, remap_colors, is_categorical = (
+        project_parameters(cfg)
+    )
     H, W, C = shape
     if build_dataloaders == build_2d_grid_gp_dataloader:
         cfg.data.update({"batch_size": 1, "num_ctx": {"max": num_ctx, "min": num_ctx}})
         train_dataloader = build_dataloaders(cfg.data, cfg.kernel)
+    elif build_dataloaders == build_dataloader_sir:
+        cfg.data.update({"batch_size": 1, "num_ctx": {"max": num_ctx, "min": num_ctx}})
+        train_dataloader = build_dataloaders(cfg.data, cfg.sim)
     else:
         train_dataloader, *_ = build_dataloaders(
             batch_size=1,
@@ -171,6 +179,8 @@ def plot_2d_img_samples(
             )
             if isinstance(output[1], tuple):  # latent or bootstrapped
                 output, _ = output  # throw away latent zs or base samples
+            if is_categorical:
+                output = pointwise_multinomial(output)
             f_mu, f_std = output
             preds[run_name] = (f_mu, f_std)
             min_std = min(min_std, f_std.min())
@@ -215,6 +225,7 @@ def project_parameters(cfg: DictConfig):
     # example project names include "TNP-KR - MNIST", "MNIST", etc, so match
     matches = lambda pattern: re.match(pattern, cfg.project, re.IGNORECASE)
     remap_colors = lambda x: x
+    is_categorical = False
     match cfg.project:
         case _ if matches(".*Gaussian Processes.*"):
             build_dataloaders = build_2d_grid_gp_dataloader
@@ -232,9 +243,14 @@ def project_parameters(cfg: DictConfig):
         case _ if matches(".*Cifar.*"):
             build_dataloaders = build_dataloaders_cifar_10
             remap_colors = regression_to_rgb
+        case _ if matches(".*SIR.*"):
+            build_dataloaders = build_dataloader_sir
+            remap_colors = remap_colors_sir
+            shape = (64, 64, 3)
+            is_categorical = True
         case _:
             raise Exception(f"No dataloader defined for {cfg.project}!")
-    return build_dataloaders, shape, cmap, cmap_std, remap_colors
+    return build_dataloaders, shape, cmap, cmap_std, remap_colors, is_categorical
 
 
 if __name__ == "__main__":
