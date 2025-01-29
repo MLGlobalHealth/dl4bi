@@ -67,7 +67,7 @@ def plot_1d_gp_samples(
             s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, *_ = next(dataloader(rng_i))
             for row_idx, run_name in enumerate(sorted(ckpts)):
                 state = ckpts[run_name]["state"]
-                f_mu, f_std, *_ = state.apply_fn(
+                output = state.apply_fn(
                     {"params": state.params, **state.kwargs},
                     s_ctx,
                     f_ctx,
@@ -75,6 +75,9 @@ def plot_1d_gp_samples(
                     valid_lens_ctx,
                     rngs={"dropout": rng_dropout, "extra": rng_extra},
                 )
+                if isinstance(output[1], tuple):  # latent or bootsrapping
+                    output, _ = output  # throw away latent or base samples
+                f_mu, f_std = output
                 plt.sca(axs[row_idx, col_idx])
                 plot_posterior_predictive(
                     s_ctx[0, :num_ctx, 0],
@@ -94,10 +97,23 @@ def plot_1d_gp_samples(
                         f"lengthscale={ls:0.1f}", fontsize=36
                     )
                 if col_idx == 0:
-                    axs[row_idx, col_idx].set_ylabel(run_name, fontsize=36)
+                    short_name = shortened_run_name(run_name)
+                    axs[row_idx, col_idx].set_ylabel(short_name, fontsize=36)
         fig.tight_layout()
         fig.savefig(results_dir / f"comparison_sample_{i+1}.png", dpi=150)
         plt.clf()
+
+
+def shortened_run_name(name):
+    match name:
+        case "Scan TNP-KR: TISABiasedScanAttention":
+            return "TNP-KR: Scan"
+        case "TNP-KR: DeepKernelAttention":
+            return "TNP-KR: DKA"
+        case "TNP-KR: FastAttention":
+            return "TNP-KR: PERF"
+        case _:
+            return name
 
 
 def plot_2d_img_samples(
@@ -185,7 +201,8 @@ def plot_2d_img_samples(
                 else:
                     title = axs[row_idx, col_idx].get_title()
                     axs[row_idx, col_idx].set_title(title, fontsize=36)
-            axs[row_idx, 0].set_ylabel(f"{run_name}", fontsize=36)
+            short_name = shortened_run_name(run_name)
+            axs[row_idx, 0].set_ylabel(f"{short_name}", fontsize=36)
         fig.tight_layout()
         fig.savefig(results_dir / f"comparison_sample_{i+1}.png", dpi=150)
         plt.clf()
