@@ -18,4 +18,4 @@ kwargs:
       dims: [256, 256, 128, 128, 3]
   n_z: 1
   output_fn:
-    func: identity
+    func: latent_logits

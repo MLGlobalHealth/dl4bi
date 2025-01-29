@@ -17,12 +17,18 @@ def diagonal_mvn(f_dist: jax.Array, min_std: float = 0.0):
 def latent_diagonal_mvn(f_dist: jax.Array, min_std: float = 0.0):
     f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
     f_std = min_std + (1 - min_std) * softplus(f_std)
-    return f_mu.mean(axis=1), f_std.mean(axis=1)  # average over latent samples
+    return f_mu.mean(axis=1), f_std.mean(axis=1)  # average over n_z latent samples
 
 
 @jit
-def identity(f_dist: jax.Array):
-    return f_dist
+def identity(output: jax.Array):
+    return output
+
+
+@jit
+def latent_logits(output: jax.Array):
+    logits, latents = output
+    return logits.mean(axis=1), latents  # average over n_z latent samples
 
 
 @jit
