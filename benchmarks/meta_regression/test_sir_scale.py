@@ -19,9 +19,18 @@ def main(cfg: DictConfig):
     rng_data, rng_valid = random.split(random.key(cfg.seed))
     dataloader = build_dataloader(cfg.data, cfg.sim)
     for path in results_path.rglob("*.ckpt"):
+        print("=" * 20, path.stem, "=" * 20)
         rng = rng_valid
         state, m_cfg = load_ckpt(path)
         out_fn = path.parent / (path.stem + "_" + cfg.data.name)
+        # when these fail and can't be caught, the exception can't be caught
+        if cfg.data.name == "1024x1024" and path.stem in [
+            "TNP-D",
+            "ConvCNP",
+            "ANP",
+            "CANP",
+        ]:
+            continue
         # need to expand internal grid of ConvCNP
         if path.stem == "ConvCNP":
             if cfg.data.name == "128x128":
