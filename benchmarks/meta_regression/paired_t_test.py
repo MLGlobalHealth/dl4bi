@@ -19,8 +19,10 @@ def paired_t_test(
         df = df.query(filter)
     m1 = df[df.Name == model_1][statistic].values
     m2 = df[df.Name == model_2][statistic].values
+    diff = m1 - m2
     print(f"{model_1}:\n{m1}")
-    print(f"\n{model_2}:\n{m2}\n")
+    print(f"\n{model_2}:\n{m2}")
+    print(f"\nDifferences:\n{diff}\n")
     return ttest_rel(m1, m2, alternative=method)
 
 
