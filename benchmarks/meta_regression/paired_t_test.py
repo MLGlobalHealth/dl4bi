@@ -11,14 +11,17 @@ def paired_t_test(
     model_1: str,
     model_2: str,
     statistic: str,
+    filter: str,
     method: str = "less",
 ):
     # NOTE: this assumes that models appear in the same seed order
-    return ttest_rel(
-        df[df.Name == model_1][statistic].values,
-        df[df.Name == model_2][statistic].values,
-        alternative=method,
-    )
+    if filter:
+        df = df.query(filter)
+    m1 = df[df.Name == model_1][statistic].values
+    m2 = df[df.Name == model_2][statistic].values
+    print(f"{model_1}:\n{m1}")
+    print(f"\n{model_2}:\n{m2}\n")
+    return ttest_rel(m1, m2, alternative=method)
 
 
 def parse_args(argv):
@@ -36,6 +39,12 @@ def parse_args(argv):
         default="Test NLL",
     )
     parser.add_argument(
+        "-f",
+        "--filter",
+        help="A filter passed to pd.DataFrame.query before performing the t-test.",
+        default="",
+    )
+    parser.add_argument(
         "-m",
         "--method",
         default="less",
@@ -48,5 +57,12 @@ def parse_args(argv):
 if __name__ == "__main__":
     args = parse_args(sys.argv)
     df = pd.read_csv(args.path)
-    result = paired_t_test(df, args.model_1, args.model_2, args.statistic, args.method)
-    print(f"p-value: {result.pvalue:0.3f}")
+    result = paired_t_test(
+        df,
+        args.model_1,
+        args.model_2,
+        args.statistic,
+        args.filter,
+        args.method,
+    )
+    print(f"t-test ({args.method}) p-value: {result.pvalue:0.3f}")

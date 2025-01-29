@@ -18,6 +18,8 @@ from scipy.stats import sem
 
 def main(args):
     df = pd.read_csv(args.path)
+    if args.filter:
+        df = df.query(args.filter)
     func = lambda x: f"${np.mean(x):.3f}\\pm{sem(x):0.3f}$"
     x = df[[*args.group_by, *args.metrics]].groupby(args.group_by).agg(func)
     x = x.reset_index()
@@ -54,6 +56,12 @@ def parse_args(argv):
         nargs="+",
         default=["Name"],
         help="Columns to group by.",
+    )
+    parser.add_argument(
+        "-f",
+        "--filter",
+        help="A filter passed to pd.DataFrame.query before summarizing.",
+        default="",
     )
     parser.add_argument(
         "-p",
