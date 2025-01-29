@@ -23,12 +23,12 @@ def main(cfg: DictConfig):
         rng = rng_valid
         state, m_cfg = load_ckpt(path)
         out_fn = path.parent / (path.stem + "_" + cfg.data.name)
-        # when these fail and can't be caught, the exception can't be caught
-        if cfg.data.name == "1024x1024" and path.stem in [
-            "TNP-D",
-            "ConvCNP",
+        # when these fail and can't be caught, the exception sometimes can't be caught
+        if cfg.data.name in ["256x256", "1024x1024"] and path.stem in [
             "ANP",
             "CANP",
+            "ConvCNP",
+            "TNP-D",
         ]:
             continue
         # need to expand internal grid of ConvCNP
