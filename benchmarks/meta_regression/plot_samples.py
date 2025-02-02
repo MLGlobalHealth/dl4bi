@@ -112,7 +112,7 @@ def plot_1d_gp_samples(
 def shortened_run_name(name):
     match name:
         case "Scan TNP-KR: TISABiasedScanAttention":
-            return "TNP-KR: Scan"
+            return "TNP-KR: SA"
         case "TNP-KR: DeepKernelAttention":
             return "TNP-KR: DKA"
         case "TNP-KR: FastAttention":
