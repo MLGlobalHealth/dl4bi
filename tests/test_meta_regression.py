@@ -18,7 +18,7 @@ from dl4bi.meta_regression import (
     BNP,
     CANP,
     CNP,
-    DSKR,
+    SGNP,
     NP,
     TNPD,
     TNPKR,
@@ -46,7 +46,7 @@ def test_models():
         ANP,
         CANP,
         BANP,
-        lambda: DSKR(kNN(k=L)),
+        lambda: SGNP(kNN(k=L)),
         TNPD,
         TNPND,
         TNPKR,
@@ -123,7 +123,7 @@ def test_context_data_leaks():
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
         ScanTNPKR,
-        lambda: DSKR(kNN(k=32), num_blks=1),
+        lambda: SGNP(kNN(k=32), num_blks=1),
     ]:
         print(model)
         m = model()
@@ -134,7 +134,7 @@ def test_context_data_leaks():
             s_test=s,
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
-            bucket_size=2,  # used by DSKR for numerical stability
+            bucket_size=2,  # used by SGNP for numerical stability
         )
         output_half = m.apply(
             params,
@@ -144,7 +144,7 @@ def test_context_data_leaks():
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
-            bucket_size=2,  # used by DSKR for numerical stability
+            bucket_size=2,  # used by SGNP for numerical stability
         )
         if hasattr(model, "n_z"):  # latent model
             output, _ = output  # throw away latent zs
@@ -178,7 +178,7 @@ def test_train_step_loss():
         ANP,
         CANP,
         BANP,
-        lambda: DSKR(kNN(k=L)),
+        lambda: SGNP(kNN(k=L)),
         TNPD,
         TNPND,
         TNPKR,
@@ -220,7 +220,7 @@ def test_sample():
         CNP,
         ANP,
         CANP,
-        lambda: DSKR(kNN(k=10)),
+        lambda: SGNP(kNN(k=10)),
         TNPD,
         TNPKR,
         ScanTNPKR,

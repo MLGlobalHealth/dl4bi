@@ -12,8 +12,8 @@ from .transform import diagonal_mvn
 
 # TODO(danj): include global vnode conditioning
 # TODO(danj): add masks for when k < num_ctx
-class DSKR(nn.Module):
-    """DSKR
+class SGNP(nn.Module):
+    """SGNP
 
     .. warning::
         `min(valid_lens_ctx)` and `min(valid_lens_test)` must both

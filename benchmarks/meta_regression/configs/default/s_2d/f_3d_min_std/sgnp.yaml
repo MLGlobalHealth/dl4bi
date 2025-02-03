@@ -1,4 +1,4 @@
-cls: DSKR
+cls: SGNP
 kwargs:
   output_fn:
     func: 'lambda x: diagonal_mvn(x, min_std=0.05)'
