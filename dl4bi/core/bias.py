@@ -89,7 +89,7 @@ def tisa_bias(
     x = vmap(tisa_rbf_basis, in_axes=(None, 0, 0, 0), out_axes=1)(d, a, b, c)
     x = x.reshape(B, H, F, Q, K).sum(axis=2)  # [B, H*F, Q, K] -> [B, H, Q, K]
     if mask is not None:
-        return jnp.where(mask[:, None, ...], -jnp.inf, x)
+        return jnp.where(mask[:, None, ...], x, -jnp.inf)
     return x
 
 
