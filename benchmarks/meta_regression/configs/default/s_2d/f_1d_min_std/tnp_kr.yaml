@@ -10,7 +10,7 @@ kwargs:
   dist:
     func: l2_dist
   bias:
-    cls: TISABias
+    cls: RBFNetworkBias
     kwargs:
       num_basis: 5
       num_heads: 4

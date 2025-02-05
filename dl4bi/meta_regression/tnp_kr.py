@@ -11,8 +11,8 @@ from ..core import (
     MLP,
     KRBlock,
     MultiHeadAttention,
-    TISABias,
-    TISABiasedScanAttention,
+    RBFNetworkBias,
+    RBFNetworkBiasedScanAttention,
 )
 from .transform import diagonal_mvn
 
@@ -49,7 +49,7 @@ class TNPKR(nn.Module):
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
     dist: Optional[Callable] = l2_dist
-    bias: Optional[nn.Module] = TISABias()
+    bias: Optional[nn.Module] = RBFNetworkBias()
     blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
@@ -146,7 +146,7 @@ class ScanTNPKR(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    blk: nn.Module = KRBlock(MultiHeadAttention(TISABiasedScanAttention()))
+    blk: nn.Module = KRBlock(MultiHeadAttention(RBFNetworkBiasedScanAttention()))
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
     output_fn: Callable = diagonal_mvn

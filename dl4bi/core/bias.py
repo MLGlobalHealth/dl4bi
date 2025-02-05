@@ -62,7 +62,7 @@ def scanned_rbf_network_bias(
 ):
     d = vmap(l2_dist)(qs_meta, ks_meta)  # [B, Q, K]
     mask = jnp.isfinite(d)
-    return rbf_network_bias(d, a, b, mask)
+    return rbf_network_bias(d, mask, a, b)
 
 
 class TISABias(nn.Module):
