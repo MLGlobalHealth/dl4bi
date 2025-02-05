@@ -5,7 +5,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from jax import vmap
-from sps.kernels import l2_dist_sq
+from sps.kernels import l2_dist
 
 from ..core import (
     MLP,
@@ -48,7 +48,7 @@ class TNPKR(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    dist: Optional[Callable] = l2_dist_sq
+    dist: Optional[Callable] = l2_dist
     bias: Optional[nn.Module] = TISABias()
     blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
@@ -97,10 +97,9 @@ class TNPKR(nn.Module):
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         qvs, kvs = norm(self.embed_all(test)), norm(self.embed_all(ctx))
-        qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx}
-        kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx}
+        qk_kwargs, kk_kwargs = {}, {}
         if self.dist is not None:
-            vdist = vmap(self.dist)
+            vdist = vmap(self.dist)  # distance function does temporal masking
             d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
             d_qk_mask, d_kk_mask = jnp.isfinite(d_qk), jnp.isfinite(d_kk)
         for _ in range(self.num_blks):

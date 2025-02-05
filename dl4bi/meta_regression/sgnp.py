@@ -6,7 +6,13 @@ import jax
 import jax.numpy as jnp
 from jraph import GraphsTuple
 
-from ..core import MLP, GraphKRBlock, RBFNetworkBias, kNN, mask_from_valid_lens
+from ..core import (
+    MLP,
+    GraphKRBlock,
+    RBFNetworkBias,
+    kNN,
+    mask_from_valid_lens,
+)
 from .transform import diagonal_mvn
 
 
