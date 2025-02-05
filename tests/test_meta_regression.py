@@ -127,7 +127,7 @@ def test_context_data_leaks():
     ]:
         m = model()
         print(m.__class__)
-        output, params = m.init_with_output(
+        params = m.init(
             {"params": rng_params, "dropout": rng_dropout, "extra": rng_extra},
             s_ctx=s,
             f_ctx=f,
@@ -136,16 +136,29 @@ def test_context_data_leaks():
             valid_lens_test=valid_lens_test,
             bucket_size=2,  # used by SGNP for numerical stability
         )
-        output_half = jit(m.apply, static_argnames=("bucket_size",))(
+        jit_m = jit(m.apply, static_argnames=("bucket_size",))
+        output = jit_m(
             params,
-            s_ctx=s2,
-            f_ctx=f2,
+            s_ctx=s,
+            f_ctx=f,
             s_test=s,
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
             bucket_size=2,  # used by SGNP for numerical stability
         )
+        # to view results: tensorboard --logdir /tmp/tensorboard/
+        with jax.profiler.trace("/tmp/tensorboard"):
+            output_half = jit_m(
+                params,
+                s_ctx=s2,
+                f_ctx=f2,
+                s_test=s,
+                valid_lens_ctx=valid_lens_ctx,
+                valid_lens_test=valid_lens_test,
+                rngs={"dropout": rng_dropout, "extra": rng_extra},
+                bucket_size=2,  # used by SGNP for numerical stability
+            )
         if hasattr(model, "n_z"):  # latent model
             output, _ = output  # throw away latent zs
             output_half, _ = output_half
