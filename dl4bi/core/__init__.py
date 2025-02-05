@@ -52,7 +52,7 @@ from .dist import (
     bf_knn,
     kNN,
     scipy_knn,
-    st_approx_knn,
+    st_l2_dist,
 )
 from .embed import (
     FixedSinusoidalEmbedding,

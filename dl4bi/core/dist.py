@@ -90,46 +90,17 @@ def scipy_knn(q: jax.Array, r: jax.Array, k: int):
     return idx, d
 
 
-@partial(jit, static_argnames=("k", "dist", "num_q_parallel"))
-def st_approx_knn(
-    q: jax.Array,
-    r: jax.Array,
-    k: int,
-    dist: Callable = l2_dist,
-    num_q_parallel: int = 1024,
-    recall_target: float = 0.95,
-):
-    r"""Spatiotemporal parellelized approximate kNN.
+@jit
+def st_l2_dist(q: jax.Array, r: jax.Array):
+    """Spatio-temporal L2 distance that enforces temporal causality.
 
-    .. note::
-        This assumes that the last dimension of `q` and `r`
-        is the temporal dimension, i.e. `{q,r}[..., -1]`.
-
-    Args:
-        q: Query points.
-        r: Reference points.
-        k: Number of neighbors per query point to retrieve.
-        dist: Distance function to use.
-        num_q_parallel: Number of queries to run in parallel.
-        recall_target: Target percent of returned k values
-            are actually in top-k. Less than 1.0 can result in
-            much faster runtimes.
-
-
-    Returns:
-        Index and distance arrays, each of dimension |r| x k.
+    Temporal causality implies that all reference points, `r`,
+    occur at a time before or equal to the query poitns, `q`. The
+    time dimension is assumed to be the last channel of the last
+    dimension of each array, i.e. `{q,r}[..., -1]`.
     """
-
-    def process_batch(q_i: jax.Array):
-        # add leading dim to q_i since map processes each q_i individually,
-        # even when batch_size is >= 1
-        d = dist(q_i[None, ...], r)
-        d = jnp.where(r[..., -1] <= q_i[-1], d, jnp.inf)  # enforce temporal causality
-        d, idx = jax.lax.approx_min_k(d, k, recall_target=recall_target)
-        return idx.flatten(), d
-
-    idx, d = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
-    return idx, d.squeeze()  # d: [B, L, 1, K] -> [B, L, K]
+    d = l2_dist(q, r)
+    return jnp.where(r[..., -1] <= q[..., -1], d, jnp.inf)
 
 
 class kNN(nn.Module):

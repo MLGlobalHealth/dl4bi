@@ -99,7 +99,7 @@ class TNPKR(nn.Module):
         qvs, kvs = norm(self.embed_all(test)), norm(self.embed_all(ctx))
         qk_kwargs, kk_kwargs = {}, {}
         if self.dist is not None:
-            vdist = vmap(self.dist)  # distance function does temporal masking
+            vdist = vmap(self.dist)
             d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
             d_qk_mask, d_kk_mask = jnp.isfinite(d_qk), jnp.isfinite(d_kk)
         for _ in range(self.num_blks):
