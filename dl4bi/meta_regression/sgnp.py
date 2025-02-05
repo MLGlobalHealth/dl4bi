@@ -54,13 +54,8 @@ class SGNP(nn.Module):
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(N_c, B)
         mask = mask_from_valid_lens(N_c, valid_lens_ctx)
-        # use a large sentinal value for kNN neighbors that should be masked;
-        # using `jnp.inf` can create NaN gradients inside a bias function that
-        # uses distances, e.g. rbf_basis; you can still use jnp.inf, but then
-        # all basis functions will need double where statements, which could
-        # effect efficiency: http://bit.ly/4aNgBjw
         sentinal = 1e6  # used to indicate masked context locations
-        s_send = jnp.where(mask, s_ctx, sentinal)  # masked values = far away for kNN
+        s_send = jnp.where(mask, s_ctx, jnp.inf)  # masked values = far away for kNN
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
         unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
@@ -80,7 +75,7 @@ class SGNP(nn.Module):
             n_edge=jnp.array([B * (N_c + N_t) * K]),
             globals=None,
         )
-        edges_mask = (g.edges < sentinal)[:, None, None]
+        edges_mask = jnp.isfinite(g.edges)[:, None, None]
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):

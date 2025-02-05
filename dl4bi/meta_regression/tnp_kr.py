@@ -97,7 +97,8 @@ class TNPKR(nn.Module):
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         qvs, kvs = norm(self.embed_all(test)), norm(self.embed_all(ctx))
-        qk_kwargs, kk_kwargs = {}, {}
+        qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx}
+        kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx}
         if self.dist is not None:
             vdist = vmap(self.dist)
             d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)

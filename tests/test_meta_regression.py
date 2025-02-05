@@ -123,10 +123,10 @@ def test_context_data_leaks():
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
         ScanTNPKR,
-        lambda: SGNP(kNN(k=32), num_blks=1),
+        lambda: SGNP(kNN(k=256, num_q_parallel=16), num_blks=1),
     ]:
-        print(model)
         m = model()
+        print(m.__class__)
         output, params = m.init_with_output(
             {"params": rng_params, "dropout": rng_dropout, "extra": rng_extra},
             s_ctx=s,
@@ -154,7 +154,10 @@ def test_context_data_leaks():
             output_half, _ = output_half
         f_mu, f_std = output
         f_mu_half, f_std_half = output_half
-        print(jnp.sort(jnp.abs(f_mu - f_mu_half).flatten(), descending=True)[:5])
+        print(
+            "largest gaps:",
+            jnp.sort(jnp.abs(f_mu - f_mu_half).flatten(), descending=True)[:5],
+        )
         assert jnp.allclose(f_mu, f_mu_half)
         assert jnp.allclose(f_std, f_std_half)
 
