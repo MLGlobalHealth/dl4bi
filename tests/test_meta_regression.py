@@ -136,7 +136,7 @@ def test_context_data_leaks():
             valid_lens_test=valid_lens_test,
             bucket_size=2,  # used by SGNP for numerical stability
         )
-        output_half = m.apply(
+        output_half = jit(m.apply, static_argnames=("bucket_size",))(
             params,
             s_ctx=s2,
             f_ctx=f2,

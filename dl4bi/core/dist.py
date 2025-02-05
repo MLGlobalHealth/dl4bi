@@ -104,7 +104,7 @@ def st_l2_dist(q: jax.Array, r: jax.Array):
 
 
 class kNN(nn.Module):
-    r"""Parellelized brute force kNN with optional `batch_size`.
+    r"""Parellelized kNN.
 
     Args:
         k: Number of neighbors per query point to retrieve.

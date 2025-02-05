@@ -54,7 +54,6 @@ class SGNP(nn.Module):
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(N_c, B)
         mask = mask_from_valid_lens(N_c, valid_lens_ctx)
-        sentinal = 1e6  # used to indicate masked context locations
         s_send = jnp.where(mask, s_ctx, jnp.inf)  # masked values = far away for kNN
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
