@@ -18,8 +18,8 @@ from dl4bi.meta_regression import (
     BNP,
     CANP,
     CNP,
-    SGNP,
     NP,
+    SGNP,
     TNPD,
     TNPKR,
     TNPND,
@@ -123,7 +123,7 @@ def test_context_data_leaks():
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
         ScanTNPKR,
-        lambda: SGNP(kNN(k=256, num_q_parallel=16), num_blks=1),
+        lambda: SGNP(kNN(k=128, num_q_parallel=16), num_blks=1),
     ]:
         m = model()
         print(m.__class__)
