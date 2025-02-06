@@ -1080,7 +1080,6 @@ class MultiHeadGraphAttention(nn.Module):
         nodes, _edges, receivers, senders, globals, _n_node, _n_edge = g
         N, H = nodes.shape[0], self.num_heads
         to_mh = jit(lambda n: rearrange(n, "N (H D) -> N H D", H=H))
-        from_mh = jit(lambda n: rearrange(n, "N H D -> N (H D)"))
         qks, vs = self.proj_qks(nodes), self.proj_vs(nodes)
         qks, vs = map(to_mh, (qks, vs))
         qks_r, qks_s = qks[receivers], qks[senders]
@@ -1088,14 +1087,7 @@ class MultiHeadGraphAttention(nn.Module):
         scores += kwargs.get("bias", 0)
         bucket_size = kwargs.get("bucket_size")
         attn = _graph_segment_softmax(scores, receivers, N, bucket_size)
-        messages = from_mh(attn[..., None] * vs[senders])
-        ctx = jax.ops.segment_sum(
-            messages,
-            receivers,
-            N,
-            indices_are_sorted=True,
-            bucket_size=bucket_size,
-        )
+        ctx = _graph_conv(senders, receivers, vs, attn, N, bucket_size)
         return self.proj_out(ctx), attn
 
 
@@ -1127,6 +1119,26 @@ def _graph_segment_softmax(
     normalizers = normalizers[segment_ids]
     softmax = logits / normalizers
     return softmax
+
+
+@partial(jit, static_argnames=("num_segments", "bucket_size"))
+def _graph_conv(
+    senders: jax.Array,
+    receivers: jax.Array,
+    nodes: jax.Array,
+    attn: jax.Array,
+    num_segments: int,
+    bucket_size: int,
+):
+    from_mh = jit(lambda n: rearrange(n, "N H D -> N (H D)"))
+    messages = from_mh(attn[..., None] * nodes[senders])
+    return jax.ops.segment_sum(
+        messages,
+        receivers,
+        num_segments,
+        indices_are_sorted=True,
+        bucket_size=bucket_size,
+    )
 
 
 # TODO(danj): can make this more efficient by doing (QK^T)V -> Q(K^TV)
