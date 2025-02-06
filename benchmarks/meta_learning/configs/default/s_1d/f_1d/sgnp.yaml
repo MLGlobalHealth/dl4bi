@@ -1,1 +1,9 @@
 cls: SGNP
+kwargs:
+  head:
+    cls: MLP
+    kwargs:
+      dims: [256, 64, 3]
+      act_fn: gelu
+  output_fn:
+    func: identity
