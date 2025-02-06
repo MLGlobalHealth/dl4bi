@@ -8,7 +8,7 @@ import wandb
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 
-from dl4bi.meta_regression.train_utils import (
+from dl4bi.meta_learning.train_utils import (
     Callback,
     build_gp_dataloader,
     cfg_to_run_name,

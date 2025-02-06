@@ -28,7 +28,7 @@ from sps.gp import GP
 from sps.kernels import rbf
 from sps.priors import Prior
 
-import dl4bi.meta_regression.train_utils as tu
+import dl4bi.meta_learning.train_utils as tu
 
 
 def main(args):

@@ -5,7 +5,7 @@ import hydra
 from jax import random
 from omegaconf import DictConfig
 
-from dl4bi.meta_regression.train_utils import (
+from dl4bi.meta_learning.train_utils import (
     build_gp_dataloader,
     cfg_to_run_name,
     evaluate,

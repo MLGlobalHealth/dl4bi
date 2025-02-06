@@ -13,7 +13,7 @@ from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
-from dl4bi.meta_regression.train_utils import (
+from dl4bi.meta_learning.train_utils import (
     Callback,
     cfg_to_run_name,
     cosine_annealing_lr,

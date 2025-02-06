@@ -9,7 +9,7 @@ from jax import random
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from dl4bi.meta_regression.train_utils import TrainState, load_ckpt
+from dl4bi.meta_learning.train_utils import TrainState, load_ckpt
 
 from .sir import build_dataloader, instantiate, select_steps
 

@@ -21,7 +21,7 @@ from optax.schedules import cosine_decay_schedule
 from sps.utils import random_subgrid
 from tqdm import tqdm
 
-from dl4bi.meta_regression.train_utils import (
+from dl4bi.meta_learning.train_utils import (
     Callback,
     TrainState,
     cfg_to_run_name,

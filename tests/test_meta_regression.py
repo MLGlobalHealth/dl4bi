@@ -12,7 +12,7 @@ from dl4bi.core import (
     MultiHeadAttention,
     kNN,
 )
-from dl4bi.meta_regression import (
+from dl4bi.meta_learning import (
     ANP,
     BANP,
     BNP,
@@ -26,7 +26,7 @@ from dl4bi.meta_regression import (
     ConvCNP,
     ScanTNPKR,
 )
-from dl4bi.meta_regression import (
+from dl4bi.meta_learning import (
     train_utils as tu,
 )
 

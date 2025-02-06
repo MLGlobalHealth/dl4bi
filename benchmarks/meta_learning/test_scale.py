@@ -10,7 +10,7 @@ from jax import jit, random
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from dl4bi.meta_regression.train_utils import (
+from dl4bi.meta_learning.train_utils import (
     cfg_to_run_name,
     load_ckpt,
 )

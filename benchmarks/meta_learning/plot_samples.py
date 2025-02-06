@@ -13,7 +13,7 @@ from omegaconf import DictConfig
 from sir import build_dataloader as build_dataloader_sir
 from sir import remap_colors as remap_colors_sir
 
-from dl4bi.meta_regression.train_utils import (
+from dl4bi.meta_learning.train_utils import (
     TrainState,
     build_2d_grid_gp_dataloader,
     build_gp_dataloader,
@@ -23,7 +23,7 @@ from dl4bi.meta_regression.train_utils import (
     plot_posterior_predictive,
     regression_to_rgb,
 )
-from dl4bi.meta_regression.transform import pointwise_multinomial
+from dl4bi.meta_learning.transform import pointwise_multinomial
 
 
 @hydra.main(config_name="default", version_base=None)

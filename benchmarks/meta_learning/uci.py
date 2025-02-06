@@ -14,7 +14,7 @@ from sklearn.preprocessing import StandardScaler
 from ucimlrepo import fetch_ucirepo
 
 from dl4bi.core import Whitener
-from dl4bi.meta_regression.train_utils import (
+from dl4bi.meta_learning.train_utils import (
     cfg_to_run_name,
     cosine_annealing_lr,
     evaluate,
