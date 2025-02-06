@@ -61,6 +61,7 @@ from .embed import (
     RBFRandomFourierFeatures,
     ResidualEmbedding,
 )
+from .gnn import EdgeBiasedGAT, GraphAttentionBlock
 from .metrics import (
     l2_dist_sq,
     mean_absolute_calibration_error,
@@ -71,7 +72,6 @@ from .mle import gp_mle_bfgs, gp_mle_sgd
 from .mlp import MLP, MLPMixer, MLPMixerBlock
 from .preprocess import Whitener, condition_number
 from .transformer import (
-    GraphBlock,
     KRBlock,
     TransformerDecoder,
     TransformerDecoderBlock,

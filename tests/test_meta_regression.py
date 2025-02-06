@@ -46,7 +46,7 @@ def test_models():
         ANP,
         CANP,
         BANP,
-        lambda: SGNP(kNN(k=L)),
+        ConvCNP,
         TNPD,
         TNPND,
         TNPKR,
@@ -55,7 +55,7 @@ def test_models():
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
         ScanTNPKR,
-        ConvCNP,
+        lambda: SGNP(kNN(k=L)),
     ]:
         m = model()
         output, params = m.init_with_output(
@@ -118,11 +118,11 @@ def test_context_data_leaks():
         ConvCNP,
         TNPD,
         TNPND,
+        ScanTNPKR,
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FusedAttention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
-        ScanTNPKR,
         lambda: SGNP(kNN(k=256, num_q_parallel=16), num_blks=1),
     ]:
         m = model()
@@ -135,7 +135,7 @@ def test_context_data_leaks():
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
         )
-        jit_m = jit(m.apply)
+        jit_m = jit(m.apply, static_argnames=("bucket_size",))
         output = jit_m(
             params,
             s_ctx=s,
@@ -144,6 +144,7 @@ def test_context_data_leaks():
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
+            bucket_size=16,  # used by SGNP for numerical stability
         )
         # to view results: tensorboard --logdir /tmp/tensorboard/
         # with jax.profiler.trace("/tmp/tensorboard"):
@@ -155,6 +156,7 @@ def test_context_data_leaks():
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
+            bucket_size=16,  # used by SGNP for numerical stability
         )
         if hasattr(model, "n_z"):  # latent model
             output, _ = output  # throw away latent zs
@@ -197,15 +199,15 @@ def test_train_step_loss():
         ANP,
         CANP,
         BANP,
-        lambda: SGNP(kNN(k=L)),
         TNPD,
         TNPND,
         TNPKR,
-        ScanTNPKR,
         ConvCNP,
+        ScanTNPKR,
+        lambda: SGNP(kNN(k=L)),
     ]:
-        print(model)
         m = model()
+        print(m.__class__)
         train_step, _ = tu.select_steps(m)
         kwargs = m.init(
             {"params": rng_params, "dropout": rng_dropout, "extra": rng_extra},
@@ -239,14 +241,14 @@ def test_sample():
         CNP,
         ANP,
         CANP,
-        lambda: SGNP(kNN(k=10)),
+        ConvCNP,
         TNPD,
         TNPKR,
         ScanTNPKR,
-        ConvCNP,
+        lambda: SGNP(kNN(k=10)),
     ]:
-        print(model)
         m = model()
+        print(m.__class__)
         kwargs = m.init(
             {"params": rng_params, "dropout": rng_dropout, "extra": rng_extra},
             s_ctx[None, ...],

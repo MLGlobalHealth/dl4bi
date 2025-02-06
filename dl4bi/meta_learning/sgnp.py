@@ -6,24 +6,12 @@ import jax
 import jax.numpy as jnp
 from jraph import GraphsTuple
 
-from ..core import (
-    MLP,
-    GraphBlock,
-    RBFNetworkBias,
-    kNN,
-    mask_from_valid_lens,
-)
+from ..core import MLP, EdgeBiasedGAT, kNN, mask_from_valid_lens
 from .transform import diagonal_mvn
 
 
-# TODO(danj): add masks for when distances are non-finite, e.g. temporal causality
 class SGNP(nn.Module):
-    """SGNP
-
-    .. warning::
-        `min(valid_lens_ctx)` and `min(valid_lens_test)` must both
-        be greater than `k`.
-    """
+    """SGNP."""
 
     knn: Callable = kNN()
     num_blks: int = 6
@@ -32,9 +20,8 @@ class SGNP(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    bias: nn.Module = RBFNetworkBias()
-    blk: nn.Module = GraphBlock()
     norm: nn.Module = nn.LayerNorm()
+    gnn: nn.Module = EdgeBiasedGAT()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
     output_fn: Callable = diagonal_mvn
 
@@ -67,22 +54,17 @@ class SGNP(nn.Module):
         nodes = jnp.vstack([x_ctx.reshape(B * N_c, -1), x_test.reshape(B * N_t, -1)])
         g = GraphsTuple(
             nodes,
-            edges=stack(d_cc.flatten(), d_ct.flatten()),
+            # NOTE: edges and edge mask must be of shape [B, Q, K], i.e. [B, 1, 1]
+            # in order to be compatible with bias modules, which expect [B, Q, K]
+            edges=stack(d_cc.flatten(), d_ct.flatten())[:, None, None],
             senders=stack(s_cc, s_ct),
             receivers=jnp.repeat(jnp.arange(B * (N_c + N_t)), K),
             n_node=jnp.array([B * (N_c + N_t)]),
             n_edge=jnp.array([B * (N_c + N_t) * K]),
             globals=None,
         )
-        edges_mask = jnp.isfinite(g.edges)[:, None, None]
-        for _ in range(self.num_blks):
-            blk = self.blk.copy()
-            for _ in range(self.num_reps):
-                bias = self.bias.copy()(g.edges[:, None, None], edges_mask).squeeze()
-                # NOTE: bucket_size is for numerical stability in
-                # jax.ops.segment_* calls; this is typically only needed for
-                # testing implementation correctness
-                g = blk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
+        edges_mask = jnp.isfinite(g.edges)
+        g = self.gnn(g, edges_mask, training, **kwargs)
         x_t = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         f_dist = self.head(x_t, training)
         return self.output_fn(f_dist)
