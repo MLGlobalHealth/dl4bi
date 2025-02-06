@@ -90,8 +90,21 @@ def scipy_knn(q: jax.Array, r: jax.Array, k: int):
     return idx, d
 
 
+@jit
+def st_l2_dist(q: jax.Array, r: jax.Array):
+    """Spatio-temporal L2 distance that enforces temporal causality.
+
+    Temporal causality implies that all reference points, `r`,
+    occur at a time before or equal to the query poitns, `q`. The
+    time dimension is assumed to be the last channel of the last
+    dimension of each array, i.e. `{q,r}[..., -1]`.
+    """
+    d = l2_dist(q, r)
+    return jnp.where(r[..., -1] <= q[..., -1], d, jnp.inf)
+
+
 class kNN(nn.Module):
-    r"""Parellelized brute force kNN with optional `batch_size`.
+    r"""Parellelized kNN.
 
     Args:
         k: Number of neighbors per query point to retrieve.

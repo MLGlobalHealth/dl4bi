@@ -1,1 +1,1 @@
-from . import meta_regression, regression, vae, core
+from . import meta_learning, regression, vae, core

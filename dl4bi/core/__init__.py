@@ -12,6 +12,7 @@ from .attention import (
     MultiKernelAttention,
     MultiplicativeScorer,
     ProductKernelAttention,
+    RBFNetworkBiasedScanAttention,
     ScanAttention,
     SpatioTemporalMLPAttention,
     TISABiasedScanAttention,
@@ -25,7 +26,16 @@ from .attention import (
     exponential_scorer,
     rbf_scorer,
 )
-from .bias import DistanceBias, TISABias, zero_bias
+from .bias import (
+    DistanceBias,
+    RBFNetworkBias,
+    TISABias,
+    rbf_network_bias,
+    scanned_rbf_network_bias,
+    scanned_tisa_bias,
+    tisa_bias,
+    zero_bias,
+)
 from .conv import (
     ConvCNPBlock,
     ConvCNPNet,
@@ -42,6 +52,7 @@ from .dist import (
     bf_knn,
     kNN,
     scipy_knn,
+    st_l2_dist,
 )
 from .embed import (
     FixedSinusoidalEmbedding,
