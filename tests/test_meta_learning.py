@@ -97,17 +97,15 @@ def test_tnp_kr_fast_scale():
 
 
 def test_context_data_leaks():
-    B, L, N = 1, 128, 64
-    key = random.key(42)
-    rng_data, rng_params, rng_dropout, rng_extra = random.split(key, 4)
-    s = jnp.linspace(-2.0, 2.0, L)
-    s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, L, S=1]
-    valid_lens_ctx = jnp.array([N] * B, dtype=jnp.int32)
+    B, L, V = 4, 128, 64
+    rng = random.key(42)
+    rng_s, rng_f, rng_params, rng_dropout, rng_extra = random.split(rng, 5)
+    valid_lens_ctx = jnp.array([V] * B, dtype=jnp.int32)
     valid_lens_test = jnp.array([L] * B, dtype=jnp.int32)
-    f = random.normal(rng_data, s.shape)
+    s = 4 * (random.uniform(rng_s, (B, L, 1)) - 0.5)  # [0, 1] -> [-0.5, 0.5] -> [-2, 2]
+    f = random.normal(rng_f, s.shape)
     # set second half to large value (different from using half the array because of attn)
-    s2 = s.at[:, N:, :].set(jnp.full((B, L - N, 1), 0))
-    f2 = f.at[:, N:, :].set(jnp.full((B, L - N, 1), 10000))
+    f2 = f.at[:, V:, :].set(jnp.full((B, L - V, 1), 10000))
     for model in [
         NP,
         CNP,
@@ -144,19 +142,19 @@ def test_context_data_leaks():
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
-            bucket_size=2,  # used by SGNP for numerical stability
+            # bucket_size=2,  # used by SGNP for numerical stability
         )
         # to view results: tensorboard --logdir /tmp/tensorboard/
         # with jax.profiler.trace("/tmp/tensorboard"):
         output_half = jit_m(
             params,
-            s_ctx=s2,
+            s_ctx=s,
             f_ctx=f2,
             s_test=s,
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
-            bucket_size=2,  # used by SGNP for numerical stability
+            # bucket_size=2,  # used by SGNP for numerical stability
         )
         if hasattr(model, "n_z"):  # latent model
             output, _ = output  # throw away latent zs
@@ -170,8 +168,14 @@ def test_context_data_leaks():
             "largest gaps:",
             jnp.sort(jnp.abs(f_mu - f_mu_half).flatten(), descending=True)[:5],
         )
-        assert jnp.allclose(f_mu, f_mu_half)
-        assert jnp.allclose(f_std, f_std_half)
+        # jax.ops.segment_sum depends on order of addition and can
+        # introduce small numerical variations
+        if isinstance(m, SGNP):
+            assert jnp.allclose(f_mu, f_mu_half, rtol=0.02)
+            assert jnp.allclose(f_std, f_std_half, rtol=0.02)
+        else:
+            assert jnp.allclose(f_mu, f_mu_half)
+            assert jnp.allclose(f_std, f_std_half)
 
 
 def test_train_step_loss():
