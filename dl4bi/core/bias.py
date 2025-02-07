@@ -6,6 +6,34 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap
 from sps.kernels import l2_dist
+import operator as op
+
+
+class _BiasOp(nn.Module):
+    bias_1: nn.Module
+    bias_2: nn.Module
+    op: op.add
+
+    @nn.compact
+    def __call__(self, x: jax.Array, mask: Optional[jax.Array] = None):
+        return self.bias_1(x) + self.bias_2(x)
+
+
+class _BiasMul(nn.Module):
+    bias_1: nn.Module
+    bias_2: nn.Module
+
+    @nn.compact
+    def __call__(self, x: jax.Array, mask: Optional[jax.Array] = None):
+        return self.bias_1(x) + self.bias_2(x)
+
+
+class Bias(nn.Module):
+    def __add__(self, other):
+        return _BiasAdd(self, other)
+
+    def __mul__(self, other):
+        return _BiasMultiply(self, other)
 
 
 class DistanceBias(nn.Module):
