@@ -51,7 +51,6 @@ from .dist import (
     approx_knn,
     bf_knn,
     kNN,
-    scipy_knn,
     st_l2_dist,
 )
 from .embed import (

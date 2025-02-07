@@ -1,12 +1,10 @@
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 
-import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import numpy as np
 from jax import jit, vmap
-from scipy.spatial import KDTree as spKDTree
 from sps.kernels import l2_dist
 
 
@@ -44,7 +42,7 @@ def approx_knn(
         return idx.flatten(), d
 
     idx, d = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
-    return idx, d.squeeze()  # d: [B, L, 1, K] -> [B, L, K]
+    return idx, jnp.swapaxes(d, -2, -1)  # d: [B, Q, 1, R] -> [B, Q, R, 1]
 
 
 @partial(jit, static_argnames=("k", "dist", "num_q_parallel"))
@@ -77,17 +75,7 @@ def bf_knn(
         return idx[:, :k].flatten(), d[:, :k]
 
     idx, d = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
-    return idx, d.squeeze()  # d: [B, L, 1, K] -> [B, L, K]
-
-
-@partial(jit, static_argnames=("k",))
-def scipy_knn(q: jax.Array, r: jax.Array, k: int):
-    r"""Slower than JAX's O(n^2) implementation for small tasks, but scales in $O(N\log N)$."""
-    d_shape = jax.ShapeDtypeStruct((q.shape[0], k), jnp.float32)
-    idx_shape = jax.ShapeDtypeStruct((q.shape[0], k), jnp.int32)
-    f = lambda q, r, k: spKDTree(np.array(r)).query(np.array(q), int(k))
-    d, idx = jax.pure_callback(f, (d_shape, idx_shape), q, r, k)
-    return idx, d
+    return idx, jnp.swapaxes(d, -2, -1)  # d: [B, Q, 1, R] -> [B, Q, R, 1]
 
 
 @jit
@@ -103,7 +91,8 @@ def st_l2_dist(q: jax.Array, r: jax.Array):
     return jnp.where(r[..., -1] <= q[..., -1], d, jnp.inf)
 
 
-class kNN(nn.Module):
+@dataclass(frozen=True)
+class kNN:
     r"""Parellelized kNN.
 
     Args:
@@ -121,9 +110,6 @@ class kNN(nn.Module):
     num_q_parallel: int = 1024
     method: Callable = approx_knn
 
-    @nn.compact
     def __call__(self, q, r):
-        vknn = vmap(
-            lambda q, r: self.method(q, r, self.k, self.dist, self.num_q_parallel)
-        )
-        return vknn(q, r)
+        f = lambda q, r: self.method(q, r, self.k, self.dist, self.num_q_parallel)
+        return jit(vmap(f))(q, r)
