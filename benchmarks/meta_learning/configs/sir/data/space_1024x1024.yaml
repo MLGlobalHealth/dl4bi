@@ -1,4 +1,5 @@
-name: 1024x1024
+name: space_1024x1024
+type: space
 s:
   - start: -32
     stop: 32

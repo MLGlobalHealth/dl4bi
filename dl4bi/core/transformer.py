@@ -234,20 +234,3 @@ class KRBlock(nn.Module):
         qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)
         qvs_5, kvs_5 = self.ffn(qvs_4, training), self.ffn(kvs_4, training)
         return qvs_3 + drop(qvs_5), kvs_3 + drop(kvs_5)
-
-
-# TODO(danj): test conditioning on globals
-class GraphKRBlock(nn.Module):
-    attn: nn.Module = MultiHeadGraphAttention()
-    norm: nn.Module = nn.LayerNorm()
-    ffn: nn.Module = MLP([256, 64], nn.gelu)
-    p_dropout: float = 0.0
-
-    @nn.compact
-    def __call__(self, g: GraphsTuple, training: bool, **kwargs):
-        drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        n_0, *_ = g
-        n_1, _ = self.attn(g._replace(nodes=self.norm(n_0)), training, **kwargs)
-        n_2 = n_0 + drop(n_1)
-        n_3 = self.ffn(self.norm.copy()(n_2), training)
-        return g._replace(nodes=n_2 + drop(n_3))

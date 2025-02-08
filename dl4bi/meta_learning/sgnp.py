@@ -6,24 +6,12 @@ import jax
 import jax.numpy as jnp
 from jraph import GraphsTuple
 
-from ..core import (
-    MLP,
-    GraphKRBlock,
-    RBFNetworkBias,
-    kNN,
-    mask_from_valid_lens,
-)
+from ..core import MLP, EdgeBiasedGAT, kNN, mask_from_valid_lens
 from .transform import diagonal_mvn
 
 
-# TODO(danj): add masks for when distances are non-finite, e.g. temporal causality
 class SGNP(nn.Module):
-    """SGNP
-
-    .. warning::
-        `min(valid_lens_ctx)` and `min(valid_lens_test)` must both
-        be greater than `k`.
-    """
+    """SGNP."""
 
     knn: Callable = kNN()
     num_blks: int = 6
@@ -32,9 +20,8 @@ class SGNP(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    bias: nn.Module = RBFNetworkBias()
-    blk: nn.Module = GraphKRBlock()
     norm: nn.Module = nn.LayerNorm()
+    gnn: nn.Module = EdgeBiasedGAT()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
     output_fn: Callable = diagonal_mvn
 
@@ -61,28 +48,46 @@ class SGNP(nn.Module):
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         x_ctx, x_test = self.norm(self.embed_all(ctx)), self.norm(self.embed_all(test))
-        (s_cc, d_cc), (s_ct, d_ct) = self.knn(s_ctx, s_send), self.knn(s_test, s_send)
-        s_cc = s_cc.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_c * K)
-        s_ct = s_ct.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_t * K)
+        # nodes for the graph are all the context nodes followed by all test nodes
         nodes = jnp.vstack([x_ctx.reshape(B * N_c, -1), x_test.reshape(B * N_t, -1)])
-        g = GraphsTuple(
-            nodes,
-            edges=stack(d_cc.flatten(), d_ct.flatten()),
-            senders=stack(s_cc, s_ct),
-            receivers=jnp.repeat(jnp.arange(B * (N_c + N_t)), K),
-            n_node=jnp.array([B * (N_c + N_t)]),
-            n_edge=jnp.array([B * (N_c + N_t) * K]),
-            globals=None,
-        )
-        edges_mask = jnp.isfinite(g.edges)[:, None, None]
-        for _ in range(self.num_blks):
-            blk = self.blk.copy()
-            for _ in range(self.num_reps):
-                bias = self.bias.copy()(g.edges[:, None, None], edges_mask).squeeze()
-                # NOTE: bucket_size is for numerical stability in
-                # jax.ops.segment_* calls; this is typically only needed for
-                # testing implementation correctness
-                g = blk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
+        g = kwargs.get("graph")
+        if g is None:
+            g = self.build_graph(nodes, s_ctx, s_test, s_send)
+        else:  # reuse graph, replacing nodes
+            g = g._replace(nodes=nodes)
+        g = self.gnn(g, training, **kwargs)
         x_t = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         f_dist = self.head(x_t, training)
         return self.output_fn(f_dist)
+
+    def build_graph(
+        self,
+        nodes: jax.Array,
+        s_ctx: jax.Array,
+        s_test: jax.Array,
+        s_send: jax.Array,
+    ):
+        """Builds a single graph from a batch of tasks.
+
+        This assumes nodes represent all test points stacked after all context
+        points, i.e. [B*N_c, B*N_t].
+        """
+        (B, N_t), N_c, K = s_test.shape[:-1], s_ctx.shape[1], self.knn.k
+        s_cc, d_cc = self.knn(s_ctx, s_send)  # s_cc: [B, Q_c, K], d_cc: [B, Q_c, K, D]
+        s_ct, d_ct = self.knn(s_test, s_send)  # s_ct: [B, Q_t, K], d_ct: [B, Q_t, K, D]
+        D = d_cc.shape[-1]
+        edges = jnp.vstack([d_cc.reshape(-1, D), d_ct.reshape(-1, D)])
+        edge_mask = jnp.all(jnp.isfinite(edges), axis=-1)
+        # convert indices from batch level to graph level
+        s_cc = s_cc.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_c * K)
+        s_ct = s_ct.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_t * K)
+        g = GraphsTuple(
+            nodes,
+            edges,
+            receivers=jnp.repeat(jnp.arange(B * (N_c + N_t)), K),
+            senders=jnp.hstack([s_cc, s_ct]),
+            n_node=jnp.array([B * (N_c + N_t)]),
+            n_edge=jnp.array([B * (N_c + N_t) * K]),
+            globals={"edge_mask": edge_mask},
+        )
+        return g

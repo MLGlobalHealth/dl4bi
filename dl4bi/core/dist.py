@@ -1,129 +1,37 @@
-from collections.abc import Callable
 from functools import partial
 
-import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import numpy as np
-from jax import jit, vmap
-from scipy.spatial import KDTree as spKDTree
+from jax import jit
 from sps.kernels import l2_dist
 
 
-@partial(jit, static_argnames=("k", "dist", "num_q_parallel"))
-def approx_knn(
-    q: jax.Array,
-    r: jax.Array,
-    k: int,
-    dist: Callable = l2_dist,
-    num_q_parallel: int = 1024,
-    recall_target: float = 0.95,
+@partial(jit, static_argnames=("causal_t",))
+def dist_spatiotemporal(
+    q: jax.Array,  # [Q, D]
+    r: jax.Array,  # [R, D]
+    causal_t: bool = False,
 ):
-    r"""Parellelized approximate kNN.
+    """Returns a spatiotemporal distance matrix of shape `[Q, R, 2]`.
 
-    Args:
-        q: Query points.
-        r: Reference points.
-        k: Number of neighbors per query point to retrieve.
-        dist: Distance function to use.
-        num_q_parallel: Number of queries to run in parallel.
-        recall_target: Target percent of returned k values
-            are actually in top-k. Less than 1.0 can result in
-            much faster runtimes.
+    This assumes that the spatial dims of `q` and `r` are all  but the last,
+    i.e. `{q,r}[:, :-1]`, and the temporal dim is the last dim,
+    i.e. `{q,r}[:, -1]`.
 
+    The entries in `[Q, R, 0]` represent the L2 spatial distance.
+    The entries in `[Q, R, 1]` represent the signed L1 temporal distance.
 
-    Returns:
-        Index and distance arrays, each of dimension |r| x k.
+    For example, for `q[i] = [x=2, y=3, t=1]` and `r[j] = [x=1, y=0, t=0]`,
+    this will return `m[i, j] = [sqrt(10), -1]`.
     """
-
-    def process_batch(q_i: jax.Array):
-        # add leading dim to q_i since map processes each q_i individually,
-        # even when batch_size is >= 1
-        d = dist(q_i[None, ...], r)
-        d, idx = jax.lax.approx_min_k(d, k, recall_target=recall_target)
-        return idx.flatten(), d
-
-    idx, d = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
-    return idx, d.squeeze()  # d: [B, L, 1, K] -> [B, L, K]
-
-
-@partial(jit, static_argnames=("k", "dist", "num_q_parallel"))
-def bf_knn(
-    q: jax.Array,
-    r: jax.Array,
-    k: int,
-    dist: Callable = l2_dist,
-    num_q_parallel: int = 1024,
-):
-    r"""Parellelized brute force kNN.
-
-    Args:
-        q: Query points.
-        r: Reference points.
-        k: Number of neighbors per query point to retrieve.
-        dist: Distance function to use.
-        num_q_parallel: Number of queries to run in parallel.
-
-    Returns:
-        Index and distance arrays, each of dimension |r| x k.
-    """
-
-    def process_batch(q_i: jax.Array):
-        # add leading dim to q_i since map processes each q_i individually,
-        # even when batch_size is >= 1
-        d = dist(q_i[None, ...], r)
-        idx = jnp.argsort(d, axis=-1)
-        d = jnp.take_along_axis(d, idx, axis=-1)
-        return idx[:, :k].flatten(), d[:, :k]
-
-    idx, d = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
-    return idx, d.squeeze()  # d: [B, L, 1, K] -> [B, L, K]
-
-
-@partial(jit, static_argnames=("k",))
-def scipy_knn(q: jax.Array, r: jax.Array, k: int):
-    r"""Slower than JAX's O(n^2) implementation for small tasks, but scales in $O(N\log N)$."""
-    d_shape = jax.ShapeDtypeStruct((q.shape[0], k), jnp.float32)
-    idx_shape = jax.ShapeDtypeStruct((q.shape[0], k), jnp.int32)
-    f = lambda q, r, k: spKDTree(np.array(r)).query(np.array(q), int(k))
-    d, idx = jax.pure_callback(f, (d_shape, idx_shape), q, r, k)
-    return idx, d
+    d_s = dist_spatial(q[..., :-1], r[..., :-1])  # [Q, R, 1] L2 dist
+    d_t = -q[..., [-1]] + r[..., [-1]].T  # [Q, R] L1 temporal dist
+    d = jnp.concatenate([d_s, d_t[..., None]], axis=-1)  # [Q, R, 2]
+    if causal_t:  # set distances to inf for future timesteps
+        return jnp.where((d_t <= 0)[..., None], d, jnp.inf)
+    return d
 
 
 @jit
-def st_l2_dist(q: jax.Array, r: jax.Array):
-    """Spatio-temporal L2 distance that enforces temporal causality.
-
-    Temporal causality implies that all reference points, `r`,
-    occur at a time before or equal to the query poitns, `q`. The
-    time dimension is assumed to be the last channel of the last
-    dimension of each array, i.e. `{q,r}[..., -1]`.
-    """
-    d = l2_dist(q, r)
-    return jnp.where(r[..., -1] <= q[..., -1], d, jnp.inf)
-
-
-class kNN(nn.Module):
-    r"""Parellelized kNN.
-
-    Args:
-        k: Number of neighbors per query point to retrieve.
-        dist: Distance function to use.
-        num_q_parallel: Number of queries to run in parallel for each element in
-            the batch.
-
-    Returns:
-        An instance of `kNN`.
-    """
-
-    k: int = 16
-    dist: Callable = l2_dist
-    num_q_parallel: int = 1024
-    method: Callable = approx_knn
-
-    @nn.compact
-    def __call__(self, q, r):
-        vknn = vmap(
-            lambda q, r: self.method(q, r, self.k, self.dist, self.num_q_parallel)
-        )
-        return vknn(q, r)
+def dist_spatial(q: jax.Array, r: jax.Array):
+    return l2_dist(q, r)[..., None]  # [Q, R, D=1]

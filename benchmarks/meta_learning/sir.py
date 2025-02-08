@@ -112,7 +112,13 @@ def main(cfg: DictConfig):
 
 
 def build_dataloader(data: DictConfig, priors: DictConfig):
-    """A 2D Lattice SIR dataloader."""
+    if data.type == "space":
+        return build_space_dataloader(data, priors)
+    return build_time_dataloader(data, priors)
+
+
+def build_space_dataloader(data: DictConfig, priors: DictConfig):
+    """A 2D Lattice SIR dataloader over space only."""
     sir = instantiate(priors)
     dims, D_s = tuple([dim.num for dim in data.s]), len(data.s)
     Lc_min, Lc_max, Lt = data.num_ctx.min, data.num_ctx.max, data.num_test
@@ -146,6 +152,51 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
             rng_sim, rng_tx_pre, rng = random.split(rng, 3)
             steps, *_ = sir.simulate(rng_sim, dims, N)
             steps = transform_and_permute(rng_tx_pre, steps)
+            for i in range(N // B):
+                rng_i, rng = random.split(rng)
+                steps_i = steps[i * B : (i + 1) * B].reshape(B, L, 3)
+                s_i, f_i, valid_lens_ctx, inv_permute_idx = create_batch(rng_i, steps_i)
+                yield (
+                    s_i[:, :Lc_max, :],
+                    f_i[:, :Lc_max, :],
+                    valid_lens_ctx,
+                    s_i,
+                    f_i,
+                    valid_lens_test,
+                    s,  # add full originals for use in callbacks, e.g. log_plots
+                    steps_i,
+                    inv_permute_idx,
+                )
+
+    return dataloader
+
+
+def build_time_dataloader(data: DictConfig, priors: DictConfig):
+    """A 2D Lattice SIR dataloader over time."""
+    sir = instantiate(priors)
+    dims, D_s = tuple([dim.num for dim in data.s]), len(data.s)
+    Lc_min, Lc_max, Lt = data.num_ctx.min, data.num_ctx.max, data.num_test
+    L, B, N = math.prod(dims), data.batch_size, data.num_steps
+    s_grid = build_grid(data.s).reshape(-1, D_s)  # flatten spatial dims
+    s = jnp.repeat(s_grid[None, ...], B, axis=0)
+    valid_lens_test = jnp.repeat(Lt, B)
+
+    @jit
+    def create_batch(rng: jax.Array, steps: jax.Array):
+        rng_permute, rng_valid = random.split(rng)
+        permute_idx = random.choice(rng_permute, L, (L,), replace=False)
+        inv_permute_idx = jnp.argsort(permute_idx)
+        valid_lens_ctx = random.randint(rng_valid, (B,), Lc_min, Lc_max)
+        s_i = s[:, permute_idx, :]
+        f_i = steps[:, permute_idx, :]
+        return s_i[:, :Lt, :], f_i[:, :Lt, :], valid_lens_ctx, inv_permute_idx
+
+    def dataloader(rng: jax.Array):
+        while True:
+            steps = None  # signal garbage collect
+            rng_sim, rng_frames, rng = random.split(rng, 3)
+            steps, *_ = sir.simulate(rng_sim, dims, N)
+            steps = rsi_to_rgb(steps)
             for i in range(N // B):
                 rng_i, rng = random.split(rng)
                 steps_i = steps[i * B : (i + 1) * B].reshape(B, L, 3)

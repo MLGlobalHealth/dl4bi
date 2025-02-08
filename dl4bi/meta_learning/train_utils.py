@@ -26,15 +26,7 @@ from omegaconf import DictConfig, OmegaConf
 from optax.losses import safe_softmax_cross_entropy
 from orbax.checkpoint import PyTreeCheckpointer
 from sps.gp import GP
-from sps.kernels import (
-    l2_dist,
-    l2_dist_sq,
-    matern_1_2,
-    matern_3_2,
-    matern_5_2,
-    periodic,
-    rbf,
-)
+from sps.kernels import matern_1_2, matern_3_2, matern_5_2, periodic, rbf
 from sps.priors import Prior
 from sps.sir import LatticeSIR
 from sps.utils import build_grid

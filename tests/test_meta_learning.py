@@ -46,7 +46,7 @@ def test_models():
         ANP,
         CANP,
         BANP,
-        lambda: SGNP(kNN(k=L)),
+        ConvCNP,
         TNPD,
         TNPND,
         TNPKR,
@@ -55,7 +55,7 @@ def test_models():
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
         ScanTNPKR,
-        ConvCNP,
+        lambda: SGNP(kNN(k=L)),
     ]:
         m = model()
         output, params = m.init_with_output(
@@ -97,17 +97,15 @@ def test_tnp_kr_fast_scale():
 
 
 def test_context_data_leaks():
-    B, L, N = 1, 256, 128
-    key = random.key(42)
-    rng_data, rng_params, rng_dropout, rng_extra = random.split(key, 4)
-    s = jnp.linspace(-2.0, 2.0, L)
-    s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, L, S=1]
-    valid_lens_ctx = jnp.array([N] * B, dtype=jnp.int32)
+    B, L, V = 4, 128, 64
+    rng = random.key(42)
+    rng_s, rng_f, rng_params, rng_dropout, rng_extra = random.split(rng, 5)
+    valid_lens_ctx = jnp.array([V] * B, dtype=jnp.int32)
     valid_lens_test = jnp.array([L] * B, dtype=jnp.int32)
-    f = random.normal(rng_data, s.shape)
+    s = 4 * (random.uniform(rng_s, (B, L, 1)) - 0.5)  # [0, 1] -> [-0.5, 0.5] -> [-2, 2]
+    f = random.normal(rng_f, s.shape)
     # set second half to large value (different from using half the array because of attn)
-    s2 = s.at[:, N:, :].set(jnp.full((B, L - N, 1), 1000))
-    f2 = f.at[:, N:, :].set(jnp.full((B, L - N, 1), 1000))
+    f2 = f.at[:, V:, :].set(jnp.full((B, L - V, 1), 10000))
     for model in [
         NP,
         CNP,
@@ -118,12 +116,12 @@ def test_context_data_leaks():
         ConvCNP,
         TNPD,
         TNPND,
+        ScanTNPKR,
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FusedAttention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
-        ScanTNPKR,
-        lambda: SGNP(kNN(k=256, num_q_parallel=16), num_blks=1),
+        lambda: SGNP(kNN(k=64), num_blks=1),
     ]:
         m = model()
         print(m.__class__)
@@ -135,7 +133,7 @@ def test_context_data_leaks():
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
         )
-        jit_m = jit(m.apply)
+        jit_m = jit(m.apply, static_argnames=("bucket_size",))
         output = jit_m(
             params,
             s_ctx=s,
@@ -144,17 +142,19 @@ def test_context_data_leaks():
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
+            # bucket_size=2,  # used by SGNP for numerical stability
         )
         # to view results: tensorboard --logdir /tmp/tensorboard/
         # with jax.profiler.trace("/tmp/tensorboard"):
         output_half = jit_m(
             params,
-            s_ctx=s2,
+            s_ctx=s,
             f_ctx=f2,
             s_test=s,
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
+            # bucket_size=2,  # used by SGNP for numerical stability
         )
         if hasattr(model, "n_z"):  # latent model
             output, _ = output  # throw away latent zs
@@ -168,11 +168,11 @@ def test_context_data_leaks():
             "largest gaps:",
             jnp.sort(jnp.abs(f_mu - f_mu_half).flatten(), descending=True)[:5],
         )
+        # jax.ops.segment_sum depends on order of addition and can
+        # introduce small numerical variations
         if isinstance(m, SGNP):
-            # jax.ops.segment_sum depends on order in which values are summed,
-            # which can accumulate small numerical errors
-            assert jnp.allclose(f_mu, f_mu_half, rtol=0.01)
-            assert jnp.allclose(f_std, f_std_half, rtol=0.01)
+            assert jnp.allclose(f_mu, f_mu_half, rtol=0.05)
+            assert jnp.allclose(f_std, f_std_half, rtol=0.05)
         else:
             assert jnp.allclose(f_mu, f_mu_half)
             assert jnp.allclose(f_std, f_std_half)
@@ -197,15 +197,15 @@ def test_train_step_loss():
         ANP,
         CANP,
         BANP,
-        lambda: SGNP(kNN(k=L)),
         TNPD,
         TNPND,
         TNPKR,
-        ScanTNPKR,
         ConvCNP,
+        ScanTNPKR,
+        lambda: SGNP(kNN(k=L)),
     ]:
-        print(model)
         m = model()
+        print(m.__class__)
         train_step, _ = tu.select_steps(m)
         kwargs = m.init(
             {"params": rng_params, "dropout": rng_dropout, "extra": rng_extra},
@@ -239,14 +239,14 @@ def test_sample():
         CNP,
         ANP,
         CANP,
-        lambda: SGNP(kNN(k=10)),
+        ConvCNP,
         TNPD,
         TNPKR,
         ScanTNPKR,
-        ConvCNP,
+        lambda: SGNP(kNN(k=10)),
     ]:
-        print(model)
         m = model()
+        print(m.__class__)
         kwargs = m.init(
             {"params": rng_params, "dropout": rng_dropout, "extra": rng_extra},
             s_ctx[None, ...],

@@ -1,4 +1,5 @@
-name: 64x64
+name: time_64x64
+type: time
 s:
   - start: -2
     stop: 2
@@ -6,9 +7,8 @@ s:
   - start: -2
     stop: 2
     num: 64
-num_ctx:
-  min: 128 # ~3%
-  max: 512 # 12.5%
-num_test: 1024  # 25%
 num_steps: 25
-batch_size: 8
+num_ctx_frames:
+  min: 3
+  max: 5
+batch_size: 4
