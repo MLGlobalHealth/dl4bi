@@ -8,7 +8,7 @@ kwargs:
       dims: [256, 128, 64]
       act_fn: gelu
   dist:
-    func: l2_dist
+    func: dist_spatial
   bias:
     cls: RBFNetworkBias
     kwargs:

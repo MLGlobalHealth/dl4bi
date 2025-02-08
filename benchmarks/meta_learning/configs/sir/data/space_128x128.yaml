@@ -1,4 +1,5 @@
-name: 128x128
+name: space_128x128
+type: space
 s:
   - start: -4
     stop: 4

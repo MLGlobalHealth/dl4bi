@@ -4,8 +4,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import vmap
-from sps.kernels import l2_dist
+from jax import vmap, jit
 
 from ..core import (
     MLP,
@@ -13,6 +12,7 @@ from ..core import (
     MultiHeadAttention,
     RBFNetworkBias,
     RBFNetworkBiasedScanAttention,
+    dist_spatial,
 )
 from .transform import diagonal_mvn
 
@@ -48,7 +48,7 @@ class TNPKR(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    dist: Optional[Callable] = l2_dist
+    dist: Optional[Callable] = dist_spatial
     bias: Optional[nn.Module] = RBFNetworkBias()
     blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
@@ -102,7 +102,10 @@ class TNPKR(nn.Module):
         if self.dist is not None:
             vdist = vmap(self.dist)
             d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
-            d_qk_mask, d_kk_mask = jnp.isfinite(d_qk), jnp.isfinite(d_kk)
+            # NOTE: this assumes the sentinal for a masked value is an
+            # infinite value in any entry of the last dim of `d`
+            to_mask = jit(lambda d: jnp.any(jnp.isfinite(d), axis=-1))
+            d_qk_mask, d_kk_mask = to_mask(d_qk), to_mask(d_kk)
         for _ in range(self.num_blks):
             blk = self.blk.copy()  # new bias for every blk & rep
             for _ in range(self.num_reps):

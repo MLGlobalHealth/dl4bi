@@ -48,11 +48,8 @@ from .conv import (
     UNet,
 )
 from .dist import (
-    approx_knn,
-    bf_knn,
-    kNN,
-    scipy_knn,
-    st_l2_dist,
+    dist_spatial,
+    dist_spatiotemporal,
 )
 from .embed import (
     FixedSinusoidalEmbedding,
@@ -60,6 +57,15 @@ from .embed import (
     NeRFEmbedding,
     RBFRandomFourierFeatures,
     ResidualEmbedding,
+)
+from .gnn import EdgeBiasedGAT, GraphAttentionBlock
+from .knn import (
+    STkNN,
+    approx_knn,
+    bf_knn,
+    kNN,
+    st_approx_knn,
+    st_bf_knn,
 )
 from .metrics import (
     l2_dist_sq,
@@ -71,7 +77,6 @@ from .mle import gp_mle_bfgs, gp_mle_sgd
 from .mlp import MLP, MLPMixer, MLPMixerBlock
 from .preprocess import Whitener, condition_number
 from .transformer import (
-    GraphKRBlock,
     KRBlock,
     TransformerDecoder,
     TransformerDecoderBlock,
