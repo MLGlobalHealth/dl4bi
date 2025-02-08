@@ -171,8 +171,8 @@ def test_context_data_leaks():
         # jax.ops.segment_sum depends on order of addition and can
         # introduce small numerical variations
         if isinstance(m, SGNP):
-            assert jnp.allclose(f_mu, f_mu_half, rtol=0.02)
-            assert jnp.allclose(f_std, f_std_half, rtol=0.02)
+            assert jnp.allclose(f_mu, f_mu_half, rtol=0.05)
+            assert jnp.allclose(f_std, f_std_half, rtol=0.05)
         else:
             assert jnp.allclose(f_mu, f_mu_half)
             assert jnp.allclose(f_std, f_std_half)

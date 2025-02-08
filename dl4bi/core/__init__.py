@@ -30,6 +30,8 @@ from .bias import (
     DistanceBias,
     RBFNetworkBias,
     TISABias,
+    dist_spatial,
+    dist_spatiotemporal,
     rbf_network_bias,
     scanned_rbf_network_bias,
     scanned_tisa_bias,
@@ -48,12 +50,6 @@ from .conv import (
     TransitionBlock,
     UNet,
 )
-from .dist import (
-    approx_knn,
-    bf_knn,
-    kNN,
-    st_l2_dist,
-)
 from .embed import (
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
@@ -62,6 +58,11 @@ from .embed import (
     ResidualEmbedding,
 )
 from .gnn import EdgeBiasedGAT, GraphAttentionBlock
+from .knn import (
+    approx_knn,
+    bf_knn,
+    kNN,
+)
 from .metrics import (
     l2_dist_sq,
     mean_absolute_calibration_error,

@@ -78,19 +78,6 @@ def bf_knn(
     return idx, jnp.swapaxes(d, -2, -1)  # d: [B, Q, 1, R] -> [B, Q, R, 1]
 
 
-@jit
-def st_l2_dist(q: jax.Array, r: jax.Array):
-    """Spatio-temporal L2 distance that enforces temporal causality.
-
-    Temporal causality implies that all reference points, `r`,
-    occur at a time before or equal to the query poitns, `q`. The
-    time dimension is assumed to be the last channel of the last
-    dimension of each array, i.e. `{q,r}[..., -1]`.
-    """
-    d = l2_dist(q, r)
-    return jnp.where(r[..., -1] <= q[..., -1], d, jnp.inf)
-
-
 @dataclass(frozen=True)
 class kNN:
     r"""Parellelized kNN.
