@@ -4,7 +4,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import vmap, jit
+from jax import jit, vmap
 
 from ..core import (
     MLP,
