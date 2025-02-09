@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import pickle
 from functools import partial
 from pathlib import Path
 from time import time
@@ -115,13 +116,13 @@ def build_dataloader(prior_pred: Callable, data: DictConfig):
         x = random.normal(rng_x, (L, D))  # features for every location
         s_r = random.uniform(rng_s, (Nc_max, S), jnp.float32, s_min, s_max)
         s = jnp.vstack([s_r, s_g])
-        f = prior_pred(rng, x, s, B)  # x: [L, D], s: [L, S], f: [B, L, 1]
+        f, *rest = prior_pred(rng, x, s, B)  # x: [L, D], s: [L, S], f: [B, L, 1]
         x, s = batchify(x), batchify(s)  # x: [B, L, D], s: [B, L, S]
         valid_lens_ctx = random.randint(rng_v, (B,), Nc_min, Nc_max)
         s = jnp.concatenate([s, x], axis=-1)  # [B, L, S + D]
         s_ctx = s[:, :Nc_max, :]
         f_ctx = f[:, :Nc_max, :]
-        return s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test
+        return s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, *rest
 
     def dataloader(rng: jax.Array):
         while True:
@@ -145,9 +146,9 @@ def jax_spatial_prior_pred_f(
     """
     rng_gp, rng_rest = random.split(rng)
     # NOTE: can't jit this; hlo lowering fails on cholesky?
-    f_mu_s, *_ = GP(rbf).simulate(rng_gp, s, batch_size)
-    f = _jax_spatial_prior_pred_rest(rng_rest, x, f_mu_s.squeeze())
-    return f[..., None]  # [B, L, 1]
+    f_mu_s, _, ls, *_ = GP(rbf).simulate(rng_gp, s, batch_size)
+    f, beta, f_sigma = _jax_spatial_prior_pred_rest(rng_rest, x, f_mu_s.squeeze())
+    return f[..., None], ls, beta, f_sigma  # f: [B, L, 1]
 
 
 @jit
@@ -158,7 +159,7 @@ def _jax_spatial_prior_pred_rest(rng: jax.Array, x: jax.Array, f_mu_s: jax.Array
     f_mu_x = beta @ x.T  # [B, L]
     f_sigma = 0.1 * jnp.abs(random.normal(rng_sigma, (B,)))
     f = f_mu_x + f_mu_s + f_sigma[:, None] * random.normal(rng_noise, (B, L))
-    return f
+    return f, beta, f_sigma
 
 
 @partial(jit, static_argnames=("batch_size",))
@@ -171,7 +172,7 @@ def numpyro_spatial_prior_pred_f(
     B = batch_size
     prior_pred = Predictive(numpyro_spatial_model, num_samples=B)
     samples = prior_pred(rng, x=x, s=s)
-    return samples["f"][..., None]
+    return samples["f"][..., None], samples["ls"], samples["beta"], samples["f_sigma"]
 
 
 def numpyro_spatial_model(
@@ -197,12 +198,12 @@ def numpyro_spatial_model(
     f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(jnp.zeros(L), k))
     f_mu = f_mu_x + f_mu_s
     f_sigma = numpyro.sample("f_sigma", dist.HalfNormal(0.1))
-    mask = jnp.arange(L) < (num_f_obs or L)
-    with numpyro.handlers.mask(mask=mask):
-        numpyro.sample("f", dist.Normal(f_mu, f_sigma), obs=f)
+    numpyro.sample("f", dist.Normal(f_mu, f_sigma), obs=f)
+    # mask = jnp.arange(L) < (num_f_obs or L)
+    # with numpyro.handlers.mask(mask=mask):
+    #     numpyro.sample("f", dist.Normal(f_mu, f_sigma), obs=f)
 
 
-# TODO(danj): implement
 def compare_inference(
     rng: jax.Array,
     model_path: Path,
@@ -214,41 +215,55 @@ def compare_inference(
     data.batch_size = 1  # only generate one sample
     dataloader = build_dataloader(numpyro_spatial_prior_pred_f, data)
     batches = dataloader(rng_sample)
-    _, _, _, s, f, _ = next(batches)
+    _, _, _, s, f, _, ls, beta, f_sigma = next(batches)
     valid_lens_ctx = jnp.array([Nc])
-    s_ctx, f_ctx, s_test, f_test = s[:, :Nc], f[:, :Nc], s[:, Nc:], f[:, Nc:]
-    # state, _ = load_ckpt(model_path)
-    # # compile in first run, time in second
-    # for i in range(2):
-    #     start = time()
-    #     f_mu, f_std = jit(state.apply_fn)(
-    #         {"params": state.params, **state.kwargs},
-    #         s_ctx,
-    #         f_ctx,
-    #         s_test,
-    #         valid_lens_ctx,
-    #         valid_lens_test=None,
-    #         rngs={"extra": rng_extra},
-    #     )
-    # print(f"Seconds elapsed for model inference: {time() - start}")
-    _x, _s, _f = s[0, :S], s[0, S:], f[0]
-    # TODO(danj): need to mask f
+    s_ctx, f_ctx = s[:, :Nc], f[:, :Nc]
+    state, _ = load_ckpt(model_path)
+    # compile in first run, time in second
+    for i in range(2):
+        start = time()
+        f_mu_model, f_std_model = jit(state.apply_fn)(
+            {"params": state.params, **state.kwargs},
+            s_ctx,
+            f_ctx,
+            s,
+            valid_lens_ctx,
+            valid_lens_test=None,
+            rngs={"extra": rng_extra},
+        )
+    print(f"Seconds elapsed for model inference: {time() - start}")
+    # _s, _x, _f = s[0, :, :S].squeeze(), s[0, :, S:], f[0]
+    _s, _x, _f = s[0, :Nc, :S].squeeze(), s[0, :Nc, S:], f[0, :Nc]
     start = time()
     mcmc = run_mcmc(rng_mcmc, numpyro_spatial_model, _x, _s, _f, Nc, infer.mcmc)
     print(f"Seconds elapsed for MCMC inference: {time() - start}")
     mcmc.print_summary()
     post = mcmc.get_samples()
-    post_pred = Predictive(
-        numpyro_spatial_model,
-        post,
-        num_samples=infer.post_pred.num_samples,
+    post_pred = Predictive(numpyro_spatial_model, post)
+    post_pred_samples = jit(post_pred)(rng_pp, _x, _s)
+    f_pp = post_pred_samples["f"]
+    post.update(
+        {
+            "x": _x,
+            "s": _s,
+            "Nc": Nc,
+            "f_mu_model": f_mu_model.squeeze(),
+            "f_std_model": f_std_model.squeeze(),
+            "f_mu_mcmc": jnp.mean(f_pp, axis=0),
+            "f_std_mcmc": jnp.std(f_pp, axis=0),
+            "f_pp": f_pp,
+            "f_true": _f,
+            "ls_true": ls,
+            "beta_true": beta,
+            "f_sigma_true": f_sigma,
+        }
     )
-    post_pred_samples = jit(post_pred)(rng_pp, _x, _s, _f, Nc)
-    print(post_pred_samples["f"].shape)
-    # 3. Run MCMC on it and extract posterior predictive samples, save them
-    # 4. Calculate marginal posterior predictive for each sample by taking mean and var
-    #  of posterior predictive
-    # 5. Calculate marginal log likelihood of actual data under each method
+    with open("compare_inference.pkl", "wb") as f:
+        pickle.dump(post, f)
+    # TODO(danj): follow this tutorial to get predictive: https://num.pyro.ai/en/stable/examples/gp.html
+    # TODO(danj): create a simple GP only model
+    # TODO(danj): record f_mu for the real model
+    # TODO(danj): calculate comparison metrics, LL under real data?
 
 
 def run_mcmc(
@@ -258,13 +273,13 @@ def run_mcmc(
     s: jax.Array,
     f: jax.Array,
     num_f_obs: int,
-    mcmc: DictConfig,
+    cfg: DictConfig,
 ):
     mcmc = MCMC(
         NUTS(model),
-        num_warmup=mcmc.num_warmup,
-        num_samples=mcmc.num_samples,
-        num_chains=mcmc.num_chains,
+        num_warmup=cfg.num_warmup,
+        num_samples=cfg.num_samples,
+        num_chains=cfg.num_chains,
     )
     mcmc.run(rng, x, s, f, num_f_obs)
     return mcmc
