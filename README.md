@@ -2,7 +2,8 @@
 
 ## Install
 1. Install [jax](https://jax.readthedocs.io/en/latest/installation.html)
-2. Install the `dl4bi` package from git:
+2. Install [numpyro](https://num.pyro.ai/en/stable/getting_started.html#installation)
+3. Install the `dl4bi` package from git:
 ```bash
 pip install -U --force-reinstall git+ssh://git@github.com/MLGlobalHealth/dl4bi.git
 ```
