@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 from functools import partial
 from pathlib import Path
+from time import time
 from typing import Callable, Optional
 
 import hydra
@@ -22,29 +23,23 @@ from dl4bi.meta_learning.train_utils import (
     cosine_annealing_lr,
     evaluate,
     instantiate,
+    load_ckpt,
     save_ckpt,
     select_steps,
     train,
 )
 
 # TODO:
-# 1. Add inference
-# 2. Get marginal predictions f_mu, f_sigma from posterior
-# 3. Add plots
-#
+# Do inference comparison
 # Can you use distance bias on covariates too??
 # Can we do House Electricity Consumption dataset?? (one million point GP paper)
-
-# mcmc = infer(rng_mcmc, args, numpyro_spatial_model, s, f)
-# mcmc.print_summary()
-# posterior_samples = mcmc.get_samples()
-# ll = log_likelihood(numpryo_spatial_model, posterior_samples, s=s, f=f)
-# print(ll)
 
 
 @hydra.main("configs/hier_bayes", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
+    path = f"results/{cfg.project}/{cfg.seed}/{run_name}"
+    path = Path(path)
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
@@ -54,6 +49,9 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
+    if cfg.infer:
+        model_path = path.with_suffix(".ckpt")
+        return compare_inference(rng, model_path, cfg.data, cfg.infer)
     rng_train, rng_test = random.split(rng)
     # NOTE: sampling from pure jax model since it only inverts the GP
     # covariance matrix once per batch; this also means that each batch
@@ -93,8 +91,6 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path = f"results/{cfg.project}/{cfg.seed}/{run_name}"
-    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
@@ -202,15 +198,63 @@ def numpyro_spatial_model(
     numpyro.sample("f", dist.Normal(f_mu_x + f_mu_s, f_sigma))
 
 
-def infer(rng, args, model, s, f):
-    sampler = NUTS(model)
+# TODO(danj): implement
+def compare_inference(
+    rng: jax.Array,
+    model_path: Path,
+    data: DictConfig,
+    infer: DictConfig,
+):
+    Nc, S = infer.num_ctx, len(data.s)
+    rng_sample, rng_extra, rng_mcmc = random.split(rng, 3)
+    data.batch_size = 1  # only generate one sample
+    dataloader = build_dataloader(numpyro_spatial_prior_pred_f, data)
+    batches = dataloader(rng_sample)
+    _, _, _, s, f, _ = next(batches)
+    valid_lens_ctx = jnp.array([Nc])
+    s_ctx, f_ctx, s_test, f_test = s[:, :Nc], f[:, :Nc], s[:, Nc:], f[:, Nc:]
+    state, _ = load_ckpt(model_path)
+    # compile in first run, time in second
+    for i in range(2):
+        start = time()
+        f_mu, f_std = jit(state.apply_fn)(
+            {"params": state.params, **state.kwargs},
+            s_ctx,
+            f_ctx,
+            s_test,
+            valid_lens_ctx,
+            valid_lens_test=None,
+            rngs={"extra": rng_extra},
+        )
+    print(f"Seconds elapsed for model inference: {time() - start}")
+    _x, _s, _f = s[0, :S], s[0, S:], f[0]
+    # TODO(danj): need to mask f
+    start = time()
+    mcmc = run_mcmc(rng_mcmc, numpyro_spatial_model, _x, _s, _f, infer)
+    print(f"Seconds elapsed for MCMC inference: {time() - start}")
+    mcmc.print_summary()
+    post_pred = mcmc.get_samples()
+    # 3. Run MCMC on it and extract posterior predictive samples, save them
+    # 4. Calculate marginal posterior predictive for each sample by taking mean and var
+    #  of posterior predictive
+    # 5. Calculate marginal log likelihood of actual data under each method
+
+
+def run_mcmc(
+    rng: jax.Array,
+    model: Callable,
+    x: jax.Array,
+    s: jax.Array,
+    f: jax.Array,
+    infer: DictConfig,
+):
     mcmc = MCMC(
-        sampler,
-        num_warmup=args.num_warmup,
-        num_samples=args.num_samples,
-        num_chains=args.num_chains,
+        NUTS(model),
+        num_warmup=infer.mcmc.num_warmup,
+        num_samples=infer.mcmc.num_samples,
+        num_chains=infer.mcmc.num_chains,
     )
-    mcmc.run(rng, s, f)
+    mcmc.run(rng, x, s, f)
     return mcmc
 
 
