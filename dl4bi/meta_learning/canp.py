@@ -4,7 +4,8 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-from ..core import MLP, MultiHeadAttention
+from ..core.attention import MultiHeadAttention
+from ..core.mlp import MLP
 from .transform import diagonal_mvn
 
 

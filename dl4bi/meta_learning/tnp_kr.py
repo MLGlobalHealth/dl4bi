@@ -6,14 +6,11 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap
 
-from ..core import (
-    MLP,
-    KRBlock,
-    MultiHeadAttention,
-    RBFNetworkBias,
-    RBFNetworkBiasedScanAttention,
-    dist_spatial,
-)
+from ..core.attention import MultiHeadAttention, RBFNetworkBiasedScanAttention
+from ..core.bias import RBFNetworkBias
+from ..core.dist import dist_spatial
+from ..core.mlp import MLP
+from ..core.transformer import KRBlock
 from .transform import diagonal_mvn
 
 

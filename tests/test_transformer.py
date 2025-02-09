@@ -1,17 +1,21 @@
 import jax.numpy as jnp
 from jax import random
 
-from dl4bi.core import (
+from dl4bi.core.attention import (
     MLP,
     AdditiveScorer,
     Attention,
     DotScorer,
     FastAttention,
-    FixedSinusoidalEmbedding,
-    GaussianFourierEmbedding,
     MultiHeadAttention,
     MultiplicativeScorer,
+)
+from dl4bi.core.embed import (
+    FixedSinusoidalEmbedding,
+    GaussianFourierEmbedding,
     NeRFEmbedding,
+)
+from dl4bi.core.transformer import (
     TransformerDecoder,
     TransformerDecoderBlock,
     TransformerEncoder,

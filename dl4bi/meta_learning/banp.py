@@ -6,7 +6,9 @@ import jax.numpy as jnp
 from jax import jit, random
 from jax.lax import stop_gradient as no_grad
 
-from ..core import MLP, MultiHeadAttention, bootstrap, mask_from_valid_lens
+from ..core.attention import MultiHeadAttention
+from ..core.mlp import MLP
+from ..core.utils import bootstrap, mask_from_valid_lens
 from .transform import diagonal_mvn
 
 

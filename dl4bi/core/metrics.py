@@ -9,41 +9,6 @@ from jax.scipy.stats import norm
 from jax.typing import ArrayLike
 
 
-@jit
-def l2_dist_sq(x: jax.Array, y: jax.Array) -> jax.Array:
-    """L2 distance between two [..., D] arrays.
-
-    Args:
-        x: Input array of size `[..., D]`.
-        y: Input array of size `[..., D]`.
-
-    Returns:
-        Matrix of all pairwise distances.
-    """
-    x, y = prepare_dims(x, y)
-    return (x**2).sum(-1)[:, None] + (y**2).sum(-1).T - 2 * x @ y.T
-
-
-@jit
-def prepare_dims(x: jax.Array, y: jax.Array) -> tuple[jax.Array, jax.Array]:
-    """Prepares dims for use in kernel functions.
-
-    Args:
-        x: Input array of size `[..., D]`.
-        y: Input array of size `[..., D]`.
-
-    Returns:
-        Two `[N, D]` dimensional arrays.
-    """
-    if x.ndim == 1:
-        x = x[:, jnp.newaxis]
-    if y.ndim == 1:
-        y = y[:, jnp.newaxis]
-    x = x.reshape(-1, x.shape[-1])
-    y = y.reshape(-1, y.shape[-1])
-    return x, y
-
-
 def mvn_logpdf(
     x: ArrayLike,
     mean: ArrayLike,

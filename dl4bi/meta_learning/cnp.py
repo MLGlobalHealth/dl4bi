@@ -4,7 +4,8 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-from ..core import MLP, mask_from_valid_lens
+from ..core.mlp import MLP
+from ..core.utils import mask_from_valid_lens
 from .transform import diagonal_mvn
 
 

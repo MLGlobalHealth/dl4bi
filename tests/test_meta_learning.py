@@ -3,15 +3,15 @@ import jax.numpy as jnp
 import optax
 from jax import jit, random
 
-from dl4bi.core import (
+from dl4bi.core.attention import (
     Attention,
     DeepKernelAttention,
     FastAttention,
     FusedAttention,
-    KRBlock,
     MultiHeadAttention,
-    kNN,
 )
+from dl4bi.core.knn import kNN
+from dl4bi.core.transformer import KRBlock
 from dl4bi.meta_learning import (
     ANP,
     BANP,

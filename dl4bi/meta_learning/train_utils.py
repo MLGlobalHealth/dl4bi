@@ -25,6 +25,8 @@ from jax.scipy.stats import norm
 from omegaconf import DictConfig, OmegaConf
 from optax.losses import safe_softmax_cross_entropy
 from orbax.checkpoint import PyTreeCheckpointer
+
+# NOTE: needed by `instantiate` function
 from sps.gp import GP
 from sps.kernels import matern_1_2, matern_3_2, matern_5_2, periodic, rbf
 from sps.priors import Prior
@@ -32,7 +34,18 @@ from sps.sir import LatticeSIR
 from sps.utils import build_grid
 from tqdm import tqdm
 
-from ..core import *
+# NOTE: needed by `instantiate` function
+from ..core.attention import *
+from ..core.bias import *
+from ..core.conv import *
+from ..core.dist import *
+from ..core.embed import *
+from ..core.gnn import *
+from ..core.knn import *
+from ..core.metrics import *
+from ..core.mlp import *
+from ..core.preprocess import *
+from ..core.transformer import *
 from .anp import ANP
 from .banp import BANP
 from .bnp import BNP
@@ -58,6 +71,23 @@ class TrainState(train_state.TrainState):
 class Callback:
     fn: Callable  # (step, rng_step, state, batch) -> None
     interval: int  # apply every interval of train_num_steps
+
+
+def instantiate(d: Union[dict, DictConfig]):
+    """Convenience function to instantiate an object from a config."""
+    if isinstance(d, DictConfig):
+        d = OmegaConf.to_container(d, resolve=True)
+    if "cls" in d:
+        cls, kwargs = d["cls"], d.get("kwargs", {})
+        for k in kwargs:
+            if k == "act_fn":
+                kwargs[k] = getattr(nn, kwargs[k])
+            elif isinstance(kwargs[k], dict):
+                kwargs[k] = instantiate(kwargs[k])
+        return globals().get(cls, getattr(nn, cls, None))(**kwargs)
+    elif "func" in d:
+        return eval(d["func"])
+    return d
 
 
 def train(
@@ -609,23 +639,6 @@ def cfg_to_run_name(cfg: DictConfig):
     if name == "TNPND":
         name = "TNP-ND"
     return name
-
-
-def instantiate(d: Union[dict, DictConfig]):
-    """Convenience function to instantiate an object from a config."""
-    if isinstance(d, DictConfig):
-        d = OmegaConf.to_container(d, resolve=True)
-    if "cls" in d:
-        cls, kwargs = d["cls"], d.get("kwargs", {})
-        for k in kwargs:
-            if k == "act_fn":
-                kwargs[k] = getattr(nn, kwargs[k])
-            elif isinstance(kwargs[k], dict):
-                kwargs[k] = instantiate(kwargs[k])
-        return globals().get(cls, getattr(nn, cls, None))(**kwargs)
-    elif "func" in d:
-        return eval(d["func"])
-    return d
 
 
 def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):

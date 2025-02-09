@@ -6,9 +6,8 @@ from typing import Optional
 
 import flax.linen as nn
 import jax
-from jraph import GraphsTuple
 
-from .attention import MultiHeadAttention, MultiHeadGraphAttention
+from .attention import MultiHeadAttention
 from .mlp import MLP
 
 

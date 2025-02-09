@@ -6,7 +6,8 @@ import jax
 import jax.numpy as jnp
 from sps.utils import build_grid
 
-from ..core import MLP, ConvCNPNet, ConvDeepSet
+from ..core.conv import ConvCNPNet, ConvDeepSet
+from ..core.mlp import MLP
 from .transform import diagonal_mvn
 
 

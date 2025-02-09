@@ -1,6 +1,6 @@
 from jax import random
 
-from dl4bi.core import Whitener, condition_number
+from dl4bi.core.preprocess import Whitener, condition_number
 
 
 def test_whitener():

@@ -53,13 +53,13 @@ def main(cfg: DictConfig):
     rng_train, rng_test = random.split(rng)
     dataloader = build_dataloader(jax_spatial_prior_pred_f, cfg.data)
     batches = dataloader(rng)
-    from tqdm import tqdm
-    import sys
+    # from tqdm import tqdm
+    # import sys
 
-    for _ in tqdm(range(1000)):
-        b = next(batches)
+    # for _ in tqdm(range(1000)):
+    #     b = next(batches)
 
-    sys.exit(0)
+    # sys.exit(0)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,

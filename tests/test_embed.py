@@ -4,7 +4,7 @@ from jax import random
 from sps.kernels import rbf
 from sps.utils import build_grid
 
-from dl4bi.core import RBFRandomFourierFeatures
+from dl4bi.embed import RBFRandomFourierFeatures
 
 
 def test_rbf_random_fourier_features():

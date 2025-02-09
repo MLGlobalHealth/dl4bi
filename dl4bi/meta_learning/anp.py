@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 from jax import random
 
-from ..core import MLP, MultiHeadAttention, mask_from_valid_lens
+from ..core.attention import MLP, MultiHeadAttention, mask_from_valid_lens
 from .transform import latent_diagonal_mvn
 
 

@@ -5,13 +5,13 @@ import jax.numpy as jnp
 import numpy as np
 from jax import random, vmap
 
-from dl4bi.core import (
+from dl4bi.core.knn import (
     approx_knn,
     bf_knn,
-    mask_from_valid_lens,
     st_approx_knn,
     st_bf_knn,
 )
+from dl4bi.core.utils import mask_from_valid_lens
 
 
 def test_knn_shapes():

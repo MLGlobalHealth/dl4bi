@@ -4,7 +4,8 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-from ..core import MLP, TransformerEncoder
+from ..core.mlp import MLP
+from ..core.transformer import TransformerEncoder
 from .transform import diagonal_mvn
 
 

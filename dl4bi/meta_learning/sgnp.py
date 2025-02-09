@@ -6,7 +6,10 @@ import jax
 import jax.numpy as jnp
 from jraph import GraphsTuple
 
-from ..core import MLP, EdgeBiasedGAT, kNN, mask_from_valid_lens
+from ..core.gnn import EdgeBiasedGAT
+from ..core.knn import kNN
+from ..core.mlp import MLP
+from ..core.utils import mask_from_valid_lens
 from .transform import diagonal_mvn
 
 

@@ -7,8 +7,8 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap
 from jax.tree_util import Partial
+from sps.kernels import l2_dist_sq
 
-from .metrics import l2_dist_sq
 from .utils import pad_concat
 
 

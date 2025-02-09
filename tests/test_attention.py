@@ -6,8 +6,7 @@ from jax import random
 from jraph import GraphsTuple
 from sps.utils import build_grid
 
-from dl4bi.core import (
-    MLP,
+from dl4bi.core.attention import (
     AdditiveScorer,
     Attention,
     DeepKernelAttention,
@@ -26,6 +25,7 @@ from dl4bi.core import (
     exponential_scorer,
     rbf_scorer,
 )
+from dl4bi.core.mlp import MLP
 
 
 def test_vanilla_attention_impl():
