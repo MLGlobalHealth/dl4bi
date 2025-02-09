@@ -2,6 +2,7 @@
 from pathlib import Path
 
 import hydra
+from gp import build_gp_dataloader
 from jax import random
 from omegaconf import DictConfig
 
@@ -10,8 +11,6 @@ from dl4bi.meta_learning.train_utils import (
     evaluate,
     load_ckpt,
 )
-
-from .gp import build_gp_dataloader
 
 
 # NOTE: use the same configs as the Gaussian Process (GP) models

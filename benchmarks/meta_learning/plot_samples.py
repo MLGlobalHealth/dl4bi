@@ -7,6 +7,11 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from celeba import build_dataloaders as build_dataloaders_celeba
 from cifar_10 import build_dataloaders as build_dataloaders_cifar_10
+from gp import (
+    build_2d_grid_gp_dataloader,
+    build_gp_dataloader,
+    plot_posterior_predictive,
+)
 from jax import random
 from mnist import build_dataloaders as build_dataloaders_mnist
 from omegaconf import DictConfig
@@ -21,12 +26,6 @@ from dl4bi.meta_learning.train_utils import (
     regression_to_rgb,
 )
 from dl4bi.meta_learning.transform import pointwise_multinomial
-
-from .gp import (
-    build_2d_grid_gp_dataloader,
-    build_gp_dataloader,
-    plot_posterior_predictive,
-)
 
 
 @hydra.main(config_name="default", version_base=None)
@@ -254,10 +253,10 @@ def project_parameters(cfg: DictConfig):
             build_dataloaders = build_dataloader_sir
             remap_colors = remap_colors_sir
             shape = {
-                "64x64": (64, 64, 3),
-                "128x128": (128, 128, 3),
-                "256x256": (256, 256, 3),
-                "1024x1024": (1024, 1024, 3),
+                "space_64x64": (64, 64, 3),
+                "space_128x128": (128, 128, 3),
+                "space_256x256": (256, 256, 3),
+                "space_1024x1024": (1024, 1024, 3),
             }[cfg.data.name]
             is_categorical = True
         case _:

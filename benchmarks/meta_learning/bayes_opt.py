@@ -9,20 +9,19 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import wandb
+from gp import build_gp_dataloader, plot_posterior_predictive
 from jax import jit, random
 from jax.scipy import stats
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-from dl4bi.core import mask_from_valid_lens
 from dl4bi.meta_learning.train_utils import (
     TrainState,
     cfg_to_run_name,
     load_ckpt,
     log_wandb_line,
 )
-
-from .gp import build_gp_dataloader, plot_posterior_predictive
+from dl4bi.utils import mask_from_valid_lens
 
 
 # NOTE: use the same configs as the Gaussian Process (GP) models
