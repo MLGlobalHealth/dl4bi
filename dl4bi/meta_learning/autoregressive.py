@@ -1,11 +1,9 @@
-from typing import Callable, Literal, Optional
+from typing import Callable, Literal, Optional, Tuple
 import jax.numpy as jnp
 import jax
-from omegaconf import OmegaConf, DictConfig
 from functools import partial
 from collections import deque
 from sps.kernels import *
-from pathlib import Path
 from tqdm import tqdm
 from jax.experimental import enable_x64
 
@@ -156,7 +154,7 @@ def analytic_gp(
     kernel: Callable,
     var: float,
     ls: float,
-    assume_unique: bool = True,
+    ensure_unique: bool = False,
 ):
     """
     Kevin P. Murphy, Probabilistic Machine Learning: An Introduction,
@@ -166,12 +164,14 @@ def analytic_gp(
     Assumes 0 mean,
     and positive-definite covariance matrix `cov_cc = kernel(s_ctx, s_ctx, var, ls)`.
     This is true for the kernels we use modulo repeated locations,
-    which can be handled by setting `assume_unique=False`.
+    which can be handled by setting `ensure_unique=True`.
     """
     f_ctx = f_ctx.squeeze(-1)
 
-    if not assume_unique:
-        s_ctx, idx, idx_inv = jnp.unique(s_ctx, return_index=True, return_inverse=True)
+    if ensure_unique:
+        s_ctx, idx, idx_inv = jnp.unique(
+            s_ctx, axis=-1, return_index=True, return_inverse=True
+        )
         f_ctx = f_ctx[idx]
 
     # 64-bit precision is required for numerical stability.
@@ -189,15 +189,16 @@ def analytic_gp(
         cov_tt = kernel(s_test, s_test, var, ls)
         print(cov_tc.dtype, cov_ct.dtype, cov_cc.dtype, cov_tt.dtype)
 
-        # Can't just invert cov_cc or even solve without the positive definite 
+        # Can't just invert cov_cc or even solve without the positive definite
         # assumption as it leads to huge numerical error. Adding jitter to the diagonal doesn't help.
         # Note that jax.scipy.linalg.solve with assume_a="pos" uses Cholesky decomposition.
         mean = cov_tc @ jax.scipy.linalg.solve(cov_cc, f_ctx, assume_a="pos")
         cov = cov_tt - cov_tc @ jax.scipy.linalg.solve(cov_cc, cov_ct, assume_a="pos")
-    
+
     print(mean.dtype, cov.dtype)
 
-    if not assume_unique:
-        mean = mean[idx_inv]
-        cov = cov[idx_inv][:, idx_inv]
+    if ensure_unique:
+        mean = mean[..., idx_inv]
+        cov = cov[..., idx_inv][:, idx_inv]
+
     return mean, cov
