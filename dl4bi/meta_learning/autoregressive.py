@@ -10,7 +10,7 @@ from tqdm import tqdm
 from jax.experimental import enable_x64
 
 Apply = Callable[
-    [jax.Array, jax.Array, jax.Array, Optional[jax.Array]], (jax.Array, jax.Array)
+    [jax.Array, jax.Array, jax.Array, Optional[jax.Array]], Tuple[jax.Array, jax.Array]
 ]
 
 
