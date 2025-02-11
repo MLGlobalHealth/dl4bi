@@ -123,20 +123,25 @@ def binary_order(n: int):
 def sample_path_autoreg(
     rng: jax.Array,
     apply: Apply,
-    s_ctx: jax.Array,
-    f_ctx: jax.Array,
-    s_test: jax.Array,
+    s_ctx: jax.Array,  # [1, L_ctx, D]
+    f_ctx: jax.Array,  # [1, L_ctx, D]
+    s_test: jax.Array,  # [1, L_test, D]
+    B: int,  # how many paths to sample
     strategy: Literal[None, "ltr", "random", "binary"] = None,
 ):
+    s_ctx = jnp.repeat(s_ctx, B, axis=0)
+    f_ctx = jnp.repeat(f_ctx, B, axis=0)
+    s_test = jnp.repeat(s_test, B, axis=0)
+
     match strategy:
         case None:
             return _sample_path_autoreg(rng, apply, s_ctx, f_ctx, s_test)
-        # Items in the batch are permuted independently.
         case "random":
-            B, L, D = s_test.shape
+            _, L_test, D = s_test.shape
             rng, rng_perm = random.split(rng)
 
-            idx = jnp.repeat(jnp.arange(L)[None, :], B, axis=0)
+            # Locations for each path are permuted independently.
+            idx = jnp.repeat(jnp.arange(L_test)[None, :], B, axis=0)
             idx = random.permutation(rng_perm, idx, axis=1, independent=True)
             idx_inv = jax.vmap(invert_permutation)(idx)
 
@@ -152,9 +157,6 @@ def sample_path_autoreg(
             )
             return jnp.take_along_axis(sample, idx_inv, axis=1)
 
-        # In below cases assume s_test is of dim (B, L, 1),
-        # and that it is constant along the first dimension.
-        # This can be fixed but incurs a performance cost.
         case "ltr":
             idx = s_test[0, :, 0].argsort()
             idx_inv = invert_permutation(idx)
@@ -167,13 +169,14 @@ def sample_path_autoreg(
                 s_test[:, idx, :],
             )[:, idx_inv, :]
         case "binary":
+            _, L_test, _ = s_test.shape
+            
             # first sort the data
             idx1 = s_test[0, :, 0].argsort()
             idx1_inv = invert_permutation(idx1)
 
             # then take the binary ordering
-            L = s_test.shape[1]
-            idx2 = binary_order(L)
+            idx2 = binary_order(L_test)
             idx2_inv = invert_permutation(idx2)
 
             return _sample_path_autoreg(
