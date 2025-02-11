@@ -65,7 +65,8 @@ def sample_path(
     return f_sampled
 
 
-@partial(jax.jit, static_argnames="apply")
+# @partial(jax.jit, static_argnames="apply")
+# this makes XLA compilation extremely slow - probably because of the for loop
 def _sample_path_autoreg(
     rng: jax.Array,
     apply: Apply,
