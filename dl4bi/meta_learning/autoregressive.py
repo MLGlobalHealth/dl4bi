@@ -156,18 +156,29 @@ def analytic_gp(
     kernel: Callable,
     var: float,
     ls: float,
+    assume_unique: bool = True,
 ):
     """
     Kevin P. Murphy, Probabilistic Machine Learning: An Introduction,
     Chapter 3.2.3,
     Equation 3.28
 
-    Assumes 0 mean.
+    Assumes 0 mean,
+    and positive-definite covariance matrix `cov_cc = kernel(s_ctx, s_ctx, var, ls)`.
+    This is true for the kernels we use modulo repeated locations,
+    which can be handled by setting `assume_unique=False`.
     """
     f_ctx = f_ctx.squeeze(-1)
 
+    if not assume_unique:
+        s_ctx, idx, idx_inv = jnp.unique(s_ctx, return_index=True, return_inverse=True)
+        f_ctx = f_ctx[idx]
+
+    # 64-bit precision is required for numerical stability.
     with enable_x64():
         print(s_ctx.dtype, f_ctx.dtype, s_test.dtype)
+
+        # Is this required?
         s_ctx = s_ctx.astype(jnp.float64)
         f_ctx = f_ctx.astype(jnp.float64)
         s_test = s_test.astype(jnp.float64)
@@ -183,5 +194,10 @@ def analytic_gp(
         # Note that jax.scipy.linalg.solve with assume_a="pos" uses Cholesky decomposition.
         mean = cov_tc @ jax.scipy.linalg.solve(cov_cc, f_ctx, assume_a="pos")
         cov = cov_tt - cov_tc @ jax.scipy.linalg.solve(cov_cc, cov_ct, assume_a="pos")
+    
+    print(mean.dtype, cov.dtype)
 
+    if not assume_unique:
+        mean = mean[idx_inv]
+        cov = cov[idx_inv][:, idx_inv]
     return mean, cov
