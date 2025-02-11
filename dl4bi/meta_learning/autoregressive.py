@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit, random
 from jax.experimental import enable_x64
+from omegaconf import DictConfig
 from sps.kernels import *  # needed by `instantiate`
 from sps.utils import build_grid
 from tqdm import tqdm
