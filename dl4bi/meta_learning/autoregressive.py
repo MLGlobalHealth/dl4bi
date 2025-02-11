@@ -119,19 +119,18 @@ def binary_order(n: int):
 
     return jnp.array(ord)
 
-
 def sample_path_autoreg(
     rng: jax.Array,
     apply: Apply,
-    s_ctx: jax.Array,  # [1, L_ctx, D]
-    f_ctx: jax.Array,  # [1, L_ctx, D]
-    s_test: jax.Array,  # [1, L_test, D]
+    s_ctx: jax.Array,  # [L_ctx, D]
+    f_ctx: jax.Array,  # [L_ctx, D]
+    s_test: jax.Array,  # [L_test, D]
     B: int,  # how many paths to sample
     strategy: Literal[None, "ltr", "random", "binary"] = None,
 ):
-    s_ctx = jnp.repeat(s_ctx, B, axis=0)
-    f_ctx = jnp.repeat(f_ctx, B, axis=0)
-    s_test = jnp.repeat(s_test, B, axis=0)
+    s_ctx = jnp.repeat(s_ctx[None], B, axis=0)
+    f_ctx = jnp.repeat(f_ctx[None], B, axis=0)
+    s_test = jnp.repeat(s_test[None], B, axis=0)
 
     match strategy:
         case None:
@@ -170,7 +169,7 @@ def sample_path_autoreg(
             )[:, idx_inv, :]
         case "binary":
             _, L_test, _ = s_test.shape
-            
+
             # first sort the data
             idx1 = s_test[0, :, 0].argsort()
             idx1_inv = invert_permutation(idx1)
