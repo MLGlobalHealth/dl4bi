@@ -1,15 +1,55 @@
-from typing import Callable, Literal, Optional, Tuple
-import jax.numpy as jnp
-import jax
-from functools import partial
 from collections import deque
-from sps.kernels import *
-from tqdm import tqdm
+from functools import partial
+from typing import Callable, Literal, Optional, Tuple
+
+import jax
+import jax.numpy as jnp
+from jax import jit, random
 from jax.experimental import enable_x64
+from sps.kernels import *  # needed by `instantiate`
+from sps.utils import build_grid
+from tqdm import tqdm
+
+from dl4bi.meta_learning.train_utils import instantiate
 
 Apply = Callable[
-    [jax.Array, jax.Array, jax.Array, Optional[jax.Array]], Tuple[jax.Array, jax.Array]
+    [jax.Array, jax.Array, jax.Array, Optional[jax.Array]],
+    Tuple[jax.Array, jax.Array],
 ]
+
+
+# copied from benchmarks/meta_learning/gp.py
+def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
+    """Generates batches of GP samples."""
+    gp = instantiate(kernel)
+    B, S = data.batch_size, len(data.s)
+    Nc_min, Nc_max = data.num_ctx.min, data.num_ctx.max
+    s_g = build_grid(data.s).reshape(-1, S)  # flatten spatial dims
+    L = Nc_max + s_g.shape[0]  # L = num test or all points
+    obs_noise, B = data.obs_noise, data.batch_size
+    valid_lens_test = jnp.repeat(L, B)
+    s_min = jnp.array([axis["start"] for axis in data.s])
+    s_max = jnp.array([axis["stop"] for axis in data.s])
+    batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
+
+    def gen_batch(rng: jax.Array):
+        rng_s, rng_gp, rng_v, rng_eps = random.split(rng, 4)
+        s_r = random.uniform(rng_s, (Nc_max, S), jnp.float32, s_min, s_max)
+        s = jnp.vstack([s_r, s_g])
+        f, var, ls, period, *_ = gp.simulate(rng_gp, s, B)
+        valid_lens_ctx = random.randint(rng_v, (B,), Nc_min, Nc_max)
+        s = batchify(s)
+        s_ctx = s[:, :Nc_max, :]
+        f_ctx = f + obs_noise * random.normal(rng_eps, f.shape)
+        f_ctx = f_ctx[:, :Nc_max, :]
+        return s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, var, ls, period
+
+    def dataloader(rng: jax.Array):
+        while True:
+            rng_i, rng = random.split(rng)
+            yield gen_batch(rng_i)
+
+    return dataloader
 
 
 def sample_path(
@@ -20,7 +60,7 @@ def sample_path(
     s_test: jax.Array,
 ):
     f_mu, f_std = apply(s_ctx, f_ctx, s_test, None)
-    f_sampled = jax.random.normal(rng, f_mu.shape) * f_std + f_mu
+    f_sampled = random.normal(rng, f_mu.shape) * f_std + f_mu
     return f_sampled
 
 
@@ -38,13 +78,13 @@ def _sample_path_autoreg(
     s_ctx = jnp.concat([s_ctx, s_test], axis=1)
     f_ctx = jnp.pad(f_ctx, ((0, 0), (0, L_test), (0, 0)))
 
-    rng = jax.random.split(rng, L_test)
+    rng = random.split(rng, L_test)
     valid_lens_ctx = jnp.repeat(L_ctx, B)
 
     for i in tqdm(range(L_test)):
         s_test_i = s_test[:, i : i + 1, :]
         f_mu_i, f_std_i = apply(s_ctx, f_ctx, s_test_i, valid_lens_ctx)
-        f_sampled = jax.random.normal(rng[i], f_mu_i.shape) * f_std_i + f_mu_i
+        f_sampled = random.normal(rng[i], f_mu_i.shape) * f_std_i + f_mu_i
 
         f_ctx = f_ctx.at[:, L_ctx + i : L_ctx + i + 1, :].set(f_sampled)
         valid_lens_ctx = valid_lens_ctx + 1
@@ -93,10 +133,10 @@ def sample_path_autoreg(
         # Items in the batch are permuted independently.
         case "random":
             B, L, D = s_test.shape
-            rng, rng_perm = jax.random.split(rng)
+            rng, rng_perm = random.split(rng)
 
             idx = jnp.repeat(jnp.arange(L)[None, :], B, axis=0)
-            idx = jax.random.permutation(rng_perm, idx, axis=1, independent=True)
+            idx = random.permutation(rng_perm, idx, axis=1, independent=True)
             idx_inv = jax.vmap(invert_permutation)(idx)
 
             idx = jnp.repeat(idx[:, :, None], D, axis=2)
