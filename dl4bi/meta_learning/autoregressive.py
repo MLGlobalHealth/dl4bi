@@ -120,6 +120,7 @@ def binary_order(n: int):
 
     return jnp.array(ord)
 
+
 def sample_path_autoreg(
     rng: jax.Array,
     apply: Apply,
@@ -220,9 +221,6 @@ def analytic_gp(
 
     # 64-bit precision is required for numerical stability.
     with enable_x64():
-        print(s_ctx.dtype, f_ctx.dtype, s_test.dtype)
-
-        # Is this required?
         s_ctx = s_ctx.astype(jnp.float64)
         f_ctx = f_ctx.astype(jnp.float64)
         s_test = s_test.astype(jnp.float64)
@@ -231,7 +229,6 @@ def analytic_gp(
         cov_ct = cov_tc.T
         cov_cc = kernel(s_ctx, s_ctx, var, ls)
         cov_tt = kernel(s_test, s_test, var, ls)
-        print(cov_tc.dtype, cov_ct.dtype, cov_cc.dtype, cov_tt.dtype)
 
         # Can't just invert cov_cc or even solve without the positive definite
         # assumption as it leads to huge numerical error. Adding jitter to the diagonal doesn't help.
@@ -239,7 +236,8 @@ def analytic_gp(
         mean = cov_tc @ jax.scipy.linalg.solve(cov_cc, f_ctx, assume_a="pos")
         cov = cov_tt - cov_tc @ jax.scipy.linalg.solve(cov_cc, cov_ct, assume_a="pos")
 
-    print(mean.dtype, cov.dtype)
+        mean = mean.astype(jnp.float32)
+        cov = cov.astype(jnp.float32)
 
     if ensure_unique:
         mean = mean[..., idx_inv]
