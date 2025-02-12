@@ -67,8 +67,8 @@ def sample_path(
 
 @jit
 def normal_log_density(x: float):
-    # log( 1/2pi e^(-x^2 / 2) )
-    return -jnp.log(2 * jnp.pi) - x**2 / 2
+    # log( 1/sqrt(2pi) e^(-x^2 / 2) )
+    return 0.5 * (-jnp.log(2 * jnp.pi) - x**2)
 
 
 def _sample_path_autoreg(
