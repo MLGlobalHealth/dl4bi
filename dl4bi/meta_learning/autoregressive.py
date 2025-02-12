@@ -160,26 +160,28 @@ def sample_path_autoreg(
             idx = jnp.repeat(idx[:, :, None], D, axis=2)
             idx_inv = jnp.repeat(idx_inv[:, :, None], D, axis=2)
 
-            sample = _sample_path_autoreg(
+            paths, log_densities = _sample_path_autoreg(
                 rng,
                 apply,
                 s_ctx,
                 f_ctx,
                 jnp.take_along_axis(s_test, idx, axis=1),
             )
-            return jnp.take_along_axis(sample, idx_inv, axis=1)
+            return jnp.take_along_axis(paths, idx_inv, axis=1), log_densities
 
         case "ltr":
             idx = s_test[0, :, 0].argsort()
             idx_inv = invert_permutation(idx)
 
-            return _sample_path_autoreg(
+            paths, log_densities = _sample_path_autoreg(
                 rng,
                 apply,
                 s_ctx,
                 f_ctx,
                 s_test[:, idx, :],
-            )[:, idx_inv, :]
+            )
+            
+            return paths[:, idx_inv, :], log_densities
         case "binary":
             _, L_test, _ = s_test.shape
 
@@ -191,13 +193,15 @@ def sample_path_autoreg(
             idx2 = binary_order(L_test)
             idx2_inv = invert_permutation(idx2)
 
-            return _sample_path_autoreg(
+            paths = _sample_path_autoreg(
                 rng,
                 apply,
                 s_ctx,
                 f_ctx,
                 s_test[:, idx1, :][:, idx2, :],
-            )[:, idx2_inv, :][:, idx1_inv, :]
+            )
+
+            return paths[:, idx2_inv, :][:, idx1_inv, :], log_densities
 
 
 # Probabilistic Machine Learning: An Introduction by Kevin P. Murphy
