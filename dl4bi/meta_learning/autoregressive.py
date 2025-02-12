@@ -65,8 +65,12 @@ def sample_path(
     return f_sampled
 
 
-# @partial(jax.jit, static_argnames="apply")
-# this makes XLA compilation extremely slow - probably because of the for loop
+@jit
+def normal_log_density(x: float):
+    # log( 1/2pi e^(-x^2 / 2) )
+    return -jnp.log(2 * jnp.pi) - x**2 / 2
+
+
 def _sample_path_autoreg(
     rng: jax.Array,
     apply: Apply,
@@ -80,18 +84,25 @@ def _sample_path_autoreg(
     s_ctx = jnp.concat([s_ctx, s_test], axis=1)
     f_ctx = jnp.pad(f_ctx, ((0, 0), (0, L_test), (0, 0)))
 
-    rng = random.split(rng, L_test)
+    # note that the independent random normals can be pre-sampled
+    # it doesn't matter whether sampling is done here, or in the for loop, as all is independent
+    normals = random.normal(rng, (L_test, B))
+    log_densities = jnp.sum(vmap(normal_log_density)(normals), axis=0)
+
     valid_lens_ctx = jnp.repeat(L_ctx, B)
 
     for i in tqdm(range(L_test)):
-        s_test_i = s_test[:, i : i + 1, :]
+        s_test_i = s_test[:, i][:, None]  # [B, 1, 1]
         f_mu_i, f_std_i = apply(s_ctx, f_ctx, s_test_i, valid_lens_ctx)
-        f_sampled = random.normal(rng[i], f_mu_i.shape) * f_std_i + f_mu_i
+        # [B, 1, 1], [B, 1, 1]
 
-        f_ctx = f_ctx.at[:, L_ctx + i : L_ctx + i + 1, :].set(f_sampled)
+        f_sampled = normals[i][:, None, None] * f_std_i + f_mu_i
+        # need to expand normals[i]'s dims to match f_std_i and f_mu_i
+
+        f_ctx = f_ctx.at[:, L_ctx + i, :].set(f_sampled.squeeze(1))
         valid_lens_ctx = valid_lens_ctx + 1
 
-    return f_ctx[:, L_ctx:]
+    return f_ctx[:, L_ctx:], log_densities
 
 
 def invert_permutation(p: jax.Array):
