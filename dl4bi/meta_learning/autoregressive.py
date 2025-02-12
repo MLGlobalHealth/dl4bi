@@ -53,30 +53,18 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
     return dataloader
 
 
-def sample_path(
-    rng: jax.Array,
-    apply: Apply,
-    s_ctx: jax.Array,
-    f_ctx: jax.Array,
-    s_test: jax.Array,
-):
-    f_mu, f_std = apply(s_ctx, f_ctx, s_test, None)
-    f_sampled = random.normal(rng, f_mu.shape) * f_std + f_mu
-    return f_sampled
-
-
 @jit
 def normal_log_density(x: float):
     # log( 1/sqrt(2pi) e^(-x^2 / 2) )
     return 0.5 * (-jnp.log(2 * jnp.pi) - x**2)
 
 
-def _sample_path_autoreg(
+def _sample_paths(
     rng: jax.Array,
     apply: Apply,
-    s_ctx: jax.Array,
-    f_ctx: jax.Array,
-    s_test: jax.Array,
+    s_ctx: jax.Array,  # [B, L_ctx, D]
+    f_ctx: jax.Array,  # [B, L_ctx, D_f]
+    s_test: jax.Array,  # [B, L_test, D]
 ):
     B, L_test, D = s_test.shape
     _, L_ctx, _ = s_ctx.shape
@@ -132,14 +120,76 @@ def binary_order(n: int):
     return jnp.array(ord)
 
 
-def sample_path_autoreg(
+def furthest_first(
+    s_ctx: jax.Array,  # [L_ctx, 1]
+    s_test: jax.Array,  # [L_test, 1]
+):
+    """
+    Order such that always the test point furthest away from the context set
+    is considered next when sampling autoregressively.
+
+    TODO: This is O(n^2), perhaps can be done faster?
+    """
+    s_ctx = s_ctx.squeeze(-1)
+    s_test = s_test.squeeze(-1)
+    L_test = len(s_test)
+
+    distances = jnp.min(
+        vmap(vmap(lambda x, y: jnp.abs(x - y), (None, 0)), (0, None))(s_ctx, s_test),
+        axis=0,
+    )
+    order = []
+
+    for _ in range(L_test):
+        i = jnp.nanargmax(distances)
+        x = s_test[i]
+
+        distances = distances.at[i].set(jnp.nan)
+        order.append(i)
+
+        distances = jnp.minimum(distances, jnp.abs(s_test - x))
+
+    return jnp.array(order, dtype=jnp.int32)
+
+
+def closest_first(
+    s_ctx: jax.Array,  # [L_ctx, 1]
+    s_test: jax.Array,  # [L_test, 1]
+):
+    """
+    Order such that always the test point closest to the context set
+    is considered next when sampling autoregressively.
+    """
+    s_ctx = s_ctx.squeeze(-1)
+    s_test = s_test.squeeze(-1)
+    L_test = len(s_test)
+
+    distances = jnp.min(
+        vmap(vmap(lambda x, y: jnp.abs(x - y), (None, 0)), (0, None))(s_ctx, s_test),
+        axis=0,
+    )
+    order = []
+
+    for _ in range(L_test):
+        i = jnp.nanargmin(distances)
+        x = s_test[i]
+
+        distances = distances.at[i].set(jnp.nan)
+        order.append(i)
+
+        distances = jnp.minimum(distances, jnp.abs(s_test - x))
+
+    return jnp.array(order, dtype=jnp.int32)
+
+
+def sample_paths(
     rng: jax.Array,
     apply: Apply,
-    s_ctx: jax.Array,  # [L_ctx, D]
-    f_ctx: jax.Array,  # [L_ctx, D]
-    s_test: jax.Array,  # [L_test, D]
+    s_ctx: jax.Array,  # [L_ctx, D_s]
+    f_ctx: jax.Array,  # [L_ctx, D_f]
+    s_test: jax.Array,  # [L_test, D_s]
     B: int,  # how many paths to sample
-    strategy: Literal[None, "ltr", "random", "binary"] = None,
+    strategy: Literal[None, "ltr", "random", "binary", "closest", "furthest"] = None,
 ):
     s_ctx = jnp.repeat(s_ctx[None], B, axis=0)
     f_ctx = jnp.repeat(f_ctx[None], B, axis=0)
@@ -147,7 +197,7 @@ def sample_path_autoreg(
 
     match strategy:
         case None:
-            return _sample_path_autoreg(rng, apply, s_ctx, f_ctx, s_test)
+            return _sample_paths(rng, apply, s_ctx, f_ctx, s_test)
         case "random":
             _, L_test, D = s_test.shape
             rng, rng_perm = random.split(rng)
@@ -160,7 +210,7 @@ def sample_path_autoreg(
             idx = jnp.repeat(idx[:, :, None], D, axis=2)
             idx_inv = jnp.repeat(idx_inv[:, :, None], D, axis=2)
 
-            paths, log_densities = _sample_path_autoreg(
+            paths, log_densities = _sample_paths(
                 rng,
                 apply,
                 s_ctx,
@@ -173,7 +223,7 @@ def sample_path_autoreg(
             idx = s_test[0, :, 0].argsort()
             idx_inv = invert_permutation(idx)
 
-            paths, log_densities = _sample_path_autoreg(
+            paths, log_densities = _sample_paths(
                 rng,
                 apply,
                 s_ctx,
@@ -193,7 +243,7 @@ def sample_path_autoreg(
             idx2 = binary_order(L_test)
             idx2_inv = invert_permutation(idx2)
 
-            paths, log_densities = _sample_path_autoreg(
+            paths, log_densities = _sample_paths(
                 rng,
                 apply,
                 s_ctx,
@@ -202,6 +252,32 @@ def sample_path_autoreg(
             )
 
             return paths[:, idx2_inv, :][:, idx1_inv, :], log_densities
+        case "furthest":
+            idx = furthest_first(s_ctx, s_test)
+            idx_inv = invert_permutation(idx)
+
+            paths, log_densities = _sample_paths(
+                rng,
+                apply,
+                s_ctx,
+                f_ctx,
+                s_test[:, idx, :],
+            )
+
+            return paths[:, idx_inv, :], log_densities
+        case "closest":
+            idx = closest_first(s_ctx, s_test)
+            idx_inv = invert_permutation(idx)
+
+            paths, log_densities = _sample_paths(
+                rng,
+                apply,
+                s_ctx,
+                f_ctx,
+                s_test[:, idx, :],
+            )
+
+            return paths[:, idx_inv, :], log_densities
 
 
 # Probabilistic Machine Learning: An Introduction by Kevin P. Murphy
