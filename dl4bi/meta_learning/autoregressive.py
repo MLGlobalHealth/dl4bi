@@ -180,7 +180,7 @@ def sample_path_autoreg(
                 f_ctx,
                 s_test[:, idx, :],
             )
-            
+
             return paths[:, idx_inv, :], log_densities
         case "binary":
             _, L_test, _ = s_test.shape
@@ -193,7 +193,7 @@ def sample_path_autoreg(
             idx2 = binary_order(L_test)
             idx2_inv = invert_permutation(idx2)
 
-            paths = _sample_path_autoreg(
+            paths, log_densities = _sample_path_autoreg(
                 rng,
                 apply,
                 s_ctx,
