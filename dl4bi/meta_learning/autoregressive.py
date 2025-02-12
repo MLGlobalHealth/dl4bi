@@ -253,7 +253,7 @@ def sample_paths(
 
             return paths[:, idx2_inv, :][:, idx1_inv, :], log_densities
         case "furthest":
-            idx = furthest_first(s_ctx, s_test)
+            idx = furthest_first(s_ctx[0, :, 0], s_test[0, :, 0])
             idx_inv = invert_permutation(idx)
 
             paths, log_densities = _sample_paths(
@@ -266,7 +266,7 @@ def sample_paths(
 
             return paths[:, idx_inv, :], log_densities
         case "closest":
-            idx = closest_first(s_ctx, s_test)
+            idx = closest_first(s_ctx[0, :, 0], s_test[0, :, 0])
             idx_inv = invert_permutation(idx)
 
             paths, log_densities = _sample_paths(
