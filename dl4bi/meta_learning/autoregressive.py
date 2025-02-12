@@ -291,7 +291,8 @@ def analytic_gp(
     var: float,
     ls: float,
     ensure_unique: bool = False,
-):
+    return_cov_inv: bool = False
+) -> Tuple[jax.Array, jax.Array] | Tuple[jax.Array, jax.Array, jax.Array]:
     """
     Kevin P. Murphy, Probabilistic Machine Learning: An Introduction,
     Chapter 3.2.3,
@@ -330,8 +331,19 @@ def analytic_gp(
         mean = mean.astype(jnp.float32)
         cov = cov.astype(jnp.float32)
 
+        # TODO: this is broken
+        if return_cov_inv:
+            cov_tt_inv = jax.scipy.linalg.inv(cov_tt)
+            cov_inv = cov_tt_inv + cov_tt_inv @ cov_tc @ jax.scipy.linalg.inv(cov_cc - cov_ct @ cov_tt_inv @ cov_tc) @ cov_ct @ cov_tt_inv
+            cov_inv = cov_inv.astype(jnp.float32)
+
     if ensure_unique:
         mean = mean[..., idx_inv]
         cov = cov[..., idx_inv][:, idx_inv]
+        if return_cov_inv:
+            cov_inv = cov_inv[..., idx_inv][:, idx_inv]
 
-    return mean, cov
+    if return_cov_inv:
+        return mean, cov, cov_inv
+    else:
+        return mean, cov
