@@ -1,6 +1,4 @@
-from collections import deque
-from functools import partial
-from typing import Callable, Literal, Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -9,7 +7,6 @@ from jax.experimental import enable_x64
 from omegaconf import DictConfig
 from sps.kernels import *  # needed by `instantiate`
 from sps.utils import build_grid
-from tqdm import tqdm
 
 from dl4bi.meta_learning.train_utils import instantiate
 
@@ -91,29 +88,6 @@ def invert_permutation(p: jax.Array):
     return jnp.empty_like(p).at[p].set(jnp.arange(p.size))
 
 
-def binary_order(n: int):
-    # produces a permutation like 0, n, n/2, n/4, 3n/4, etc.
-
-    if n <= 2:
-        return jnp.arange(n)
-
-    # the ordering to output
-    ord = [0, n - 1]
-    # stores intervals of the form [l,r] of numbers that are not yet in the result
-    seq = deque([(1, n - 2)])
-
-    while len(seq) > 0:
-        l, r = seq.popleft()
-        m = (l + r) // 2
-        ord.append(m)
-        if l <= m - 1:
-            seq.append((l, m - 1))
-        if m + 1 <= r:
-            seq.append((m + 1, r))
-
-    return jnp.array(ord)
-
-
 def furthest_first(
     s_ctx: jax.Array,  # [L_ctx, 1]
     s_test: jax.Array,  # [L_test, 1]
@@ -124,8 +98,10 @@ def furthest_first(
 
     TODO: This is O(n^2), perhaps can be done faster?
     """
-    s_ctx = s_ctx.squeeze(-1)
-    s_test = s_test.squeeze(-1)
+
+    # cast to float so that setting to jnp.nan works
+    s_ctx = s_ctx.squeeze(-1).astype(jnp.float32)
+    s_test = s_test.squeeze(-1).astype(jnp.float32)
     L_test = len(s_test)
 
     distances = jnp.min(
@@ -154,8 +130,9 @@ def closest_first(
     Order such that always the test point closest to the context set
     is considered next when sampling autoregressively.
     """
-    s_ctx = s_ctx.squeeze(-1)
-    s_test = s_test.squeeze(-1)
+    # cast to float so that setting to jnp.nan works
+    s_ctx = s_ctx.squeeze(-1).astype(jnp.float32)
+    s_test = s_test.squeeze(-1).astype(jnp.float32)
     L_test = len(s_test)
 
     distances = jnp.min(
@@ -183,95 +160,38 @@ def sample_paths(
     f_ctx: jax.Array,  # [L_ctx, D_f]
     s_test: jax.Array,  # [L_test, D_s]
     B: int,  # how many paths to sample
-    strategy: Literal[None, "ltr", "random", "binary", "closest", "furthest"] = None,
+    random: bool = False,
 ):
     s_ctx = jnp.repeat(s_ctx[None], B, axis=0)
     f_ctx = jnp.repeat(f_ctx[None], B, axis=0)
     s_test = jnp.repeat(s_test[None], B, axis=0)
 
-    match strategy:
-        case None:
-            return _sample_paths(rng, apply, s_ctx, f_ctx, s_test)
-        case "random":
-            _, L_test, D = s_test.shape
-            rng, rng_perm = random.split(rng)
+    if not random:
+        return _sample_paths(rng, apply, s_ctx, f_ctx, s_test)
+    else:
+        _, L_test, D_s = s_test.shape
+        _, _, D_f = f_ctx.shape
+        rng, rng_perm = random.split(rng)
 
-            # Locations for each path are permuted independently.
-            idx = jnp.repeat(jnp.arange(L_test)[None, :], B, axis=0)
-            idx = random.permutation(rng_perm, idx, axis=1, independent=True)
-            idx_inv = jax.vmap(invert_permutation)(idx)
+        # Locations for each path are permuted independently.
+        idx = jnp.repeat(jnp.arange(L_test)[None, :], B, axis=0)
+        idx = random.permutation(rng_perm, idx, axis=1, independent=True)
 
-            idx = jnp.repeat(idx[:, :, None], D, axis=2)
-            idx_inv = jnp.repeat(idx_inv[:, :, None], D, axis=2)
+        idx_inv = jax.vmap(invert_permutation)(idx)
 
-            paths, log_densities = _sample_paths(
-                rng,
-                apply,
-                s_ctx,
-                f_ctx,
-                jnp.take_along_axis(s_test, idx, axis=1),
-            )
-            return jnp.take_along_axis(paths, idx_inv, axis=1), log_densities
+        # idx needs to match dimension of array in take_along_axis
+        idx = jnp.repeat(idx[:, :, None], D_s, axis=2)
+        idx_inv = jnp.repeat(idx_inv[:, :, None], D_f, axis=2)
 
-        case "ltr":
-            idx = s_test[0, :, 0].argsort()
-            idx_inv = invert_permutation(idx)
+        paths, log_densities = _sample_paths(
+            rng,
+            apply,
+            s_ctx,
+            f_ctx,
+            jnp.take_along_axis(s_test, idx, axis=1),
+        )
 
-            paths, log_densities = _sample_paths(
-                rng,
-                apply,
-                s_ctx,
-                f_ctx,
-                s_test[:, idx, :],
-            )
-
-            return paths[:, idx_inv, :], log_densities
-        case "binary":
-            _, L_test, _ = s_test.shape
-
-            # first sort the data
-            idx1 = s_test[0, :, 0].argsort()
-            idx1_inv = invert_permutation(idx1)
-
-            # then take the binary ordering
-            idx2 = binary_order(L_test)
-            idx2_inv = invert_permutation(idx2)
-
-            paths, log_densities = _sample_paths(
-                rng,
-                apply,
-                s_ctx,
-                f_ctx,
-                s_test[:, idx1, :][:, idx2, :],
-            )
-
-            return paths[:, idx2_inv, :][:, idx1_inv, :], log_densities
-        case "furthest":
-            idx = furthest_first(s_ctx[0], s_test[0])
-            idx_inv = invert_permutation(idx)
-
-            paths, log_densities = _sample_paths(
-                rng,
-                apply,
-                s_ctx,
-                f_ctx,
-                s_test[:, idx, :],
-            )
-
-            return paths[:, idx_inv, :], log_densities
-        case "closest":
-            idx = closest_first(s_ctx[0], s_test[0])
-            idx_inv = invert_permutation(idx)
-
-            paths, log_densities = _sample_paths(
-                rng,
-                apply,
-                s_ctx,
-                f_ctx,
-                s_test[:, idx, :],
-            )
-
-            return paths[:, idx_inv, :], log_densities
+        return jnp.take_along_axis(paths, idx_inv, axis=1), log_densities
 
 
 # Probabilistic Machine Learning: An Introduction by Kevin P. Murphy
@@ -285,8 +205,7 @@ def analytic_gp(
     var: float,
     ls: float,
     ensure_unique: bool = False,
-    return_cov_inv: bool = False,
-) -> Tuple[jax.Array, jax.Array] | Tuple[jax.Array, jax.Array, jax.Array]:
+) -> Tuple[jax.Array, jax.Array]:
     """
     Kevin P. Murphy, Probabilistic Machine Learning: An Introduction,
     Chapter 3.2.3,
@@ -325,26 +244,9 @@ def analytic_gp(
         mean = mean.astype(jnp.float32)
         cov = cov.astype(jnp.float32)
 
-        # TODO: this is broken
-        if return_cov_inv:
-            cov_tt_inv = jax.scipy.linalg.inv(cov_tt)
-            cov_inv = (
-                cov_tt_inv
-                + cov_tt_inv
-                @ cov_tc
-                @ jax.scipy.linalg.inv(cov_cc - cov_ct @ cov_tt_inv @ cov_tc)
-                @ cov_ct
-                @ cov_tt_inv
-            )
-            cov_inv = cov_inv.astype(jnp.float32)
 
     if ensure_unique:
         mean = mean[..., idx_inv]
         cov = cov[..., idx_inv][:, idx_inv]
-        if return_cov_inv:
-            cov_inv = cov_inv[..., idx_inv][:, idx_inv]
 
-    if return_cov_inv:
-        return mean, cov, cov_inv
-    else:
-        return mean, cov
+    return mean, cov
