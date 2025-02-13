@@ -73,7 +73,7 @@ def _sample_paths(
 
     valid_lens_ctx = jnp.repeat(L_ctx, B)
 
-    for i in tqdm(range(L_test)):
+    for i in range(L_test):
         s_test_i = s_test[:, i][:, None]  # [B, 1, 1]
         f_mu_i, f_std_i = apply(s_ctx, f_ctx, s_test_i, valid_lens_ctx)
         # [B, 1, 1], [B, 1, 1]
