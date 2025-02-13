@@ -53,12 +53,6 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
     return dataloader
 
 
-@jit
-def normal_log_density(x: float):
-    # log( 1/sqrt(2pi) e^(-x^2 / 2) )
-    return 0.5 * (-jnp.log(2 * jnp.pi) - x**2)
-
-
 def _sample_paths(
     rng: jax.Array,
     apply: Apply,
@@ -75,7 +69,7 @@ def _sample_paths(
     # note that the independent random normals can be pre-sampled
     # it doesn't matter whether sampling is done here, or in the for loop, as all is independent
     normals = random.normal(rng, (L_test, B))
-    log_densities = jnp.sum(vmap(normal_log_density)(normals), axis=0)
+    log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=0)
 
     valid_lens_ctx = jnp.repeat(L_ctx, B)
 
@@ -291,7 +285,7 @@ def analytic_gp(
     var: float,
     ls: float,
     ensure_unique: bool = False,
-    return_cov_inv: bool = False
+    return_cov_inv: bool = False,
 ) -> Tuple[jax.Array, jax.Array] | Tuple[jax.Array, jax.Array, jax.Array]:
     """
     Kevin P. Murphy, Probabilistic Machine Learning: An Introduction,
@@ -334,7 +328,14 @@ def analytic_gp(
         # TODO: this is broken
         if return_cov_inv:
             cov_tt_inv = jax.scipy.linalg.inv(cov_tt)
-            cov_inv = cov_tt_inv + cov_tt_inv @ cov_tc @ jax.scipy.linalg.inv(cov_cc - cov_ct @ cov_tt_inv @ cov_tc) @ cov_ct @ cov_tt_inv
+            cov_inv = (
+                cov_tt_inv
+                + cov_tt_inv
+                @ cov_tc
+                @ jax.scipy.linalg.inv(cov_cc - cov_ct @ cov_tt_inv @ cov_tc)
+                @ cov_ct
+                @ cov_tt_inv
+            )
             cov_inv = cov_inv.astype(jnp.float32)
 
     if ensure_unique:
