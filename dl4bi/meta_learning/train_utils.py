@@ -673,7 +673,19 @@ def load_ckpt(path: Union[str, Path]):
     if not isinstance(path, Path):
         path = Path(path)
     ckptr = PyTreeCheckpointer()
-    ckpt = ckptr.restore(path.absolute())
+    try:
+        ckpt = ckptr.restore(path.absolute())
+    except ValueError:
+        sharding_file = path / "_sharding"
+        cpu = str(jax.devices("cpu")[0])
+        sharding = sharding_file.read_text().replace("cuda:0", cpu)
+        sharding_file_bak = sharding_file.replace(path / "_sharding.bak")
+        sharding_file.write_text(sharding)
+        ckpt = ckptr.restore(path.absolute())
+    finally:
+        # cleanup
+        if "sharding_file_bak" in locals() and sharding_file_bak.exists():
+            sharding_file_bak.replace(sharding_file)
     cfg = OmegaConf.create(ckpt["config"])
     model = instantiate(cfg.model)
     state = TrainState.create(
