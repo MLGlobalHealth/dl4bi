@@ -1,7 +1,9 @@
 defaults:
   - _self_ # use default global values below
   - data: 1d
+  - infer: 1d
   - model: 1d/tnp_kr
+inference_model: spatial
 seed: 42
 wandb: True
 project: Hierarchical Bayes
@@ -12,3 +14,4 @@ plot_interval: 100000
 lr_peak: 1.0e-3
 lr_pct_warmup: 0.0
 clip_max_norm: 3.0
+compare_inference: False

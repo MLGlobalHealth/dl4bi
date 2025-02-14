@@ -1,0 +1,6 @@
+name: 1d
+mcmc:
+  num_warmup: 1000
+  num_samples: 1000
+  num_chains: 4
+num_ctx: 32
