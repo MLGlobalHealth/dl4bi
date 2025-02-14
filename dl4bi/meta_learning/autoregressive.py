@@ -187,7 +187,7 @@ def sample_autoreg(
     f_ctx: jax.Array,  # [L_ctx, D_f]
     s_test: jax.Array,  # [L_test, D_s]
     B: int,  # how many paths to sample
-    random: bool = False,
+    random: bool = False, # whether to permute s_test randomly
 ):
     s_ctx = jnp.repeat(s_ctx[None], B, axis=0)
     f_ctx = jnp.repeat(f_ctx[None], B, axis=0)
@@ -202,7 +202,7 @@ def sample_autoreg(
 
         # Locations for each path are permuted independently.
         idx = jnp.repeat(jnp.arange(L_test)[None, :], B, axis=0)
-        idx = random.permutation(rng_perm, idx, axis=1, independent=True)
+        idx = jax.random.permutation(rng_perm, idx, axis=1, independent=True)
 
         idx_inv = jax.vmap(invert_permutation)(idx)
 
