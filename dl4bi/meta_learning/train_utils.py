@@ -677,8 +677,8 @@ def load_ckpt(path: Union[str, Path]):
         ckpt = ckptr.restore(path.absolute())
     except ValueError:
         sharding_file = path / "_sharding"
-        cpu = str(jax.devices("cpu")[0])
-        sharding = sharding_file.read_text().replace("cuda:0", cpu)
+        device = str(jax.devices()[0])
+        sharding = sharding_file.read_text().replace("cuda:0", device)
         sharding_file_bak = sharding_file.replace(path / "_sharding.bak")
         sharding_file.write_text(sharding)
         ckpt = ckptr.restore(path.absolute())
