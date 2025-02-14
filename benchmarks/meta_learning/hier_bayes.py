@@ -26,10 +26,10 @@ from dl4bi.meta_learning.train_utils import (
 )
 
 # TODO:
+# Plot comparison images - pointwise post pred
 # Do inference comparison
 # Can you use distance bias on covariates too??
 # Can we do House Electricity Consumption dataset?? (one million point GP paper)
-# Customize so inference models can use any kernel? similar to GP code
 
 
 @hydra.main("configs/hier_bayes", config_name="default", version_base=None)
@@ -46,15 +46,20 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    numpyro_model, batch_to_infer_args, dataloader = import_inference_functions(
-        cfg.inference_model, cfg.data
-    )
+    dataloader, *infer_funcs = collect_infer_funcs(cfg.inference_model, cfg.data)
     if cfg.run_inference:
-        rng_sample, rng_mcmc, rng = random.split(rng, 3)
+        batch_to_infer_args, numpyro_model, numpyro_post_pred = infer_funcs
+        rng_sample, rng_mcmc, rng_post, rng = random.split(rng, 4)
         batch = next(dataloader(rng_sample))
-        args = batch_to_infer_args(batch, cfg.data, cfg.infer)
-        mcmc = run_mcmc(rng_mcmc, numpyro_model, cfg.infer.mcmc, *args)
+        kwargs = batch_to_infer_kwargs(batch, cfg.data, cfg.infer)
+        mcmc = run_mcmc(rng_mcmc, numpyro_model, cfg.infer.mcmc, kwargs["mcmc"])
         mcmc.print_summary()
+        samples = mcmc.get_samples()
+        f_mu, f_std = numpyro_pointwise_post_pred(
+            rng_post,
+            **kwargs["post_pred"],
+            **samples,
+        )
     rng_train, rng_test = random.split(rng)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
@@ -91,10 +96,15 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def import_inference_functions(model_name: str, data: DictConfig):
+def collect_infer_funcs(model_name: str, data: DictConfig):
     module = importlib.import_module(f"inference_models.{model_name}")
     dataloader = module.build_dataloader(module.jax_prior_pred, data)
-    return module.numpyro_model, module.batch_to_infer_args, dataloader
+    return (
+        dataloader,
+        module.batch_to_infer_args,
+        module.numpyro_model,
+        module.numpyro_pointwise_post_pred,
+    )
 
 
 def compare_inference(
@@ -159,12 +169,14 @@ def compare_inference(
 
 
 def run_mcmc(rng: jax.Array, model: Callable, infer: DictConfig, *args):
-    return MCMC(
+    mcmc = MCMC(
         NUTS(model),
         num_warmup=infer.num_warmup,
         num_samples=infer.num_samples,
         num_chains=infer.num_chains,
-    ).run(rng, *args)
+    )
+    mcmc.run(rng, *args)
+    return mcmc
 
 
 if __name__ == "__main__":
