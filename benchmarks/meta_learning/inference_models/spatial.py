@@ -17,9 +17,8 @@ from .utils import condition_gp
 
 
 def numpyro_model(
-    s: jax.Array,
-    f: Optional[jax.Array] = None,
-    mask: Optional[bool] = None,
+    s_ctx: jax.Array,
+    f_ctx: Optional[jax.Array] = None,
     jitter: float = 1e-5,
 ):
     """Generic Spatiotemporal model with fixed and random spatial effects.
@@ -32,12 +31,13 @@ def numpyro_model(
         jitter: Jitter for kernel covariance to stabilize inversion.
     """
 
-    L = s.shape[0]
+    L = s_ctx.shape[0]
+    var = numpyro.deterministic("var", 1.0)
     ls = numpyro.sample("ls", dist.Beta(3, 7))
-    k = rbf(s, s, var=1.0, ls=ls) + jitter * jnp.eye(L)
+    k = rbf(s_ctx, s_ctx, var, ls) + jitter * jnp.eye(L)
     f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(jnp.zeros(L), k))
     f_obs_noise = numpyro.sample("f_obs_noise", dist.HalfNormal(0.1))
-    numpyro.sample("f", dist.Normal(f_mu_s, f_obs_noise), obs=f)
+    numpyro.sample("f", dist.Normal(f_mu_s, f_obs_noise), obs=f_ctx)
 
 
 @partial(jit, static_argnames=("batch_size",))
@@ -61,11 +61,12 @@ def numpyro_pointwise_post_pred(
     f_mu_s: jax.Array,  # [N, L_ctx]
     f_obs_noise: jax.Array,  # [N]
     jitter: float = 1e-5,
+    **kwargs,
 ):
     """Calculates the pointwise posterior predictive."""
     N = ls.shape[0]
-    f = vmap(numpyro_post_pred, in_axes=(0, None, None, 0, 0, 0, 0))(
-        random.split(rng, N), s_ctx, s_test, var, ls, f_mu_s, f_obs_noise
+    f = vmap(numpyro_post_pred, in_axes=(0, None, None, 0, 0, 0, 0, None))(
+        random.split(rng, N), s_ctx, s_test, var, ls, f_mu_s, f_obs_noise, jitter
     )  # f: [N, L]
     return f.mean(axis=0), f.std(axis=0)
 
@@ -159,4 +160,10 @@ def build_dataloader(prior_pred: Callable, data: DictConfig):
 def batch_to_infer_kwargs(batch: tuple, data: DictConfig, infer: DictConfig):
     Nc = infer.num_ctx
     _, _, _, s, f, *_ = batch
-    return s[0, :Nc], f[0, :Nc]
+    s, f = s[0], f[0]
+    return {
+        "s_ctx": s[:Nc],
+        "s_test": s[Nc:],
+        "f_ctx": f[:Nc],
+        "f_test": f[Nc:],
+    }

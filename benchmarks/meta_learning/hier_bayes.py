@@ -47,19 +47,21 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     dataloader, *infer_funcs = collect_infer_funcs(cfg.inference_model, cfg.data)
-    if cfg.run_inference:
-        batch_to_infer_args, numpyro_model, numpyro_post_pred = infer_funcs
+    if cfg.compare_inference:
+        batch_to_infer_kwargs, numpyro_model, numpyro_pointwise_post_pred = infer_funcs
         rng_sample, rng_mcmc, rng_post, rng = random.split(rng, 4)
         batch = next(dataloader(rng_sample))
         kwargs = batch_to_infer_kwargs(batch, cfg.data, cfg.infer)
-        mcmc = run_mcmc(rng_mcmc, numpyro_model, cfg.infer.mcmc, kwargs["mcmc"])
+        mcmc = run_mcmc(rng_mcmc, numpyro_model, cfg.infer.mcmc, **kwargs)
         mcmc.print_summary()
         samples = mcmc.get_samples()
         f_mu, f_std = numpyro_pointwise_post_pred(
             rng_post,
-            **kwargs["post_pred"],
+            **kwargs,
             **samples,
         )
+        print(f_mu.shape)
+        return
     rng_train, rng_test = random.split(rng)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
@@ -101,7 +103,7 @@ def collect_infer_funcs(model_name: str, data: DictConfig):
     dataloader = module.build_dataloader(module.jax_prior_pred, data)
     return (
         dataloader,
-        module.batch_to_infer_args,
+        module.batch_to_infer_kwargs,
         module.numpyro_model,
         module.numpyro_pointwise_post_pred,
     )
@@ -168,14 +170,14 @@ def compare_inference(
     # TODO(danj): calculate comparison metrics, LL under real data?
 
 
-def run_mcmc(rng: jax.Array, model: Callable, infer: DictConfig, *args):
+def run_mcmc(rng: jax.Array, model: Callable, infer: DictConfig, **kwargs):
     mcmc = MCMC(
         NUTS(model),
         num_warmup=infer.num_warmup,
         num_samples=infer.num_samples,
         num_chains=infer.num_chains,
     )
-    mcmc.run(rng, *args)
+    mcmc.run(rng, **kwargs)
     return mcmc
 
 

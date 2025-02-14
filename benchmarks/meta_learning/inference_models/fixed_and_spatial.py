@@ -17,10 +17,11 @@ from .utils import condition_gp
 
 
 def numpyro_model(
-    x: jax.Array,  # [L, D]
-    s: jax.Array,  # [L, S]
-    f: jax.Array,  # [L, 1]
+    x_ctx: jax.Array,  # [L, D]
+    s_ctx: jax.Array,  # [L, S]
+    f_ctx: jax.Array,  # [L, 1]
     jitter: float = 1e-5,
+    **kwargs,
 ):
     """Generic Spatiotemporal model with fixed and random spatial effects.
 
@@ -30,16 +31,16 @@ def numpyro_model(
         f: Observed function values, `[L, 1]`.
     """
 
-    L, D = x.shape
+    L, D = x_ctx.shape
     var = numpyro.deterministic("var", 1.0)
     ls = numpyro.sample("ls", dist.Beta(3, 7))
-    k = rbf(s, s, var, ls) + jitter * jnp.eye(L)
+    k = rbf(s_ctx, s_ctx, var, ls) + jitter * jnp.eye(L)
     beta = numpyro.sample("beta", dist.Normal(jnp.zeros(D), jnp.ones(D)))
-    f_mu_x = x @ beta
+    f_mu_x = x_ctx @ beta
     f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(jnp.zeros(L), k))
     f_mu = f_mu_x + f_mu_s
     f_obs_noise = numpyro.sample("f_obs_noise", dist.HalfNormal(0.1))
-    numpyro.sample("f", dist.Normal(f_mu, f_obs_noise), obs=f)
+    numpyro.sample("f", dist.Normal(f_mu, f_obs_noise), obs=f_ctx)
 
 
 @partial(jit, static_argnames=("batch_size",))
@@ -60,16 +61,27 @@ def numpyro_pointwise_post_pred(
     s_ctx: jax.Array,  # [L_ctx, S]
     s_test: jax.Array,  # [L_test, S]
     x_test: jax.Array,  # [L_test, D]
+    beta: jax.Array,  # [N, L_test, D]
     var: jax.Array,  # [N]
     ls: jax.Array,  # [N]
     f_mu_s: jax.Array,  # [N, L_ctx]
     f_obs_noise: jax.Array,  # [N]
     jitter: float = 1e-5,
+    **kwargs,
 ):
     """Calculates the pointwise posterior predictive."""
     N = ls.shape[0]
-    f = vmap(numpyro_post_pred, in_axes=(0, None, None, 0, 0, 0, 0))(
-        random.split(rng, N), s_ctx, s_test, x_test, var, ls, f_mu_s, f_obs_noise
+    f = vmap(numpyro_post_pred, in_axes=(0, None, None, None, 0, 0, 0, 0, 0, None))(
+        random.split(rng, N),
+        s_ctx,
+        s_test,
+        x_test,
+        beta,
+        var,
+        ls,
+        f_mu_s,
+        f_obs_noise,
+        jitter,
     )  # f: [N, L]
     return f.mean(axis=0), f.std(axis=0)
 
@@ -175,8 +187,15 @@ def build_dataloader(prior_pred: Callable, data: DictConfig):
     return dataloader
 
 
-def batch_to_infer_args(batch: tuple, data: DictConfig, infer: DictConfig):
+def batch_to_infer_kwargs(batch: tuple, data: DictConfig, infer: DictConfig):
     S, Nc = len(data.s), infer.num_ctx
     _, _, _, s, f, *_ = batch
-    s, x, f = s[0, :Nc, :S], s[0, :Nc, S:], f[0, :Nc, :]
-    return x, s, f
+    x, s, f = s[0, :, S:], s[0, :, :S], f[0]
+    return {
+        "x_ctx": x[:Nc],
+        "x_test": x[Nc:],
+        "s_ctx": s[:Nc],
+        "s_test": s[Nc:],
+        "f_ctx": f[:Nc],
+        "f_test": f[Nc:],
+    }
