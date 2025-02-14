@@ -49,15 +49,42 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
 
     return dataloader
 
+def sample_diagonal(
+        rng: jax.Array,
+        apply: Apply,
+        s_ctx: jax.Array,  # [L_ctx, D_s]
+        f_ctx: jax.Array,  # [L_ctx, D_f]
+        s_test: jax.Array,  # [L_test, D_s]
+        B: int,  # how many paths to sample
+):
+    L_test, _ = s_test.shape
+    _, D_f = f_ctx.shape
 
-def _sample_paths(
+    # precompute the randomness
+    normals = random.normal(rng, (B, L_test, D_f))
+    log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=0)
+
+    s_ctx = jnp.expand_dims(s_ctx, 0)
+    f_ctx = jnp.expand_dims(f_ctx, 0)
+    s_test = jnp.expand_dims(s_test, 0)
+    # we only need to expand the dimension to B when multiplying by the random normals
+
+    f_mu, f_std = apply(s_ctx, f_ctx, s_test)
+    f_mu = jnp.repeat(f_mu, B, axis=0)
+    f_std = jnp.repeat(f_std, B, axis=0)
+    f_sampled = normals * f_std + f_mu
+
+    return f_sampled, log_densities
+
+
+def _sample_autoreg(
     rng: jax.Array,
     apply: Apply,
-    s_ctx: jax.Array,  # [B, L_ctx, D]
+    s_ctx: jax.Array,  # [B, L_ctx, D_s]
     f_ctx: jax.Array,  # [B, L_ctx, D_f]
-    s_test: jax.Array,  # [B, L_test, D]
+    s_test: jax.Array,  # [B, L_test, D_s]
 ):
-    B, L_test, D = s_test.shape
+    B, L_test, _ = s_test.shape
     _, L_ctx, _ = s_ctx.shape
 
     s_ctx = jnp.concat([s_ctx, s_test], axis=1)
@@ -72,8 +99,8 @@ def _sample_paths(
 
     for i in range(L_test):
         s_test_i = s_test[:, i][:, None]  # [B, 1, 1]
-        f_mu_i, f_std_i = apply(s_ctx, f_ctx, s_test_i, valid_lens_ctx)
-        # [B, 1, 1], [B, 1, 1]
+
+        f_mu_i, f_std_i = apply(s_ctx, f_ctx, s_test_i, valid_lens_ctx) # [B, 1, 1], [B, 1, 1]
 
         f_sampled = normals[i][:, None, None] * f_std_i + f_mu_i
         # need to expand normals[i]'s dims to match f_std_i and f_mu_i
@@ -112,12 +139,12 @@ def furthest_first(
 
     for _ in range(L_test):
         i = jnp.nanargmax(distances)
-        x = s_test[i]
+        s_i = s_test[i]
 
         distances = distances.at[i].set(jnp.nan)
         order.append(i)
 
-        distances = jnp.minimum(distances, jnp.abs(s_test - x))
+        distances = jnp.minimum(distances, jnp.abs(s_test - s_i))
 
     return jnp.array(order, dtype=jnp.int32)
 
@@ -153,7 +180,7 @@ def closest_first(
     return jnp.array(order, dtype=jnp.int32)
 
 
-def sample_paths(
+def sample_autoreg(
     rng: jax.Array,
     apply: Apply,
     s_ctx: jax.Array,  # [L_ctx, D_s]
@@ -167,7 +194,7 @@ def sample_paths(
     s_test = jnp.repeat(s_test[None], B, axis=0)
 
     if not random:
-        return _sample_paths(rng, apply, s_ctx, f_ctx, s_test)
+        return _sample_autoreg(rng, apply, s_ctx, f_ctx, s_test)
     else:
         _, L_test, D_s = s_test.shape
         _, _, D_f = f_ctx.shape
@@ -183,7 +210,7 @@ def sample_paths(
         idx = jnp.repeat(idx[:, :, None], D_s, axis=2)
         idx_inv = jnp.repeat(idx_inv[:, :, None], D_f, axis=2)
 
-        paths, log_densities = _sample_paths(
+        paths, log_densities = _sample_autoreg(
             rng,
             apply,
             s_ctx,
