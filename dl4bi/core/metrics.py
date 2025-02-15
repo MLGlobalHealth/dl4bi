@@ -52,6 +52,16 @@ def mvn_logpdf(
             )
 
 
+def kl_div_diag_mvn(f_mu_p, f_std_p, f_mu_q, f_std_q):
+    f_var_p, f_var_q = f_std_p**2, f_std_q**2
+    return 0.5 * jnp.sum(
+        f_var_p / f_var_q
+        + (f_mu_p - f_mu_q) ** 2 / f_var_q
+        - 1
+        + jnp.log(f_var_q / f_var_p)
+    )
+
+
 @partial(jit, static_argnames=["num_bins"])
 def mean_absolute_calibration_error(
     f_true: jax.Array,  # [B, ..., D]
