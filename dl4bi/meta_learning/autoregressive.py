@@ -49,19 +49,20 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
 
     return dataloader
 
+
 def sample_diagonal(
-        rng: jax.Array,
-        apply: Apply,
-        s_ctx: jax.Array,  # [L_ctx, D]
-        f_ctx: jax.Array,  # [L_ctx, 1]
-        s_test: jax.Array,  # [L_test, D]
-        B: int,  # how many paths to sample
+    rng: jax.Array,
+    apply: Apply,
+    s_ctx: jax.Array,  # [L_ctx, D]
+    f_ctx: jax.Array,  # [L_ctx, 1]
+    s_test: jax.Array,  # [L_test, D]
+    B: int,  # how many paths to sample
 ):
     L_test, _ = s_test.shape
 
     # precompute the randomness
     normals = random.normal(rng, (B, L_test, 1))
-    log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=1)
+    log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=1).squeeze(1)
 
     s_ctx = jnp.expand_dims(s_ctx, 0)
     f_ctx = jnp.expand_dims(f_ctx, 0)
@@ -99,7 +100,9 @@ def _sample_autoreg(
     for i in range(L_test):
         s_test_i = s_test[:, i][:, None]  # [B, 1, 1]
 
-        f_mu_i, f_std_i = apply(s_ctx, f_ctx, s_test_i, valid_lens_ctx) # [B, 1, 1], [B, 1, 1]
+        f_mu_i, f_std_i = apply(
+            s_ctx, f_ctx, s_test_i, valid_lens_ctx
+        )  # [B, 1, 1], [B, 1, 1]
 
         f_sampled = normals[i][:, None, None] * f_std_i + f_mu_i
         # need to expand normals[i]'s dims to match f_std_i and f_mu_i
@@ -186,7 +189,7 @@ def sample_autoreg(
     f_ctx: jax.Array,  # [L_ctx, 1]
     s_test: jax.Array,  # [L_test, D]
     B: int,  # how many paths to sample
-    random: bool = False, # whether to permute s_test randomly
+    random: bool = False,  # whether to permute s_test randomly
 ):
     s_ctx = jnp.repeat(s_ctx[None], B, axis=0)
     f_ctx = jnp.repeat(f_ctx[None], B, axis=0)
@@ -269,7 +272,6 @@ def analytic_gp(
 
         mean = mean.astype(jnp.float32)
         cov = cov.astype(jnp.float32)
-
 
     if ensure_unique:
         mean = mean[..., idx_inv]
