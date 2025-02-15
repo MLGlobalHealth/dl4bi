@@ -39,9 +39,12 @@ def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
     path = f"results/{cfg.project}/{cfg.inference_model}/{cfg.data.name}/{cfg.seed}/{run_name}"
     path = Path(path)
+    wandb_mode = "disabled"
+    if cfg.wandb and not cfg.compare_inference:
+        wandb_mode = "online"
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
-        mode="online" if cfg.wandb else "disabled",
+        mode=wandb_mode,
         name=run_name,
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
