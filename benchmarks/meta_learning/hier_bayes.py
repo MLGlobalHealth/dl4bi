@@ -36,7 +36,7 @@ def main(cfg: DictConfig):
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
-        name=run_name + f" - infer {cfg.infer_seed}" if cfg.infer_compare else "",
+        name=run_name + (f" - infer {cfg.infer_seed}" if cfg.infer_compare else ""),
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
     )
