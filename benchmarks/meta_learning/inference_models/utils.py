@@ -5,6 +5,7 @@ from typing import Callable, Optional
 
 import jax
 import jax.numpy as jnp
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import scoringrules as sr
@@ -147,19 +148,26 @@ def plot_2d_posterior_predictive(
     _, axs = plt.subplots(2, 4, figsize=(20, 10))
     task = jnp.hstack([f_ctx, jnp.repeat(jnp.nan, L - L_ctx)])
     to_img = lambda x: x[inv_permute_idx].reshape(H, W)
+    min_std = min(f_std_pyro.min(), f_std_model.min())
+    max_std = max(f_std_pyro.max(), f_std_model.max())
+    norm_std = mpl.colors.Normalize(vmin=min_std, vmax=max_std)
     task, f = to_img(task), to_img(f)
     axs[0, 0].set_ylabel("HMC", fontsize=fontsize)
     axs[0, 0].set_title("Task", fontsize=fontsize)
     axs[0, 0].imshow(task, cmap=cmap, interpolation="none")
     axs[0, 1].set_title("Uncertainty", fontsize=fontsize)
-    axs[0, 1].imshow(to_img(f_std_pyro), cmap=cmap_std, interpolation="none")
+    axs[0, 1].imshow(
+        to_img(f_std_pyro), cmap=cmap_std, norm=norm_std, interpolation="none"
+    )
     axs[0, 2].set_title("Prediction", fontsize=fontsize)
     axs[0, 2].imshow(to_img(f_mu_pyro), cmap=cmap, interpolation="none")
     axs[0, 3].set_title("Ground Truth", fontsize=fontsize)
     axs[0, 3].imshow(f, cmap=cmap, interpolation="none")
     axs[1, 0].set_ylabel("TNP-KR", fontsize=fontsize)
     axs[1, 0].imshow(task, cmap=cmap, interpolation="none")
-    axs[1, 1].imshow(to_img(f_std_model), cmap=cmap_std, interpolation="none")
+    axs[1, 1].imshow(
+        to_img(f_std_model), cmap=cmap_std, norm=norm_std, interpolation="none"
+    )
     axs[1, 2].imshow(to_img(f_mu_model), cmap=cmap, interpolation="none")
     axs[1, 3].imshow(f)
     return plt.gcf()
