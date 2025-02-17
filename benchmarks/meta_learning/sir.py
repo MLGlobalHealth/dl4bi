@@ -181,6 +181,9 @@ def build_time_dataloader(data: DictConfig, priors: DictConfig):
     s = jnp.repeat(s_grid[None, ...], B, axis=0)
     valid_lens_test = jnp.repeat(Lt, B)
 
+    # TODO(danj): option to permute locations/specify valid lens or not
+    # TODO(danj): randomly select a few timesteps
+    # TODO(danj): create a plotting function
     @jit
     def create_batch(rng: jax.Array, steps: jax.Array):
         rng_permute, rng_valid = random.split(rng)

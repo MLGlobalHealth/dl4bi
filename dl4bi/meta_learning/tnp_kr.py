@@ -31,6 +31,7 @@ class TNPKR(nn.Module):
             two arrays.
         bias: A bias module that consumes pairwise distances.
         blk: A block to use for each layer and each repetition.
+        norm: A module used for normalization between blocks.
         head: Transforms the tokens into model output.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
