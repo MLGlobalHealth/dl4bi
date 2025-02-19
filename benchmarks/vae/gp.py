@@ -33,7 +33,7 @@ def main(cfg: DictConfig):
     kernel_name, model_name, seed = d["kernel"], d["model"], cfg.seed
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
-        mode="online" if cfg.wandb in cfg else "disabled",
+        mode="online" if cfg.wandb else "disabled",
         project=cfg.project,
         name=f"{kernel_name} - {model_name} - seed {seed}",
     )
