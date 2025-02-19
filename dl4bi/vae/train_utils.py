@@ -30,7 +30,7 @@ def elbo_train_step(
     """
 
     def elbo_loss(params):
-        var, ls, _z, f = batch
+        f, var, ls, period, z = batch
         f_hat, z_mu, z_std = state.apply_fn(
             {"params": params}, f, var, ls, rngs={"extra": rng}
         )
@@ -61,7 +61,7 @@ def mse_train_step(
     """
 
     def mse_loss(params):
-        var, ls, z, f = batch
+        f, var, ls, period, z = batch
         f_hat = state.apply_fn({"params": params}, z, var, ls)
         return optax.squared_error(f_hat, f.squeeze()).mean()
 

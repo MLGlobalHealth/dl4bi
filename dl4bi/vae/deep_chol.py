@@ -2,6 +2,8 @@ import flax.linen as nn
 import jax.numpy as jnp
 from jax import Array
 
+from dl4bi.mlp import gMLP
+
 
 class DeepChol(nn.Module):
     r"""`DeepChol` learns to approximate the function $f_\theta:(\mathbf{z},\text{var},\text{ls})\to\mathbf{Lz}$.
@@ -40,7 +42,13 @@ class DeepChol(nn.Module):
         Returns:
             $\hat{\mathbf{f}}$, an approximation of $\mathbf{Lz}$.
         """
-        B = z.shape[0]
+        B, L = z.shape
+        if isinstance(self.decoder, gMLP):
+            z = z[..., None]  # [B, L, 1]
+            var = jnp.full((B, L, 1), var)
+            ls = jnp.full((B, L, 1), ls)
+            x = jnp.concatenate([z, var, ls], axis=-1)
+            return self.decoder(x).squeeze()  # [B, L]
         var = jnp.full((B, 1), var)
         ls = jnp.full((B, 1), ls)
         return self.decoder(jnp.hstack([z, var, ls]))

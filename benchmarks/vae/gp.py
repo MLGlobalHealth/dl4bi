@@ -23,7 +23,7 @@ from sps.priors import Prior
 from sps.utils import build_grid
 from tqdm import tqdm
 
-from dl4bi.core import *  # noqa: F403
+from dl4bi.mlp import MLP, gMLP
 from dl4bi.vae import DeepChol, PriorCVAE, train_utils
 
 
@@ -33,7 +33,7 @@ def main(cfg: DictConfig):
     kernel_name, model_name, seed = d["kernel"], d["model"], cfg.seed
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
-        mode="online" if "wandb" in cfg else "disabled",
+        mode="online" if cfg.wandb in cfg else "disabled",
         name=f"{kernel_name} - {model_name} - seed {seed}",
     )
     rng = random.key(cfg.seed)
@@ -87,7 +87,7 @@ def train(
 ):
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
     loader = dataloader(rng_data, gp, s, batch_size)
-    var, ls, z, f = next(loader)
+    f, var, ls, period, z = next(loader)
     rngs = {"params": rng_params, "extra": rng_extra}
     x = f if isinstance(model, PriorCVAE) else z  # decoder-only, e.g. DeepChol
     kwargs = model.init(rngs, x, var, ls)
@@ -175,7 +175,7 @@ def validate(
     results = []
     for i in (pbar := tqdm(range(num_batches), unit="batch", dynamic_ncols=True)):
         batch = next(loader)
-        var, ls, z, f = batch
+        f, var, ls, period, z = batch
         params = {"params": state.params, **state.kwargs}
         rngs = {"extra": rng_extra}
         if is_decoder_only:
@@ -208,7 +208,7 @@ def log_plots(
     f_hat: jax.Array,
 ):
     """Logs `num_plots` from the given batch."""
-    (var, ls, _z, f), s_flat = batch, s.squeeze()
+    (f, var, ls, period, z), s_flat = batch, s.squeeze()
     sample_paths = []
     for i in random.choice(rng, f.shape[0], (num_plots,), replace=False):
         plt.plot(s_flat, f[i].squeeze().T, color="black")
