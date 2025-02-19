@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from collections.abc import Callable
+
 import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
@@ -26,36 +28,30 @@ class PriorCVAE(nn.Module):
 
     encoder: nn.Module
     decoder: nn.Module
+    cond_stack_fn: Callable
     z_dim: int
 
     @nn.compact
-    def __call__(self, f: Array, var: float, ls: float):
+    def __call__(self, f: Array, conditionals: Array):
         r"""Run module forward.
 
         Args:
             f: The function values, an array of shape `(B, K, 1)`.
-            var: The variance for the GP.
-            ls: The lengthscale for the GP.
+            conditionals: The conditional hyperparameters of the stochastic process
 
         Returns:
             $\hat{\mathbf{f}}$, a recreation of the original$\mathbf{f}$,
             along with $\mu$ and $\log(\sigma^2)$, which are often used
             to calculate losses involving KL divergence.
         """
-        B = f.shape[0]
-        var = jnp.full((B, 1), var)
-        ls = jnp.full((B, 1), ls)
-        latents = self.encoder(jnp.hstack([f.reshape(B, -1), var, ls]))
+        latents = self.encoder(self.cond_stack_fn(f, conditionals))
         z_mu = nn.Dense(self.z_dim)(latents)
         z_log_var = nn.Dense(self.z_dim)(latents)
         z_std = jnp.exp(z_log_var / 2)
         eps = random.normal(self.make_rng("extra"), z_std.shape)
         z = z_mu + z_std * eps
-        f_hat = self.decoder(jnp.hstack([z, var, ls]))
+        f_hat = self.decoder(self.cond_stack_fn(z, conditionals))
         return f_hat.reshape(f.shape), z_mu, z_std
 
-    def decode(self, z: Array, var: float, ls: float):
-        B = z.shape[0]
-        var = jnp.full((B, 1), var)
-        ls = jnp.full((B, 1), ls)
-        return self.decoder(jnp.hstack([z, var, ls]))
+    def decode(self, z: Array, conditionals: Array):
+        return self.decoder(self.cond_stack_fn(z, conditionals))

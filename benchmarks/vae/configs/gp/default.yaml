@@ -1,6 +1,6 @@
 defaults:
   - _self_ # use default global values below
-  - model: deep_chol
+  - model: deep_rv
   - kernel: matern
 seed: 42
 wandb: True

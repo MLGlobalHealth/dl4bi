@@ -1,5 +1,7 @@
-cls: DeepChol
+cls: DeepRV
 kwargs:
+  cond_stack_fn: 
+    func: append_cond_to_locs
   decoder:
     cls: MLP
     kwargs:
