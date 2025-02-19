@@ -27,20 +27,21 @@ from dl4bi.mlp import MLP, gMLP
 from dl4bi.vae import DeepChol, PriorCVAE, train_utils
 
 
-@hydra.main("configs/gp", version_base=None)
+@hydra.main("configs/gp", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     d = HydraConfig.get().runtime.choices
     kernel_name, model_name, seed = d["kernel"], d["model"], cfg.seed
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb in cfg else "disabled",
+        project=cfg.project,
         name=f"{kernel_name} - {model_name} - seed {seed}",
     )
     rng = random.key(cfg.seed)
     rng_train, rng_eval = random.split(rng)
     s = build_grid([{"start": 0.0, "stop": 1.0, "num": 128}])
     gp, model = instantiate(cfg.kernel), instantiate(cfg.model)
-    state = train(rng_train, gp, s, model)
+    state = train(rng_train, gp, s, model, cfg.train_num_steps, cfg.valid_interval)
     path = Path(f"results/1D_GP/{kernel_name}/{model_name}-seed-{seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
     validate(
