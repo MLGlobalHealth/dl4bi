@@ -64,7 +64,7 @@ class SpatialGatingUnit(nn.Module):
     Based on implementation [here](https://github.com/lucidrains/g-mlp-pytorch/tree/main).
 
     Args:
-        num_heads: Number of heads where each gets its own bias term.
+        num_heads: Number of gate heads.
         gate_fn: Activation function for gate inputs.
         norm: Module used to normalize gate values.
 
@@ -77,18 +77,17 @@ class SpatialGatingUnit(nn.Module):
     norm: nn.Module = nn.LayerNorm()
 
     @nn.compact
-    def __call__(self, x, gate_res: Optional[jax.Array] = None):
-        B, L, D = x.shape
-        H = 1 if gate_res is None else gate_res.shape[1]  # B L D
+    def __call__(self, x, attn_res: Optional[jax.Array] = None):
+        L, H = x.shape[1], self.num_heads
         bias = self.param("bias", init.constant(1.0), (1, H, L, 1))
-        weights = self.param("weights", init.uniform(-1e-3 / L, 1e-3 / L), (H, L, L))
-        z_1, z_2 = jnp.split(x, 2, axis=-1)
+        weights = self.param("weights", init.lecun_uniform(), (H, L, L))
+        z_1, z_2 = jnp.split(x, 2, axis=-1)  # z_1, z_2: [B, L, D / 2]
         z_2 = self.norm(z_2)
-        z_2 = rearrange(z_2, "B L (H D) -> B H L D", H=H)
-        z_2 = jnp.einsum("B H L D, H M L -> B H M D", z_2, weights)  # M = L
-        z_2 = rearrange(z_2 + bias, "B H L D -> B L (H D)")
-        if gate_res is not None:
-            z_2 += gate_res
+        z_2 = rearrange(z_2, "B L (H D) -> B H L D", H=H)  # subgate per head
+        z_2 = jnp.einsum("H Q L, B H L D -> B H Q D", weights, z_2) + bias  # WZ + b
+        z_2 = rearrange(z_2, "B H L D -> B L (H D)")
+        if attn_res is not None:
+            z_2 += attn_res
         return z_1 * self.gate_fn(z_2)
 
 
@@ -96,10 +95,15 @@ class SpatialGatingUnit(nn.Module):
 # TODO(danj): implement causal masking variant for autoregressive tasks
 # TODO(danj): try implementing Toeplitz matrices with circulant matrices --
 # useful on MLM objective, but perhaps not generally?
-class GatedMLPBlock(nn.Module):
+class gMLPBlock(nn.Module):
     """Gated MLP Block from [Pay Attention to MLPs](https://arxiv.org/abs/2105.08050).
 
     Based on implementation [here](https://github.com/lucidrains/g-mlp-pytorch/tree/main).
+
+    .. note::
+        The final dimension of `attn`'s output must be half the size of the last
+        dimension of `proj_in`, since `proj_in`'s output is split into the value
+        and gate.
 
     Args:
         proj_in: Module that projects last dimension of input.
@@ -110,35 +114,48 @@ class GatedMLPBlock(nn.Module):
         An instance of `GatedMLPBlock`.
     """
 
-    proj_in: nn.Module = MLP([128, 64], nn.gelu)
-    proj_out: nn.Module = MLP([128, 1], nn.gelu)
+    proj_in: nn.Module = MLP([128], nn.gelu)
+    proj_out: nn.Module = MLP([64], nn.gelu)
     attn: Optional[nn.Module] = None
 
     @nn.compact
-    def __call__(self, x):
-        pass
+    def __call__(self, x, valid_lens: Optional[jax.Array] = None):
+        attn_res = None
+        if self.attn is not None:
+            attn_res, _ = self.attn(x, x, x, valid_lens)
+        x = self.proj_in(x)
+        x = SpatialGatingUnit()(x, attn_res)
+        return self.proj_out(x)
 
 
-class GatedMLP(nn.Module):
+class gMLP(nn.Module):
     """Gated MLP from [Pay Attention to MLPs](https://arxiv.org/abs/2105.08050).
 
     Based on implementation [here](https://github.com/lucidrains/g-mlp-pytorch/tree/main).
 
     Args:
         num_blks: Number of `GatedMLPBlocks` to use.
-        proj_in: Module that projects last dimension of input for blocks.
-        proj_out: Module that projects last dimension of output for blocks.
-        attn: An optional attention module used in aMLP variant for blocks.
+        embed: A callable that embeds input before passing to gMLPBlocks.
+        blk: A configured gMLPBlock.
+        norm: A module used for normalization between blocks.
+        head: Transforms the block output into model output.
+        output_fn: A function that transforms the model output into
+            a form that can be consumed by loss functions.
 
     Returns:
-        An instance of `GatedMLP`.
+        An instance of `gMLP`.
     """
 
     num_blks: int = 6
-    proj_in: nn.Module = MLP([128, 64], nn.gelu)
-    proj_out: nn.Module = MLP([128, 1], nn.gelu)
-    attn: Optional[nn.Module] = None
+    embed: Callable = MLP([64])
+    norm: nn.Module = nn.LayerNorm()
+    blk: nn.Module = gMLPBlock()
+    head: nn.Module = MLP([128, 1], nn.gelu)
+    output_fn: Callable = lambda x: x
 
     @nn.compact
-    def __call__(self, x):
-        pass
+    def __call__(self, x: jax.Array):  # x: [B, L, D]
+        x = self.embed(x)
+        for _ in range(self.num_blks):
+            x += self.blk.copy()(self.norm.copy()(x))
+        return self.output_fn(self.head(self.norm.copy()(x)))
