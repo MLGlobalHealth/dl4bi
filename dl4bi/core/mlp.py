@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jnp
 from einops import rearrange
 from flax import linen as nn
+from jax import jit
 from jax.nn import initializers as init
 
 
@@ -83,12 +84,18 @@ class SpatialGatingUnit(nn.Module):
         weights = self.param("weights", init.lecun_uniform(), (H, L, L))
         z_1, z_2 = jnp.split(x, 2, axis=-1)  # z_1, z_2: [B, L, D / 2]
         z_2 = self.norm(z_2)
-        z_2 = rearrange(z_2, "B L (H D) -> B H L D", H=H)  # subgate per head
-        z_2 = jnp.einsum("H Q L, B H L D -> B H Q D", weights, z_2) + bias  # WZ + b
-        z_2 = rearrange(z_2, "B H L D -> B L (H D)")
+        z_2 = _spatial_gate(z_2, weights, bias)
         if attn_res is not None:
             z_2 += attn_res
         return z_1 * self.gate_fn(z_2)
+
+
+@jit
+def _spatial_gate(z_2: jax.Array, weights: jax.Array, bias: jax.Array):
+    H = bias.shape[1]
+    z_2 = rearrange(z_2, "B L (H D) -> B H L D", H=H)  # subgate per head
+    z_2 = jnp.einsum("H Q L, B H L D -> B H Q D", weights, z_2) + bias  # WZ + b
+    return rearrange(z_2, "B H L D -> B L (H D)")
 
 
 # TODO(danj): implement GatedMLPBlock for vision with patch sizes

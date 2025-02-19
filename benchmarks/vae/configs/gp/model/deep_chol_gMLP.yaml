@@ -1,6 +1,6 @@
 cls: DeepChol
 kwargs:
   decoder:
-    cls: MLP
+    cls: gMLP
     kwargs:
-      dims: [128, 128]
+      num_blks: 2
