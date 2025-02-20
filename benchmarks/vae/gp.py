@@ -13,10 +13,12 @@ import numpy as np
 import optax
 import orbax.checkpoint as ocp
 import wandb
+from flax.training import orbax_utils
 from hydra.core.hydra_config import HydraConfig
 from jax import jit, random
 from jax.scipy.stats import norm
 from omegaconf import DictConfig, OmegaConf
+from orbax.checkpoint import PyTreeCheckpointer
 from sps.gp import GP
 from sps.kernels import matern_3_2, periodic, rbf
 from sps.priors import Prior
@@ -39,7 +41,7 @@ def main(cfg: DictConfig):
     )
     rng = random.key(cfg.seed)
     rng_train, rng_eval = random.split(rng)
-    s = build_grid([{"start": 0.0, "stop": 1.0, "num": 128}])
+    s = build_grid([{"start": -5.0, "stop": 5.0, "num": 512}])
     gp, model = instantiate(cfg.kernel), instantiate(cfg.model)
     state = train(rng_train, gp, s, model, cfg.train_num_steps, cfg.valid_interval)
     path = Path(f"results/1D_GP/{kernel_name}/{model_name}-seed-{seed}")
@@ -224,52 +226,30 @@ def log_plots(
 
 
 def save_ckpt(state: train_utils.TrainState, cfg: DictConfig, path: Path):
-    """Saves a checkpoint."""
+    "Save a checkpoint."
     shutil.rmtree(path, ignore_errors=True)
-    ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
-    cfg_d = OmegaConf.to_container(cfg, resolve=True)
-    ckptr.save(
-        path.absolute(),
-        args=ocp.args.Composite(
-            state=ocp.args.StandardSave(state),
-            config=ocp.args.JsonSave(cfg_d),
-        ),
-    )
+    ckptr = PyTreeCheckpointer()
+    ckpt = {"state": state, "config": OmegaConf.to_container(cfg, resolve=True)}
+    save_args = orbax_utils.save_args_from_target(ckpt)
+    ckptr.save(path.absolute(), ckpt, save_args=save_args)
 
 
-def load_ckpt(path: Path):
-    """Loads a checkpoint."""
-    ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
-    # restore config and use it to create model template
-    ckpt = ckptr.restore(path, args=ocp.args.Composite(config=ocp.args.JsonRestore()))
+def load_ckpt(path: Union[str, Path]):
+    "Load a checkpoint."
+    if not isinstance(path, Path):
+        path = Path(path)
+    ckptr = PyTreeCheckpointer()
+    ckpt = ckptr.restore(path.absolute())
     cfg = OmegaConf.create(ckpt["config"])
-    num_steps, batch_size = 100000, 1024
-    lr_peak, lr_pct_warmup, lr_num_cycles = 1e-3, 0.1, 1
-    rng = random.key(42)
-    rng_gp, rng_params, rng_extra = random.split(rng, 3)
-    s = build_grid([{"start": 0, "stop": 1.0, "num": 128}])
-    gp, model = instantiate(cfg.kernel), instantiate(cfg.model)
-    f, var, ls, period, z = gp.simulate(rng_gp, s, batch_size)
-    x = f if isinstance(model, PriorCVAE) else z  # decoder-only, e.g. DeepChol
-    rngs = {"params": rng_params, "extra": rng_extra}
-    kwargs = model.init(rngs, x, var, ls)
-    params = kwargs.pop("params")
-    learning_rate_fn = create_learning_rate_fn(
-        num_steps,
-        lr_peak,
-        lr_pct_warmup,
-        lr_num_cycles,
-    )
+    model = instantiate(cfg.model)
     state = train_utils.TrainState.create(
         apply_fn=model.apply,
-        params=params,
-        tx=optax.yogi(learning_rate_fn),
-        kwargs=kwargs,
+        # TODO(danj): reload optimizer state
+        tx=optax.yogi(1e-4),
+        params=ckpt["state"]["params"],
+        kwargs=ckpt["state"]["kwargs"],
     )
-    ckpt = ckptr.restore(
-        path, args=ocp.args.Composite(state=ocp.args.StandardRestore(state))
-    )
-    return ckpt["state"], model, cfg
+    return state, cfg
 
 
 if __name__ == "__main__":
