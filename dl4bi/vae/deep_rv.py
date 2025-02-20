@@ -5,11 +5,12 @@ from jax import Array
 
 
 class DeepRV(nn.Module):
-    r"""`DeepRV` learns to emulates samples from a fixed size stochastic process by learning
-    the function $f_\mathbf{c}:(\mathbf{z})\to\mathbf{T}_{\mathbf{c}}\mathbf{z}$, from the latent space
-    to realizations of the process given conditional hyperparameters $\mathbf{c}$.
+    r"""`DeepRV` learns to emulate samples from a fixed size stochastic process.
 
-    Note that $\mathbf{L}_{\mathbf{c}}$ is conditioned on the hyperparameters $\mathbf{c}$ as well.
+    The model learns the function $f_\mathbf{c}:(\mathbf{z})\to\mathbf{T}_{\mathbf{c}}\mathbf{z}$,
+    from the latent space to the realizations of the process given conditional hyperparameters $\mathbf{c}$,
+    where $\mathbf{L}_{\mathbf{c}}$ is conditioned on the hyperparameters $\mathbf{c}$.
+
     E.g for a Gaussian Process (GP) with a kernel $\mathcal{K}_\mathbf{c}$, and a fixed spatial structure
     $\mathbf{x}$, the model emulates the GP by learning the following function:
     $\text{Cholesky}(\mathbf{K}_\mathbf{c})\mathbf{z} \approx  \text{DeepRV}(\mathbf{z}, \mathbf{c})$,
