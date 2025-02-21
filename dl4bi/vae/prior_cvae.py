@@ -32,7 +32,7 @@ class PriorCVAE(nn.Module):
     z_dim: int
 
     @nn.compact
-    def __call__(self, f: Array, conditionals: Array):
+    def __call__(self, f: Array, conditionals: Array, **kwargs):
         r"""Run module forward.
 
         Args:
@@ -44,14 +44,14 @@ class PriorCVAE(nn.Module):
             along with $\mu$ and $\log(\sigma^2)$, which are often used
             to calculate losses involving KL divergence.
         """
-        latents = self.encoder(self.cond_stack_fn(f, conditionals))
+        latents = self.encoder(self.cond_stack_fn(f, conditionals), **kwargs)
         z_mu = nn.Dense(self.z_dim)(latents)
         z_log_var = nn.Dense(self.z_dim)(latents)
         z_std = jnp.exp(z_log_var / 2)
         eps = random.normal(self.make_rng("extra"), z_std.shape)
         z = z_mu + z_std * eps
-        f_hat = self.decoder(self.cond_stack_fn(z, conditionals))
+        f_hat = self.decoder(self.cond_stack_fn(z, conditionals), **kwargs)
         return f_hat.reshape(f.shape), z_mu, z_std
 
-    def decode(self, z: Array, conditionals: Array):
-        return self.decoder(self.cond_stack_fn(z, conditionals))
+    def decode(self, z: Array, conditionals: Array, **kwargs):
+        return self.decoder(self.cond_stack_fn(z, conditionals), **kwargs)

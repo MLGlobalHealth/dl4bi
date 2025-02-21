@@ -35,7 +35,7 @@ class DeepRV(nn.Module):
     cond_stack_fn: Callable
 
     @nn.compact
-    def __call__(self, z: Array, conditionals: Array):
+    def __call__(self, z: Array, conditionals: Array, **kwargs):
         r"""Run module forward.
 
         Args:
@@ -45,4 +45,4 @@ class DeepRV(nn.Module):
         Returns:
             $\hat{\mathbf{f}}$, an approximation of the stochastic process's realizations.
         """
-        return self.decoder(self.cond_stack_fn(z, conditionals))
+        return self.decoder(self.cond_stack_fn(z, conditionals), **kwargs)
