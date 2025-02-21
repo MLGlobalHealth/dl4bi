@@ -70,7 +70,7 @@ def mse_train_step(
 
 
 @jit
-def append_cond_to_feats(x: jax.Array, cond: jax.Array):
+def cond_as_feats(x: jax.Array, cond: jax.Array):
     B, L = x.shape[:2]
     if len(x.shape) == 2:
         x = x[..., None]
@@ -78,7 +78,7 @@ def append_cond_to_feats(x: jax.Array, cond: jax.Array):
 
 
 @jit
-def append_cond_to_locs(x: jax.Array, cond: jax.Array):
+def cond_as_locs(x: jax.Array, cond: jax.Array):
     B, L = x.shape[:2]
     # NOTE: reshape x in case x's shape is [B,L,1]
     return jnp.concat([x.reshape(B, L), jnp.tile(cond.flatten(), (B, 1))], axis=-1)
