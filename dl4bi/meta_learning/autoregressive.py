@@ -2,10 +2,11 @@ from typing import Callable, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
-from jax import jit, random
+from jax import jit, random, vmap
 from jax.experimental import enable_x64
 from omegaconf import DictConfig
 from sps.kernels import *  # needed by `instantiate`
+from sps.kernels import l2_dist_sq
 from sps.utils import build_grid
 
 from dl4bi.meta_learning.train_utils import instantiate
@@ -77,6 +78,100 @@ def sample_diagonal(
     return f_sampled, log_densities
 
 
+def invert_permutation(p: jax.Array):
+    return jnp.empty_like(p).at[p].set(jnp.arange(p.size))
+
+
+def furthest_first(
+    s_ctx: jax.Array,  # [L_ctx, D]
+    s_test: jax.Array,  # [L_test, D]
+):
+    """
+    Order such that always the test point furthest away from the context set
+    is considered next.
+
+    Uses L2 distance as the criterion.
+
+    TODO: This is O(n^2), perhaps can be done faster?
+    """
+
+    # cast to float so that setting to jnp.nan works
+    s_ctx = s_ctx.astype(jnp.float32)
+    s_test = s_test.astype(jnp.float32)
+    L_test = len(s_test)
+
+    # { dist(s, s_ctx)^2 : s in s_test }
+    distances_squared = l2_dist_sq(s_test, s_ctx).min(axis=1)
+    order = []
+
+    for _ in range(L_test):
+        # pick the furthest point
+        i = jnp.nanargmax(distances_squared)
+        order.append(i)
+
+        # set the distance to this point to nan to ignore it in future iters
+        distances_squared = distances_squared.at[i].set(jnp.nan)
+
+        # update distances
+        distances_squared = jnp.minimum(
+            distances_squared,
+            l2_dist_sq(
+                s_test[i][None],  # [1, D]
+                s_test,
+            ).squeeze(0),  # [1, L_ctx] -> [L_ctx]
+        )
+
+    return jnp.array(order, dtype=jnp.int32)
+
+
+def closest_first(
+    s_ctx: jax.Array,  # [L_ctx, D]
+    s_test: jax.Array,  # [L_test, D]
+):
+    """
+    Order such that always the test point closest to the context set
+    is considered next.
+
+    Uses L2 distance as the criterion.
+
+    TODO: This is O(n^2), perhaps can be done faster?
+    """
+
+    # cast to float so that setting to jnp.nan works
+    s_ctx = s_ctx.astype(jnp.float32)
+    s_test = s_test.astype(jnp.float32)
+    L_test = len(s_test)
+
+    # { dist(s, s_ctx)^2 : s in s_test }
+    distances_squared = l2_dist_sq(s_test, s_ctx).min(axis=1)
+    order = []
+
+    for _ in range(L_test):
+        # pick the closest point
+        i = jnp.nanargmin(distances_squared)
+        order.append(i)
+
+        # set the distance to this point to nan to ignore it in future iters
+        distances_squared = distances_squared.at[i].set(jnp.nan)
+
+        # update distances
+        distances_squared = jnp.minimum(
+            distances_squared,
+            l2_dist_sq(
+                s_test[i][None],  # [1, D]
+                s_test,
+            ).squeeze(0),  # [1, L_ctx] -> [L_ctx]
+        )
+
+    return jnp.array(order, dtype=jnp.int32)
+
+
+def random_permutations(rng: jax.Array, n: int, batch_size: int):
+    idx = jnp.repeat(jnp.arange(n)[None], batch_size, axis=0)
+    idx = jax.random.permutation(rng, idx, axis=1, independent=True)
+    return idx
+
+
 def _sample_autoreg(
     rng: jax.Array,
     apply: Apply,
@@ -90,10 +185,11 @@ def _sample_autoreg(
     s_ctx = jnp.concat([s_ctx, s_test], axis=1)
     f_ctx = jnp.pad(f_ctx, ((0, 0), (0, L_test), (0, 0)))
 
-    # note that the independent random normals can be pre-sampled
-    # it doesn't matter whether sampling is done here, or in the for loop, as all is independent
-    normals = random.normal(rng, (L_test, B))
-    log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=0)
+    # Note that the independent random normals can be pre-sampled.
+    # It doesn't matter whether sampling is done here, or in the for loop,
+    # as in each iteration the N(0, 1) sampling is independent
+    normals = random.normal(rng, (B, L_test))
+    log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=1)
 
     valid_lens_ctx = jnp.repeat(L_ctx, B)
 
@@ -104,82 +200,13 @@ def _sample_autoreg(
             s_ctx, f_ctx, s_test_i, valid_lens_ctx
         )  # [B, 1, 1], [B, 1, 1]
 
-        f_sampled = normals[i][:, None, None] * f_std_i + f_mu_i
-        # need to expand normals[i]'s dims to match f_std_i and f_mu_i
+        f_sampled = normals[:, i][..., None, None] * f_std_i + f_mu_i
+        # need to expand normals[:, i]'s dims to match f_std_i and f_mu_i
 
         f_ctx = f_ctx.at[:, L_ctx + i, :].set(f_sampled.squeeze(1))
         valid_lens_ctx = valid_lens_ctx + 1
 
     return f_ctx[:, L_ctx:], log_densities
-
-
-def invert_permutation(p: jax.Array):
-    return jnp.empty_like(p).at[p].set(jnp.arange(p.size))
-
-
-def furthest_first(
-    s_ctx: jax.Array,  # [L_ctx, 1]
-    s_test: jax.Array,  # [L_test, 1]
-):
-    """
-    Order such that always the test point furthest away from the context set
-    is considered next when sampling autoregressively.
-
-    TODO: This is O(n^2), perhaps can be done faster?
-    """
-
-    # cast to float so that setting to jnp.nan works
-    s_ctx = s_ctx.squeeze(-1).astype(jnp.float32)
-    s_test = s_test.squeeze(-1).astype(jnp.float32)
-    L_test = len(s_test)
-
-    distances = jnp.min(
-        vmap(vmap(lambda x, y: jnp.abs(x - y), (None, 0)), (0, None))(s_ctx, s_test),
-        axis=0,
-    )
-    order = []
-
-    for _ in range(L_test):
-        i = jnp.nanargmax(distances)
-        s_i = s_test[i]
-
-        distances = distances.at[i].set(jnp.nan)
-        order.append(i)
-
-        distances = jnp.minimum(distances, jnp.abs(s_test - s_i))
-
-    return jnp.array(order, dtype=jnp.int32)
-
-
-def closest_first(
-    s_ctx: jax.Array,  # [L_ctx, 1]
-    s_test: jax.Array,  # [L_test, 1]
-):
-    """
-    Order such that always the test point closest to the context set
-    is considered next when sampling autoregressively.
-    """
-    # cast to float so that setting to jnp.nan works
-    s_ctx = s_ctx.squeeze(-1).astype(jnp.float32)
-    s_test = s_test.squeeze(-1).astype(jnp.float32)
-    L_test = len(s_test)
-
-    distances = jnp.min(
-        vmap(vmap(lambda x, y: jnp.abs(x - y), (None, 0)), (0, None))(s_ctx, s_test),
-        axis=0,
-    )
-    order = []
-
-    for _ in range(L_test):
-        i = jnp.nanargmin(distances)
-        x = s_test[i]
-
-        distances = distances.at[i].set(jnp.nan)
-        order.append(i)
-
-        distances = jnp.minimum(distances, jnp.abs(s_test - x))
-
-    return jnp.array(order, dtype=jnp.int32)
 
 
 def sample_autoreg(
@@ -203,14 +230,13 @@ def sample_autoreg(
         rng, rng_perm = random.split(rng)
 
         # Locations for each path are permuted independently.
-        idx = jnp.repeat(jnp.arange(L_test)[None, :], B, axis=0)
-        idx = jax.random.permutation(rng_perm, idx, axis=1, independent=True)
-
+        idx = random_permutations(rng_perm, L_test, B)
         idx_inv = jax.vmap(invert_permutation)(idx)
 
         # idx needs to match dimension of array in take_along_axis
-        idx = jnp.repeat(idx[:, :, None], D, axis=2)
-        idx_inv = idx_inv[:, :, None]
+        idx = jnp.repeat(idx[..., None], D, axis=-1)
+        idx_inv = idx_inv[..., None]
+        assert idx.shape == s_test.shape
 
         paths, log_densities = _sample_autoreg(
             rng,
@@ -220,6 +246,7 @@ def sample_autoreg(
             jnp.take_along_axis(s_test, idx, axis=1),
         )
 
+        assert idx_inv.shape == paths.shape
         return jnp.take_along_axis(paths, idx_inv, axis=1), log_densities
 
 
