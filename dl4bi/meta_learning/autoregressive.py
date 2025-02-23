@@ -254,9 +254,9 @@ def sample_autoreg(
 # Chapter 3.2.3
 # Equation 3.28
 def analytic_gp(
-    s_ctx: jax.Array,  # [L_ctx, 1]
+    s_ctx: jax.Array,  # [L_ctx, D]
     f_ctx: jax.Array,  # [L_ctx, 1]
-    s_test: jax.Array,  # [L_test, 1]
+    s_test: jax.Array,  # [L_test, D]
     kernel: Callable,
     var: float,
     ls: float,
