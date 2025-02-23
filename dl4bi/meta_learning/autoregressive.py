@@ -167,6 +167,10 @@ def closest_first(
 
 
 def random_permutations(rng: jax.Array, n: int, batch_size: int):
+    """
+    Returns array of shape [batch_size, n]
+    where each row is a permutation of [0, 1, ..., n-1].
+    """
     idx = jnp.repeat(jnp.arange(n)[None], batch_size, axis=0)
     idx = jax.random.permutation(rng, idx, axis=1, independent=True)
     return idx
@@ -223,7 +227,7 @@ def sample_autoreg(
     else:
         _, L_test, D = s_test.shape
 
-        rng, rng_perm = random.split(rng)
+        rng, rng_perm = jax.random.split(rng)
 
         # Locations for each path are permuted independently.
         idx = random_permutations(rng_perm, L_test, B)
