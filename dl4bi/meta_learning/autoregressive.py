@@ -191,22 +191,18 @@ def _sample_autoreg(
     normals = random.normal(rng, (B, L_test))
     log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=1)
 
-    valid_lens_ctx = jnp.repeat(L_ctx, B)
+    def g(i, f):
+        s_test_i = s_test[:, i][:, None]  # [B, 1, D]
+        normal = normals[:, i][:, None, None]  # [B, 1, 1]
+        valid_lens_ctx = jnp.repeat(L_test + i, B)
 
-    for i in range(L_test):
-        s_test_i = s_test[:, i][:, None]  # [B, 1, 1]
+        f_mu_i, f_std_i = apply(s_ctx, f, s_test_i, valid_lens_ctx)
+        f_sampled = normal * f_std_i + f_mu_i
+        return f.at[:, L_test + i].set(f_sampled.squeeze(1))
 
-        f_mu_i, f_std_i = apply(
-            s_ctx, f_ctx, s_test_i, valid_lens_ctx
-        )  # [B, 1, 1], [B, 1, 1]
+    f = jax.lax.fori_loop(0, L_test, g, f_ctx)
 
-        f_sampled = normals[:, i][..., None, None] * f_std_i + f_mu_i
-        # need to expand normals[:, i]'s dims to match f_std_i and f_mu_i
-
-        f_ctx = f_ctx.at[:, L_ctx + i, :].set(f_sampled.squeeze(1))
-        valid_lens_ctx = valid_lens_ctx + 1
-
-    return f_ctx[:, L_ctx:], log_densities
+    return f[:, L_ctx:], log_densities
 
 
 def sample_autoreg(
