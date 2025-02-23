@@ -198,7 +198,7 @@ def _sample_autoreg(
     def g(i, f):
         s_test_i = s_test[:, i][:, None]  # [B, 1, D]
         normal = normals[:, i][:, None, None]  # [B, 1, 1]
-        valid_lens_ctx = jnp.repeat(L_test + i, B)
+        valid_lens_ctx = jnp.repeat(L_ctx + i, B)
 
         f_mu_i, f_std_i = apply(s_ctx, f, s_test_i, valid_lens_ctx)
         f_sampled = normal * f_std_i + f_mu_i
