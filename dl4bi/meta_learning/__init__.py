@@ -1,7 +1,6 @@
 from . import train_utils
 from .anp import ANP
 from .banp import BANP
-from .batch import Batch, BatchElement
 from .bnp import BNP
 from .canp import CANP
 from .cnp import CNP
