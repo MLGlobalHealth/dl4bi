@@ -202,7 +202,7 @@ def _sample_autoreg(
 
         f_mu_i, f_std_i = apply(s_ctx, f, s_test_i, valid_lens_ctx)
         f_sampled = normal * f_std_i + f_mu_i
-        return f.at[:, L_test + i].set(f_sampled.squeeze(1))
+        return f.at[:, L_ctx + i].set(f_sampled.squeeze(1))
 
     f = jax.lax.fori_loop(0, L_test, g, f_ctx)
 
