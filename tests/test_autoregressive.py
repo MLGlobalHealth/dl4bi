@@ -23,13 +23,13 @@ def random_tests(
     L_ctx=3,
     L_test=10,
     B=2,  # batch size
-    D_s=1,  # dimension of s (locations)
+    D=1,  # dimension of s (locations)
     rng=random.key(0),
 ):
     for i in tqdm.trange(N_tests):
         rng, rng_ctx, rng_test, rng_perm = random.split(rng, 4)
-        s_ctx = random.beta(rng_ctx, 3, 7, (L_ctx, D_s))
-        s_test = random.uniform(rng_test, (L_test, D_s))
+        s_ctx = random.beta(rng_ctx, 3, 7, (L_ctx, D))
+        s_test = random.uniform(rng_test, (L_test, D))
 
         # test furthest
         idx = furthest_first(s_ctx, s_test)
@@ -47,14 +47,13 @@ def random_tests(
         s_test = jnp.repeat(s_test[None], B, axis=0)
         paths = random.normal(rng_test, (B, L_test, 1))
 
-        # snippet from autoregressive.py
         idx = random_permutations(rng_perm, L_test, B)
         idx_inv = jax.vmap(invert_permutation)(idx)
         idx_inv_slow = jnp.stack([invert_permutation(idx[i]) for i in range(B)])
         assert (idx_inv == idx_inv_slow).all(), f"{idx_inv}\n\n{idx_inv_slow}"
 
         s_test_permuted = jnp.take_along_axis(
-            s_test, jnp.repeat(idx[..., None], D_s, axis=-1), axis=1
+            s_test, jnp.repeat(idx[..., None], D, axis=-1), axis=1
         )
         s_test_permuted_slow = jnp.stack([s_test[i][idx[i]] for i in range(B)])
         for i in range(B):
@@ -106,6 +105,6 @@ if __name__ == "__main__":
         idx
     ]
 
-    random_tests(rng=random.key(time_ns()), D_s=2)
+    random_tests(rng=random.key(time_ns()), D=2)
 
     print("All tests passed.")
