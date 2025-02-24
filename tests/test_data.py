@@ -2,7 +2,7 @@ import jax.numpy as jnp
 from jax import random
 from sps.utils import build_grid
 
-from dl4bi.core.data import BatchElement, Data, SpatialData
+from dl4bi.core.data import BatchElement, Data, SpatialData, TemporalData
 
 
 def test_data():
@@ -106,3 +106,27 @@ def test_spatial_data():
     assert be.valid_lens_ctx.shape == (), "Incorrect valid_lens_ctx shape!"
     assert be.valid_lens_test.shape == (), "Incorrect valid_lens_test shape!"
     assert be.inv_permute_idx.shape == (S * S,), "Incorrect inv_permute_idx shape!"
+
+
+def test_temporal_data():
+    B, T, D = 4, 128, 2
+    min_ctx, max_ctx = 8, 64
+    rng = random.key(42)
+    x = f = random.normal(rng, (B, T, D))
+    t = jnp.repeat(jnp.arange(T)[None, :, None], B, axis=0)
+    data = TemporalData(x, t, f)
+    batch = data.to_batch(
+        rng,
+        min_ctx,
+        max_ctx,
+        num_test=T,
+        independent=False,
+        test_includes_ctx=True,
+    )
+    assert batch.x_ctx.shape == (B, max_ctx, D), "Incorrect x_ctx shape!"
+    assert batch.f_ctx.shape == (B, max_ctx, D), "Incorrect f_ctx shape!"
+    assert batch.x_test.shape == (B, T, D), "Incorrect x_test shape!"
+    assert batch.f_test.shape == (B, T, D), "Incorrect f_test shape!"
+    assert batch.valid_lens_ctx.shape == (B,), "Incorrect valid_lens_ctx shape!"
+    assert batch.valid_lens_test.shape == (B,), "Incorrect valid_lens_test shape!"
+    assert batch.inv_permute_idx.shape == (B, T), "Incorrect inv_permute_idx shape!"

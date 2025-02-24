@@ -11,14 +11,15 @@ from jax import jit, random, vmap
 class BatchElement:
     x_ctx: Optional[jax.Array] = None  # [L_ctx, D_x]
     s_ctx: Optional[jax.Array] = None  # [L_ctx, D_s]
+    t_ctx: Optional[jax.Array] = None  # [L_ctx, 1]
     f_ctx: Optional[jax.Array] = None  # [L_ctx, D_f]
     valid_lens_ctx: Optional[jax.Array] = None  # [1]
     x_test: Optional[jax.Array] = None  # [L_test, D_x]
     s_test: Optional[jax.Array] = None  # [L_test, D_s]
+    t_test: Optional[jax.Array] = None  # [L_test, 1]
     f_test: Optional[jax.Array] = None  # [L_test, D_f]
     valid_lens_test: Optional[jax.Array] = None  # [1]
-    inv_permute_idx: Optional[jax.Array] = None  # [T, L] or [L]
-    time_step_idx: Optional[jax.Array] = None  # [T]
+    inv_permute_idx: Optional[jax.Array] = None  # [L]
 
     def update(self, **kwargs):
         """Returns a new batch with updated attributes."""
@@ -44,14 +45,15 @@ jax.tree_util.register_pytree_node(
         (
             b.x_ctx,
             b.s_ctx,
+            b.t_ctx,
             b.f_ctx,
             b.valid_lens_ctx,
             b.x_test,
             b.s_test,
+            b.t_test,
             b.f_test,
             b.valid_lens_test,
             b.inv_permute_idx,
-            b.time_step_idx,
         ),
         None,
     ),
@@ -63,14 +65,15 @@ jax.tree_util.register_pytree_node(
 class Batch:
     x_ctx: Optional[jax.Array] = None  # [B, L_ctx, D_x]
     s_ctx: Optional[jax.Array] = None  # [B, L_ctx, D_s]
+    t_ctx: Optional[jax.Array] = None  # [B, L_ctx, 1]
     f_ctx: Optional[jax.Array] = None  # [B, L_ctx, D_f]
     valid_lens_ctx: Optional[jax.Array] = None  # [B]
     x_test: Optional[jax.Array] = None  # [B, L_test, D_x]
     s_test: Optional[jax.Array] = None  # [B, L_test, D_s]
+    t_test: Optional[jax.Array] = None  # [B, L_test, 1]
     f_test: Optional[jax.Array] = None  # [B, L_test, D_f]
     valid_lens_test: Optional[jax.Array] = None  # [B]
-    inv_permute_idx: Optional[jax.Array] = None  # [B, T, L] or [B, L] or [L]
-    time_step_idx: Optional[jax.Array] = None  # [B, T]
+    inv_permute_idx: Optional[jax.Array] = None  # [B, L]
 
     def update(self, **kwargs):
         """Returns a new batch with updated attributes."""
@@ -93,8 +96,6 @@ class Batch:
                     # [B, T, L]: A separate permutation for each batch element and timestep
                     if v.ndim > 1:
                         v = v[i]
-                elif k == "time_start_idx":
-                    v = v[i]
             d[k] = v
         return BatchElement(**d)
 
@@ -114,14 +115,15 @@ jax.tree_util.register_pytree_node(
         (
             b.x_ctx,
             b.s_ctx,
+            b.t_ctx,
             b.f_ctx,
             b.valid_lens_ctx,
             b.x_test,
             b.s_test,
+            b.t_test,
             b.f_test,
             b.valid_lens_test,
             b.inv_permute_idx,
-            b.time_step_idx,
         ),
         None,
     ),
@@ -192,13 +194,16 @@ def data_to_batch(
     x_ctx, x_test, _ = vbatch(rngs, x)
     f_ctx, f_test, inv_permute_idx = vbatch(rngs, f)
     s_ctx, s_test = None, None
+    t_ctx, t_test = None, None
     return Batch(
         x_ctx,
         s_ctx,
+        t_ctx,
         f_ctx,
         valid_lens_ctx,
         x_test,
         s_test,
+        t_test,
         f_test,
         valid_lens_test,
         inv_permute_idx,
@@ -296,13 +301,99 @@ def spatial_data_to_batch(
     x_ctx, x_test, _ = vbatch(rngs, x) if has_x else (None, None, None)
     s_ctx, s_test, _ = vbatch(rngs, s)
     f_ctx, f_test, inv_permute_idx = vbatch(rngs, f)
+    t_ctx, t_test = None, None
     return Batch(
         x_ctx,
         s_ctx,
+        t_ctx,
         f_ctx,
         valid_lens_ctx,
         x_test,
         s_test,
+        t_test,
+        f_test,
+        valid_lens_test,
+        inv_permute_idx,
+    )
+
+
+@dataclass(frozen=True)
+class TemporalData:
+    x: Optional[jax.Array]  # [B, T, D_x] or None
+    t: jax.Array  # [B, T, 1]
+    f: jax.Array  # [B, T, D_f]
+
+    def to_batch(
+        self,
+        rng: jax.Array,
+        min_ctx: int,
+        max_ctx: int,
+        num_test: int,
+        independent: bool = False,
+        test_includes_ctx: bool = True,
+    ):
+        return temporal_data_to_batch(
+            rng,
+            self.x,
+            self.t,
+            self.f,
+            min_ctx,
+            max_ctx,
+            num_test,
+            independent,
+            test_includes_ctx,
+        )
+
+
+# register TemporalData with jax so it can be used in compiled functions
+jax.tree_util.register_pytree_node(
+    TemporalData,
+    lambda d: ((d.x, d.s, d.f), None),
+    lambda _aux, children: TemporalData(*children),
+)
+
+
+@partial(
+    jit,
+    static_argnames=(
+        "min_ctx",
+        "max_ctx",
+        "num_test",
+        "independent",
+        "test_includes_ctx",
+    ),
+)
+def temporal_data_to_batch(
+    rng: jax.Array,
+    x: Optional[jax.Array],  # [B, T, D_x] or None
+    t: jax.Array,  # [B, T, 1]
+    f: jax.Array,  # [B, T, D_f]
+    min_ctx: int,
+    max_ctx: int,
+    num_test: int,
+    independent: bool = False,
+    test_includes_ctx: bool = True,
+):
+    B = t.shape[0]
+    has_x = x is not None
+    rng_valid, rng = random.split(rng)
+    valid_lens_ctx = random.randint(rng_valid, (B,), min_ctx, max_ctx)
+    valid_lens_test = jnp.repeat(num_test, B)
+    vbatch = vmap(lambda rng, v: _batch(rng, v, max_ctx, num_test, test_includes_ctx))
+    rngs = random.split(rng, B) if independent else jnp.repeat(rng, B)
+    x_ctx, x_test, _ = vbatch(rngs, x) if has_x else (None, None, None)
+    t_ctx, t_test, _ = vbatch(rngs, t)
+    f_ctx, f_test, inv_permute_idx = vbatch(rngs, f)
+    s_ctx, s_test = None, None
+    return Batch(
+        x_ctx,
+        s_ctx,
+        t_ctx,
+        f_ctx,
+        valid_lens_ctx,
+        x_test,
+        s_test,
+        t_test,
         f_test,
         valid_lens_test,
         inv_permute_idx,
