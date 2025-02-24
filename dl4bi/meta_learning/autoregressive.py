@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Callable, Optional, Tuple
 
 import jax
@@ -166,6 +167,7 @@ def closest_first(
     return jnp.array(order, dtype=jnp.int32)
 
 
+@partial(jit, static_argnames=["n"])
 def random_permutations(rng: jax.Array, n: int, batch_size: int):
     """
     Returns array of shape [batch_size, n]
