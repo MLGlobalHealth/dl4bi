@@ -262,6 +262,7 @@ def analytic_gp(
     kernel: Callable,
     var: float,
     ls: float,
+    noise: float = 0,
     ensure_unique: bool = False,
 ) -> Tuple[jax.Array, jax.Array]:
     """
@@ -290,8 +291,10 @@ def analytic_gp(
 
         cov_tc = kernel(s_test, s_ctx, var, ls)
         cov_ct = cov_tc.T
-        cov_cc = kernel(s_ctx, s_ctx, var, ls)
         cov_tt = kernel(s_test, s_test, var, ls)
+
+        # Note that for noisy observations we have to add noise for correctness - see Murphy (17.32 - 17.36).
+        cov_cc = kernel(s_ctx, s_ctx, var, ls) + noise * jnp.eye(s_ctx.shape[0])
 
         # Can't just invert cov_cc or even solve without the positive definite
         # assumption as it leads to huge numerical error. Adding jitter to the diagonal doesn't help.
