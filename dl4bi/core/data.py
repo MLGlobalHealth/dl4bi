@@ -9,6 +9,12 @@ from jax import jit, random, vmap
 
 @dataclass(frozen=True)
 class BatchElement:
+    """A `BatchElement` represents a single element of a `Batch`.
+
+    In other words, it is the same as a `Batch` object where each contained
+    array no longer has the leading batch dim.
+    """
+
     x_ctx: Optional[jax.Array] = None  # [L_ctx, D_x]
     s_ctx: Optional[jax.Array] = None  # [L_ctx, D_s]
     t_ctx: Optional[jax.Array] = None  # [L_ctx, 1]
@@ -38,7 +44,7 @@ class BatchElement:
         return None
 
 
-# register Batch with jax so it can be used in compiled functions
+# register with jax to use in compiled functions
 jax.tree_util.register_pytree_node(
     BatchElement,
     lambda b: (
@@ -63,6 +69,11 @@ jax.tree_util.register_pytree_node(
 
 @dataclass(frozen=True)
 class Batch:
+    """A generic `Batch` object.
+
+    This batch object can be deconstructed with `**batch`.
+    """
+
     x_ctx: Optional[jax.Array] = None  # [B, L_ctx, D_x]
     s_ctx: Optional[jax.Array] = None  # [B, L_ctx, D_s]
     t_ctx: Optional[jax.Array] = None  # [B, L_ctx, 1]
@@ -86,17 +97,9 @@ class Batch:
     def __getitem__(self, i: int):
         d = {}
         for k, v in iter(self):
-            if isinstance(v, jax.Array):
-                if k.endswith(("ctx", "test")):
-                    v = v[i]  # [B] or [B, L, D]
-                elif k == "inv_permute_idx":
-                    # inv_permute_idx shape meaning:
-                    # [L]: A single permutation for all batch elements
-                    # [B, L]: A separate permutation for each batch element
-                    # [B, T, L]: A separate permutation for each batch element and timestep
-                    if v.ndim > 1:
-                        v = v[i]
             d[k] = v
+            if isinstance(v, jax.Array):
+                d[k] = v[i]
         return BatchElement(**d)
 
     def __len__(self):
@@ -108,7 +111,7 @@ class Batch:
         return None
 
 
-# register Batch with jax so it can be used in compiled functions
+# register with jax to use in compiled functions
 jax.tree_util.register_pytree_node(
     Batch,
     lambda b: (
@@ -133,6 +136,12 @@ jax.tree_util.register_pytree_node(
 
 @dataclass(frozen=True)
 class Data:
+    """A simple `Data` container.
+
+    This class is intended for simple datasets where each element of the batch
+    consists of a dataset of fixed effects `x` and function outputs `f`.
+    """
+
     x: jax.Array  # [B, L, D_x]
     f: jax.Array  # [B, L, D_f]
 
@@ -140,12 +149,31 @@ class Data:
         self,
         rng: jax.Array,
         min_ctx: int,
-        max_ctx: Optional[int],
-        num_test: Optional[int],
+        max_ctx: int,
+        num_test: int,
         independent: bool = False,
         test_includes_ctx: bool = True,
+        include_inv_permute_idx: bool = False,
     ):
-        return data_to_batch(
+        """Creates a `Batch` from this `Data`.
+
+        Args:
+            rng: A PRNG.
+            min_ctx: Minimum number of context points.
+            max_ctx: Maximum number of context points.
+            num_test: Number of test points.
+            independent: Whether the subset of context points for each element
+                in the batch should be selected independently.
+            test_includes_ctx: Whether to include context points in the test
+                set.
+            include_inv_permute_idx: Whether to include the `inv_permute_idx`,
+                which enables easily mapping context points back to their
+                original positions in the dataset. This is useful for callbacks
+                and plotting functions.
+        Returns:
+            A `Batch`.
+        """
+        return _data_to_batch(
             rng,
             self.x,
             self.f,
@@ -154,10 +182,11 @@ class Data:
             num_test,
             independent,
             test_includes_ctx,
+            include_inv_permute_idx,
         )
 
 
-# register Data with jax so it can be used in compiled functions
+# register with jax to use in compiled functions
 jax.tree_util.register_pytree_node(
     Data,
     lambda d: ((d.x, d.f), None),
@@ -173,9 +202,10 @@ jax.tree_util.register_pytree_node(
         "num_test",
         "independent",
         "test_includes_ctx",
+        "include_inv_permute_idx",
     ),
 )
-def data_to_batch(
+def _data_to_batch(
     rng: jax.Array,
     x: jax.Array,  # [B, L, D_x]
     f: jax.Array,  # [B, L, D_f]
@@ -184,6 +214,7 @@ def data_to_batch(
     num_test: int,
     independent: bool = False,
     test_includes_ctx: bool = True,
+    include_inv_permute_idx: bool = False,
 ):
     B = x.shape[0]
     rng_valid, rng = random.split(rng)
@@ -206,7 +237,8 @@ def data_to_batch(
         t_test,
         f_test,
         valid_lens_test,
-        inv_permute_idx,
+        # no need to store this if its not used
+        inv_permute_idx if include_inv_permute_idx else None,
     )
 
 
@@ -232,7 +264,14 @@ def _batch(
 
 @dataclass(frozen=True)
 class SpatialData:
-    x: Optional[jax.Array]  # [B, [S]+, D_x] or None
+    """A `SpatialData` container.
+
+    This class is intended for datasets with a spatial dimension, `s`, which may
+    have optional fixed effects, `x`, and functional output, `f`, associated with
+    each location.
+    """
+
+    x: Optional[jax.Array]  # [B, [S]+, D_x] or [B, 1, D_x] or None
     s: jax.Array  # [B, [S]+, D_s]
     f: jax.Array  # [B, [S]+, D_f]
 
@@ -244,8 +283,27 @@ class SpatialData:
         num_test: int,
         independent: bool = False,
         test_includes_ctx: bool = True,
+        include_inv_permute_idx: bool = False,
     ):
-        return spatial_data_to_batch(
+        """Creates a `Batch` from this `SpatialData`.
+
+        Args:
+            rng: A PRNG.
+            min_ctx: Minimum number of context points.
+            max_ctx: Maximum number of context points.
+            num_test: Number of test points.
+            independent: Whether the subset of context points for each element
+                in the batch should be selected independently.
+            test_includes_ctx: Whether to include context points in the test
+                set.
+            include_inv_permute_idx: Whether to include the `inv_permute_idx`,
+                which enables easily mapping context points back to their
+                original positions in the dataset. This is useful for callbacks
+                and plotting functions.
+        Returns:
+            A `Batch`.
+        """
+        return _spatial_data_to_batch(
             rng,
             self.x,
             self.s,
@@ -255,10 +313,11 @@ class SpatialData:
             num_test,
             independent,
             test_includes_ctx,
+            include_inv_permute_idx,
         )
 
 
-# register SpatialData with jax so it can be used in compiled functions
+# register with jax to use in compiled functions
 jax.tree_util.register_pytree_node(
     SpatialData,
     lambda d: ((d.x, d.s, d.f), None),
@@ -274,11 +333,12 @@ jax.tree_util.register_pytree_node(
         "num_test",
         "independent",
         "test_includes_ctx",
+        "include_inv_permute_idx",
     ),
 )
-def spatial_data_to_batch(
+def _spatial_data_to_batch(
     rng: jax.Array,
-    x: Optional[jax.Array],  # [B, [S]+, D_x] or None
+    x: Optional[jax.Array],  # [B, [S]+, D_x] or [B, 1, D_x] or None
     s: jax.Array,  # [B, [S]+]
     f: jax.Array,  # [B, [S]+, D_f]
     min_ctx: int,
@@ -286,6 +346,7 @@ def spatial_data_to_batch(
     num_test: int,
     independent: bool = False,
     test_includes_ctx: bool = True,
+    include_inv_permute_idx: bool = False,
 ):
     B = s.shape[0]
     has_x = x is not None
@@ -313,13 +374,21 @@ def spatial_data_to_batch(
         t_test,
         f_test,
         valid_lens_test,
-        inv_permute_idx,
+        # no need to store this if its not used
+        inv_permute_idx if include_inv_permute_idx else None,
     )
 
 
 @dataclass(frozen=True)
 class TemporalData:
-    x: Optional[jax.Array]  # [B, T, D_x] or None
+    """A `TemporalData` container.
+
+    This class is intended for datasets with a temporal dimension, `t`, which may
+    have optional fixed effects, `x`, and functional output, `f`, associated with
+    each time.
+    """
+
+    x: Optional[jax.Array]  # [B, T, D_x] or [B, 1, D_x] None
     t: jax.Array  # [B, T, 1]
     f: jax.Array  # [B, T, D_f]
 
@@ -331,8 +400,27 @@ class TemporalData:
         num_test: int,
         independent: bool = False,
         test_includes_ctx: bool = True,
+        include_inv_permute_idx: bool = False,
     ):
-        return temporal_data_to_batch(
+        """Creates a `Batch` from this `SpatialData`.
+
+        Args:
+            rng: A PRNG.
+            min_ctx: Minimum number of context points.
+            max_ctx: Maximum number of context points.
+            num_test: Number of test points.
+            independent: Whether the subset of context points for each element
+                in the batch should be selected independently.
+            test_includes_ctx: Whether to include context points in the test
+                set.
+            include_inv_permute_idx: Whether to include the `inv_permute_idx`,
+                which enables easily mapping context points back to their
+                original positions in the dataset. This is useful for callbacks
+                and plotting functions.
+        Returns:
+            A `Batch`.
+        """
+        return _temporal_data_to_batch(
             rng,
             self.x,
             self.t,
@@ -342,13 +430,14 @@ class TemporalData:
             num_test,
             independent,
             test_includes_ctx,
+            include_inv_permute_idx,
         )
 
 
-# register TemporalData with jax so it can be used in compiled functions
+# register with jax to use in compiled functions
 jax.tree_util.register_pytree_node(
     TemporalData,
-    lambda d: ((d.x, d.s, d.f), None),
+    lambda d: ((d.x, d.t, d.f), None),
     lambda _aux, children: TemporalData(*children),
 )
 
@@ -361,11 +450,12 @@ jax.tree_util.register_pytree_node(
         "num_test",
         "independent",
         "test_includes_ctx",
+        "include_inv_permute_idx",
     ),
 )
-def temporal_data_to_batch(
+def _temporal_data_to_batch(
     rng: jax.Array,
-    x: Optional[jax.Array],  # [B, T, D_x] or None
+    x: Optional[jax.Array],  # [B, T, D_x] or [B, 1, D_x] None
     t: jax.Array,  # [B, T, 1]
     f: jax.Array,  # [B, T, D_f]
     min_ctx: int,
@@ -373,6 +463,7 @@ def temporal_data_to_batch(
     num_test: int,
     independent: bool = False,
     test_includes_ctx: bool = True,
+    include_inv_permute_idx: bool = False,
 ):
     B = t.shape[0]
     has_x = x is not None
@@ -396,43 +487,144 @@ def temporal_data_to_batch(
         t_test,
         f_test,
         valid_lens_test,
-        inv_permute_idx,
+        # no need to store this if its not used
+        inv_permute_idx if include_inv_permute_idx else None,
     )
 
 
-# @partial(
-#     jit,
-#     static_argnames=(
-#         "s_min_ctx",
-#         "s_max_ctx",
-#         "t_indep_s_ctx",
-#         "t_fixed_interval",
-#         "t_target_is_last",
-#         "batch_size",
-#     ),
-# )
-# def spatiotemporal_data_to_batch(
-#     rng: jax.Array,
-#     x: Optional[jax.Array],  # [T, [S]+, D_x] or [[S]+, D_x] or None
-#     s: jax.Array,  # [T, [S]+] or [S]+
-#     t: jax.Array,  # [T]
-#     f: jax.Array,  # [T, [S]+, D_f]
-#     s_min_ctx: Optional[int] = None,
-#     s_max_ctx: Optional[int] = None,
-#     t_num_ctx: int = 4,
-#     t_indep_s_ctx: bool = False,
-#     t_fixed_interval: Optional[int] = None,
-#     t_target_is_last: bool = True,
-#     batch_size: int = 4,
-# ):
-#     B = batch_size
-#     rng_ts, rng = random.split(rng)
-#     if t_target_is_last:  # last time step is the target time step
-#         rng_lasts, rng_ts = random.split(rng)
-#         t_lasts = random.randint(rng_lasts, (B,), t.min() + t_num_ctx, t.max())
-#         ts = []
-#         for t_last in t_lasts:
-#             rng_t, rng_ts = random.split(rng_ts)
-#             ts += [random.randint(rng_t, ())]
+@dataclass(frozen=True)
+class SpatiotemporalData:
+    """A `SpatiotemporalData` container.
 
-#     pass
+    This class is intended for datasets with a spatial dimension, `s`, a
+    temporal dimension, `t`, optional fixed effects per time step per location, `x`,
+    and the functional output associated with each time step and location.
+
+    .. note::
+        Unlike the other `Data` classes, the batch dimension here is the time, `T`.
+    """
+
+    x: Optional[jax.Array]  # [T, [S]+, D_x] or [T, 1, D_x] or [1, 1, D_x] or None
+    s: jax.Array  # [T, [S]+, D_s]
+    t: jax.Array  # [T, [S]+, 1] or [T, 1, 1]
+    f: jax.Array  # [T, [S]+, D_f]
+
+    def to_batch(
+        self,
+        rng: jax.Array,
+        min_ctx: int,
+        max_ctx: int,
+        num_test: int,
+        independent: bool = False,
+        test_includes_ctx: bool = True,
+        include_inv_permute_idx: bool = False,
+        batch_size: int = 4,
+        fixed_interval: int = -1,
+    ):
+        """Creates a `Batch` from this `SpatiotemporalData`.
+
+        Args:
+            rng: A PRNG.
+            min_ctx: Minimum number of context points.
+            max_ctx: Maximum number of context points.
+            num_test: Number of test points.
+            independent: Whether the subset of context points for each time step
+                should be selected independently.
+            test_includes_ctx: Whether to include context points in the test
+                set.
+            include_inv_permute_idx: Whether to include the `inv_permute_idx`,
+                which enables easily mapping context points back to their
+                original times and locations in the dataset. This is useful for
+                callbacks and plotting functions.
+            batch_size: Number of batch elements to create from this data.
+            fixed_inverval: If greater than 0, selects time steps separated
+                by `fixed_inverval`, otherwise selects random time steps.
+        Returns:
+            A `Batch`.
+        """
+        return _spatiotemporal_data_to_batch(
+            rng,
+            self.x,
+            self.s,
+            self.t,
+            self.f,
+            min_ctx,
+            max_ctx,
+            num_test,
+            independent,
+            test_includes_ctx,
+            include_inv_permute_idx,
+            batch_size,
+            fixed_interval,
+        )
+
+
+# register with jax to use in compiled functions
+jax.tree_util.register_pytree_node(
+    SpatiotemporalData,
+    lambda d: ((d.x, d.s, d.t, d.f), None),
+    lambda _aux, children: SpatiotemporalData(*children),
+)
+
+
+@partial(
+    jit,
+    static_argnames=(
+        "min_ctx",
+        "max_ctx",
+        "num_test",
+        "batch_size",
+        "independent",
+        "fixed_interval",
+        "test_includes_ctx",
+        "include_inv_permute_idx",
+    ),
+)
+def _spatiotemporal_data_to_batch(
+    rng: jax.Array,
+    x: Optional[jax.Array],  # [T, [S]+, D_x] or [T, 1, D_x] or [1, 1, D_x] or None
+    s: jax.Array,  # [T, [S]+, D_s]
+    t: jax.Array,  # [T, [S]+, 1] or [T, 1, 1]
+    f: jax.Array,  # [T, [S]+, D_f]
+    min_ctx: int,
+    max_ctx: int,
+    num_test: int,
+    independent: bool = False,
+    test_includes_ctx: bool = True,
+    include_inv_permute_idx: bool = False,
+    batch_size: int = 4,
+    fixed_inteval: int = -1,
+):
+    T = s.shape[0]
+    has_x = x is not None
+    flatten_spatial_dims = lambda v: v.reshape(T, -1, v.shape[-1])
+    x = flatten_spatial_dims(x) if has_x else None
+    s = flatten_spatial_dims(s)
+    t = flatten_spatial_dims(t)
+    f = flatten_spatial_dims(f)
+    L = s.shape[1]
+    x = jnp.broadcast_to(x, (T, L, x.shape[-1])) if has_x else None
+    t = jnp.broadcast_to(t, (T, L, 1))
+    rng_valid, rng = random.split(rng)
+    valid_lens_ctx = random.randint(rng_valid, (T,), min_ctx, max_ctx)
+    valid_lens_test = jnp.repeat(num_test, T)
+    vbatch = vmap(lambda rng, v: _batch(rng, v, max_ctx, num_test, test_includes_ctx))
+    rngs = random.split(rng, T) if independent else jnp.repeat(rng, T)
+    x_ctx, x_test, _ = vbatch(rngs, x) if has_x else (None, None, None)
+    s_ctx, s_test, _ = vbatch(rngs, s)
+    t_ctx, t_test, _ = vbatch(rngs, t)
+    f_ctx, f_test, inv_permute_idx = vbatch(rngs, f)
+    return Batch(
+        x_ctx,
+        s_ctx,
+        t_ctx,
+        f_ctx,
+        valid_lens_ctx,
+        x_test,
+        s_test,
+        t_test,
+        f_test,
+        valid_lens_test,
+        # no need to store this if its not used
+        inv_permute_idx if include_inv_permute_idx else None,
+    )
