@@ -67,6 +67,8 @@ def run(
     B=32,  # how to batch the autoregressive sampling. this parameter only affects runtime efficiency
     ls: float | None = None,  # override the ls in the config
     var: float | None = None,  # override the var in the config
+    num_ctx: int | None = None,  # number of context points to use
+    noise: float | None = None,  # override the noise in the config
     debug: bool = False,
 ):
     rng = random.key(seed)
@@ -83,13 +85,15 @@ def run(
     config = config.copy()
     config.data.batch_size = 1
     if ls is not None:
-        config.kernel.kwargs.ls.kwargs = DictConfig(
-            {"dist": "fixed", "kwargs": {"value": ls}}
-        )
+        config.kernel.kwargs.ls.kwargs = {"dist": "fixed", "kwargs": {"value": ls}}
     if var is not None:
-        config.kernel.kwargs.var.kwargs = DictConfig(
-            {"dist": "fixed", "kwargs": {"value": var}}
-        )
+        config.kernel.kwargs.var.kwargs = {"dist": "fixed", "kwargs": {"value": var}}
+
+    if num_ctx is not None:
+        config.data.num_ctx = {"min": num_ctx, "max": num_ctx}
+    if noise is not None:
+        config.data.obs_noise = noise
+
     OmegaConf.save(config, results_dir / "config.yaml")
     print("Seed:", seed)
     print("GP:", config.kernel)
@@ -217,7 +221,9 @@ if __name__ == "__main__":
     parser.add_argument("--B", type=int, required=True)
     parser.add_argument("--ls", type=float, default=None)
     parser.add_argument("--var", type=float, default=None)
+    parser.add_argument("--num_ctx", type=int, default=None)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--noise", type=float, default=None)
     args = parser.parse_args()
 
     apply, config = load_model(path)

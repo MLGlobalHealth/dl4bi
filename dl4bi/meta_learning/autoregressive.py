@@ -3,11 +3,11 @@ from typing import Callable, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
-from jax import jit, random, vmap
+import tqdm
+from jax import jit, random
 from jax.experimental import enable_x64
 from omegaconf import DictConfig
-from sps.kernels import *  # needed by `instantiate`
-from sps.kernels import l2_dist_sq
+from sps.kernels import l2_dist, l2_dist_sq
 from sps.utils import build_grid
 
 from dl4bi.meta_learning.train_utils import instantiate
@@ -185,11 +185,12 @@ def _sample_autoreg(
     s_ctx: jax.Array,  # [B, L_ctx, D]
     f_ctx: jax.Array,  # [B, L_ctx, 1]
     s_test: jax.Array,  # [B, L_test, D]
+    debug: bool = False,
 ):
     B, L_test, _ = s_test.shape
     _, L_ctx, _ = s_ctx.shape
 
-    s_ctx = jnp.concat([s_ctx, s_test], axis=1)
+    s = jnp.concat([s_ctx, s_test], axis=1)
     f_ctx = jnp.pad(f_ctx, ((0, 0), (0, L_test), (0, 0)))
 
     # Note that the independent random normals can be pre-sampled.
@@ -200,12 +201,17 @@ def _sample_autoreg(
 
     def g(i, f):
         s_test_i = s_test[:, i][:, None]  # [B, 1, D]
-        normal = normals[:, i][:, None, None]  # [B, 1, 1]
+        normal = normals[:, i][:, None]  # [B, 1]
         valid_lens_ctx = jnp.repeat(L_ctx + i, B)
 
-        f_mu_i, f_std_i = apply(s_ctx, f, s_test_i, valid_lens_ctx)
+        f_mu_i, f_std_i = apply(s, f, s_test_i, valid_lens_ctx)
+        f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)
         f_sampled = normal * f_std_i + f_mu_i
-        return f.at[:, L_ctx + i].set(f_sampled.squeeze(1))
+
+        # TODO: add a debug callback, something like:
+        # if large variance and close to known points, warn
+
+        return f.at[:, L_ctx + i].set(f_sampled)
 
     f = jax.lax.fori_loop(0, L_test, g, f_ctx)
 
@@ -220,13 +226,14 @@ def sample_autoreg(
     s_test: jax.Array,  # [L_test, D]
     B: int,  # how many paths to sample
     random: bool = False,  # whether to permute s_test randomly
+    debug: bool = False,
 ):
     s_ctx = jnp.repeat(s_ctx[None], B, axis=0)
     f_ctx = jnp.repeat(f_ctx[None], B, axis=0)
     s_test = jnp.repeat(s_test[None], B, axis=0)
 
     if not random:
-        return _sample_autoreg(rng, apply, s_ctx, f_ctx, s_test)
+        return _sample_autoreg(rng, apply, s_ctx, f_ctx, s_test, debug=debug)
     else:
         _, L_test, D = s_test.shape
 
@@ -247,13 +254,11 @@ def sample_autoreg(
             s_ctx,
             f_ctx,
             jnp.take_along_axis(s_test, idx, axis=1),
+            debug=debug,
         )
 
         assert idx_inv.shape == paths.shape
         return jnp.take_along_axis(paths, idx_inv, axis=1), log_densities
-
-
-from itertools import product
 
 
 # Probabilistic Machine Learning: An Introduction by Kevin P. Murphy
@@ -319,7 +324,6 @@ def analytic_gp(
         cov = cov.astype(jnp.float32)
 
     if take_from_context:
-        print(L_test)
         mean = jnp.zeros(L_test).at[mask].set(mean).at[~mask].set(f_ctx)
         mask2 = jnp.outer(mask, mask)
         cov = jnp.zeros((L_test, L_test)).at[mask2].set(cov.reshape(-1))
