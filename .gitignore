@@ -17,3 +17,4 @@ __pycache__
 
 # macos filesystem artifacts
 .DS_Store
+results
