@@ -119,32 +119,6 @@ def build_dataloaders(
                     test_includes_ctx=True,
                     include_inv_permute_idx=True,
                 )
-                # rng_permute, rng_valid, rng = random.split(rng, 3)
-                # f_test = f_test.reshape(B, -1, 1)  # [B, H, W, 1] -> [B, L, 1]
-                # permute_idx = random.choice(rng_permute, L, (L,), replace=False)
-                # inv_permute_idx = jnp.argsort(permute_idx)
-                # # permute the order and select the first valid_lens_ctx for context
-                # s_test_permuted = s_test[:, permute_idx, :]
-                # f_test_permuted = f_test[:, permute_idx, :]
-                # s_test_permuted = s_test_permuted[:, :num_test_max, :]
-                # f_test_permuted = f_test_permuted[:, :num_test_max, :]
-                # valid_lens_ctx = random.randint(
-                #     rng_valid,
-                #     (B,),
-                #     num_ctx_min,
-                #     num_ctx_max,
-                # )
-                # yield (
-                #     s_test_permuted[:, :num_ctx_max, :],  # s_ctx (permuted)
-                #     f_test_permuted[:, :num_ctx_max, :],  # f_ctx (permuted)
-                #     valid_lens_ctx,  # only the first valid lens are used/observed
-                #     s_test_permuted,  # s_test (permuted)
-                #     f_test_permuted,  # f_test (permuted)
-                #     valid_lens_test,
-                #     s_test,  # add full originals for use in callbacks, e.g. log_plots
-                #     f_test,
-                #     inv_permute_idx,
-                # )
 
         return dataloader
 

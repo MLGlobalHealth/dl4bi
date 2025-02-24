@@ -89,7 +89,7 @@ class Batch(Mapping):
         """Returns a new batch with updated attributes."""
         return replace(self, **kwargs)
 
-    def idx(self, i: int):
+    def element(self, i: int):
         d = {}
         for k, v in iter(self):
             d[k] = v

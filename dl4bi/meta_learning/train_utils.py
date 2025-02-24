@@ -232,7 +232,7 @@ def vanilla_train_step(
     def loss_fn(params):
         mask_test = jnp.array([True])
         if batch.valid_lens_test is not None:
-            L = batch.valid_lens_test.shape[0]
+            L = batch.f_test.shape[1]
             mask_test = mask_from_valid_lens(L, batch.valid_lens_test)
         output = state.apply_fn(
             {"params": params, **state.kwargs},
@@ -254,38 +254,33 @@ def vanilla_train_step(
 def vanilla_valid_step(
     rng: jax.Array,
     state: TrainState,
-    batch: tuple,
+    batch: Batch,
     is_categorical: bool = False,
     **kwargs,
 ):
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
+    mask_test = jnp.array([True])
+    if batch.valid_lens_test is not None:
+        L_test = batch.f_test.shape[1]
+        mask_test = mask_from_valid_lens(L_test, batch.valid_lens_test)
     output = jit(state.apply_fn)(
         {"params": state.params, **state.kwargs},
-        s_ctx,
-        f_ctx,
-        s_test,
-        valid_lens_ctx,
-        valid_lens_test,
         rngs={"extra": rng},
+        **batch,
     )
     if isinstance(output[1], tuple):  # latent model
         output, _ = output  # latent zs aren't used in validation
-    B, L_test, _ = s_test.shape
-    if valid_lens_test is None:
-        valid_lens_test = jnp.repeat(L_test, B)
-    mask_test = mask_from_valid_lens(L_test, valid_lens_test)
     if is_categorical:
-        nll = safe_softmax_cross_entropy(output, f_test)
+        nll = safe_softmax_cross_entropy(output, batch.f_test)
         nll = nll.mean(where=mask_test.squeeze())
         return {"NLL": nll}
     hdi_prob = kwargs.get("hdi_prob", 0.95)
     z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
     f_mu, f_std = output
-    nll = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
-    rmse = jnp.sqrt(jnp.square(f_test - f_mu).mean(where=mask_test))
-    mae = jnp.abs(f_test - f_mu).mean(where=mask_test)
+    nll = -norm.logpdf(batch.f_test, f_mu, f_std).mean(where=mask_test)
+    rmse = jnp.sqrt(jnp.square(batch.f_test - f_mu).mean(where=mask_test))
+    mae = jnp.abs(batch.f_test - f_mu).mean(where=mask_test)
     f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
-    cvg = ((f_test >= f_lower) & (f_test <= f_upper)).mean(where=mask_test)
+    cvg = ((batch.f_test >= f_lower) & (batch.f_test <= f_upper)).mean(where=mask_test)
     return {"NLL": nll, "RMSE": rmse, "MAE": mae, "Coverage": cvg}
 
 
