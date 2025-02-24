@@ -167,7 +167,8 @@ def closest_first(
     return jnp.array(order, dtype=jnp.int32)
 
 
-@partial(jit, static_argnames=["n", "batch_size"])
+# this just slowed the code down
+# @partial(jit, static_argnames=["n", "batch_size"])
 def random_permutations(rng: jax.Array, n: int, batch_size: int):
     """
     Returns array of shape [batch_size, n]
@@ -252,18 +253,20 @@ def sample_autoreg(
         return jnp.take_along_axis(paths, idx_inv, axis=1), log_densities
 
 
+from itertools import product
+
+
 # Probabilistic Machine Learning: An Introduction by Kevin P. Murphy
 # Chapter 3.2.3
 # Equation 3.28
 def analytic_gp(
-    s_ctx: jax.Array,  # [L_ctx, D]
-    f_ctx: jax.Array,  # [L_ctx, 1]
-    s_test: jax.Array,  # [L_test, D]
+    s_ctx: jax.Array,  # [L_ctx, D] or [L_ctx]
+    f_ctx: jax.Array,  # [L_ctx, 1] or [L_ctx]
+    s_test: jax.Array,  # [L_test, D] or [L_test]
     kernel: Callable,
     var: float,
     ls: float,
     noise: float = 0,
-    ensure_unique: bool = False,
 ) -> Tuple[jax.Array, jax.Array]:
     """
     Kevin P. Murphy, Probabilistic Machine Learning: An Introduction,
@@ -275,13 +278,23 @@ def analytic_gp(
     This is true for the kernels we use modulo repeated locations,
     which can be handled by setting `ensure_unique=True`.
     """
-    f_ctx = f_ctx.squeeze(-1)
+    L_test = s_test.shape[0]
 
-    if ensure_unique:
-        s_ctx, idx, idx_inv = jnp.unique(
-            s_ctx, axis=-1, return_index=True, return_inverse=True
+    if f_ctx.ndim > 1:
+        f_ctx = f_ctx.squeeze(-1)
+
+    take_from_context = noise < 1e-5
+    if take_from_context:
+        print(
+            "Assuming no noise, will take values from context set if f_ctx and s_test overlap."
         )
-        f_ctx = f_ctx[idx]
+        appear_in_context = []
+        for i, s in enumerate(s_test):
+            if s in s_ctx:
+                appear_in_context.append(i)
+        appear_in_context = jnp.array(appear_in_context)
+        mask = jnp.ones(L_test, dtype=bool).at[appear_in_context].set(False)
+        s_test = s_test[mask]
 
     # 64-bit precision is required for numerical stability.
     with enable_x64():
@@ -305,8 +318,10 @@ def analytic_gp(
         mean = mean.astype(jnp.float32)
         cov = cov.astype(jnp.float32)
 
-    if ensure_unique:
-        mean = mean[..., idx_inv]
-        cov = cov[..., idx_inv][:, idx_inv]
+    if take_from_context:
+        print(L_test)
+        mean = jnp.zeros(L_test).at[mask].set(mean).at[~mask].set(f_ctx)
+        mask2 = jnp.outer(mask, mask)
+        cov = jnp.zeros((L_test, L_test)).at[mask2].set(cov.reshape(-1))
 
     return mean, cov
