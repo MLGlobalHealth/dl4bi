@@ -573,11 +573,11 @@ jax.tree_util.register_pytree_node(
         "min_ctx",
         "max_ctx",
         "num_test",
-        "batch_size",
         "independent",
-        "fixed_interval",
         "test_includes_ctx",
         "include_inv_permute_idx",
+        "batch_size",
+        "fixed_interval",
     ),
 )
 def _spatiotemporal_data_to_batch(
@@ -593,7 +593,7 @@ def _spatiotemporal_data_to_batch(
     test_includes_ctx: bool = True,
     include_inv_permute_idx: bool = False,
     batch_size: int = 4,
-    fixed_inteval: int = -1,
+    fixed_interval: int = -1,
 ):
     T = s.shape[0]
     has_x = x is not None
