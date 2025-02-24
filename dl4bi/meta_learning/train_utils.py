@@ -38,6 +38,7 @@ from tqdm import tqdm
 from ..core.attention import *
 from ..core.bias import *
 from ..core.conv import *
+from ..core.data import Batch
 from ..core.dist import *
 from ..core.embed import *
 from ..core.gnn import *
@@ -109,17 +110,11 @@ def train(
 ):
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
     batches = train_dataloader(rng_data)
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = next(batches)
+    batch = next(batches)
     rngs = {"params": rng_params, "extra": rng_extra}
-    kwargs = model.init(rngs, s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test)
+    kwargs = model.init(rngs, **batch)
     params = kwargs.pop("params")
-    param_count = nn.tabulate(model, rngs)(
-        s_ctx,
-        f_ctx,
-        s_test,
-        valid_lens_ctx,
-        valid_lens_test,
-    )
+    param_count = nn.tabulate(model, rngs)(**batch)
     print(param_count)
     state = TrainState.create(
         apply_fn=model.apply,
@@ -217,7 +212,7 @@ def select_steps(model, is_categorical=False):
 def vanilla_train_step(
     rng: jax.Array,
     state: TrainState,
-    batch: tuple,
+    batch: Batch,
     is_categorical: bool = False,
     **kwargs,
 ):
@@ -235,26 +230,21 @@ def vanilla_train_step(
     rng_dropout, rng_extra = random.split(rng)
 
     def loss_fn(params):
-        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
-        (B, L_test, _) = s_test.shape
-        if valid_lens_test is None:
-            valid_lens_test = jnp.repeat(L_test, B)
-        mask_test = mask_from_valid_lens(L_test, valid_lens_test)
+        mask_test = jnp.array([True])
+        if batch.valid_lens_test is not None:
+            L = batch.valid_lens_test.shape[0]
+            mask_test = mask_from_valid_lens(L, batch.valid_lens_test)
         output = state.apply_fn(
             {"params": params, **state.kwargs},
-            s_ctx,
-            f_ctx,
-            s_test,
-            valid_lens_ctx,
-            valid_lens_test,
             training=True,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
+            **batch,
         )
         if is_categorical:
-            nll = safe_softmax_cross_entropy(output, f_test)
+            nll = safe_softmax_cross_entropy(output, batch.f_test)
             return nll.mean(where=mask_test.squeeze())
         f_mu, f_std = output
-        return -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
+        return -norm.logpdf(batch.f_test, f_mu, f_std).mean(where=mask_test)
 
     nll, grads = jax.value_and_grad(loss_fn)(state.params)
     return state.apply_gradients(grads=grads), nll

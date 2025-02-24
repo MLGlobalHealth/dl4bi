@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields, replace
 from functools import partial
 from typing import Optional
@@ -8,7 +9,7 @@ from jax import jit, random, vmap
 
 
 @dataclass(frozen=True)
-class BatchElement:
+class BatchElement(Mapping):
     """A `BatchElement` represents a single element of a `Batch`.
 
     In other words, it is the same as a `Batch` object where each contained
@@ -31,17 +32,15 @@ class BatchElement:
         """Returns a new batch with updated attributes."""
         return replace(self, **kwargs)
 
+    def __getitem__(self, key):
+        return asdict(self)[key]
+
     def __iter__(self):
         """Allows you to use **batch to expand as kwargs."""
-        yield from asdict(self).items()
+        return iter(asdict(self))
 
     def __len__(self):
-        for field in fields(self):
-            if field.name.endswith(("ctx", "test")):
-                x = getattr(self, field.name)
-                if isinstance(x, jax.Array):
-                    return x.shape[0]
-        return None
+        return len(asdict(self))
 
 
 # register with jax to use in compiled functions
@@ -68,7 +67,7 @@ jax.tree_util.register_pytree_node(
 
 
 @dataclass(frozen=True)
-class Batch:
+class Batch(Mapping):
     """A generic `Batch` object.
 
     This batch object can be deconstructed with `**batch`.
@@ -90,11 +89,7 @@ class Batch:
         """Returns a new batch with updated attributes."""
         return replace(self, **kwargs)
 
-    def __iter__(self):
-        """Allows you to use **batch to expand as kwargs."""
-        yield from asdict(self).items()
-
-    def __getitem__(self, i: int):
+    def idx(self, i: int):
         d = {}
         for k, v in iter(self):
             d[k] = v
@@ -102,13 +97,15 @@ class Batch:
                 d[k] = v[i]
         return BatchElement(**d)
 
+    def __getitem__(self, key):
+        return asdict(self)[key]
+
+    def __iter__(self):
+        """Allows you to use **batch to expand as kwargs."""
+        return iter(asdict(self))
+
     def __len__(self):
-        for field in fields(self):
-            if field.name.endswith(("ctx", "test")):
-                x = getattr(self, field.name)
-                if isinstance(x, jax.Array):
-                    return x.shape[0]
-        return None
+        return len(asdict(self))
 
 
 # register with jax to use in compiled functions
@@ -148,8 +145,8 @@ class Data:
     def to_batch(
         self,
         rng: jax.Array,
-        min_ctx: int,
-        max_ctx: int,
+        num_ctx_min: int,
+        num_ctx_max: int,
         num_test: int,
         independent: bool = False,
         test_includes_ctx: bool = True,
@@ -159,8 +156,8 @@ class Data:
 
         Args:
             rng: A PRNG.
-            min_ctx: Minimum number of context points.
-            max_ctx: Maximum number of context points.
+            num_ctx_min: Minimum number of context points.
+            num_ctx_max: Maximum number of context points.
             num_test: Number of test points.
             independent: Whether the subset of context points for each element
                 in the batch should be selected independently.
@@ -177,8 +174,8 @@ class Data:
             rng,
             self.x,
             self.f,
-            min_ctx,
-            max_ctx,
+            num_ctx_min,
+            num_ctx_max,
             num_test,
             independent,
             test_includes_ctx,
@@ -197,8 +194,8 @@ jax.tree_util.register_pytree_node(
 @partial(
     jit,
     static_argnames=(
-        "min_ctx",
-        "max_ctx",
+        "num_ctx_min",
+        "num_ctx_max",
         "num_test",
         "independent",
         "test_includes_ctx",
@@ -209,8 +206,8 @@ def _data_to_batch(
     rng: jax.Array,
     x: jax.Array,  # [B, L, D_x]
     f: jax.Array,  # [B, L, D_f]
-    min_ctx: int,
-    max_ctx: int,
+    num_ctx_min: int,
+    num_ctx_max: int,
     num_test: int,
     independent: bool = False,
     test_includes_ctx: bool = True,
@@ -218,9 +215,11 @@ def _data_to_batch(
 ):
     B = x.shape[0]
     rng_valid, rng = random.split(rng)
-    valid_lens_ctx = random.randint(rng_valid, (B,), min_ctx, max_ctx)
+    valid_lens_ctx = random.randint(rng_valid, (B,), num_ctx_min, num_ctx_max)
     valid_lens_test = jnp.repeat(num_test, B)
-    vbatch = vmap(lambda rng, v: _batch(rng, v, max_ctx, num_test, test_includes_ctx))
+    vbatch = vmap(
+        lambda rng, v: _batch(rng, v, num_ctx_max, num_test, test_includes_ctx)
+    )
     rngs = random.split(rng, B) if independent else jnp.repeat(rng, B)
     x_ctx, x_test, _ = vbatch(rngs, x)
     f_ctx, f_test, inv_permute_idx = vbatch(rngs, f)
@@ -242,11 +241,11 @@ def _data_to_batch(
     )
 
 
-@partial(jit, static_argnames=("max_ctx", "num_test", "test_includes_ctx"))
+@partial(jit, static_argnames=("num_ctx_max", "num_test", "test_includes_ctx"))
 def _batch(
     rng: jax.Array,
     v: jax.Array,  # [L, D]
-    max_ctx: int,
+    num_ctx_max: int,
     num_test: int,
     test_includes_ctx: bool = True,
 ):
@@ -254,11 +253,11 @@ def _batch(
     permute_idx = random.choice(rng, L, (L,), replace=False)
     inv_permute_idx = jnp.argsort(permute_idx)
     v_permuted = v[permute_idx]
-    v_ctx = v_permuted[:max_ctx]
+    v_ctx = v_permuted[:num_ctx_max]
     if test_includes_ctx:
         v_test = v_permuted[:num_test]
     else:
-        v_test = v_permuted[max_ctx : max_ctx + num_test]
+        v_test = v_permuted[num_ctx_max : num_ctx_max + num_test]
     return v_ctx, v_test, inv_permute_idx
 
 
@@ -278,8 +277,8 @@ class SpatialData:
     def to_batch(
         self,
         rng: jax.Array,
-        min_ctx: int,
-        max_ctx: int,
+        num_ctx_min: int,
+        num_ctx_max: int,
         num_test: int,
         independent: bool = False,
         test_includes_ctx: bool = True,
@@ -289,8 +288,8 @@ class SpatialData:
 
         Args:
             rng: A PRNG.
-            min_ctx: Minimum number of context points.
-            max_ctx: Maximum number of context points.
+            num_ctx_min: Minimum number of context points.
+            num_ctx_max: Maximum number of context points.
             num_test: Number of test points.
             independent: Whether the subset of context points for each element
                 in the batch should be selected independently.
@@ -308,8 +307,8 @@ class SpatialData:
             self.x,
             self.s,
             self.f,
-            min_ctx,
-            max_ctx,
+            num_ctx_min,
+            num_ctx_max,
             num_test,
             independent,
             test_includes_ctx,
@@ -328,8 +327,8 @@ jax.tree_util.register_pytree_node(
 @partial(
     jit,
     static_argnames=(
-        "min_ctx",
-        "max_ctx",
+        "num_ctx_min",
+        "num_ctx_max",
         "num_test",
         "independent",
         "test_includes_ctx",
@@ -341,8 +340,8 @@ def _spatial_data_to_batch(
     x: Optional[jax.Array],  # [B, [S]+, D_x] or [B, 1, D_x] or None
     s: jax.Array,  # [B, [S]+]
     f: jax.Array,  # [B, [S]+, D_f]
-    min_ctx: int,
-    max_ctx: int,
+    num_ctx_min: int,
+    num_ctx_max: int,
     num_test: int,
     independent: bool = False,
     test_includes_ctx: bool = True,
@@ -355,9 +354,11 @@ def _spatial_data_to_batch(
     s = flatten_spatial_dims(s)
     f = flatten_spatial_dims(f)
     rng_valid, rng = random.split(rng)
-    valid_lens_ctx = random.randint(rng_valid, (B,), min_ctx, max_ctx)
+    valid_lens_ctx = random.randint(rng_valid, (B,), num_ctx_min, num_ctx_max)
     valid_lens_test = jnp.repeat(num_test, B)
-    vbatch = vmap(lambda rng, v: _batch(rng, v, max_ctx, num_test, test_includes_ctx))
+    vbatch = vmap(
+        lambda rng, v: _batch(rng, v, num_ctx_max, num_test, test_includes_ctx)
+    )
     rngs = random.split(rng, B) if independent else jnp.repeat(rng, B)
     x_ctx, x_test, _ = vbatch(rngs, x) if has_x else (None, None, None)
     s_ctx, s_test, _ = vbatch(rngs, s)
@@ -395,8 +396,8 @@ class TemporalData:
     def to_batch(
         self,
         rng: jax.Array,
-        min_ctx: int,
-        max_ctx: int,
+        num_ctx_min: int,
+        num_ctx_max: int,
         num_test: int,
         independent: bool = False,
         test_includes_ctx: bool = True,
@@ -406,8 +407,8 @@ class TemporalData:
 
         Args:
             rng: A PRNG.
-            min_ctx: Minimum number of context points.
-            max_ctx: Maximum number of context points.
+            num_ctx_min: Minimum number of context points.
+            num_ctx_max: Maximum number of context points.
             num_test: Number of test points.
             independent: Whether the subset of context points for each element
                 in the batch should be selected independently.
@@ -425,8 +426,8 @@ class TemporalData:
             self.x,
             self.t,
             self.f,
-            min_ctx,
-            max_ctx,
+            num_ctx_min,
+            num_ctx_max,
             num_test,
             independent,
             test_includes_ctx,
@@ -445,8 +446,8 @@ jax.tree_util.register_pytree_node(
 @partial(
     jit,
     static_argnames=(
-        "min_ctx",
-        "max_ctx",
+        "num_ctx_min",
+        "num_ctx_max",
         "num_test",
         "independent",
         "test_includes_ctx",
@@ -458,8 +459,8 @@ def _temporal_data_to_batch(
     x: Optional[jax.Array],  # [B, T, D_x] or [B, 1, D_x] None
     t: jax.Array,  # [B, T, 1]
     f: jax.Array,  # [B, T, D_f]
-    min_ctx: int,
-    max_ctx: int,
+    num_ctx_min: int,
+    num_ctx_max: int,
     num_test: int,
     independent: bool = False,
     test_includes_ctx: bool = True,
@@ -468,9 +469,11 @@ def _temporal_data_to_batch(
     B = t.shape[0]
     has_x = x is not None
     rng_valid, rng = random.split(rng)
-    valid_lens_ctx = random.randint(rng_valid, (B,), min_ctx, max_ctx)
+    valid_lens_ctx = random.randint(rng_valid, (B,), num_ctx_min, num_ctx_max)
     valid_lens_test = jnp.repeat(num_test, B)
-    vbatch = vmap(lambda rng, v: _batch(rng, v, max_ctx, num_test, test_includes_ctx))
+    vbatch = vmap(
+        lambda rng, v: _batch(rng, v, num_ctx_max, num_test, test_includes_ctx)
+    )
     rngs = random.split(rng, B) if independent else jnp.repeat(rng, B)
     x_ctx, x_test, _ = vbatch(rngs, x) if has_x else (None, None, None)
     t_ctx, t_test, _ = vbatch(rngs, t)
@@ -512,8 +515,8 @@ class SpatiotemporalData:
     def to_batch(
         self,
         rng: jax.Array,
-        min_ctx: int,
-        max_ctx: int,
+        num_ctx_min: int,
+        num_ctx_max: int,
         num_test: int,
         independent: bool = False,
         test_includes_ctx: bool = True,
@@ -525,8 +528,8 @@ class SpatiotemporalData:
 
         Args:
             rng: A PRNG.
-            min_ctx: Minimum number of context points.
-            max_ctx: Maximum number of context points.
+            num_ctx_min: Minimum number of context points.
+            num_ctx_max: Maximum number of context points.
             num_test: Number of test points.
             independent: Whether the subset of context points for each time step
                 should be selected independently.
@@ -548,8 +551,8 @@ class SpatiotemporalData:
             self.s,
             self.t,
             self.f,
-            min_ctx,
-            max_ctx,
+            num_ctx_min,
+            num_ctx_max,
             num_test,
             independent,
             test_includes_ctx,
@@ -570,8 +573,8 @@ jax.tree_util.register_pytree_node(
 @partial(
     jit,
     static_argnames=(
-        "min_ctx",
-        "max_ctx",
+        "num_ctx_min",
+        "num_ctx_max",
         "num_test",
         "independent",
         "test_includes_ctx",
@@ -586,8 +589,8 @@ def _spatiotemporal_data_to_batch(
     s: jax.Array,  # [T, [S]+, D_s]
     t: jax.Array,  # [T, [S]+, 1] or [T, 1, 1]
     f: jax.Array,  # [T, [S]+, D_f]
-    min_ctx: int,
-    max_ctx: int,
+    num_ctx_min: int,
+    num_ctx_max: int,
     num_test: int,
     independent: bool = False,
     test_includes_ctx: bool = True,
@@ -606,9 +609,11 @@ def _spatiotemporal_data_to_batch(
     x = jnp.broadcast_to(x, (T, L, x.shape[-1])) if has_x else None
     t = jnp.broadcast_to(t, (T, L, 1))
     rng_valid, rng = random.split(rng)
-    valid_lens_ctx = random.randint(rng_valid, (T,), min_ctx, max_ctx)
+    valid_lens_ctx = random.randint(rng_valid, (T,), num_ctx_min, num_ctx_max)
     valid_lens_test = jnp.repeat(num_test, T)
-    vbatch = vmap(lambda rng, v: _batch(rng, v, max_ctx, num_test, test_includes_ctx))
+    vbatch = vmap(
+        lambda rng, v: _batch(rng, v, num_ctx_max, num_test, test_includes_ctx)
+    )
     rngs = random.split(rng, T) if independent else jnp.repeat(rng, T)
     x_ctx, x_test, _ = vbatch(rngs, x) if has_x else (None, None, None)
     s_ctx, s_test, _ = vbatch(rngs, s)

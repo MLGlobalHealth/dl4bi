@@ -14,6 +14,7 @@ from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
+from dl4bi.core.data import SpatialData
 from dl4bi.meta_learning.train_utils import (
     Callback,
     cfg_to_run_name,
@@ -94,7 +95,7 @@ def build_dataloaders(
     num_ctx_max: int = 128,
     num_test_max: int = 256,
 ):
-    B, L = batch_size, 28 * 28
+    B = batch_size
     normalize = lambda sample: 2 * (
         tf.cast(sample["image"], tf.float32) / 255.0 - 0.5
     )  # [0, 255] -> [-0.5, 0.5] -> [-1, 1]
@@ -103,39 +104,47 @@ def build_dataloaders(
     train_ds = train_ds.shuffle(buffer_size, seed=42, reshuffle_each_iteration=True)
     train_ds = train_ds.batch(batch_size, drop_remainder=True).prefetch(1)
     valid_ds = valid_ds.batch(batch_size, drop_remainder=True).prefetch(1)
-    s_test = build_grid([dict(start=-2.0, stop=2.0, num=28)] * 2).reshape(L, 2)
-    s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
-    valid_lens_test = jnp.repeat(num_test_max, B)  # similar to ANP, Appendix D
+    s = build_grid([dict(start=-2.0, stop=2.0, num=28)] * 2)
+    s = jnp.repeat(s[None, ...], B, axis=0)
 
     def build_dataloader(dataset):
         def dataloader(rng: jax.Array):
-            for f_test in dataset.as_numpy_iterator():
-                rng_permute, rng_valid, rng = random.split(rng, 3)
-                f_test = f_test.reshape(B, -1, 1)  # [B, H, W, 1] -> [B, L, 1]
-                permute_idx = random.choice(rng_permute, L, (L,), replace=False)
-                inv_permute_idx = jnp.argsort(permute_idx)
-                # permute the order and select the first valid_lens_ctx for context
-                s_test_permuted = s_test[:, permute_idx, :]
-                f_test_permuted = f_test[:, permute_idx, :]
-                s_test_permuted = s_test_permuted[:, :num_test_max, :]
-                f_test_permuted = f_test_permuted[:, :num_test_max, :]
-                valid_lens_ctx = random.randint(
-                    rng_valid,
-                    (B,),
+            for f in dataset.as_numpy_iterator():
+                rng_i, rng = random.split(rng)
+                yield SpatialData(x=None, s=s, f=f).to_batch(
+                    rng_i,
                     num_ctx_min,
                     num_ctx_max,
+                    num_test_max,
+                    test_includes_ctx=True,
+                    include_inv_permute_idx=True,
                 )
-                yield (
-                    s_test_permuted[:, :num_ctx_max, :],  # s_ctx (permuted)
-                    f_test_permuted[:, :num_ctx_max, :],  # f_ctx (permuted)
-                    valid_lens_ctx,  # only the first valid lens are used/observed
-                    s_test_permuted,  # s_test (permuted)
-                    f_test_permuted,  # f_test (permuted)
-                    valid_lens_test,
-                    s_test,  # add full originals for use in callbacks, e.g. log_plots
-                    f_test,
-                    inv_permute_idx,
-                )
+                # rng_permute, rng_valid, rng = random.split(rng, 3)
+                # f_test = f_test.reshape(B, -1, 1)  # [B, H, W, 1] -> [B, L, 1]
+                # permute_idx = random.choice(rng_permute, L, (L,), replace=False)
+                # inv_permute_idx = jnp.argsort(permute_idx)
+                # # permute the order and select the first valid_lens_ctx for context
+                # s_test_permuted = s_test[:, permute_idx, :]
+                # f_test_permuted = f_test[:, permute_idx, :]
+                # s_test_permuted = s_test_permuted[:, :num_test_max, :]
+                # f_test_permuted = f_test_permuted[:, :num_test_max, :]
+                # valid_lens_ctx = random.randint(
+                #     rng_valid,
+                #     (B,),
+                #     num_ctx_min,
+                #     num_ctx_max,
+                # )
+                # yield (
+                #     s_test_permuted[:, :num_ctx_max, :],  # s_ctx (permuted)
+                #     f_test_permuted[:, :num_ctx_max, :],  # f_ctx (permuted)
+                #     valid_lens_ctx,  # only the first valid lens are used/observed
+                #     s_test_permuted,  # s_test (permuted)
+                #     f_test_permuted,  # f_test (permuted)
+                #     valid_lens_test,
+                #     s_test,  # add full originals for use in callbacks, e.g. log_plots
+                #     f_test,
+                #     inv_permute_idx,
+                # )
 
         return dataloader
 
