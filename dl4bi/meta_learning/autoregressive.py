@@ -191,7 +191,7 @@ def _sample_autoreg(
     _, L_ctx, _ = s_ctx.shape
 
     s = jnp.concat([s_ctx, s_test], axis=1)
-    f_ctx = jnp.pad(f_ctx, ((0, 0), (0, L_test), (0, 0)))
+    f = jnp.pad(f_ctx, ((0, 0), (0, L_test), (0, 0)))
 
     # Note that the independent random normals can be pre-sampled.
     # It doesn't matter whether sampling is done here, or in the for loop,
@@ -199,21 +199,24 @@ def _sample_autoreg(
     normals = random.normal(rng, (B, L_test))
     log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=1)
 
-    def g(i, f):
+    def g(i: int, f: jax.Array):
         s_test_i = s_test[:, i][:, None]  # [B, 1, D]
         normal = normals[:, i][:, None]  # [B, 1]
         valid_lens_ctx = jnp.repeat(L_ctx + i, B)
 
         f_mu_i, f_std_i = apply(s, f, s_test_i, valid_lens_ctx)
         f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)
+        # f_mu, f_std = apply(s, f, s_test, valid_lens_ctx)
+        # f_mu_i, f_std_i = f_mu[:, i], f_std[:, i]
         f_sampled = normal * f_std_i + f_mu_i
 
         # TODO: add a debug callback, something like:
         # if large variance and close to known points, warn
+        # or also the output mean could be wrong
 
         return f.at[:, L_ctx + i].set(f_sampled)
 
-    f = jax.lax.fori_loop(0, L_test, g, f_ctx)
+    f = jax.lax.fori_loop(0, L_test, g, f)
 
     return f[:, L_ctx:], log_densities
 
@@ -297,7 +300,7 @@ def analytic_gp(
         for i, s in enumerate(s_test):
             if s in s_ctx:
                 appear_in_context.append(i)
-        appear_in_context = jnp.array(appear_in_context)
+        appear_in_context = jnp.array(appear_in_context, dtype=jnp.int32)
         mask = jnp.ones(L_test, dtype=bool).at[appear_in_context].set(False)
         s_test = s_test[mask]
 
