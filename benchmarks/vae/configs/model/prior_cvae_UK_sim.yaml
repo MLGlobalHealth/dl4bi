@@ -5,9 +5,9 @@ kwargs:
   encoder:
     cls: MLP
     kwargs:
-      dims: [128, 128]
+      dims: [363, 363]
   decoder:
     cls: MLP
     kwargs:
-      dims: [128, 128]
-  z_dim: 128
+      dims: [363, 363]
+  z_dim: 363

@@ -1,0 +1,27 @@
+model: 
+  func: poisson
+spatial_prior: 
+  func: car
+# priors names and args must be compat with Numpyro distributions
+priors: 
+  beta:
+    numpyro_dist: Normal
+    kwargs:
+      loc: 0.0
+      scale: 1.0
+  tau:
+    numpyro_dist: Dirichlet
+    kwargs:
+      concentration: [1.0]
+  alpha:
+    numpyro_dist: Beta
+    kwargs:
+      concentration1: 4.0
+      concentration0: 1.0
+num_obs_locations: null
+surrogate_model: True
+simulation_priors:
+  alpha:
+    numpyro_dist: Delta
+    kwargs:
+      v: 0.95

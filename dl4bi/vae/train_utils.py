@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from dataclasses import dataclass
+
 import jax
 import jax.numpy as jnp
 import optax
@@ -9,6 +12,12 @@ from jax.scipy.stats import norm
 
 class TrainState(train_state.TrainState):
     kwargs: FrozenDict = FrozenDict({})
+
+
+@dataclass
+class Callback:
+    fn: Callable
+    interval: int  # apply every interval of train_num_steps
 
 
 @jit
@@ -66,6 +75,22 @@ def mse_train_step(
         return optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
 
     loss, grads = value_and_grad(mse_loss)(state.params)
+    return state.apply_gradients(grads=grads), loss
+
+
+@jit
+def pi_vae_train_step(rng, state, batch, **kwargs):
+    def loss_fn(params):
+        s, f = batch
+        f_hat_beta, f_hat_beta_hat, z_mu, z_std = state.apply_fn(
+            {"params": params}, s, f, rngs={"extra": rng}
+        )
+        loss_1 = optax.squared_error(f_hat_beta, f).mean()
+        loss_2 = optax.squared_error(f_hat_beta_hat, f).mean()
+        kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
+        return loss_1 + loss_2 + kl_div.mean()
+
+    loss, grads = value_and_grad(loss_fn)(state.params)
     return state.apply_gradients(grads=grads), loss
 
 

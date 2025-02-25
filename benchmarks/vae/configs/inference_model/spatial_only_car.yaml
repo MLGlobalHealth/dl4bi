@@ -1,0 +1,21 @@
+model: # Inference model function to choose from inference_models/inference_models.py
+  func: noisy_spatial_model
+spatial_prior: 
+  func: car
+# priors names and args must be compat with Numpyro distributions
+priors: # Priors for inference model data generation
+  tau:
+    numpyro_dist: Delta
+    kwargs:
+      v: 1.0
+  alpha:
+    numpyro_dist: Beta
+    kwargs:
+      concentration1: 4.0
+      concentration0: 1.0
+  sigma:
+    numpyro_dist: Delta
+    kwargs:
+      v: 0.2
+surrogate_model: True # Whether to use a surrogate model or and actual GP sampling
+num_obs_locations: null # Can be used to randomly select partial number of locations for inference

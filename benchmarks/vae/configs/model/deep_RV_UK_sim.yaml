@@ -5,4 +5,4 @@ kwargs:
   decoder:
     cls: MLP
     kwargs:
-      dims: [512, 512]
+      dims: [363, 363]

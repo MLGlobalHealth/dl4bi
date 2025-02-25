@@ -1,0 +1,27 @@
+model: # Inference model function to choose from inference_models/inference_models.py
+  func: binomial
+spatial_prior:
+  func: matern_1_2
+# priors names and args must be compat with Numpyro distributions
+priors: # Priors for inference model data generation
+  beta:
+    numpyro_dist: Normal
+    kwargs:
+      loc: 0.0
+      scale: 1.0
+  var:
+    numpyro_dist: Gamma
+    kwargs:
+      concentration: 1.5
+      rate: 1.5
+  ls:
+    numpyro_dist: Uniform
+    kwargs:
+      low: 0.05
+      high: 1.0
+
+  period: # Would only be used if training prior is Periodic
+    numpyro_dist: HalfNormal
+surrogate_model: True # Whether to use a surrogate model or and actual GP sampling
+num_obs_locations: null # Can be used to randomly select partial number of locations for inference
+population_scale: 100
