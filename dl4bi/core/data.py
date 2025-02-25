@@ -1,5 +1,6 @@
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, fields, replace
+from dataclasses import asdict, dataclass, replace
+from enum import Enum
 from functools import partial
 from typing import Optional
 
@@ -495,6 +496,11 @@ def _temporal_data_to_batch(
     )
 
 
+class SpatiotemporalTask(Enum):
+    Forecast = "forecast"
+    Interpolate = "interpolate"
+
+
 @dataclass(frozen=True)
 class SpatiotemporalData:
     """A `SpatiotemporalData` container.
@@ -505,6 +511,10 @@ class SpatiotemporalData:
 
     .. note::
         Unlike the other `Data` classes, the batch dimension here is the time, `T`.
+
+    .. warning::
+        This container assumes that that timesteps are ordered from least to
+        most recent.
     """
 
     x: Optional[jax.Array]  # [T, [S]+, D_x] or [T, 1, D_x] or [1, 1, D_x] or None
@@ -515,33 +525,43 @@ class SpatiotemporalData:
     def to_batch(
         self,
         rng: jax.Array,
-        num_ctx_min: int,
-        num_ctx_max: int,
+        task: SpatiotemporalTask,
+        fixed_t_step: int,
+        num_t_per_element: int,
+        num_ctx_min_per_t: int,
+        num_ctx_max_per_t: int,
+        independent: bool,
         num_test: int,
-        independent: bool = False,
-        test_includes_ctx: bool = True,
+        batch_size: int,
         include_inv_permute_idx: bool = False,
-        batch_size: int = 4,
-        fixed_interval: int = -1,
     ):
         """Creates a `Batch` from this `SpatiotemporalData`.
 
         Args:
             rng: A PRNG.
-            num_ctx_min: Minimum number of context points.
-            num_ctx_max: Maximum number of context points.
-            num_test: Number of test points.
+            task: A `SpatiotemporalTask` type, e.g. interpolate or forecast.
+            fixed_t_step: If greater than 0, use timesteps separated by a fixed
+                step size along the leading axis, `T`, e.g. a `fixed_t_step=2`
+                would yield indices 0, 2, 4, 6, ... along the `T` axis. Note
+                that this likely only makes sense when the elements in the
+                leading axis, `T`, are separated by a fixed time interval, e.g.
+                t[0]=1.0, t[1]=2.0, t[2]=3.0, etc. If the time steps along
+                the leading axis are real numbers with irregular gaps, e.g.
+                t[0]=1.23, t[1]=5.7, t[3]=20.8, etc, this will likely have an
+                unintended effect. In summary, `fixed_t_step` works with fixed
+                indices along `T`, not with the actual times they represent.
+            num_t_per_element: Number of time steps to include in each batch
+                element.
+            num_ctx_min_per_t: Minimum number of context points per time step.
+            num_ctx_max_per_t: Maximum number of context points per time step.
             independent: Whether the subset of context points for each time step
                 should be selected independently.
-            test_includes_ctx: Whether to include context points in the test
-                set.
+            num_test: Number of test points for target time step.
+            batch_size: Number of elements in the generated batch.
             include_inv_permute_idx: Whether to include the `inv_permute_idx`,
                 which enables easily mapping context points back to their
                 original times and locations in the dataset. This is useful for
                 callbacks and plotting functions.
-            batch_size: Number of batch elements to create from this data.
-            fixed_inverval: If greater than 0, selects time steps separated
-                by `fixed_inverval`, otherwise selects random time steps.
         Returns:
             A `Batch`.
         """
@@ -551,14 +571,15 @@ class SpatiotemporalData:
             self.s,
             self.t,
             self.f,
-            num_ctx_min,
-            num_ctx_max,
-            num_test,
+            task,
+            fixed_t_step,
+            num_t_per_element,
+            num_ctx_min_per_t,
+            num_ctx_max_per_t,
             independent,
-            test_includes_ctx,
-            include_inv_permute_idx,
+            num_test,
             batch_size,
-            fixed_interval,
+            include_inv_permute_idx,
         )
 
 
@@ -573,14 +594,15 @@ jax.tree_util.register_pytree_node(
 @partial(
     jit,
     static_argnames=(
-        "num_ctx_min",
-        "num_ctx_max",
-        "num_test",
+        "task",
+        "fixed_t_step",
+        "num_t_per_element",
+        "num_ctx_min_per_t",
+        "num_ctx_max_per_t",
         "independent",
-        "test_includes_ctx",
-        "include_inv_permute_idx",
+        "num_test",
         "batch_size",
-        "fixed_interval",
+        "include_inv_permute_idx",
     ),
 )
 def _spatiotemporal_data_to_batch(
@@ -589,16 +611,17 @@ def _spatiotemporal_data_to_batch(
     s: jax.Array,  # [T, [S]+, D_s]
     t: jax.Array,  # [T, [S]+, 1] or [T, 1, 1]
     f: jax.Array,  # [T, [S]+, D_f]
-    num_ctx_min: int,
-    num_ctx_max: int,
+    task: SpatiotemporalTask,
+    fixed_t_step: int,
+    num_t_per_element: int,
+    num_ctx_min_per_t: int,
+    num_ctx_max_per_t: int,
+    independent: bool,
     num_test: int,
-    independent: bool = False,
-    test_includes_ctx: bool = True,
-    include_inv_permute_idx: bool = False,
     batch_size: int = 4,
-    fixed_interval: int = -1,
+    include_inv_permute_idx: bool = False,
 ):
-    T = s.shape[0]
+    B, T, T_e = batch_size, s.shape[0], num_t_per_element
     has_x = x is not None
     flatten_spatial_dims = lambda v: v.reshape(T, -1, v.shape[-1])
     x = flatten_spatial_dims(x) if has_x else None
@@ -606,15 +629,35 @@ def _spatiotemporal_data_to_batch(
     t = flatten_spatial_dims(t)
     f = flatten_spatial_dims(f)
     L = s.shape[1]
+    num_test = num_test or L
     x = jnp.broadcast_to(x, (T, L, x.shape[-1])) if has_x else None
     t = jnp.broadcast_to(t, (T, L, 1))
-    rng_valid, rng = random.split(rng)
-    valid_lens_ctx = random.randint(rng_valid, (T,), num_ctx_min, num_ctx_max)
+    rng_t, rng = random.split(rng)
     valid_lens_test = jnp.repeat(num_test, T)
-    vbatch = vmap(
-        lambda rng, v: _batch(rng, v, num_ctx_max, num_test, test_includes_ctx)
-    )
-    rngs = random.split(rng, T) if independent else jnp.repeat(rng, T)
+    if fixed_t_step < 0:  # use random time steps
+        rng_ts = random.split(rng_t, B)
+        ts = vmap(lambda rng: random.choice(rng, T, (T_e,), replace=False))(rng_ts)
+        ts = jnp.sort(ts, axis=1)
+    else:
+        rng_ts = random.split(rng_t, B)
+        choices = jnp.arange(fixed_t_step * (num_t_per_element - 1), T)
+        last_ts = random.choice(rng, choices, (B,), replace=False)
+        prev_ts = fixed_t_step * jnp.arange(num_t_per_element - 1, -1, -1)
+        ts = last_ts[:, None] - prev_ts
+    # last step if forecast, else median for interpolate
+    test_i = -1 if task is SpatiotemporalTask.Forecast else num_t_per_element // 2 + 1
+    # get indices of time steps for batches
+    t_test_i = ts[:, [test_i]]
+    t_ctx_i = jnp.concat([ts[:, :test_i], ts[:, test_i + 1 :]], axis=1)
+    x_ctx, x_test = (x[t_ctx_i], x[t_test_i]) if has_x else (None, None)
+    # shapes: *_ctx: [B, T_e-1, [S]+, D_*], *_test: [B, 1, [S]+, D_*]
+    s_ctx, s_test = s[t_ctx_i], s[t_test_i]
+    t_ctx, t_test = t[t_ctx_i], t[t_test_i]
+    f_ctx, f_test = f[t_ctx_i], f[t_test_i]
+    # TODO:
+    # permute each T_e
+    # pack the context into a single array
+    rngs = random.split(rng, T_e) if independent else jnp.repeat(rng, T_e)
     x_ctx, x_test, _ = vbatch(rngs, x) if has_x else (None, None, None)
     s_ctx, s_test, _ = vbatch(rngs, s)
     t_ctx, t_test, _ = vbatch(rngs, t)
