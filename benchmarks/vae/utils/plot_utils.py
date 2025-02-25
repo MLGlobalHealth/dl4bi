@@ -13,8 +13,8 @@ import seaborn as sns
 from jax.scipy.stats import norm
 
 import wandb
+from dl4bi.vae.train_utils import TrainState, generate_surrogate_decoder
 from utils.map_utils import get_norm_vars
-from utils.train_utils import TrainState, generate_surrogate_decoder
 
 
 def plot_EB_scatter_conditionals(

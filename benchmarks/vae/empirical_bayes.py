@@ -15,14 +15,10 @@ from omegaconf import DictConfig, OmegaConf
 from scipy.optimize import minimize
 from utils.map_utils import generate_adjacency_matrix, process_map
 from utils.plot_utils import plot_EB_scatter_conditionals
-from utils.train_utils import (
-    TrainState,
-    generate_model_name,
-    generate_surrogate_decoder,
-    instantiate,
-)
+from utils.obj_utils import generate_model_name, instantiate
 
 import wandb
+from dl4bi.vae.train_utils import TrainState, generate_surrogate_decoder
 
 
 @hydra.main("configs", config_name="default", version_base=None)

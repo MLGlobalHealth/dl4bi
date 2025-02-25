@@ -17,6 +17,7 @@ from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig, OmegaConf
 from orbax.checkpoint import PyTreeCheckpointer
 from utils.map_utils import process_map
+from utils.obj_utils import generate_model_name, instantiate
 from utils.plot_utils import (
     plot_histograms,
     plot_infer_observed_coverage,
@@ -24,15 +25,10 @@ from utils.plot_utils import (
     plot_trace,
     plot_vae_scatter_comp,
 )
-from utils.train_utils import (
-    TrainState,
-    cosine_annealing_lr,
-    generate_model_name,
-    generate_surrogate_decoder,
-    instantiate,
-)
 
 import wandb
+from dl4bi.meta_learning.train_utils import cosine_annealing_lr
+from dl4bi.vae.train_utils import TrainState, generate_surrogate_decoder
 
 
 @hydra.main("configs", config_name="default", version_base=None)

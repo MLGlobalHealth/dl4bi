@@ -12,15 +12,13 @@ import optax
 import pandas as pd
 from omegaconf import OmegaConf
 from orbax.checkpoint import PyTreeCheckpointer
+from train import build_spatial_dataloaders
 from utils.map_utils import process_map
+from utils.obj_utils import generate_model_name, instantiate
 from utils.plot_utils import conds_to_title, plot_on_map
-from utils.train_utils import (
-    TrainState,
-    cosine_annealing_lr,
-    generate_model_name,
-    instantiate,
-)
-from vae import build_spatial_dataloaders
+
+from dl4bi.meta_learning.train_utils import cosine_annealing_lr
+from dl4bi.vae.train_utils import TrainState
 
 
 def reproduce_plots(seeds: jax.Array):

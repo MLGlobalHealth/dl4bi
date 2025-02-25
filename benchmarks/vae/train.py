@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from collections import defaultdict
+from functools import partial
 from pathlib import Path
 from typing import Callable, Generator
 
@@ -12,24 +13,24 @@ import numpy as np
 import numpyro.distributions as dist
 import optax
 from inference_models.inference_models import gen_saptial_prior
-from jax import random
+from jax import jit, random
+from jax.scipy.stats import norm
 from numpyro.handlers import seed
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 from utils.map_utils import process_map
+from utils.obj_utils import generate_model_name, instantiate
 from utils.plot_utils import log_vae_map_plots
-from utils.train_utils import (
-    Callback,
-    TrainState,
-    cosine_annealing_lr,
-    generate_model_name,
-    get_train_step,
-    get_valid_step,
-    instantiate,
-    save_ckpt,
-)
 
 import wandb
+from dl4bi.meta_learning.train_utils import cosine_annealing_lr, save_ckpt
+from dl4bi.vae.train_utils import (
+    Callback,
+    TrainState,
+    deep_RV_train_step,
+    elbo_train_step,
+    prior_cvae_train_step,
+)
 
 
 @hydra.main("configs", config_name="default", version_base=None)
@@ -238,6 +239,56 @@ def validate(
     metrics = {k: np.mean(v) for k, v in metrics.items()}
     wandb.log(metrics)
     print(metrics)
+
+
+def get_train_step(model_cfg: DictConfig, cond_names: list[str]):
+    var_idx = None if "var" not in cond_names else cond_names.index("var")
+    train_step = elbo_train_step
+    if model_cfg.cls == "DeepRV":
+        train_step = partial(deep_RV_train_step, var_idx=var_idx)
+    elif model_cfg.cls == "PriorCVAE":
+        train_step = prior_cvae_train_step
+    return train_step
+
+
+def get_valid_step(model_cfg: DictConfig, cond_names: list[str]):
+    ls_idx = None if "ls" not in cond_names else cond_names.index("ls")
+    var_idx = None if "var" not in cond_names else cond_names.index("var")
+    model_name = model_cfg.cls
+    decoder_only = model_name == "DeepRV"
+
+    def valid_step(rng, state, batch, prefix: str = "", **kwargs):
+        f, z, conditionals = batch
+        var = 1 if var_idx is None else conditionals[var_idx].squeeze()
+        ls = None if ls_idx is None else conditionals[ls_idx].squeeze()
+        params = {"params": state.params, **state.kwargs}
+        rngs = {"extra": rng}
+        z_mu, z_std = None, None
+        f_hat = jit(state.apply_fn)(
+            params, z if decoder_only else f, conditionals, **kwargs, rngs=rngs
+        )
+        if not decoder_only:
+            f_hat, z_mu, z_std = f_hat
+        mse_score = optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
+        # NOTE: Normalizing the mse score with variance, aN(0,K)~N(0, a^2K), and
+        norm_mse_score = (1 / var) * mse_score
+        loss = norm_mse_score
+        if not decoder_only:
+            kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
+            logp = (
+                (1 / (2 * 0.9)) * mse_score
+                if model_name == "PriorCVAE"
+                else -norm.logpdf(f, f_hat, 1.0).mean()
+            )
+            loss = logp + kl_div.mean()
+
+        return {
+            f"{prefix} loss": loss,
+            f"{prefix} norm MSE": norm_mse_score,
+            "ls": ls if ls is not None else None,
+        }
+
+    return valid_step
 
 
 if __name__ == "__main__":
