@@ -1,0 +1,18 @@
+model: # Inference model function to choose from inference_models/inference_models.py
+  func: poisson
+spatial_prior: 
+  func: iid
+# priors names and args must be compat with Numpyro distributions
+priors: # Priors for inference model data generation
+  beta:
+    numpyro_dist: Normal
+    kwargs:
+      loc: 0.0
+      scale: 5.0
+  var:
+    numpyro_dist: Uniform
+    kwargs:
+      low: 1
+      high: 10
+surrogate_model: False # Whether to use a surrogate model or and actual GP sampling
+num_obs_locations: null # Can be used to randomly select partial number of locations for inference
