@@ -199,6 +199,18 @@ def _sample_autoreg(
     normals = random.normal(rng, (B, L_test))
     log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=1)
 
+    # for i in range(L_test):
+    #     s_test_i = s_test[:, i][:, None]  # [B, 1, D]
+    #     normal = normals[:, i][:, None]  # [B, 1]
+    #     valid_lens_ctx = jnp.repeat(L_ctx + i, B)
+
+    #     f_mu_i, f_std_i = apply(s, f, s_test_i, valid_lens_ctx)
+    #     f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)
+    #     f_sampled = normal * f_std_i + f_mu_i
+
+    #     f = f.at[:, L_ctx + i].set(f_sampled)
+
+    # Equivalent to the above loop but ~2x faster.
     def g(i: int, f: jax.Array):
         s_test_i = s_test[:, i][:, None]  # [B, 1, D]
         normal = normals[:, i][:, None]  # [B, 1]
@@ -206,8 +218,6 @@ def _sample_autoreg(
 
         f_mu_i, f_std_i = apply(s, f, s_test_i, valid_lens_ctx)
         f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)
-        # f_mu, f_std = apply(s, f, s_test, valid_lens_ctx)
-        # f_mu_i, f_std_i = f_mu[:, i], f_std[:, i]
         f_sampled = normal * f_std_i + f_mu_i
 
         # TODO: add a debug callback, something like:
