@@ -50,7 +50,7 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
     return dataloader
 
 
-def sample_diagonal(
+def diagonal_sample(
     rng: jax.Array,
     apply: Apply,
     s_ctx: jax.Array,  # [L_ctx, D]
@@ -178,7 +178,7 @@ def random_permutations(rng: jax.Array, n: int, batch_size: int):
     return idx
 
 
-def _sample_autoreg(
+def _autoregressive_sample(
     rng: jax.Array,
     apply: Apply,
     s_ctx: jax.Array,  # [B, L_ctx, D]
@@ -224,7 +224,7 @@ def _sample_autoreg(
     return f[:, L_ctx:], log_densities
 
 
-def sample_autoreg(
+def autoregressive_sample(
     rng: jax.Array,
     apply: Apply,
     s_ctx: jax.Array,  # [L_ctx, D]
@@ -238,7 +238,7 @@ def sample_autoreg(
     s_test = jnp.repeat(s_test[None], B, axis=0)
 
     if not random:
-        return _sample_autoreg(rng, apply, s_ctx, f_ctx, s_test)
+        return _autoregressive_sample(rng, apply, s_ctx, f_ctx, s_test)
     else:
         _, L_test, D = s_test.shape
 
@@ -253,7 +253,7 @@ def sample_autoreg(
         idx_inv = idx_inv[..., None]
         assert idx.shape == s_test.shape
 
-        paths, log_densities = _sample_autoreg(
+        paths, log_densities = _autoregressive_sample(
             rng,
             apply,
             s_ctx,

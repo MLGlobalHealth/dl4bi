@@ -9,12 +9,12 @@ from jax import jit, random
 from omegaconf import OmegaConf
 
 from dl4bi.meta_learning.autoregressive import (
+    autoregressive_sample,
     build_gp_dataloader,
     closest_first,
+    diagonal_sample,
     furthest_first,
     invert_permutation,
-    sample_autoreg,
-    sample_diagonal,
 )
 from dl4bi.meta_learning.train_utils import load_ckpt
 
@@ -184,7 +184,7 @@ def run(
             for i in tqdm.trange(num_iters, desc=f"Strategy {strategy}"):
                 rng, rng_i = random.split(rng)
                 if strategy == "diagonal":
-                    path, log_density = sample_diagonal(
+                    path, log_density = diagonal_sample(
                         rng_i,
                         apply,
                         s_ctx,
@@ -193,7 +193,7 @@ def run(
                         B,
                     )
                 else:
-                    path, log_density = sample_autoreg(
+                    path, log_density = autoregressive_sample(
                         rng_i,
                         apply,
                         s_ctx,
