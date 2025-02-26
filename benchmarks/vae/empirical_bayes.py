@@ -13,9 +13,9 @@ from jax import random
 from numpyro.handlers import seed
 from omegaconf import DictConfig, OmegaConf
 from scipy.optimize import minimize
-from utils.map_utils import generate_adjacency_matrix, process_map
-from utils.plot_utils import plot_EB_scatter_conditionals
+from utils.map_utils import gen_locations, generate_adjacency_matrix
 from utils.obj_utils import generate_model_name, instantiate
+from utils.plot_utils import plot_EB_scatter_conditionals
 
 import wandb
 from dl4bi.vae.train_utils import TrainState, generate_surrogate_decoder
@@ -41,13 +41,12 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    map_data = gpd.read_file(cfg.data.map_path)
-    s = process_map(map_data)
+    map_data, s = gen_locations(cfg.data)
     priors = {
         pr: instantiate(pr_dist) for pr, pr_dist in cfg.inference_model.priors.items()
     }
     surrogate_kwargs = {}
-    if cfg.model.kwargs.decoder.cls == "FixedLocationTransfomer":
+    if "FixedLocationTransfomer" in model_name:
         surrogate_kwargs = {"s": s}
     inference_model, conds_names = gen_inference_model(
         cfg, s, map_data, priors, surrogate_kwargs

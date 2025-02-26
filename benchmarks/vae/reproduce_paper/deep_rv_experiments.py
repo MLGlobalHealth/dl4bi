@@ -124,7 +124,8 @@ def run_experiments(
                     seeds[:1],
                     spatial_priors,
                     models + ["Baseline_GP"],
-                    infer_overrides + [f"inference_model.population_scale={pop_scale}"],
+                    infer_overrides
+                    + [f"+inference_model.population_scale={pop_scale}"],
                     model_type=model_type,
                 )
 

@@ -3,6 +3,7 @@ from typing import Union
 import flax.linen as nn
 import jax.numpy as jnp
 from inference_models import *  # noqa: F403
+from jax import Array
 from models import *  # noqa: F403
 from numpyro.distributions import *  # noqa: F403
 from omegaconf import DictConfig, OmegaConf
@@ -13,8 +14,27 @@ from dl4bi.vae.train_utils import TrainState
 
 def generate_model_name(cfg: DictConfig):
     spatial_prior = cfg.inference_model.spatial_prior.func
-    dec_name = cfg.model.kwargs.decoder.cls
+    if cfg.model.get("kwargs", None) is None:
+        dec_name = "MLP"
+    else:
+        dec_name = cfg.model.kwargs.decoder.cls
     return cfg.get("name", f"{cfg.model.cls}_{dec_name}_{spatial_prior}")
+
+
+def build_model(model_cfg: DictConfig, s: Array):
+    if model_cfg.get("kwargs", None) is not None:
+        return instantiate(model_cfg)
+    L = s.shape[0]
+    OmegaConf.set_struct(model_cfg, False)
+    model_cfg["kwargs"] = {
+        "cond_stack_fn": {"func": "cond_as_locs"},
+        "decoder": {"cls": "MLP", "kwargs": {"dims": [L, L]}},
+    }
+    if model_cfg.cls == "PriorCVAE":
+        model_cfg["kwargs"]["encoder"] = {"cls": "MLP", "kwargs": {"dims": [L, L]}}
+        model_cfg["kwargs"]["z_dim"] = L
+    OmegaConf.set_struct(model_cfg, True)
+    return instantiate(model_cfg)
 
 
 def instantiate(d: Union[dict, DictConfig]):

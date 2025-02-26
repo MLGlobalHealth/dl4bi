@@ -1,7 +1,7 @@
 defaults:
   - _self_ # use default global values below
-  - data: default
-  - model: deep_RV_UK_sim
+  - data: map_data
+  - model: auto_deep_RV
   - inference_model: poisson
 exp_name: null
 seed: 42

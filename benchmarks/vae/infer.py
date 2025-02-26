@@ -16,15 +16,9 @@ from numpyro.handlers import seed
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig, OmegaConf
 from orbax.checkpoint import PyTreeCheckpointer
-from utils.map_utils import process_map
+from utils.map_utils import gen_locations
 from utils.obj_utils import generate_model_name, instantiate
-from utils.plot_utils import (
-    plot_histograms,
-    plot_infer_observed_coverage,
-    plot_infer_realizations,
-    plot_trace,
-    plot_vae_scatter_comp,
-)
+from utils.plot_utils import plot_inference_run
 
 import wandb
 from dl4bi.meta_learning.train_utils import cosine_annealing_lr
@@ -47,12 +41,11 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng, rng_plot, rng_idxs, rng_hmc = random.split(random.key(cfg.seed), 4)
-    map_data = gpd.read_file(cfg.data.map_path)
-    s = process_map(map_data)
+    map_data, s = gen_locations(cfg.data)
     model_dir = Path(f"results/{cfg.exp_name}/{spatial_prior.func}/{cfg.seed}")
     priors, simulation_priors = init_priors(cfg)
     surrogate_kwargs = {}
-    if cfg.model.kwargs.decoder.cls == "FixedLocationTransfomer":
+    if "FixedLocationTransfomer" in model_name:
         surrogate_kwargs = {"s": s}
     # NOTE: the inference model expects to have this exact API
     inference_model, cond_names = gen_inference_model(
@@ -60,7 +53,9 @@ def main(cfg: DictConfig):
     )
     # NOTE: Generates a model for creating the simulated data
     sim_model, _ = gen_inference_model(cfg, s, map_data, simulation_priors)
-    f_obs, conditionals = gen_obs_data(rng, sim_model, map_data, cond_names)
+    f_obs, spatial_eff, conditionals = gen_obs_data(
+        rng, sim_model, map_data, cond_names
+    )
     obs_mask, obs_idxs = generate_obs_mask(rng_idxs, f_obs, cfg.inference_model)
     surrogate_decoder = None
     if cfg.inference_model.surrogate_model:
@@ -74,19 +69,22 @@ def main(cfg: DictConfig):
             "s": s,
             "f": f_obs,
             "obs_idxs": obs_idxs,
+            "spatial_eff": spatial_eff,
             **conditionals,
         }
     )
     results_dir = get_results_dir(cfg, model_dir, obs_idxs, s)
     results_dir.mkdir(parents=True, exist_ok=True)
-    log_inference_run(
+    log_inference_run((samples, mcmc, post), conditionals, results_dir)
+    plot_inference_run(
         rng_plot,
+        cfg.inference_model,
+        model_name,
         (samples, mcmc, post),
         f_obs,
         conditionals,
         priors,
         map_data,
-        results_dir,
         cfg.log_scale_plots,
     )
 
@@ -113,7 +111,7 @@ def _hmc(
 def gen_obs_data(
     rng: jax.Array,
     sim_model: Callable,
-    map_data: gpd.GeoDataFrame,
+    map_data: Optional[gpd.GeoDataFrame],
     cond_names: list[str],
 ):
     """Generates the observed data for inference.
@@ -129,25 +127,22 @@ def gen_obs_data(
     Returns:
         the inference dataloader
     """
-    if "data" in map_data.columns:
-        f_obs, conditionals = jnp.array(map_data["data"], dtype=jnp.float32)
+    spatial_eff, conditionals = None, [None] * len(cond_names)
+    if map_data is not None and "data" in map_data.columns:
+        f_obs = jnp.array(map_data["data"], dtype=jnp.float32)
     else:
-        f_obs, _, conditionals = seed(sim_model, rng)(surrogate_decoder=None, y=None)
-    return f_obs, dict(zip(cond_names, conditionals))
+        f_obs, spatial_eff, conditionals = seed(sim_model, rng)(
+            surrogate_decoder=None, y=None
+        )
+    return f_obs, spatial_eff, dict(zip(cond_names, conditionals))
 
 
 def log_inference_run(
-    rng: jax.Array,
     hmc_res: tuple[dict, MCMC, dict],
-    f_obs: jax.Array,
     surrogate_conds: dict,
-    priors: dict,
-    map_data: gpd.GeoDataFrame,
     results_dir: Path,
-    log_scale_plots: bool,
 ):
     samples, mcmc, post = hmc_res
-    rng_real, rng_scat = jax.random.split(rng)
     with open(results_dir / "hmc_samples.pkl", "wb") as out_file:
         pickle.dump(samples, out_file)
     with open(results_dir / "hmc_pp.pkl", "wb") as out_file:
@@ -160,23 +155,6 @@ def log_inference_run(
     print(metrics)
     with open(results_dir / "hmc_metrics.pkl", "wb") as out_file:
         pickle.dump(metrics, out_file)
-    plot_infer_observed_coverage(post, map_data, log=log_scale_plots)
-    plot_infer_realizations(rng_real, map_data, f_obs, post, log=log_scale_plots)
-    # NOTE: in case the chains\samples are very tightly batch (not converged) the plotting will fail
-    try:
-        plot_trace(samples, mcmc, surrogate_conds)
-        plot_histograms(samples, surrogate_conds, priors)
-    except ValueError:
-        pass
-    scatter_paths = plot_vae_scatter_comp(
-        rng_scat,
-        f_obs[None, ...],
-        post["obs"].mean(axis=0)[None, ..., None],
-        [it for _, it in surrogate_conds.items()],
-        list(surrogate_conds.keys()),
-        num_samples=1,
-    )
-    wandb.log({"Scatter plot": [wandb.Image(p) for p in scatter_paths]})
 
 
 def log_inference_metrics(hmc_res: tuple[dict, MCMC, dict], surrogate_conds: dict):
@@ -189,22 +167,6 @@ def log_inference_metrics(hmc_res: tuple[dict, MCMC, dict], surrogate_conds: dic
         {
             f"Inferred {name}": samples[name].mean(axis=0).squeeze().item()
             for name in surrogate_conds
-            if name in samples
-        }
-    )
-
-    def eb_metric(x, x_samples):
-        if x is None:
-            return None
-        dist = jnp.abs(x - x_samples.mean())
-        if x_samples.max() == x_samples.min():
-            return dist.item()
-        return (dist / (x_samples.max() - x_samples.min())).item()
-
-    metrics.update(
-        {
-            f"EB metric {name}": eb_metric(val, samples[name])
-            for name, val in surrogate_conds.items()
             if name in samples
         }
     )

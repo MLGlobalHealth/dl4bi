@@ -7,20 +7,19 @@ from typing import Callable, Generator
 import flax.linen as nn
 import geopandas as gpd
 import hydra
-import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import optax
 from inference_models.inference_models import gen_saptial_prior
-from jax import jit, random
+from jax import Array, jit, random
 from jax.scipy.stats import norm
 from numpyro.handlers import seed
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
-from utils.map_utils import process_map
-from utils.obj_utils import generate_model_name, instantiate
-from utils.plot_utils import log_vae_map_plots
+from utils.map_utils import gen_locations
+from utils.obj_utils import build_model, generate_model_name, instantiate
+from utils.plot_utils import log_vae_grid_plots, log_vae_map_plots
 
 import wandb
 from dl4bi.meta_learning.train_utils import cosine_annealing_lr, save_ckpt
@@ -47,9 +46,8 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    map_data = gpd.read_file(cfg.data.map_path)
-    s = process_map(map_data)
-    model = instantiate(cfg.model)
+    map_data, s = gen_locations(cfg.data)
+    model = build_model(cfg.model, s)
     kwargs = {}
     if cfg.model.kwargs.decoder.cls == "FixedLocationTransfomer":
         kwargs = {"s": s}
@@ -78,6 +76,9 @@ def main(cfg: DictConfig):
         )
     )
     valid_step = get_valid_step(cfg.model, cond_names)
+    decoder_only = cfg.model.cls == "DeepRV"
+    z_dim = s.shape[0] if decoder_only else model.z_dim
+    callback_fn = log_vae_grid_plots if map_data is None else log_vae_map_plots
     state = train(
         rng_train,
         model,
@@ -91,13 +92,13 @@ def main(cfg: DictConfig):
         log_every_n=100,
         callbacks=[
             Callback(
-                log_vae_map_plots(
+                callback_fn(
                     map_data,
                     s,
                     cond_names,
-                    s.shape[0],
+                    z_dim,
                     large_batch_loader,
-                    cfg.model.cls == "DeepRV",
+                    decoder_only,
                 ),
                 cfg.plot_interval,
             )
@@ -121,10 +122,10 @@ def main(cfg: DictConfig):
 
 
 def build_spatial_dataloaders(
-    rng: jax.Array,
+    rng: Array,
     cfg: DictConfig,
     map_data: gpd.GeoDataFrame,
-    s: jax.Array,
+    s: Array,
     priors: dict[str, dist.Distribution],
     spatial_prior: Callable,
 ):
@@ -132,10 +133,10 @@ def build_spatial_dataloaders(
     a specific distance based or graph model based kernel
 
     Args:
-        rng (jax.Array)
+        rng (Array)
         cfg (DictConfig): Run configuration
         map_data (gpd.GeoDataFrame): map data to construct the graph from (graph model case)
-        s (jax.Array): locations on map
+        s (Array): locations on map
         priors (dict[str, dist.Distribution]): hyperparameter priors for sampling
         spatial_prior (Callable): either gp kernel function, or spatial prior name
 
@@ -161,7 +162,7 @@ def build_spatial_dataloaders(
 
 
 def train(
-    rng: jax.Array,
+    rng: Array,
     model: nn.Module,
     optimizer: optax.GradientTransformation,
     train_step: Callable,
@@ -212,7 +213,7 @@ def train(
 
 
 def validate(
-    rng: jax.Array,
+    rng: Array,
     state: TrainState,
     valid_step: Callable,
     loader: Generator,

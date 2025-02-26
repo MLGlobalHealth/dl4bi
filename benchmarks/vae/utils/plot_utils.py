@@ -1,5 +1,6 @@
 from datetime import datetime
-from typing import Callable, Generator, Optional
+from pathlib import Path
+from typing import Callable, Generator, Optional, Union
 
 import arviz as az
 import flax.linen as nn
@@ -8,9 +9,12 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+import numpyro
 import pandas as pd
 import seaborn as sns
 from jax.scipy.stats import norm
+from numpyro.infer import MCMC
+from omegaconf import DictConfig
 
 import wandb
 from dl4bi.vae.train_utils import TrainState, generate_surrogate_decoder
@@ -44,174 +48,198 @@ def plot_EB_scatter_conditionals(
     return plot_path
 
 
-def plot_infer_observed_coverage(post, map_data, hdi_prob=0.95, log=True):
+def plot_infer_map_sum(post, map_data, log=True):
     obs_idxs, f, f_hat = post["obs_idxs"], post["f"], post["obs"]
     f_hat_mean, f_hat_std = f_hat.mean(axis=0), f_hat.std(axis=0)
     if log:
         f, f_hat_mean = jnp.log(f + 1), jnp.log(f_hat_mean + 1)
     vmin, vmax = min(f.min(), f_hat_mean.min()), max(f.max(), f_hat_mean.max())
-    fig, ax = plt.subplots(1, 5, figsize=(30, 10))
+    fig, ax = plt.subplots(1, 4, figsize=(20, 10))
     log_str = " (Log scale)" if log else ""
     plot_on_map(ax[0], map_data, f, vmin, vmax, f"y obs{log_str}")
     plot_on_map(ax[1], map_data, f_hat_mean, vmin, vmax, f"Mean MCMC Samples{log_str}")
     plot_on_map(ax[2], map_data, f_hat_std, title="MCMC STD", cmap="plasma")
-    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
-    f_lower = f_hat_mean - z_score * f_hat_std
-    f_upper = f_hat_mean + z_score * f_hat_std
-    coverage = jnp.logical_and(f >= f_lower, f <= f_upper)
-    coverage_pct = coverage.mean() * 100
-    cvr_title = f"{hdi_prob}% Conf Coverage\nCoverage{log_str}: {coverage_pct:.2f}%"
-    plot_on_map(ax[3], map_data, coverage.astype(int), title=cvr_title, cmap="coolwarm")
     obs_title = f"Obsereved Locations ({len(obs_idxs)} locations)"
     mask = jnp.array([(1 if i in obs_idxs else 0) for i in range(map_data.shape[0])])
-    plot_on_map(ax[4], map_data, mask, 0.0, 1.0, obs_title, cmap="coolwarm")
+    plot_on_map(ax[3], map_data, mask, 0.0, 1.0, obs_title, cmap="coolwarm")
     for axis in ax:
         axis.set_axis_off()
     plt.tight_layout()
     timestamp = datetime.now().isoformat()
-    path = f"/tmp/Sampeled vs GT {timestamp}.png"
+    path = f"/tmp/Infer summary {timestamp}.png"
     fig.savefig(path, dpi=125)
-    wandb.log({"Sampeled vs GT": wandb.Image(path)})
+    wandb.log({"Infer summaryT": wandb.Image(path)})
     plt.clf()
     plt.close(fig)
     return path
 
 
-def plot_infer_realizations(rng_plot, map_data, f_obs, post, num_samples=5, log=True):
-    log_str = " (Log scale)" if log else ""
-    fig, ax = plt.subplots(1, num_samples + 1, figsize=(3 * num_samples, 16))
-    samples_f = post["obs"]
-    # NOTE: sets the first realisation to the actual observed one
-    samples_idxs = jax.random.choice(
-        rng_plot, jnp.arange(samples_f.shape[0]), (num_samples,), replace=False
-    )
+def _to_prev(prev_hat: jax.Array, inference_model: str):
+    if inference_model == "poisson":
+        return jnp.exp(prev_hat)
+    elif inference_model == "binomial":
+        return 1 / (1 + jnp.exp(-prev_hat))
+    else:
+        return prev_hat
+
+
+def plot_prevalence_scatter_comp(
+    prev_real: Optional[jax.Array],
+    prev_hats: list[jax.Array],
+    f_obs: jax.Array,
+    population: Optional[jax.Array],
+    models: list[str],
+    inference_model: str,
+    save_path: Optional[Union[Path, str]] = None,
+    population_scale: int = 100,
+    log: bool = False,
+):
+    if prev_real is None and inference_model == "binomial" and population:
+        population = population // population_scale
+        prev_real = jnp.array(f_obs / population)
+    if prev_real is None:
+        return
+    prev_hats = [_to_prev(prev_hat, inference_model) for prev_hat in prev_hats]
     if log:
-        f_obs, samples_f = jnp.log(f_obs + 1), jnp.log(samples_f + 1)
-    vmin = min(f_obs.min(), samples_f[samples_idxs].min())
-    vmax = min(f_obs.max(), samples_f[samples_idxs].max())
-    plot_on_map(
-        ax[0],
-        map_data,
-        f_obs,
-        vmin=vmin,
-        vmax=vmax,
-        title=f"f obs{log_str}",
-        legend=False,
+        prev_hats = [jnp.log(prev_hat + 1) for prev_hat in prev_hats]
+        prev_real = jnp.log(prev_real + 1)
+    prev_hat_means = [prev_hat.mean(axis=0) for prev_hat in prev_hats]
+    abs_min, abs_max = prev_real.min(), prev_real.max()
+    fig, axes = plt.subplots(1, len(models), figsize=(6 * len(models), 8))
+    axes = [axes] if len(models) == 1 else axes
+    for i, (ax, model) in enumerate(zip(axes, models)):
+        p_hat_i = prev_hat_means[i]
+        ax.scatter(prev_real, p_hat_i, alpha=0.6, label="Samples")
+        ax.set_title(f"Prevalence vs. {model.replace('_', ' ')} mean prevalence")
+        abs_min = min(abs_min, p_hat_i.min())
+        abs_max = max(abs_max, p_hat_i.max())
+    for ax in axes:
+        ax.plot([abs_min, abs_max], [abs_min, abs_max], "r--", label="y = x")
+        ax.set_xlabel(r"$p$")
+        ax.set_ylabel(r"$\hat{p}$")
+        ax.legend(loc="lower right")
+        ax.set_xlim(abs_min - 0.01, abs_max + 0.01)
+        ax.set_ylim(abs_min - 0.01, abs_max + 0.01)
+    plt.tight_layout()
+    fig.subplots_adjust(top=0.86)
+    if save_path is None:
+        save_path = f"Scatter prevalence{datetime.now().isoformat()}.png"
+    plt.clf()
+    plt.close(fig)
+
+
+def plot_models_mean_prevalence(
+    prev_real: Optional[jax.Array],
+    prev_hats: list[jax.Array],
+    f_obs: jax.Array,
+    population: Optional[jax.Array],
+    models: list[str],
+    inference_model: str,
+    map_data: gpd.GeoDataFrame,
+    save_path: Optional[Union[Path, str]] = None,
+    population_scale: int = 100,
+    log: bool = False,
+):
+    if prev_real is None and inference_model == "binomial" and population:
+        population = population // population_scale
+        prev_real = jnp.array(f_obs / population)
+    prev_hats = [_to_prev(prev_hat, inference_model) for prev_hat in prev_hats]
+    use_real = prev_real is not None
+    if log:
+        prev_hats = [jnp.log(prev_hat + 1) for prev_hat in prev_hats]
+        prev_real = jnp.log(prev_real + 1) if use_real else prev_real
+    prev_hat_means = [prev_hat.mean(axis=0) for prev_hat in prev_hats]
+    if use_real:
+        prev_hat_means = [prev_real] + prev_hat_means
+    vmin = jnp.min(jnp.array([prev_mean.min() for prev_mean in prev_hat_means])).item()
+    vmax = jnp.max(jnp.array([prev_mean.max() for prev_mean in prev_hat_means])).item()
+    fig, axes = plt.subplots(
+        1, len(prev_hat_means), figsize=(6 * len(prev_hat_means), 8)
     )
+    log_str = " (Log scale)" if log else ""
+    for i, prev_mean in enumerate(prev_hat_means):
+        title = f"{models[i - 1]}: Mean prevalence"
+        if i == 0 and use_real:
+            title = "Observed prevalence"
+        ax = axes if len(prev_hat_means) == 1 else axes[i]
+        plot_on_map(ax, map_data, prev_mean, vmin, vmax, f"{title}{log_str}")
+        ax.set_axis_off()
+    plt.tight_layout()
+    if save_path is None:
+        save_path = f"Observed prevalence{datetime.now().isoformat()}.png"
+    fig.savefig(save_path, dpi=125)
+    plt.clf()
+    plt.close(fig)
+
+
+def plot_map_predictive(
+    rng: jax.Array,
+    f: jax.Array,
+    f_hat: jax.Array,
+    map_data: gpd.GeoDataFrame,
+    save_path: Optional[Union[Path, str]] = None,
+    log: bool = True,
+    n_samples: int = 3,
+):
+    log_str = " (Log scale)" if log else ""
+    if log:
+        f, f_hat = jnp.log(f + 1), jnp.log(f_hat + 1)
+    idxs = jax.random.choice(
+        rng, jnp.arange(f_hat.shape[0]), (n_samples,), replace=False
+    )
+    fig, ax = plt.subplots(1, n_samples + 1, figsize=((n_samples + 1) * 5, 8))
+    plot_on_map(ax[0], map_data, f, title=f"Observed counts{log_str}", legend=False)
     ax[0].set_axis_off()
-    for i, s_idx in enumerate(samples_idxs):
+    for i, s_idx in enumerate(idxs):
         plot_on_map(
             ax[i + 1],
             map_data,
-            samples_f[s_idx],
-            vmin=vmin,
-            vmax=vmax,
-            title=f"Realisation {i}{log_str}",
+            f_hat[s_idx],
+            title=f"Posterior Predictive Sample {i + 1}{log_str}",
             legend=False,
         )
         ax[i + 1].set_axis_off()
-
     plt.tight_layout()
-    timestamp = datetime.now().isoformat()
-    path = f"/tmp/Inferred Realisations {timestamp}.png"
-    fig.savefig(path, dpi=250)
-    wandb.log({f"Inferred Realisations{log_str}": wandb.Image(path)})
-    plt.clf()
-    plt.close(fig)
-
-
-def plot_violin(post, f_batch, model_name, num_locations=10, log_scale: bool = False):
-    obs_idxs = post["obs_idxs"]
-    random_idxs = np.random.choice(post["obs"].shape[1], num_locations, replace=False)
-    obs_data = [post["obs"][:, idx] for idx in random_idxs]
-    true_data = f_batch[:, random_idxs]
-    if log_scale:
-        obs_data = [jnp.log(obs_d + 1) for obs_d in obs_data]
-        true_data = jnp.log(true_data + 1)
-    data = []
-    for i, (obs, true) in enumerate(zip(obs_data, true_data.T)):
-        obs_str = " obs" if random_idxs[i] in obs_idxs else ""
-        location = f"Loc {random_idxs[i]}{obs_str}"
-        data.extend([(value.item(), location, "True Data") for value in true])
-        data.extend([(value.item(), location, "Posterior Data") for value in obs])
-    df = pd.DataFrame(data, columns=["Value", "Location", "Type"])
-    fig = plt.figure(figsize=(16, 8))
-    sns.violinplot(
-        data=df,
-        x="Location",
-        y="Value",
-        hue="Type",
-        split=True,
-        palette={"True Data": "blue", "Posterior Data": "red"},
-        inner="quartile",
-        linewidth=1.2,
-    )
-    title = f"True vs Sampeled Distributions {model_name}{' (log_scale)' if log_scale else ''}"
-    plt.title(title, fontsize=16)
-    plt.xlabel("Locations", fontsize=14)
-    plt.ylabel("Observation Value", fontsize=14)
-    plt.legend(title="Distribution Type", loc="upper right", fontsize=12)
-    plt.xticks(rotation=45)
-    timestamp = datetime.now().isoformat()
-    path = f"/tmp/violin_{model_name}_{timestamp}.png"
-    plt.savefig(path, dpi=200)
-    wandb.log({"Violin Plot": wandb.Image(path)})
-    plt.clf()
-    plt.close(fig)
-
-
-def plot_matrix_with_colorbar(fig, axis, matrix, title, min_v=None, max_v=None):
-    im = axis.imshow(matrix, cmap="viridis", vmin=min_v, vmax=max_v)
-    axis.set_title(title)
-    fig.colorbar(im, ax=axis, fraction=0.046, pad=0.04)
-
-
-def plot_covariance(samples, conditionals, model_name, kernel, s):
-    if kernel.__name__ == "periodic":
-        K = kernel(
-            s, s, conditionals["var"], conditionals["ls"], conditionals["period"]
-        )
+    if not save_path:
+        save_path = f"/tmp/Inferred Realisations {datetime.now().isoformat()}.png"
+        fig.savefig(save_path, dpi=300)
+        wandb.log({f"Inferred Realisations{log_str}": wandb.Image(save_path)})
     else:
-        K = kernel(s, s, conditionals["var"], conditionals["ls"])
-    mu_covariance = np.cov(samples["mu"], rowvar=False)
-    vmin = min(K.min(), mu_covariance.min())
-    vmax = max(K.max(), mu_covariance.max())
-    fig, ax = plt.subplots(2, 2, figsize=(12, 12))
-
-    plot_matrix_with_colorbar(fig, ax[0, 0], K, "GT Kernel - scaled", vmin, vmax)
-    plot_matrix_with_colorbar(
-        fig, ax[0, 1], mu_covariance, "Inferred covariance - scaled", vmin, vmax
-    )
-    plot_matrix_with_colorbar(fig, ax[1, 0], K, "GT Kernel")
-    plot_matrix_with_colorbar(fig, ax[1, 1], mu_covariance, "Inferred covariance")
-    cond_str = ", ".join([f"{k}: {v[0]:.2f}" for k, v in conditionals.items()])
-    plt.title(f"Covariance Matrix for {model_name}: {cond_str}")
-    plt.tight_layout()
-    timestamp = datetime.now().isoformat()
-    path = f"/tmp/covariance_{model_name}_{timestamp}.png"
-    plt.savefig(path, dpi=150)
-    wandb.log({"Covariance Matrix": wandb.Image(path)})
-    plt.clf()
+        fig.savefig(save_path, dpi=300)
+    fig.clf()
     plt.close(fig)
 
 
-def plot_trace(samples, mcmc, conditionals):
-    mcmc = az.from_numpyro(mcmc)
-    var_names = [
-        str(c) for c in conditionals.keys() if c in mcmc.posterior.data_vars.variables
-    ]
-    if len(var_names) > 0:
-        az.plot_trace(mcmc, var_names=var_names)
-        conditional_means = {c: samples[str(c)].mean().item() for c in var_names}
-        axes = plt.gcf().get_axes()
-        for i, (name, mean_val) in enumerate(conditional_means.items()):
-            axes[(i * 2) + 1].set_title(f"{name} (mean: {mean_val:.2f})", fontsize=10)
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
-        timestamp = datetime.now().isoformat()
-        path = f"/tmp/trace_{timestamp}.png"
-        plt.savefig(path, dpi=150)
-        wandb.log({"Trace Plot": wandb.Image(str(path))})
-        plt.clf()
+def plot_infer_trace(
+    samples,
+    mcmc,
+    conditionals: Optional[dict] = None,
+    var_names: Optional[list[str]] = None,
+    save_path: Optional[Path] = None,
+):
+    if isinstance(mcmc, numpyro.infer.MCMC):
+        mcmc = az.from_numpyro(mcmc)
+    if var_names is None and conditionals is not None:
+        var_names = [
+            str(c)
+            for c in conditionals.keys()
+            if c in mcmc.posterior.data_vars.variables
+        ]
+    if len(var_names) == 0:
+        return
+    save_path = (
+        save_path if save_path else Path(f"/tmp/trace_{datetime.now().isoformat()}.png")
+    )
+    az.plot_trace(mcmc, var_names=var_names)
+    conditional_means = {c: samples[str(c)].mean().item() for c in var_names}
+    axes = plt.gcf().get_axes()
+    for i, (name, mean_val) in enumerate(conditional_means.items()):
+        axes[i * 2].set_title(f"{name} (mean: {mean_val:.2f})", fontsize=10)
+        axes[(i * 2) + 1].set_title(f"{name} (mean: {mean_val:.2f})", fontsize=10)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.savefig(save_path, dpi=300)
+    plt.clf()
+    plt.close()
 
 
 def plot_histograms(samples, conditionals, priors):
@@ -262,124 +290,108 @@ def plot_histograms(samples, conditionals, priors):
     plt.close(fig)
 
 
-def plot_posterior_predictives_map_points(
-    gdf: gpd.GeoDataFrame,
-    x_norm_vars: tuple,
-    y_norm_vars: tuple,
-    s_ctx: jax.Array,
-    valid_lens_ctx: jax.Array,
-    f_test: jax.Array,
-    valid_lens_test: jax.Array,
-    f_mu: jax.Array,
-    f_std: jax.Array,
-    sampling_policy: str,
-    hdi_prob: float = 0.95,
-    num_plots: int = 10,
+def plot_infer_grid_sum(rng, post, hdi_prob=0.95, num_decodings=10):
+    s_flat = post["s"].squeeze()
+    f, f_hat = post["f"], post["obs"]
+    f_hat_mean, f_hat_std = f_hat.mean(axis=0), f_hat.std(axis=0)
+    fig, ax = plt.subplots(1, 3, figsize=(15, 8))
+
+    idxs = jax.random.choice(
+        rng, jnp.arange(f_hat.shape[0]), shape=(num_decodings,), replace=False
+    )
+    ax[0].plot(s_flat, f_hat_mean, color="red", label=f"mean {r'$\hat{f}$'}")
+    ax[0].plot(s_flat, f.squeeze(), color="black", label=r"$f$")
+    ax[0].set_title("Postetior predictive samples")
+    ax[0].legend()
+    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
+    f_lower = f_hat_mean - z_score * f_hat_std
+    f_upper = f_hat_mean + z_score * f_hat_std
+    coverage = jnp.logical_and(f >= f_lower, f <= f_upper)
+    coverage_pct = coverage.mean() * 100
+    ax[1].plot(s_flat, f.squeeze(), color="black", label=r"$f$")
+    ax[1].plot(s_flat, f_hat_mean, color="red", label=f"mean {r'$\hat{f}$'}")
+    ax[1].fill_between(
+        s_flat,
+        f_lower,
+        f_upper,
+        color="red",
+        alpha=0.3,
+        label=f"{hdi_prob * 100:.0f}% HDI",
+    )
+    ax[1].set_title(f"Coverage: {coverage_pct:.1f}%")
+    ax[1].legend()
+    for j in idxs:
+        ax[2].plot(s_flat, f_hat[j].squeeze(), label=f"{r'$\hat{f}$'} - {j}")
+    ax[2].set_title("Postetior predictive samples")
+
+    plt.tight_layout()
+    timestamp = datetime.now().isoformat()
+    path = f"/tmp/Infer summary {timestamp}.png"
+    fig.savefig(path, dpi=125)
+    wandb.log({"Infer summaryT": wandb.Image(path)})
+    plt.clf()
+    plt.close(fig)
+    return path
+
+
+def plot_inference_run(
+    rng: jax.Array,
+    inference_model: DictConfig,
+    model_name: str,
+    hmc_res: tuple[dict, MCMC, dict],
+    f_obs: jax.Array,
+    surrogate_conds: dict,
+    priors: dict,
+    map_data: Optional[gpd.GeoDataFrame],
+    log_scale_plots: bool,
 ):
-    """Plots posterior predictives for geoms on the map, and saves figures."""
-    num_geoms = len(gdf.geometry)
-    paths = []
-    x_mean, x_std = x_norm_vars
-    y_mean, y_std = y_norm_vars
-    for i in range(num_plots):
-        v_ctx = valid_lens_ctx[i]
-        s_ctx_i = s_ctx[i, :v_ctx].squeeze()
-        v_test = valid_lens_test[i]
-        f_test_i = f_test[i, -num_geoms:v_test].squeeze()
-        f_mu_i = f_mu[i, -num_geoms:v_test].squeeze()
-        f_std_i = f_std[i, -num_geoms:v_test].squeeze()
-
-        vmin = min(f_test_i.min(), f_mu_i.min())
-        vmax = max(f_test_i.max(), f_mu_i.max())
-
-        fig, ax = plt.subplots(2, 3, figsize=(15, 10))
-        plot_on_map(ax[0, 0], gdf, f_test_i, vmin, vmax, "Ground Truth", "viridis")
-        plot_on_map(ax[0, 1], gdf, f_mu_i, vmin, vmax, "Predicted Values", "viridis")
-        context_points = np.array(
-            [(s_ctx_i[:, 0] * x_std) + x_mean, (s_ctx_i[:, 1] * y_std) + y_mean]
-        ).T
-        plot_locations_map(
-            ax[0, 2], gdf, context_points, sampling_policy, plot_blank=True
+    samples, mcmc, post = hmc_res
+    if map_data is not None:
+        plot_infer_map_sum(post, map_data, log=log_scale_plots)
+        plot_map_predictive(rng, f_obs, post["obs"], map_data, log=log_scale_plots)
+    elif post["s"].shape[-1] == 1:
+        plot_infer_grid_sum(rng, post)
+    # NOTE: in case the chains\samples are very tightly batch (not converged) the plotting will fail
+    try:
+        plot_infer_trace(samples, mcmc, surrogate_conds)
+        plot_histograms(samples, surrogate_conds, priors)
+    except ValueError:
+        pass
+    plot_vae_scatter_plot(
+        f_obs[None, ...],
+        post["obs"].mean(axis=0)[None, ..., None],
+        [it for _, it in surrogate_conds.items()],
+        list(surrogate_conds.keys()),
+        num_samples=1,
+    )
+    if inference_model.model.func not in ["poisson", "binomial"]:
+        return
+    prev_real, population = None, None
+    if map_data is not None and "population" in map_data.columns:
+        population = map_data.population
+    if map_data is None or "data" not in map_data.columns:
+        prev_real = post["beta"] + post["spatial_eff"]
+    prev_hat = samples["beta"][..., None] + samples["mu"]
+    if map_data is not None:
+        plot_models_mean_prevalence(
+            prev_real,
+            [prev_hat],
+            f_obs,
+            population,
+            [model_name],
+            inference_model.model.func,
+            map_data,
+            population_scale=inference_model.get("population_scale", None),
         )
-        plot_on_map(ax[1, 0], gdf, f_std_i, title="Uncertainty - STD", cmap="plasma")
-
-        z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
-        f_lower, f_upper = f_mu_i - z_score * f_std_i, f_mu_i + z_score * f_std_i
-
-        coverage = jnp.logical_and(f_test_i >= f_lower, f_test_i <= f_upper)
-        coverage_pct = coverage.mean() * 100
-        plot_on_map(
-            ax[1, 1],
-            gdf,
-            coverage.astype(int),
-            title=f"1-0 Coverage for 95% Conf\nCoverage: {coverage_pct:.2f}%",
-            cmap="coolwarm",
-        )
-        for axis_row in ax:
-            for axis in axis_row:
-                axis.set_axis_off()
-
-        plt.tight_layout()
-
-        timestamp = datetime.now().isoformat()
-        title = f"Sample {i} (GT, Prediction, Uncertainty, Coverage)"
-        paths.append(f"/tmp/Meta Reg {timestamp} - {title}.png")
-        fig.suptitle(title)
-        fig.subplots_adjust(top=0.9)
-        fig.savefig(paths[-1], dpi=125)
-        plt.clf()
-        plt.close(fig)
-    return paths
-
-
-def log_posterior_map_predictive_plots(gdf: gpd.GeoDataFrame, sampling_policy: str):
-    x_norm_vars, y_norm_vars = get_norm_vars(gdf)
-
-    def log_posterior_predictive_plots(
-        step: int,
-        rng_step: int,
-        state,
-        batch: tuple,
-        num_plots: int = 10,
-    ):
-        rng_dropout, rng_extra = jax.random.split(rng_step)
-        (
-            s_ctx,
-            f_ctx,
-            valid_lens_ctx,
-            s_test,
-            f_test,
-            valid_lens_test,
-            _,
-            _,
-            _,
-        ) = batch
-
-        f_mu, f_std, *_ = state.apply_fn(
-            {"params": state.params, **state.kwargs},
-            s_ctx,
-            f_ctx,
-            s_test,
-            valid_lens_ctx,
-            valid_lens_test,
-            rngs={"dropout": rng_dropout, "extra": rng_extra},
-        )
-        paths = plot_posterior_predictives_map_points(
-            gdf,
-            x_norm_vars,
-            y_norm_vars,
-            s_ctx,
-            valid_lens_ctx,
-            f_test,
-            valid_lens_test,
-            f_mu,
-            f_std,
-            sampling_policy,
-            num_plots=num_plots,
-        )
-        wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
-
-    return log_posterior_predictive_plots
+    plot_prevalence_scatter_comp(
+        prev_real,
+        [prev_hat],
+        f_obs,
+        population,
+        [model_name],
+        inference_model.model.func,
+        population_scale=inference_model.get("population_scale", None),
+    )
 
 
 def plot_kl_on_map(
@@ -422,61 +434,69 @@ def plot_kl_on_map(
     plt.close(fig)
 
 
-def plot_vae_reconstruction_samples(
+def plot_vae_reconstruction(
     rng: jax.Array,
-    gdf: gpd.GeoDataFrame,
-    x_norm_vars: tuple,
-    y_norm_vars: tuple,
-    state: TrainState,
-    decode_only: bool,
-    loader: Generator,
-    conds_names: list[str],
     s: jax.Array,
-    num_plots: int = 10,
+    map_data: gpd.GeoDataFrame,
+    state: TrainState,
+    model: str,
+    loader,
+    conds_names: list[str],
+    save_dir: Optional[Path] = None,
+    num_plots: int = 5,
     samples_per_plot: int = 3,
-    kwargs={},
+    plot_locations=False,
+    step="",
+    **kwargs,
 ):
     """Plots VAE predictions on map"""
-    paths = []
+    x_norm_vars, y_norm_vars = get_norm_vars(map_data)
     x_mean, x_std = x_norm_vars
     y_mean, y_std = y_norm_vars
+    paths = []
     for i in range(num_plots):
         rng_drop, rng_extra, rng = jax.random.split(rng, 3)
         f, z, conditionals = next(loader)
         f_hat = state.apply_fn(
             {"params": state.params, **state.kwargs},
-            z if decode_only else f,
+            z if model == "DeepRV" else f,
             conditionals,
             **kwargs,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
-        f_hat = f_hat if decode_only else f_hat[0]
-        fig, ax = plt.subplots(1, samples_per_plot * 2 + 1, figsize=(20, 5))
-        for i in range(samples_per_plot):
-            f_i = f[i].squeeze()
-            f_hat_i = f_hat[i].squeeze()
-            vmin = min(f_i.min(), f_hat_i.min())
-            vmax = max(f_i.max(), f_hat_i.max())
-            plot_on_map(ax[2 * i], gdf, f_i, vmin, vmax, "Ground Truth", "viridis")
-            plot_on_map(ax[2 * i + 1], gdf, f_hat_i, vmin, vmax, "Predicted", "viridis")
-        context_points = np.array(
-            [(s[:, 0] * x_std) + x_mean, (s[:, 1] * y_std) + y_mean]
-        ).T
-        plot_locations_map(ax[-1], gdf, context_points, plot_blank=True)
+        f_hat = f_hat if model == "DeepRV" else f_hat[0]
+        fig, ax = plt.subplots(
+            1, samples_per_plot * 2 + int(plot_locations), figsize=(16, 5)
+        )
+        for j in range(samples_per_plot):
+            f_j = f[j].squeeze()
+            f_hat_j = f_hat[j].squeeze()
+            vmin = min(f_j.min(), f_hat_j.min())
+            vmax = max(f_j.max(), f_hat_j.max())
+            plot_on_map(ax[2 * j], map_data, f_j, vmin, vmax, r"$f$", "viridis")
+            plot_on_map(
+                ax[2 * j + 1], map_data, f_hat_j, vmin, vmax, r"$\hat{f}$", "viridis"
+            )
+        if plot_locations:
+            context_points = np.array(
+                [(s[:, 0] * x_std) + x_mean, (s[:, 1] * y_std) + y_mean]
+            ).T
+            plot_locations_map(ax[-1], map_data, context_points, plot_blank=True)
         for axis in ax:
             axis.set_axis_off()
-
         plt.tight_layout()
-
-        timestamp = datetime.now().isoformat()
-        title = f"Sample {i} {conds_to_title(conds_names, conditionals)}"
-        paths.append(f"/tmp/VAE_Rec {timestamp} - {title}.png")
+        title = f"{model}, {conds_to_title(conds_names, conditionals)}"
         fig.suptitle(title)
         fig.subplots_adjust(top=0.85)
-        fig.savefig(paths[-1], dpi=125)
+        if save_dir:
+            fig.savefig(save_dir / f"rec_{i}.png", dpi=125)
+        else:
+            paths.append(f"/tmp/VAE_Rec {datetime.now().isoformat()} - {title}.png")
+            fig.savefig(paths[-1], dpi=125)
         plt.clf()
         plt.close(fig)
-    return paths
+    if save_dir is None:
+        wandb.log({f"Reconstruction {step}": [wandb.Image(p) for p in paths]})
 
 
 def plot_vae_decoder_samples(
@@ -488,6 +508,7 @@ def plot_vae_decoder_samples(
     surrogate_decoder: Callable,
     num_batches: int = 5,
     num_plots: int = 5,
+    step="",
     **kwargs,
 ):
     paths = []
@@ -516,7 +537,53 @@ def plot_vae_decoder_samples(
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
         plt.close(fig)
-    return paths
+    wandb.log({f"Decoder {step}": [wandb.Image(p) for p in paths]})
+
+
+def plot_violin(post, f_batch, model_name, num_locations=10, log_scale: bool = False):
+    obs_idxs = post["obs_idxs"]
+    random_idxs = np.random.choice(post["obs"].shape[1], num_locations, replace=False)
+    obs_data = [post["obs"][:, idx] for idx in random_idxs]
+    true_data = f_batch[:, random_idxs]
+    if log_scale:
+        obs_data = [jnp.log(obs_d + 1) for obs_d in obs_data]
+        true_data = jnp.log(true_data + 1)
+    data = []
+    for i, (obs, true) in enumerate(zip(obs_data, true_data.T)):
+        obs_str = " obs" if random_idxs[i] in obs_idxs else ""
+        location = f"Loc {random_idxs[i]}{obs_str}"
+        data.extend([(value.item(), location, "True Data") for value in true])
+        data.extend([(value.item(), location, "Posterior Data") for value in obs])
+    df = pd.DataFrame(data, columns=["Value", "Location", "Type"])
+    fig = plt.figure(figsize=(16, 8))
+    sns.violinplot(
+        data=df,
+        x="Location",
+        y="Value",
+        hue="Type",
+        split=True,
+        palette={"True Data": "blue", "Posterior Data": "red"},
+        inner="quartile",
+        linewidth=1.2,
+    )
+    title = f"True vs Sampeled Distributions {model_name}{' (log_scale)' if log_scale else ''}"
+    plt.title(title, fontsize=16)
+    plt.xlabel("Locations", fontsize=14)
+    plt.ylabel("Observation Value", fontsize=14)
+    plt.legend(title="Distribution Type", loc="upper right", fontsize=12)
+    plt.xticks(rotation=45)
+    timestamp = datetime.now().isoformat()
+    path = f"/tmp/violin_{model_name}_{timestamp}.png"
+    plt.savefig(path, dpi=200)
+    wandb.log({"Violin Plot": wandb.Image(path)})
+    plt.clf()
+    plt.close(fig)
+
+
+def plot_matrix_with_colorbar(fig, axis, matrix, title, min_v=None, max_v=None):
+    im = axis.imshow(matrix, cmap="viridis", vmin=min_v, vmax=max_v)
+    axis.set_title(title)
+    fig.colorbar(im, ax=axis, fraction=0.046, pad=0.04)
 
 
 def plot_dist_analysis_plots(
@@ -525,8 +592,9 @@ def plot_dist_analysis_plots(
     conds_names: list[str],
     z_dim: int,
     surrogate_decoder: Callable,
-    map_data: gpd.GeoDataFrame,
+    map_data: Optional[gpd.GeoDataFrame],
     num_batches: int = 5,
+    step="",
     **kwargs,
 ):
     paths = []
@@ -556,60 +624,55 @@ def plot_dist_analysis_plots(
         plt.clf()
         plt.close(fig)
         plot_violin({"obs_idxs": jnp.arange(f.shape[0]), "obs": f_hat}, f_batch, title)
-        plot_kl_on_map(f_batch, f_hat, map_data, conds_str)
-    return paths
+        if map_data is not None:
+            plot_kl_on_map(f_batch, f_hat, map_data, conds_str)
+    wandb.log({f"Distribution {step}": [wandb.Image(p) for p in paths]})
 
 
-def plot_vae_scatter_comp(
-    rng_scatter,
-    f,
-    f_hat,
-    conditionals,
-    conds_names,
-    num_samples=5,
-    num_LTAs=None,
+def plot_vae_scatter_plot(
+    f: jax.Array,
+    f_hat: jax.Array,
+    conditionals: Optional[list],
+    conds_names: list[str],
+    num_samples: int = 5,
+    save_dir: Optional[Path] = None,
+    step="",
 ):
-    paths = []
     fig, axes = plt.subplots(1, num_samples, figsize=(5 * num_samples, 5))
     for i, ax in enumerate(axes.flatten() if num_samples > 1 else [axes]):
-        rng_scatter, _ = jax.random.split(rng_scatter)
         f_i, f_hat_i = f[i], f_hat[i]
-        if num_LTAs is not None:
-            idxs = jax.random.choice(
-                rng_scatter, f_i.shape[0], (num_LTAs,), replace=False
-            )
-            f_i = f_i[idxs]
-            f_hat_i = f_hat_i[idxs]
         ax.scatter(f_i, f_hat_i, alpha=0.6, label="Samples")
         min_val = min(f_i.min(), f_hat_i.min())
         max_val = max(f_i.max(), f_hat_i.max())
         ax.plot([min_val, max_val], [min_val, max_val], "r--", label="y = x")
-        ax.set_xlabel("True values (f_i)")
-        ax.set_ylabel("Predicted values (f_hat_i)")
-        ax.set_title(f"Y vs Y hat - sample {i + 1}")
+        ax.set_xlabel(r"$f$")
+        ax.set_ylabel(r"$\hat{f}$")
         ax.legend()
     plt.tight_layout()
-    timestamp = datetime.now().isoformat()
-    title = f"Y vs Y hat {conds_to_title(conds_names, conditionals)}"
-    paths.append(f"/tmp/VAE_Scatter {timestamp} - {title}.png")
     fig.subplots_adjust(top=0.86)
-    fig.savefig(paths[-1], dpi=125)
+    if save_dir:
+        fig.savefig(save_dir / "scatter.png", dpi=125)
+    else:
+        timestamp = datetime.now().isoformat()
+        title = "Y vs Y hat"
+        if conditionals is not None:
+            title = f"{title} {conds_to_title(conds_names, conditionals)}"
+        path = f"/tmp/VAE_Scatter {timestamp} - {title}.png"
+        fig.savefig(path, dpi=125)
+        wandb.log({f"Scatter {step}": wandb.Image(path)})
     plt.clf()
     plt.close(fig)
-    return paths
 
 
 def log_vae_map_plots(
-    gdf: gpd.GeoDataFrame,
+    map_data: gpd.GeoDataFrame,
     s: jax.Array,
     conds_names: list[str],
     z_dim: int,
     large_batch_loader: Generator,
     is_decoder_only: bool,
 ):
-    x_norm_vars, y_norm_vars = get_norm_vars(gdf)
-
-    def log_posterior_predictive_plots(
+    def log_plots(
         step: int,
         rng_step: int,
         state: TrainState,
@@ -617,9 +680,7 @@ def log_vae_map_plots(
         loader: Generator,
         **kwargs,
     ):
-        rng_drop, rng_extra, rng_dec, rng_scat, rng_dist, rng_rcn = jax.random.split(
-            rng_step, 6
-        )
+        rng_drop, rng_extra, rng_dec, rng_dist, rng_rcn = jax.random.split(rng_step, 5)
         f, z, conditionals = next(loader)
         f_hat = state.apply_fn(
             {"params": state.params, **state.kwargs},
@@ -630,49 +691,47 @@ def log_vae_map_plots(
         )
         f_hat = f_hat if is_decoder_only else f_hat[0]
         surrogate_decoder = generate_surrogate_decoder(state, model)
-        paths_rec = plot_vae_reconstruction_samples(
+        plot_vae_reconstruction(
             rng_rcn,
-            gdf,
-            x_norm_vars,
-            y_norm_vars,
+            s,
+            map_data,
             state,
-            is_decoder_only,
+            model.__class__.__name__,
             loader,
             conds_names,
-            s,
-            kwargs=kwargs,
+            plot_locations=True,
+            step=str(step),
+            **kwargs,
         )
-        paths_decoder = plot_vae_decoder_samples(
+        plot_vae_decoder_samples(
             rng_dec,
-            gdf,
+            map_data,
             loader,
             conds_names,
             z_dim,
             surrogate_decoder,
+            step=str(step),
             **kwargs,
         )
-        paths_scatter = plot_vae_scatter_comp(
-            rng_scat,
+        plot_vae_scatter_plot(
             f,
             f_hat,
             conditionals,
             conds_names,
+            step=str(step),
         )
-        path_dist = plot_dist_analysis_plots(
+        plot_dist_analysis_plots(
             rng_dist,
             large_batch_loader,
             conds_names,
             z_dim,
             surrogate_decoder,
-            gdf,
+            map_data,
+            step=str(step),
             **kwargs,
         )
-        wandb.log({f"Scatter {step}": [wandb.Image(p) for p in paths_scatter]})
-        wandb.log({f"Reconstruction {step}": [wandb.Image(p) for p in paths_rec]})
-        wandb.log({f"Decoder {step}": [wandb.Image(p) for p in paths_decoder]})
-        wandb.log({f"Distribution {step}": [wandb.Image(p) for p in path_dist]})
 
-    return log_posterior_predictive_plots
+    return log_plots
 
 
 def plot_on_map(
@@ -718,3 +777,152 @@ def conds_to_title(conds_names: list[str], conditionals: list[jax.Array]):
         )
         + ")"
     )
+
+
+def plot_vae_rec_1d(
+    rng: jax.Array,
+    s: jax.Array,
+    state: TrainState,
+    model: str,
+    loader,
+    conds_names: list[str],
+    save_dir: Optional[Path] = None,
+    num_plots: int = 5,
+    samples_per_plot: int = 3,
+    step="",
+    **kwargs,
+):
+    """Plots VAE predictions on map"""
+    paths = []
+    s_flat = s.squeeze()
+    for i in range(num_plots):
+        rng_drop, rng_extra, rng = jax.random.split(rng, 3)
+        f, z, conditionals = next(loader)
+        f_hat = state.apply_fn(
+            {"params": state.params, **state.kwargs},
+            z if model == "DeepRV" else f,
+            conditionals,
+            **kwargs,
+            rngs={"dropout": rng_drop, "extra": rng_extra},
+        )
+        f_hat = f_hat if model == "DeepRV" else f_hat[0]
+        fig, ax = plt.subplots(1, samples_per_plot, figsize=(16, 5))
+        for j in range(samples_per_plot):
+            ax[j].plot(s_flat, f[j].squeeze(), color="black", label=r"$f$")
+            ax[j].plot(s_flat, f_hat[j].squeeze(), color="red", label=r"$\hat{f}$")
+            ax[j].legend()
+        plt.tight_layout()
+        title = f"{model}, {conds_to_title(conds_names, conditionals)}"
+        fig.suptitle(title)
+        fig.subplots_adjust(top=0.85)
+        if save_dir:
+            fig.savefig(save_dir / f"rec_{i}.png", dpi=125)
+        else:
+            paths.append(f"/tmp/VAE_Rec {datetime.now().isoformat()} - {title}.png")
+            fig.savefig(paths[-1], dpi=125)
+        plt.clf()
+        plt.close(fig)
+    if save_dir is None:
+        wandb.log({f"Reconstruction {step}": [wandb.Image(p) for p in paths]})
+
+
+def plot_vae_decoder_1d(
+    rng: jax.Array,
+    s: jax.Array,
+    loader: Generator,
+    conds_names: list[str],
+    z_dim: int,
+    surrogate_decoder: Callable,
+    num_batches: int = 5,
+    num_decodings: int = 10,
+    step="",
+    **kwargs,
+):
+    s_flat = s.squeeze()
+    fig, ax = plt.subplots(1, num_batches, figsize=(5 * num_batches, 5))
+    for i in range(num_batches):
+        rng_z, rng = jax.random.split(rng)
+        f_batch, _, conditionals = next(loader)
+        f = f_batch[0]
+        z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim))
+        f_hat = surrogate_decoder(z, conditionals, **kwargs)
+        ax[i].plot(s_flat, f.squeeze(), color="black", label=r"$f$")
+        for j in range(num_decodings):
+            ax[i].plot(s_flat, f_hat[j].squeeze(), label=f"{r'$\hat{f}$'} - {j}")
+        ax[i].set_title(f"Sample {i} {conds_to_title(conds_names, conditionals)}")
+    plt.tight_layout()
+    timestamp = datetime.now().isoformat()
+    path = f"/tmp/VAE_1d_Decoder {timestamp}.png"
+    fig.subplots_adjust(top=0.86)
+    fig.savefig(path, dpi=125)
+    plt.clf()
+    plt.close(fig)
+    wandb.log({f"Decoder {step}": wandb.Image(path)})
+
+
+def log_vae_grid_plots(
+    map_data: Optional[gpd.GeoDataFrame],
+    s: jax.Array,
+    conds_names: list[str],
+    z_dim: int,
+    large_batch_loader: Generator,
+    is_decoder_only: bool,
+):
+    def log_plots(
+        step: int,
+        rng_step: int,
+        state: TrainState,
+        model: nn.Module,
+        loader: Generator,
+        **kwargs,
+    ):
+        rng_drop, rng_extra, rng_dec, rng_dist, rng_rcn = jax.random.split(rng_step, 5)
+        f, z, conditionals = next(loader)
+        f_hat = state.apply_fn(
+            {"params": state.params, **state.kwargs},
+            z if is_decoder_only else f,
+            conditionals,
+            **kwargs,
+            rngs={"dropout": rng_drop, "extra": rng_extra},
+        )
+        f_hat = f_hat if is_decoder_only else f_hat[0]
+        surrogate_decoder = generate_surrogate_decoder(state, model)
+        if s.shape[-1] == 1:
+            plot_vae_rec_1d(
+                rng_rcn,
+                s,
+                state,
+                model.__class__.__name__,
+                loader,
+                conds_names,
+                step=str(step),
+                **kwargs,
+            )
+            plot_vae_decoder_1d(
+                rng_dec,
+                s,
+                loader,
+                conds_names,
+                z_dim,
+                surrogate_decoder,
+                step=str(step),
+            )
+        plot_vae_scatter_plot(
+            f,
+            f_hat,
+            conditionals,
+            conds_names,
+            step=str(step),
+        )
+        plot_dist_analysis_plots(
+            rng_dist,
+            large_batch_loader,
+            conds_names,
+            z_dim,
+            surrogate_decoder,
+            map_data=None,
+            step=str(step),
+            **kwargs,
+        )
+
+    return log_plots

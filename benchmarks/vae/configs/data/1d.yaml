@@ -1,6 +1,9 @@
+s:
+  - start: 0
+    stop: 100
+    num: 32
 batch_size: 32
 large_batch_size: 1024
 graph_construction:
   self_loops: false
-data_type: 1d
 map_path: null

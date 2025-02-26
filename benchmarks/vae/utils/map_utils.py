@@ -5,6 +5,18 @@ import pandas as pd
 from omegaconf import DictConfig
 from scipy.spatial import distance_matrix
 from shapely.affinity import scale, translate
+from sps.utils import build_grid
+
+
+def gen_locations(data: DictConfig):
+    map_data = (
+        None if data.get("map_path", None) is None else gpd.read_file(data.map_path)
+    )
+    if map_data is None:
+        s = build_grid(data.s).reshape(-1, len(data.s))  # flatten spatial dims
+    else:
+        s = process_map(map_data)
+    return map_data, s
 
 
 def normalize_geometry(gdf: gpd.GeoDataFrame):
