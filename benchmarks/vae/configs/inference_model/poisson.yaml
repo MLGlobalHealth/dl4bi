@@ -19,7 +19,10 @@ priors: # Priors for training DeepRV or for inference
       low: 0.0
       high: 50.0
   period: # Would only be used if training prior is Periodic
-    numpyro_dist: HalfNormal
+    numpyro_dist: Uniform
+    kwargs:
+      low: 10.0
+      high: 50.0
 surrogate_model: True # Whether to use a surrogate model or and actual GP sampling
 num_obs_locations: null # Can be used to randomly select partial number of locations for inference
 # In case you want specific distributions or values to simulate data over the map, simulation_priors will override
