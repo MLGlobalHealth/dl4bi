@@ -35,12 +35,14 @@ def random_tests(
         idx = furthest_first(s_ctx, s_test)
         idx_inv = invert_permutation(idx)
         assert is_permutation(idx), f"{idx}"
+        assert is_permutation(idx_inv), f"{idx_inv}"
         assert (s_test[idx][idx_inv] == s_test).all(), "ordering not preserved"
 
         # test closest
         idx = closest_first(s_ctx, s_test)
         idx_inv = invert_permutation(idx)
         assert is_permutation(idx), f"{idx}"
+        assert is_permutation(idx_inv), f"{idx_inv}"
         assert (s_test[idx][idx_inv] == s_test).all(), "ordering not preserved"
 
         # test random permutation

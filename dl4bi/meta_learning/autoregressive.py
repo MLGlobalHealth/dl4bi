@@ -64,19 +64,20 @@ def sample_diagonal(
 
     # precompute the randomness
     normals = random.normal(rng, (B, L_test, 1))
-    log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=1).squeeze(1)
+    log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=1)
 
-    s_ctx = jnp.expand_dims(s_ctx, 0)
-    f_ctx = jnp.expand_dims(f_ctx, 0)
-    s_test = jnp.expand_dims(s_test, 0)
-    # we only need to expand the dimension to B when multiplying by the random normals
+    # expand the dimensions to B
+    s_ctx = jnp.repeat(s_ctx[None], B, axis=0)
+    f_ctx = jnp.repeat(f_ctx[None], B, axis=0)
+    s_test = jnp.repeat(s_test[None], B, axis=0)
 
     f_mu, f_std = apply(s_ctx, f_ctx, s_test)
-    f_mu = jnp.repeat(f_mu, B, axis=0)
-    f_std = jnp.repeat(f_std, B, axis=0)
     f_sampled = normals * f_std + f_mu
 
-    return f_sampled, log_densities
+    # Jacobian transform eps -> f_sampled
+    log_densities -= jnp.log(f_std).sum(axis=1)
+
+    return f_sampled, log_densities.squeeze(-1)
 
 
 def invert_permutation(p: jax.Array):
@@ -174,8 +175,8 @@ def random_permutations(rng: jax.Array, n: int, batch_size: int):
     Returns array of shape [batch_size, n]
     where each row is a permutation of [0, 1, ..., n-1].
     """
-    idx = jnp.repeat(jnp.arange(n)[None], batch_size, axis=0)
-    idx = jax.random.permutation(rng, idx, axis=1, independent=True)
+    idx = jnp.tile(jnp.arange(n), (batch_size, 1))
+    idx = jax.random.permutation(rng, idx, axis=1, independent=False)
     return idx
 
 
@@ -185,7 +186,6 @@ def _sample_autoreg(
     s_ctx: jax.Array,  # [B, L_ctx, D]
     f_ctx: jax.Array,  # [B, L_ctx, 1]
     s_test: jax.Array,  # [B, L_test, D]
-    debug: bool = False,
 ):
     B, L_test, _ = s_test.shape
     _, L_ctx, _ = s_ctx.shape
@@ -199,36 +199,29 @@ def _sample_autoreg(
     normals = random.normal(rng, (B, L_test))
     log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=1)
 
-    # for i in range(L_test):
-    #     s_test_i = s_test[:, i][:, None]  # [B, 1, D]
-    #     normal = normals[:, i][:, None]  # [B, 1]
-    #     valid_lens_ctx = jnp.repeat(L_ctx + i, B)
-
-    #     f_mu_i, f_std_i = apply(s, f, s_test_i, valid_lens_ctx)
-    #     f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)
-    #     f_sampled = normal * f_std_i + f_mu_i
-
-    #     f = f.at[:, L_ctx + i].set(f_sampled)
-
-    # Equivalent to the above loop but ~2x faster.
-    def g(i: int, f: jax.Array):
+    def loop(i: int, carry: tuple[jax.Array, jax.Array]):
+        f, log_densities = carry
         s_test_i = s_test[:, i][:, None]  # [B, 1, D]
-        normal = normals[:, i][:, None]  # [B, 1]
+        eps = normals[:, i][:, None]  # [B, 1]
         valid_lens_ctx = jnp.repeat(L_ctx + i, B)
 
         f_mu_i, f_std_i = apply(s, f, s_test_i, valid_lens_ctx)
         f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)
-        f_sampled = normal * f_std_i + f_mu_i
+        f_sampled = eps * f_std_i + f_mu_i
 
-        # TODO: add a debug callback, something like:
-        # if large variance and close to known points, warn
-        # or also the output mean could be wrong
+        return (
+            f.at[:, L_ctx + i].set(f_sampled),
+            # Jacobian transform eps -> f_sampled
+            # q(f) = q(eps) * |df/deps|^-1 = q(eps) / f_std, hence in log space subtract log(f_std)
+            log_densities - jnp.log(f_std_i.squeeze(1)),
+        )
 
-        return f.at[:, L_ctx + i].set(f_sampled)
+    f, log_densities = jax.lax.fori_loop(0, L_test, loop, (f, log_densities))
 
-    f = jax.lax.fori_loop(0, L_test, g, f)
-
-    return f[:, L_ctx:], log_densities
+    return (
+        f[:, L_ctx:],  # [B, L_test, 1]
+        log_densities,  # [B]
+    )
 
 
 def sample_autoreg(
@@ -239,14 +232,13 @@ def sample_autoreg(
     s_test: jax.Array,  # [L_test, D]
     B: int,  # how many paths to sample
     random: bool = False,  # whether to permute s_test randomly
-    debug: bool = False,
 ):
     s_ctx = jnp.repeat(s_ctx[None], B, axis=0)
     f_ctx = jnp.repeat(f_ctx[None], B, axis=0)
     s_test = jnp.repeat(s_test[None], B, axis=0)
 
     if not random:
-        return _sample_autoreg(rng, apply, s_ctx, f_ctx, s_test, debug=debug)
+        return _sample_autoreg(rng, apply, s_ctx, f_ctx, s_test)
     else:
         _, L_test, D = s_test.shape
 
@@ -267,7 +259,6 @@ def sample_autoreg(
             s_ctx,
             f_ctx,
             jnp.take_along_axis(s_test, idx, axis=1),
-            debug=debug,
         )
 
         assert idx_inv.shape == paths.shape

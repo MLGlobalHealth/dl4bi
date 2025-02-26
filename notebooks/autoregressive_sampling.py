@@ -4,9 +4,9 @@ from typing import Callable, Optional
 
 import jax
 import jax.numpy as jnp
+import tqdm
 from jax import jit, random
-from omegaconf import DictConfig, OmegaConf
-from tqdm import tqdm
+from omegaconf import OmegaConf
 
 from dl4bi.meta_learning.autoregressive import (
     build_gp_dataloader,
@@ -42,7 +42,7 @@ def load_model(path):
         s_ctx: jax.Array,
         f_ctx: jax.Array,
         s_test: jax.Array,
-        valid_lens_ctx: Optional[jax.Array] = None,
+        valid_lens_ctx: jax.Array | None = None,
     ):
         return state.apply_fn(
             {"params": state.params, **state.kwargs},
@@ -69,7 +69,7 @@ def run(
     var: float | None = None,  # override the var in the config
     num_ctx: int | None = None,  # number of context points to use
     noise: float | None = None,  # override the noise in the config
-    debug: bool = False,
+    s_test: list[float] | None = None,  # override s_test
 ):
     rng = random.key(seed)
 
@@ -119,16 +119,17 @@ def run(
     f_ctx = f_ctx[:valid_lens_ctx]
     s_ctx = s_ctx[:valid_lens_ctx]
 
-    # Excluding the context points from test set for numerical stability of later analysis.
-    num_ctx = config.data.num_ctx.max
-    s_test = s[num_ctx:]
-    f_test = f[num_ctx:]
+    if s_test is None:
+        # Excluding the context points from test set for numerical stability of later analysis.
+        num_ctx = config.data.num_ctx.max
+        s_test = s[num_ctx:]
+    else:
+        s_test = jnp.array(s_test, dtype=jnp.float32).reshape(len(s_test), 1)
 
     # Save everything that can be needed for later analysis
     jnp.save(results_dir / "s_ctx.npy", s_ctx)
     jnp.save(results_dir / "f_ctx.npy", f_ctx)
     jnp.save(results_dir / "s_test.npy", s_test)
-    jnp.save(results_dir / "f_test.npy", f_test)
     jnp.save(results_dir / "s.npy", s)
     jnp.save(results_dir / "f.npy", f)
 
@@ -136,7 +137,6 @@ def run(
     [diagonal_mu], [diagonal_sd] = apply(
         s_ctx[None], f_ctx[None], s_test[None]
     )  # note need to expand dims
-    diagonal_mu, diagonal_sd = diagonal_mu.squeeze(), diagonal_sd.squeeze()
     diagonal_var = diagonal_sd**2
     jnp.save(results_dir / "diagonal_mu", diagonal_mu)
     jnp.save(results_dir / "diagonal_var", diagonal_var)
@@ -157,7 +157,6 @@ def run(
             "random",
             "closest",
         ]:
-            print(f"Strategy: {strategy}")
             paths, densities = [], []
 
             # there was significant overhead from reordering within each batch, hence do that here
@@ -181,13 +180,17 @@ def run(
                     # handled inside sample_paths, so identity here
                     idx = idx_inv = ...
 
-            s_test = s_test[idx]
-
-            for i in tqdm(range(num_iters)):
+            s_test_permuted = s_test[idx]
+            for i in tqdm.trange(num_iters, desc=f"Strategy {strategy}"):
                 rng, rng_i = random.split(rng)
                 if strategy == "diagonal":
                     path, log_density = sample_diagonal(
-                        rng_i, apply, s_ctx, f_ctx, s_test, B
+                        rng_i,
+                        apply,
+                        s_ctx,
+                        f_ctx,
+                        s_test_permuted,
+                        B,
                     )
                 else:
                     path, log_density = sample_autoreg(
@@ -195,15 +198,15 @@ def run(
                         apply,
                         s_ctx,
                         f_ctx,
-                        s_test,
+                        s_test_permuted,
                         B,
                         random=(strategy == "random"),
-                        debug=debug,
                     )
+                assert path.shape == (B, s_test.shape[0], 1)
                 paths.append(path)
                 densities.append(log_density)
 
-            paths = jnp.concat(paths, axis=0)[:, idx_inv]
+            paths = jnp.concat(paths, axis=0)[:, idx_inv, :]
             jnp.save(results_dir / f"paths_{strategy}.npy", paths)
             densities = jnp.concat(densities, axis=0)
             jnp.save(results_dir / f"densities_{strategy}.npy", densities)
@@ -224,6 +227,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_ctx", type=int, default=None)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--noise", type=float, default=None)
+    parser.add_argument("--s_test", type=float, nargs="+", default=None)
     args = parser.parse_args()
 
     apply, config = load_model(path)
