@@ -9,7 +9,7 @@ from jax import jit, random
 from omegaconf import OmegaConf
 
 from dl4bi.meta_learning.autoregressive import (
-    autoregressive_sample,
+    autoregressive_sample_multiple_paths,
     build_gp_dataloader,
     closest_first,
     diagonal_sample,
@@ -193,7 +193,7 @@ def run(
                         B,
                     )
                 else:
-                    path, log_density = autoregressive_sample(
+                    path, log_density = autoregressive_sample_multiple_paths(
                         rng_i,
                         apply,
                         s_ctx,

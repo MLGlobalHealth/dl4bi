@@ -178,15 +178,19 @@ def random_permutations(rng: jax.Array, n: int, batch_size: int):
     return idx
 
 
-def _autoregressive_sample(
+def autoregressive_sample(
     rng: jax.Array,
     apply: Apply,
-    s_ctx: jax.Array,  # [B, L_ctx, D]
-    f_ctx: jax.Array,  # [B, L_ctx, 1]
-    s_test: jax.Array,  # [B, L_test, D]
+    s_ctx: jax.Array,  # [B, L_ctx, D_s]
+    f_ctx: jax.Array,  # [B, L_ctx, D_f]
+    s_test: jax.Array,  # [B, L_test, D_s]
 ):
-    B, L_test, _ = s_test.shape
-    _, L_ctx, _ = s_ctx.shape
+    """
+    Implementation of the autoregressive sampling generative model, batched.
+    """
+    B, L_ctx, _ = s_ctx.shape
+    _, L_test, _ = s_test.shape
+    _, _, D_f = f_ctx.shape
 
     s = jnp.concat([s_ctx, s_test], axis=1)
     f = jnp.pad(f_ctx, ((0, 0), (0, L_test), (0, 0)))
@@ -194,24 +198,24 @@ def _autoregressive_sample(
     # Note that the independent random normals can be pre-sampled.
     # It doesn't matter whether sampling is done here, or in the for loop,
     # as in each iteration the N(0, 1) sampling is independent
-    normals = random.normal(rng, (B, L_test))
+    normals = random.normal(rng, (B, L_test, D_f))
     log_densities = jnp.sum(jax.scipy.stats.norm.logpdf(normals), axis=1)
 
     def loop(i: int, carry: tuple[jax.Array, jax.Array]):
         f, log_densities = carry
-        s_test_i = s_test[:, i][:, None]  # [B, 1, D]
-        eps = normals[:, i][:, None]  # [B, 1]
-        valid_lens_ctx = jnp.repeat(L_ctx + i, B)
+        s_test_i = s_test[:, i][:, None]  # [B, 1, D_s]
+        eps = normals[:, i]  # [B, D_f]
+        valid_lens_ctx = jnp.repeat(L_ctx + i, B)  # [B]
 
         f_mu_i, f_std_i = apply(s, f, s_test_i, valid_lens_ctx)
-        f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)
+        f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)  # [B, D_f]
         f_sampled = eps * f_std_i + f_mu_i
 
         return (
             f.at[:, L_ctx + i].set(f_sampled),
             # Jacobian transform eps -> f_sampled
             # q(f) = q(eps) * |df/deps|^-1 = q(eps) / f_std, hence in log space subtract log(f_std)
-            log_densities - jnp.log(f_std_i.squeeze(1)),
+            log_densities - jnp.log(f_std_i),
         )
 
     f, log_densities = jax.lax.fori_loop(
@@ -224,12 +228,42 @@ def _autoregressive_sample(
     return f[:, L_ctx:], log_densities
 
 
-def autoregressive_sample(
+def autoregressive_logpdf(
+    apply: Apply,
+    s_ctx: jax.Array,  # [B, L_ctx, D_s]
+    f_ctx: jax.Array,  # [B, L_ctx, D_f]
+    s_test: jax.Array,  # [B, L_test, D_s]
+    f_test: jax.Array,  # [B, L_test, D_f]
+):
+    """
+    Computes the log-likelihood given by the autoregressive model, batched.
+    """
+    B, L_ctx, _ = s_ctx.shape
+    _, L_test, _ = s_test.shape
+    _, _, D_f = f_ctx.shape
+
+    s = jnp.concat([s_ctx, s_test], axis=1)
+    f = jnp.concat([f_ctx, f_test], axis=1)
+
+    def loop(i: int, log_densities: jax.Array):
+        s_test_i = s_test[:, i][:, None]  # [B, 1, D_s]
+        f_test_i = f_test[:, i]  # [B, D_f]
+        valid_lens_ctx = jnp.repeat(L_ctx + i, B)  # [B]
+
+        f_mu_i, f_std_i = apply(s, f, s_test_i, valid_lens_ctx)
+        f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)  # [B, D_f]
+
+        return log_densities + jax.scipy.stats.norm.logpdf(f_test_i, f_mu_i, f_std_i)
+
+    return jax.lax.fori_loop(0, L_test, loop, jnp.zeros((B, D_f)))
+
+
+def autoregressive_sample_multiple_paths(
     rng: jax.Array,
     apply: Apply,
-    s_ctx: jax.Array,  # [L_ctx, D]
-    f_ctx: jax.Array,  # [L_ctx, 1]
-    s_test: jax.Array,  # [L_test, D]
+    s_ctx: jax.Array,  # [L_ctx, D_s]
+    f_ctx: jax.Array,  # [L_ctx, D_f]
+    s_test: jax.Array,  # [L_test, D_s]
     B: int,  # how many paths to sample
     random: bool = False,  # whether to permute s_test randomly
 ):
@@ -238,9 +272,10 @@ def autoregressive_sample(
     s_test = jnp.repeat(s_test[None], B, axis=0)
 
     if not random:
-        return _autoregressive_sample(rng, apply, s_ctx, f_ctx, s_test)
+        return autoregressive_sample(rng, apply, s_ctx, f_ctx, s_test)
     else:
-        _, L_test, D = s_test.shape
+        _, L_test, D_s = s_test.shape
+        _, _, D_f = f_ctx.shape
 
         rng, rng_perm = jax.random.split(rng)
 
@@ -249,11 +284,11 @@ def autoregressive_sample(
         idx_inv = jax.vmap(invert_permutation)(idx)
 
         # idx needs to match dimension of array in take_along_axis
-        idx = jnp.repeat(idx[..., None], D, axis=-1)
-        idx_inv = idx_inv[..., None]
+        idx = jnp.repeat(idx[..., None], D_s, axis=-1)
+        idx_inv = jnp.repeat(idx_inv[..., None], D_f, axis=-1)
         assert idx.shape == s_test.shape
 
-        paths, log_densities = _autoregressive_sample(
+        paths, log_densities = autoregressive_sample(
             rng,
             apply,
             s_ctx,
