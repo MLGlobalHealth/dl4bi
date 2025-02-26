@@ -225,7 +225,6 @@ if __name__ == "__main__":
     parser.add_argument("--ls", type=float, default=None)
     parser.add_argument("--var", type=float, default=None)
     parser.add_argument("--num_ctx", type=int, default=None)
-    parser.add_argument("--debug", action="store_true")
     parser.add_argument("--noise", type=float, default=None)
     parser.add_argument("--s_test", type=float, nargs="+", default=None)
     args = parser.parse_args()

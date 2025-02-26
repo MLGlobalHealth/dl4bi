@@ -216,12 +216,14 @@ def _sample_autoreg(
             log_densities - jnp.log(f_std_i.squeeze(1)),
         )
 
-    f, log_densities = jax.lax.fori_loop(0, L_test, loop, (f, log_densities))
-
-    return (
-        f[:, L_ctx:],  # [B, L_test, 1]
-        log_densities,  # [B]
+    f, log_densities = jax.lax.fori_loop(
+        0,
+        L_test,
+        loop,
+        (f, log_densities),
     )
+
+    return f[:, L_ctx:], log_densities
 
 
 def sample_autoreg(
