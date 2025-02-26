@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Callable, Optional, Tuple
 
 import jax
@@ -178,6 +179,8 @@ def random_permutations(rng: jax.Array, n: int, batch_size: int):
     return idx
 
 
+# consider
+@partial(jit, static_argnames=["apply"])
 def autoregressive_sample(
     rng: jax.Array,
     apply: Apply,
