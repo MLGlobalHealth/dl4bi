@@ -231,7 +231,7 @@ def generate_obs_mask(rng: jax.Array, f_obs: jax.Array, infer_cfg: DictConfig):
 
 
 def init_priors(cfg: DictConfig):
-    """inits the priors and validates them"""
+    """inits the priors for inference and validates them"""
     priors = {}
     for pr, pr_dist in cfg.inference_model.priors.items():
         if pr_dist.numpyro_dist == "Delta":

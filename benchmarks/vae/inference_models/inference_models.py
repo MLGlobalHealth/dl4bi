@@ -153,6 +153,8 @@ def gen_saptial_prior(
     n = s.shape[0]
     spatial_name = spatial_prior.__name__
     if spatial_name == "car":
+        if map_data is None:
+            raise ValueError("CAR model isn't supported for grid data")
         adj_mat = generate_adjacency_matrix(map_data, cfg.data.graph_construction)
         D = jnp.diag(adj_mat.sum(axis=1))
         model = partial(

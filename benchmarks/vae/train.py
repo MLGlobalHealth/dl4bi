@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
@@ -49,31 +48,21 @@ def main(cfg: DictConfig):
     map_data, s = gen_locations(cfg.data)
     model = build_model(cfg.model, s)
     kwargs = {}
-    if cfg.model.kwargs.decoder.cls == "FixedLocationTransfomer":
+    if "FixedLocationTransfomer" in model_name:
         kwargs = {"s": s}
     lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps,
-        cfg.lr_peak,
-        cfg.lr_pct_warmup,
+        cfg.train_num_steps, cfg.lr_peak, cfg.lr_pct_warmup
     )
     optimizer = optax.chain(
-        optax.clip_by_global_norm(cfg.clip_max_norm),
-        optax.yogi(lr_schedule),
+        optax.clip_by_global_norm(cfg.clip_max_norm), optax.yogi(lr_schedule)
     )
-    # NOTE: large_batch_loader is used to compare the decoder distribution with true data
     spatial_prior = instantiate(cfg.inference_model.spatial_prior)
     priors = {
         pr: instantiate(pr_dist) for pr, pr_dist in cfg.inference_model.priors.items()
     }
+    # NOTE: large_batch_loader is used to compare the decoder distribution with true data
     train_loader, test_loader, large_batch_loader, cond_names = (
-        build_spatial_dataloaders(
-            rng,
-            cfg,
-            map_data,
-            s,
-            priors,
-            spatial_prior,
-        )
+        build_spatial_dataloaders(rng, cfg, map_data, s, priors, spatial_prior)
     )
     valid_step = get_valid_step(cfg.model, cond_names)
     decoder_only = cfg.model.cls == "DeepRV"
@@ -129,8 +118,8 @@ def build_spatial_dataloaders(
     priors: dict[str, dist.Distribution],
     spatial_prior: Callable,
 ):
-    """Generates the GP dataloader for training or inference for
-    a specific distance based or graph model based kernel
+    """Generates the spatial prior dataloader for training for
+    a specific distance based GP or graph model based kernel
 
     Args:
         rng (Array)
@@ -262,16 +251,18 @@ def get_valid_step(model_cfg: DictConfig, cond_names: list[str]):
         f, z, conditionals = batch
         var = 1 if var_idx is None else conditionals[var_idx].squeeze()
         ls = None if ls_idx is None else conditionals[ls_idx].squeeze()
-        params = {"params": state.params, **state.kwargs}
-        rngs = {"extra": rng}
         z_mu, z_std = None, None
         f_hat = jit(state.apply_fn)(
-            params, z if decoder_only else f, conditionals, **kwargs, rngs=rngs
+            {"params": state.params, **state.kwargs},
+            z if decoder_only else f,
+            conditionals,
+            **kwargs,
+            rngs={"extra": rng},
         )
         if not decoder_only:
             f_hat, z_mu, z_std = f_hat
         mse_score = optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
-        # NOTE: Normalizing the mse score with variance, aN(0,K)~N(0, a^2K), and
+        # NOTE: Normalizing the mse score with variance, aN(0,K)~N(0, a^2K)
         norm_mse_score = (1 / var) * mse_score
         loss = norm_mse_score
         if not decoder_only:
@@ -282,12 +273,7 @@ def get_valid_step(model_cfg: DictConfig, cond_names: list[str]):
                 else -norm.logpdf(f, f_hat, 1.0).mean()
             )
             loss = logp + kl_div.mean()
-
-        return {
-            f"{prefix} loss": loss,
-            f"{prefix} norm MSE": norm_mse_score,
-            "ls": ls if ls is not None else None,
-        }
+        return {f"{prefix} loss": loss, f"{prefix} norm MSE": norm_mse_score, "ls": ls}
 
     return valid_step
 
