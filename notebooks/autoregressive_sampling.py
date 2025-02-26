@@ -151,7 +151,7 @@ def run(
         num_iters = (Np - 1) // B + 1
         for strategy in [
             # "preserve",
-            "diagonal",
+            "diagonal",  # this is mostly for sanity-checking
             "ltr",
             "furthest",
             "random",
@@ -218,10 +218,10 @@ if __name__ == "__main__":
     path = "/Users/pgrynfelder/Library/CloudStorage/GoogleDrive-wadh6460@ox.ac.uk/My Drive/results"
 
     parser = ArgumentParser()
-    parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--job_id", type=str, default=None)
-    parser.add_argument("--Np", type=int, required=True)
-    parser.add_argument("--B", type=int, required=True)
+    parser.add_argument("--Np", type=int, default=128)
+    parser.add_argument("--B", type=int, default=128)
     parser.add_argument("--ls", type=float, default=None)
     parser.add_argument("--var", type=float, default=None)
     parser.add_argument("--num_ctx", type=int, default=None)
@@ -230,4 +230,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     apply, config = load_model(path)
-    run(apply=apply, config=config, **vars(args))
+    # run(apply=apply, config=config, **vars(args))
+    for i in range(20):
+        kwargs = vars(args) | {
+            "seed": i,
+            "job_id": f"{config.data.name}_{config.model.cls}_{config.kernel.cls}_{i}",
+        }
+        run(apply=apply, config=config, **kwargs)
