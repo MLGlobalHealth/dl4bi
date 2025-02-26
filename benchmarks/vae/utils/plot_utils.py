@@ -123,7 +123,7 @@ def plot_prevalence_scatter_comp(
     plt.tight_layout()
     fig.subplots_adjust(top=0.86)
     if save_path is None:
-        save_path = f"Scatter prevalence{datetime.now().isoformat()}.png"
+        save_path = f"/tmp/Scatter prevalence{datetime.now().isoformat()}.png"
     plt.clf()
     plt.close(fig)
 
@@ -166,7 +166,7 @@ def plot_models_mean_prevalence(
         ax.set_axis_off()
     plt.tight_layout()
     if save_path is None:
-        save_path = f"Observed prevalence{datetime.now().isoformat()}.png"
+        save_path = f"/tmp/Observed prevalence{datetime.now().isoformat()}.png"
     fig.savefig(save_path, dpi=125)
     plt.clf()
     plt.close(fig)
@@ -227,9 +227,8 @@ def plot_infer_trace(
         ]
     if len(var_names) == 0:
         return
-    save_path = (
-        save_path if save_path else Path(f"/tmp/trace_{datetime.now().isoformat()}.png")
-    )
+    if save_path is None:
+        save_path = Path(f"/tmp/trace_{datetime.now().isoformat()}.png")
     az.plot_trace(mcmc, var_names=var_names)
     conditional_means = {c: samples[str(c)].mean().item() for c in var_names}
     axes = plt.gcf().get_axes()
