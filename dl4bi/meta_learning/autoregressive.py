@@ -279,9 +279,8 @@ def analytic_gp(
     Equations (17.32 - 17.36)
 
     Assumes 0 mean,
-    and positive-definite covariance matrix `cov_cc = kernel(s_ctx, s_ctx, var, ls)`.
-    This is true for the kernels we use modulo repeated locations,
-    which can be handled by setting `ensure_unique=True`.
+    and requires the covariance matrix `cov_cc = kernel(s_ctx, s_ctx, var, ls) + obs_noise**2 * I`
+    to be strictly positive definite.
     """
     L_test = s_test.shape[0]
 
