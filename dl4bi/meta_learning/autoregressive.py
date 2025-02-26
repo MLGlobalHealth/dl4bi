@@ -267,9 +267,6 @@ def sample_autoreg(
         return jnp.take_along_axis(paths, idx_inv, axis=1), log_densities
 
 
-# Probabilistic Machine Learning: An Introduction by Kevin P. Murphy
-# Chapter 3.2.3
-# Equation 3.28
 def analytic_gp(
     s_ctx: jax.Array,  # [L_ctx, D] or [L_ctx]
     f_ctx: jax.Array,  # [L_ctx, 1] or [L_ctx]
@@ -277,12 +274,11 @@ def analytic_gp(
     kernel: Callable,
     var: float,
     ls: float,
-    noise: float = 0,
+    obs_noise: float = 0,  # observation noise, note this is \sigma, not \sigma^2
 ) -> Tuple[jax.Array, jax.Array]:
     """
     Kevin P. Murphy, Probabilistic Machine Learning: An Introduction,
-    Chapter 3.2.3,
-    Equation 3.28
+    Equations (17.32 - 17.36)
 
     Assumes 0 mean,
     and positive-definite covariance matrix `cov_cc = kernel(s_ctx, s_ctx, var, ls)`.
@@ -294,7 +290,7 @@ def analytic_gp(
     if f_ctx.ndim > 1:
         f_ctx = f_ctx.squeeze(-1)
 
-    take_from_context = noise < 1e-5
+    take_from_context = obs_noise < 1e-2
     if take_from_context:
         print(
             "Assuming no noise, will take values from context set if f_ctx and s_test overlap."
@@ -318,7 +314,7 @@ def analytic_gp(
         cov_tt = kernel(s_test, s_test, var, ls)
 
         # Note that for noisy observations we have to add noise for correctness - see Murphy (17.32 - 17.36).
-        cov_cc = kernel(s_ctx, s_ctx, var, ls) + noise * jnp.eye(s_ctx.shape[0])
+        cov_cc = kernel(s_ctx, s_ctx, var, ls) + obs_noise**2 * jnp.eye(s_ctx.shape[0])
 
         # Can't just invert cov_cc or even solve without the positive definite
         # assumption as it leads to huge numerical error. Adding jitter to the diagonal doesn't help.
