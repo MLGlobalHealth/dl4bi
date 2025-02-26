@@ -1,13 +1,11 @@
-from functools import partial
 from typing import Callable, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
-import tqdm
 from jax import jit, random
 from jax.experimental import enable_x64
 from omegaconf import DictConfig
-from sps.kernels import l2_dist, l2_dist_sq
+from sps.kernels import l2_dist_sq
 from sps.utils import build_grid
 
 from dl4bi.meta_learning.train_utils import instantiate
