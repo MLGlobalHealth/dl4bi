@@ -214,6 +214,7 @@ def run(
 
 if __name__ == "__main__":
     from argparse import ArgumentParser
+    from time import time
 
     path = "/Users/pgrynfelder/Library/CloudStorage/GoogleDrive-wadh6460@ox.ac.uk/My Drive/results"
 
@@ -236,4 +237,7 @@ if __name__ == "__main__":
             "seed": i,
             "job_id": f"{config.data.name}_{config.model.cls}_{config.kernel.cls}_{i}",
         }
+        start_time = time()
         run(apply=apply, config=config, **kwargs)
+        end_time = time()
+        print(f"Total time spent on this run: {end_time - start_time:.2f}s")
