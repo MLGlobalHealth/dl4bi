@@ -231,13 +231,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     apply, config = load_model(path)
-    # run(apply=apply, config=config, **vars(args))
-    for i in range(20):
-        kwargs = vars(args) | {
-            "seed": i,
-            "job_id": f"{config.data.name}_{config.model.cls}_{config.kernel.cls}_{i}",
-        }
-        start_time = time()
-        run(apply=apply, config=config, **kwargs)
-        end_time = time()
-        print(f"Total time spent on this run: {end_time - start_time:.2f}s")
+    run(apply=apply, config=config, **vars(args))
+    # for i in range(20):
+    #     kwargs = vars(args) | {
+    #         "seed": i,
+    #         "job_id": f"{config.data.name}_{config.model.cls}_{config.kernel.cls}_{i}",
+    #     }
+    #     start_time = time()
+    #     run(apply=apply, config=config, **kwargs)
+    #     end_time = time()
+    #     print(f"Total time spent on this run: {end_time - start_time:.2f}s")

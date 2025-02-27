@@ -907,3 +907,37 @@ def log_wandb_line(vec: jax.Array, title: str):
     wandb_key = title.lower().replace(" ", "_")
     tbl = wandb.Table(data=[[i, v] for i, v in enumerate(vec)], columns=["i", "v"])
     wandb.log({wandb_key: wandb.plot.line(tbl, "i", "v", title=title)})
+
+
+# copied from benchmarks/meta_learning/gp.py, perhaps should be moved here?
+def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
+    """Generates batches of GP samples."""
+    gp = instantiate(kernel)
+    B, S = data.batch_size, len(data.s)
+    Nc_min, Nc_max = data.num_ctx.min, data.num_ctx.max
+    s_g = build_grid(data.s).reshape(-1, S)  # flatten spatial dims
+    L = Nc_max + s_g.shape[0]  # L = num test or all points
+    obs_noise, B = data.obs_noise, data.batch_size
+    valid_lens_test = jnp.repeat(L, B)
+    s_min = jnp.array([axis["start"] for axis in data.s])
+    s_max = jnp.array([axis["stop"] for axis in data.s])
+    batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
+
+    def gen_batch(rng: jax.Array):
+        rng_s, rng_gp, rng_v, rng_eps = random.split(rng, 4)
+        s_r = random.uniform(rng_s, (Nc_max, S), jnp.float32, s_min, s_max)
+        s = jnp.vstack([s_r, s_g])
+        f, var, ls, period, *_ = gp.simulate(rng_gp, s, B)
+        valid_lens_ctx = random.randint(rng_v, (B,), Nc_min, Nc_max)
+        s = batchify(s)
+        s_ctx = s[:, :Nc_max, :]
+        f_ctx = f + obs_noise * random.normal(rng_eps, f.shape)
+        f_ctx = f_ctx[:, :Nc_max, :]
+        return s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, var, ls, period
+
+    def dataloader(rng: jax.Array):
+        while True:
+            rng_i, rng = random.split(rng)
+            yield gen_batch(rng_i)
+
+    return dataloader
