@@ -99,3 +99,10 @@ def _nan_pad(v: jax.Array, axis: int, L: int):
     L_v = v.shape[axis]
     pad[axis] = (0, L - L_v)
     return jnp.pad(v, pad, mode="constant", constant_values=jnp.nan)
+
+
+@jit
+def flatten_spatial(v: Optional[jax.Array]):
+    if v is None:
+        return None
+    return v.reshape(v.shape[0], -1, v.shape[-1])

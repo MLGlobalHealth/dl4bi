@@ -6,14 +6,14 @@ import jax
 import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from jax import jit, random
+from jax import jit, random, vmap
 from jax.scipy.stats import norm
-from jax import vmap
 
 from .utils import (
     MetaLearningBatch,
     MetaLearningData,
     batch_BLD,
+    flatten_spatial,
     inv_permute_L_in_BLD,
     permute_L_in_BLD,
     unbatch_BLD,
@@ -36,7 +36,7 @@ class SpatiotemporalData(MetaLearningData):
         self,
         rng: jax.Array,
         num_t: int,
-        random_t: int,
+        random_t: bool,
         num_ctx_min_per_t: int,
         num_ctx_max_per_t: int,
         independent_t_masks: bool,
@@ -103,7 +103,7 @@ def _batch(
     t: jax.Array,
     f: jax.Array,
     num_t: int,
-    random_t: int,
+    random_t: bool,
     num_ctx_min_per_t: int,
     num_ctx_max_per_t: int,
     independent_t_masks: bool,
@@ -114,24 +114,26 @@ def _batch(
     B, T, T_b = batch_size, t.shape[1], num_t
     rng_t, rng_p, rng_b = random.split(rng, 3)
     has_x = x is not None
-    broadcast_x = x.ndim == 2 if has_x else None
-    if random_t:
-        rng_ts = random.split(rng_t, B)
-        ts = vmap(lambda rng: random.choice(rng, T, (T_b,)))(rng_ts)
-        ts = jnp.sort(ts, axis=1)  # [B, T_b]
-    else:
-        last_ts = random.randint(rng_t, (T_b,), T_b, T)
-        prev_ts = jnp.arange(T_b - 1, -1, -1)
-        ts = last_ts[:, None] - prev_ts  # [B, T_b]
-    test_i = -1 if forecast else T_b // 2 + 1  # last time step or median
-    # get indices of time steps for batches
-    t_test_i = ts[:, [test_i]]
-    t_ctx_i = jnp.concat([ts[:, :test_i], ts[:, test_i + 1 :]], axis=1)
-    # shapes: *_ctx: [B, T_b-1, [S]+, D_*], *_test: [B, 1, [S]+, D_*]
-    x_ctx, x_test = (x[t_ctx_i], x[t_test_i]) if has_x else (None, None)
-    s_ctx, s_test = s[t_ctx_i], s[t_test_i]
-    t_ctx, t_test = t[t_ctx_i], t[t_test_i]
-    f_ctx, f_test = f[t_ctx_i], f[t_test_i]
+    broadcast_x = x.ndim in (2, 3) if has_x else None
+    ts_test, ts_ctx = _select_ts(rng_t, random_t, forecast, B, T, T_b)
+    s, f = map(flatten_spatial, [s, f])
+    tpls = map(lambda v: (v[ts_ctx], v[ts_test]), [s, t, f])
+    (s_ctx, s_test), (t_ctx, t_test), (f_ctx, f_test) = tpls
+    t_ctx = jnp.broadcast_to(t_ctx[:, :, None, None], (f_ctx.shape[:-1], 1))
+    t_test = jnp.broadcast_to(t_test[:, :, None, None], (f_test.shape[:-1], 1))
+    if has_x and not broadcast_x:  # x: [T, [S]+, D_x]
+        x = flatten_spatial(x)  # [T, L_s, D_x]
+        x_ctx, x_test = x[ts_ctx], x[ts_test]
+    elif broadcast_x:
+        D_x = x.shape[-1]
+        ctx_shape, test_shape = (*f_ctx.shape[:-1], D_x), (*f_test.shape[:-1], D_x)
+        # if ndim = 3, broadcast over space, otherwise broadcast over time and space
+        x = x[:, :, None, :] if x.ndim == 3 else x[:, None, None, :]
+        x_ctx = jnp.broadcast_to(x, ctx_shape)
+        x_test = jnp.broadcast_to(x, test_shape)
+    # *_ctx: [B, T_b-1, L_s, D_*], *_test: [B, 1, L_s, D_*]
+    # TODO(danj): permute L_s, select valid_lens and truncate
+    # vmap(batch_BLD)
 
     # s, f = flatten_spatial(s), flatten_spatial(f)
     # batch_args = (num_ctx_min_per_t, num_ctx_max_per_t, num_test)
@@ -151,11 +153,27 @@ def _batch(
     # return SpatiotemporalBatch(*args, inv_permute_idx=inv_permute_idx, s_shape=s.shape)
 
 
-@jit
-def flatten_spatial(v: Optional[jax.Array]):
-    if v is None:
-        return None
-    return v.reshape(*v.shape[:2], -1, v.shape[-1])
+def _select_ts(
+    rng_t: jax.Array,
+    random_t: bool,
+    forecast: bool,
+    B: int,
+    T: int,
+    T_b: int,
+):
+    if random_t:
+        rng_ts = random.split(rng_t, B)
+        ts = vmap(lambda rng: random.choice(rng, T, (T_b,)))(rng_ts)
+        ts = jnp.sort(ts, axis=1)  # [B, T_b]
+    else:
+        last_ts = random.randint(rng_t, (T_b,), T_b, T)
+        prev_ts = jnp.arange(T_b - 1, -1, -1)
+        ts = last_ts[:, None] - prev_ts  # [B, T_b]
+    test_i = -1 if forecast else T_b // 2 + 1  # last time step or median
+    # get indices of time steps for batches
+    ts_ctx = jnp.concat([ts[:, :test_i], ts[:, test_i + 1 :]], axis=1)
+    ts_test = ts[:, [test_i]]
+    return ts_ctx, ts_test
 
 
 # register to use in jitted functions
