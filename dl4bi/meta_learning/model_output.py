@@ -43,14 +43,14 @@ class GaussianOutput(DistributionOutput):
     std: jax.Array
 
     @classmethod
-    def from_conditional(cls, dist: jax.Array, min_std: float = 0.0, **kwargs):
-        mu, std = jnp.split(dist, 2, axis=-1)
+    def from_conditional(cls, params: jax.Array, min_std: float = 0.0, **kwargs):
+        mu, std = jnp.split(params, 2, axis=-1)
         std = min_std + (1 - min_std) * softplus(std)
         return GaussianOutput(mu, std)
 
     @classmethod
-    def from_latent(cls, dist: jax.Array, min_std: float = 0.0, **kwargs):
-        mu, std = jnp.split(dist, 2, axis=-1)
+    def from_latent(cls, params: jax.Array, min_std: float = 0.0, **kwargs):
+        mu, std = jnp.split(params, 2, axis=-1)
         std = min_std + (1 - min_std) * softplus(std)
         return mu.mean(axis=1), std.mean(axis=1)  # average over n_z latent samples
 

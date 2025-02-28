@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from jax import random
 
 from ..core.attention import MLP, MultiHeadAttention, mask_from_valid_lens
-from .transform import latent_diagonal_mvn
+from .model_output import GaussianOutput
 
 
 class ANP(nn.Module):
@@ -74,7 +74,7 @@ class ANP(nn.Module):
     )
     dec: nn.Module = MLP([128] * 4 + [2])
     n_z: int = 1
-    output_fn: Callable = latent_diagonal_mvn
+    output_fn: Callable = GaussianOutput.from_latent
 
     @nn.compact
     def __call__(
@@ -167,5 +167,5 @@ class ANP(nn.Module):
         s = jnp.repeat(s_test[:, None, ...], self.n_z, axis=1)  # [B, n_z, L_test, D_s]
         z = jnp.repeat(z[..., None, :], L_test, axis=-2)  # [B, n_z, L_test, d_z]
         q = jnp.concatenate([s, r, z], -1)  # [B, n_z, L_test, D_s + d_ffn + d_z]
-        f_dist = self.dec(q, training)
-        return self.output_fn(f_dist)
+        output = self.dec(q, training)
+        return self.output_fn(output)

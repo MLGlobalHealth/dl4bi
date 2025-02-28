@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from jax import jit, random
+from jax.scipy.stats import norm
 
 from .utils import (
     MetaLearningBatch,
@@ -21,8 +22,6 @@ from .utils import (
 
 @dataclass(frozen=True, eq=False)
 class SpatialData(MetaLearningData):
-    """A simple `TabularData` container."""
-
     x: Optional[jax.Array]  # [B, [S]+, D_x] or [B, D_x] or None
     s: jax.Array  # [B, [S]+, D_s]
     f: jax.Array  # [B, [S]+, D_f]
@@ -108,13 +107,48 @@ class SpatialBatch(MetaLearningBatch):
     inv_permute_idx: jax.Array  # [L]
     s_shape: tuple
 
-    def plot_1d(self, model_output):
-        # TODO(danj): IMPLEMENT
-        pass
+    def plot_1d(
+        self,
+        f_pred: jax.Array,  # [B, [K]?, L_test, 1]
+        f_std: jax.Array,  # [B, [K]?, L_test, 1]
+        hdi_prob: float = 0.95,
+    ):
+        (B, L_test), L = self.f_test.shape[:2], self.inv_permute_idx.shape[0]
+        K = 1 if f_pred.ndim != 4 else f_pred.shape[1]  # bootstrapped K
+        f_pred = f_pred.reshape(B * K, L_test, -1)
+        f_std = f_std.reshape(B * K, L_test, -1)
+        arrays = [self.s_test, self.f_test, f_pred, f_std]
+        arrays = unbatch_BLD(arrays, L)
+        arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
+        s_test, f_test, f_pred, f_std = map(lambda v: v[..., 0], arrays)
+        z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
+        f_lower, f_upper = f_pred - z_score * f_std, f_pred + z_score * f_std
+        _, axs = plt.subplots(B, 1, figsize=(8, B * 4))
+        for i in range(B):
+            if i == 0:
+                axs[i].set_title("Spatial Posterior Predictive")
+            elif i == B - 1:
+                axs[i].set_xlabel("s")
+            axs[i].set_ylabel(f"Sample {i+1}", rotation=90)
+            axs[i].scatter(self.s_ctx[i, :, 0], self.f_ctx[i, :, 0], color="black")
+            axs[i].plot(s_test[i], f_test[i], color="black")
+            for j in range(K):
+                axs[i].plot(s_test[i], f_pred[i], color="steelblue")
+                axs[i].fill_between(
+                    s_test[i],
+                    f_lower[i],
+                    f_upper[i],
+                    alpha=0.4 / K,
+                    color="steelblue",
+                    interpolate=True,
+                )
+        plt.tight_layout()
+        return plt.gcf()
 
     def plot_2d(
         self,
-        model_output,
+        f_pred: jax.Array,  # [B, [K]?, L_test, D_f]
+        f_std: jax.Array,  # [B, [K]?, L_test, D_f]
         cmap=mpl.colormaps.get_cmap("grey"),
         cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
         norm=None,
@@ -123,17 +157,15 @@ class SpatialBatch(MetaLearningBatch):
     ):
         B, L = self.f_test.shape[0], self.inv_permute_idx.shape[0]
         reshape = jit(lambda v: v.reshape(*self.s_shape[:-1], v.shape[-1]))
-        f_mu, f_std = model_output.f_mu, model_output.f_std
-        K = f_mu.shape[0] / B
-        if K > 1:  # bootstrapped models
-            f_mu = f_mu.reshape(B, K, *f_mu.shape[1:]).mean(axis=1)
-            f_std = f_std.reshape(B, K, *f_std.shape[1:]).mean(axis=1)
+        if f_pred.ndim == 4:  # [B, K, L, D] boostrapped
+            f_pred = f_pred.mean(axis=1)
+            f_std = f_std.mean(axis=1)
         if f_std.shape[-1] > 1:  # e.g. uncertainty per RGB channel
             f_std = f_std.mean(axis=-1)
-        arrays = unbatch_BLD([self.f_ctx, self.f_test, f_mu, f_std], L)
+        arrays = unbatch_BLD([self.f_ctx, self.f_test, f_pred, f_std], L)
         arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
         arrays = map(reshape, arrays)
-        f_ctx, f_test, f_mu, f_std = map(remap_colors, arrays)
+        f_ctx, f_test, f_pred, f_std = map(remap_colors, arrays)
         _, axs = plt.subplots(B, 4, figsize=(20, B * 5))
         for i in range(B):
             if i == 0:
@@ -144,7 +176,7 @@ class SpatialBatch(MetaLearningBatch):
             axs[i, 0].set_ylabel(f"Sample {i}")
             axs[i, 0].imshow(f_ctx, cmap=cmap, norm=norm, interpolation="none")
             axs[i, 1].imshow(f_std, cmap=cmap_std, norm=norm_std, interpolation="none")
-            axs[i, 2].imshow(f_mu, cmap=cmap, norm=norm, interpolation="none")
+            axs[i, 2].imshow(f_pred, cmap=cmap, norm=norm, interpolation="none")
             axs[i, 3].imshow(f_test, cmap=cmap, norm=norm, interpolation="none")
         plt.tight_layout()
         return plt.gcf()

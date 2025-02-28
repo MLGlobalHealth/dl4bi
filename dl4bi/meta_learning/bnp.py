@@ -8,7 +8,7 @@ from jax.lax import stop_gradient as no_grad
 
 from ..core.mlp import MLP
 from ..core.utils import bootstrap, mask_from_valid_lens
-from .transform import diagonal_mvn
+from .model_output import GaussianOutput
 
 
 class BNP(nn.Module):
@@ -40,8 +40,8 @@ class BNP(nn.Module):
     enc_det: nn.Module = MLP([128] * 6)
     dec_hid: nn.Module = MLP([128])
     dec_boot: nn.Module = MLP([128] * 2)
-    dec_dist: nn.Module = MLP([128] * 3 + [2])
-    output_fn: Callable = diagonal_mvn
+    dec_out: nn.Module = MLP([128] * 3 + [2])
+    output_fn: Callable = GaussianOutput.from_conditional
 
     @nn.compact
     def __call__(
@@ -128,12 +128,12 @@ class BNP(nn.Module):
         training: bool = False,
         r_ctx_boot: Optional[jax.Array] = None,
     ):
-        L_test = s_test.shape[1]
+        (B, L_test), K = s_test.shape[:2], self.num_samples
         r_ctx = jnp.repeat(r_ctx[:, None, :], L_test, axis=1)  # [B*K, L_test, d_ffn]
         q = jnp.concatenate([r_ctx, s_test], -1)  # [B*K, L_test, d_ffn + D_s]
         h = self.dec_hid(q, training)
         if r_ctx_boot is not None:
             r_ctx_boot = jnp.repeat(r_ctx_boot[:, None, :], L_test, axis=1)
             h += self.dec_boot(r_ctx_boot, training)
-        f_dist = self.dec_dist(h, training)
-        return self.output_fn(f_dist)  # [B*K, L_test, d_f]
+        output = self.dec_out(h, training).reshape(B, K, L_test, -1)
+        return self.output_fn(output)  # [B, K, L_test, D_f]

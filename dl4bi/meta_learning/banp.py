@@ -9,7 +9,7 @@ from jax.lax import stop_gradient as no_grad
 from ..core.attention import MultiHeadAttention
 from ..core.mlp import MLP
 from ..core.utils import bootstrap, mask_from_valid_lens
-from .transform import diagonal_mvn
+from .model_output import GaussianOutput
 
 
 class BANP(nn.Module):
@@ -67,8 +67,8 @@ class BANP(nn.Module):
     )
     dec_hid: nn.Module = MLP([128])
     dec_boot: nn.Module = MLP([128] * 2)
-    dec_dist: nn.Module = MLP([128] * 3 + [2])
-    output_fn: Callable = diagonal_mvn
+    dec_out: nn.Module = MLP([128] * 3 + [2])
+    output_fn: Callable = GaussianOutput.from_conditional
 
     @nn.compact
     def __call__(
@@ -169,6 +169,7 @@ class BANP(nn.Module):
         training: bool = False,
         r_ctx_boot: Optional[jax.Array] = None,
     ):
+        (B, L_test), K = self.s_test.shape[:2], self.num_samples
         s_ctx_embed = self.embed_s(s_ctx)
         s_test_embed = self.embed_s(s_test)
         r, _ = self.cross_attn(
@@ -189,5 +190,5 @@ class BANP(nn.Module):
                 training,
             )  # [B*K, L_test, d_ffn]
             h += self.dec_boot(r_boot, training)
-        f_dist = self.dec_dist(h, training)
-        return self.output_fn(f_dist)  # [B*K, L_test, d_f]
+        output = self.dec_out(h, training).reshape(B, K, L_test, -1)
+        return self.output_fn(output)  # [B, K, L_test, d_f]

@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 from ..core.attention import MultiHeadAttention
 from ..core.mlp import MLP
-from .transform import diagonal_mvn
+from .model_output import GaussianOutput
 
 
 class CANP(nn.Module):
@@ -56,7 +56,7 @@ class CANP(nn.Module):
         num_heads=8,
     )
     dec: nn.Module = MLP([128] * 4 + [2])
-    output_fn: Callable = diagonal_mvn
+    output_fn: Callable = GaussianOutput.from_conditional
 
     @nn.compact
     def __call__(
@@ -113,5 +113,5 @@ class CANP(nn.Module):
             training,
         )  # [B, L_test, d_ffn]
         q = jnp.concatenate([r, s_test], -1)  # [B, L_test, d_ffn + D_s]
-        f_dist = self.dec(q, training)
-        return self.output_fn(f_dist)
+        output = self.dec(q, training)
+        return self.output_fn(output)

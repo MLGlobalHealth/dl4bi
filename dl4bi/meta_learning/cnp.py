@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 from ..core.mlp import MLP
 from ..core.utils import mask_from_valid_lens
-from .transform import diagonal_mvn
+from .model_output import GaussianOutput
 
 
 class CNP(nn.Module):
@@ -31,7 +31,7 @@ class CNP(nn.Module):
 
     enc_det: nn.Module = MLP([128] * 6)
     dec: nn.Module = MLP([128] * 4 + [2])
-    output_fn: Callable = diagonal_mvn
+    output_fn: Callable = GaussianOutput.from_conditional
 
     @nn.compact
     def __call__(
@@ -71,5 +71,5 @@ class CNP(nn.Module):
         L_test = s_test.shape[1]
         r_ctx = jnp.repeat(r_ctx[:, None, :], L_test, axis=1)  # [B, L_test, d_ffn]
         q = jnp.concatenate([r_ctx, s_test], -1)  # [B, L_test, d_ffn + D_s]
-        f_dist = self.dec(q, training)
-        return self.output_fn(f_dist)
+        output = self.dec(q, training)
+        return self.output_fn(output)

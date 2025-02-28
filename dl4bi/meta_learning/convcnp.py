@@ -8,7 +8,7 @@ from sps.utils import build_grid
 
 from ..core.conv import ConvCNPNet, ConvDeepSet
 from ..core.mlp import MLP
-from .transform import diagonal_mvn
+from .model_output import GaussianOutput
 
 
 class ConvCNP(nn.Module):
@@ -40,7 +40,7 @@ class ConvCNP(nn.Module):
     conv_net: nn.Module = ConvCNPNet()
     dec: nn.Module = ConvDeepSet()
     head: nn.Module = MLP([128] * 3 + [2])
-    output_fn: Callable = diagonal_mvn
+    output_fn: Callable = GaussianOutput.from_conditional
 
     @nn.compact
     def __call__(

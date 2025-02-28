@@ -7,7 +7,7 @@ from jax import random
 
 from ..core.mlp import MLP
 from ..core.utils import mask_from_valid_lens
-from .transform import latent_diagonal_mvn
+from .model_output import GaussianOutput
 
 
 class NP(nn.Module):
@@ -35,7 +35,7 @@ class NP(nn.Module):
     z_dist: nn.Module = MLP([128, 256])
     dec: nn.Module = MLP([128] * 4 + [2])
     n_z: int = 1
-    output_fn: Callable = latent_diagonal_mvn
+    output_fn: Callable = GaussianOutput.from_latent
 
     @nn.compact
     def __call__(
@@ -104,5 +104,5 @@ class NP(nn.Module):
         r_ctx_z = jnp.repeat(r_ctx_z, L_test, axis=2)  # [B, n_z, L_test, d_ffn + d_z]
         s = jnp.repeat(s_test[:, None, ...], self.n_z, axis=1)  # [B, n_z, L_test, D_s]
         q = jnp.concatenate([r_ctx_z, s], -1)  # [B, n_z, L_test, d_ffn + d_z + D_s]
-        f_dist = self.dec(q, training)
-        return self.output_fn(f_dist)
+        output = self.dec(q, training)
+        return self.output_fn(output)

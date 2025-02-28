@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 from ..core.mlp import MLP
 from ..core.transformer import TransformerEncoder
-from .transform import diagonal_mvn
+from .model_output import GaussianOutput
 
 
 class TNPD(nn.Module):
@@ -26,7 +26,7 @@ class TNPD(nn.Module):
     embed_s_f: nn.Module = MLP([64] * 4)
     enc: nn.Module = TransformerEncoder()
     head: nn.Module = MLP([128, 2], nn.relu)
-    output_fn: Callable = diagonal_mvn
+    output_fn: Callable = GaussianOutput.from_conditional
 
     @nn.compact
     def __call__(
@@ -72,5 +72,5 @@ class TNPD(nn.Module):
         s_f_embed = self.embed_s_f(s_f, training)
         s_f_enc = self.enc(s_f_embed, valid_lens_ctx, training, **kwargs)
         s_f_test_enc = s_f_enc[:, -L_test:, ...]
-        f_dist = self.head(s_f_test_enc, training)
-        return self.output_fn(f_dist)
+        output = self.head(s_f_test_enc, training)
+        return self.output_fn(output)

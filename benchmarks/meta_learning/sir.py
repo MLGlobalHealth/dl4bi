@@ -13,6 +13,7 @@ from jax import jit, random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
+from dl4bi.meta_learning.model_output import pointwise_multinomial
 from dl4bi.meta_learning.train_utils import (
     Callback,
     cfg_to_run_name,
@@ -25,7 +26,6 @@ from dl4bi.meta_learning.train_utils import (
     select_steps,
     train,
 )
-from dl4bi.meta_learning.transform import pointwise_multinomial
 
 # Example command to evaluate only:
 # python sir.py \

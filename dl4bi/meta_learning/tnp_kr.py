@@ -11,7 +11,7 @@ from ..core.bias import RBFNetworkBias
 from ..core.dist import dist_spatial
 from ..core.mlp import MLP
 from ..core.transformer import KRBlock
-from .transform import diagonal_mvn
+from .model_output import GaussianOutput
 
 
 class TNPKR(nn.Module):
@@ -51,7 +51,7 @@ class TNPKR(nn.Module):
     blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
-    output_fn: Callable = diagonal_mvn
+    output_fn: Callable = GaussianOutput.from_conditional
 
     @nn.compact
     def __call__(
@@ -113,8 +113,8 @@ class TNPKR(nn.Module):
                     kk_kwargs["bias"] = bias(d_kk, d_kk_mask)
                 qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)
-        f_dist = self.head(qvs, training)
-        return self.output_fn(f_dist)
+        output = self.head(qvs, training)
+        return self.output_fn(output)
 
 
 class ScanTNPKR(nn.Module):
@@ -150,7 +150,7 @@ class ScanTNPKR(nn.Module):
     blk: nn.Module = KRBlock(MultiHeadAttention(RBFNetworkBiasedScanAttention()))
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
-    output_fn: Callable = diagonal_mvn
+    output_fn: Callable = GaussianOutput.from_conditional
 
     @nn.compact
     def __call__(
@@ -200,5 +200,5 @@ class ScanTNPKR(nn.Module):
             for _ in range(self.num_reps):
                 qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)
-        f_dist = self.head(qvs, training)
-        return self.output_fn(f_dist)
+        output = self.head(qvs, training)
+        return self.output_fn(output)

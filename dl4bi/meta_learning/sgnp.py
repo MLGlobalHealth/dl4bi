@@ -11,7 +11,7 @@ from ..core.gnn import EdgeBiasedGAT
 from ..core.knn import STkNN, kNN
 from ..core.mlp import MLP
 from ..core.utils import mask_from_valid_lens
-from .transform import diagonal_mvn
+from .model_output import GaussianOutput
 
 
 class SGNP(nn.Module):
@@ -51,7 +51,7 @@ class SGNP(nn.Module):
     norm: nn.Module = nn.LayerNorm()
     gnn: nn.Module = EdgeBiasedGAT()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
-    output_fn: Callable = diagonal_mvn
+    output_fn: Callable = GaussianOutput.from_conditional
 
     @nn.compact
     def __call__(
@@ -80,8 +80,8 @@ class SGNP(nn.Module):
         g = g._replace(nodes=nodes)
         g = self.gnn(g, training, **kwargs)
         n_t = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
-        f_dist = self.head(n_t, training)
-        return self.output_fn(f_dist)
+        output = self.head(n_t, training)
+        return self.output_fn(output)
 
 
 @partial(jit, static_argnames=("knn",))

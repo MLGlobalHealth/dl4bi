@@ -58,7 +58,7 @@ from .sgnp import SGNP
 from .tnp_d import TNPD
 from .tnp_kr import TNPKR, ScanTNPKR
 from .tnp_nd import TNPND
-from .transform import *
+from .model_output import *
 
 
 @flax.struct.dataclass

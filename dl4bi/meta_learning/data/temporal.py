@@ -4,20 +4,22 @@ from typing import Optional
 
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 from jax import jit, random
+from jax.scipy.stats import norm
 
 from .utils import (
     MetaLearningBatch,
     MetaLearningData,
     batch_BLD,
+    inv_permute_L_in_BLD,
     permute_L_in_BLD,
+    unbatch_BLD,
 )
 
 
 @dataclass(frozen=True, eq=False)
 class TemporalData(MetaLearningData):
-    """A simple `TabularData` container."""
-
     x: Optional[jax.Array]  # [B, T, D_x] or [B, D_x] or None
     t: jax.Array  # [B, T]
     f: jax.Array  # [B, T, D_f]
@@ -101,9 +103,43 @@ class TemporalBatch(MetaLearningBatch):
     valid_lens_test: jax.Array  # [B]
     inv_permute_idx: jax.Array  # [L]
 
-    def plot_1d(self, model_output):
-        # TODO(danj): IMPLEMENT
-        pass
+    def plot_1d(
+        self,
+        f_pred: jax.Array,  # [B, [K]?, L_test, 1]
+        f_std: jax.Array,  # [B, [K]?, L_test, 1]
+        hdi_prob: float = 0.95,
+    ):
+        (B, L_test), L = self.f_test.shape[:2], self.inv_permute_idx.shape[0]
+        K = 1 if f_pred.ndim != 4 else f_pred.shape[1]  # bootstrapped K
+        f_pred = f_pred.reshape(B * K, L_test, -1)
+        f_std = f_std.reshape(B * K, L_test, -1)
+        arrays = [self.t_test, self.f_test, f_pred, f_std]
+        arrays = unbatch_BLD(arrays, L)
+        arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
+        t_test, f_test, f_pred, f_std = map(lambda v: v[..., 0], arrays)
+        z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
+        f_lower, f_upper = f_pred - z_score * f_std, f_pred + z_score * f_std
+        _, axs = plt.subplots(B, 1, figsize=(8, B * 4))
+        for i in range(B):
+            if i == 0:
+                axs[i].set_title("Temporal Posterior Predictive")
+            elif i == B - 1:
+                axs[i].set_xlabel("t")
+            axs[i].set_ylabel(f"Sample {i+1}", rotation=90)
+            axs[i].scatter(self.t_ctx[i, :, 0], self.f_ctx[i, :, 0], color="black")
+            axs[i].plot(t_test[i], f_test[i], color="black")
+            for j in range(K):
+                axs[i].plot(t_test[i], f_pred[i], color="steelblue")
+                axs[i].fill_between(
+                    t_test[i],
+                    f_lower[i],
+                    f_upper[i],
+                    alpha=0.4 / K,
+                    color="steelblue",
+                    interpolate=True,
+                )
+        plt.tight_layout()
+        return plt.gcf()
 
 
 # register to use in jitted functions
