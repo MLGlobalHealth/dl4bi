@@ -53,6 +53,7 @@ def binomial(
     map_data: gpd.GeoDataFrame,
     spatial_prior: Callable,
     priors: dict,
+    surrogate_kwargs: dict = {},
 ):
     """
     Builds a Binomial inference model for either actual spatial prior or a surrogate.
@@ -79,7 +80,7 @@ def binomial(
     if cfg.inference_model.get("population_scale", None) is not None:
         population = population // cfg.inference_model.population_scale
     spatial_prior_model, cond_names = gen_saptial_prior(
-        cfg, s, spatial_prior, priors, map_data
+        cfg, s, spatial_prior, priors, map_data, surrogate_kwargs
     )
 
     def inference_model(surrogate_decoder=None, obs_mask=True, y=None):

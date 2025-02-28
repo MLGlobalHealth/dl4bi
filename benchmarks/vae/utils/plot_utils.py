@@ -94,7 +94,7 @@ def plot_prevalence_scatter_comp(
     population_scale: int = 100,
     log: bool = False,
 ):
-    if prev_real is None and inference_model == "binomial" and population:
+    if prev_real is None and inference_model == "binomial" and population is not None:
         population = population // population_scale
         prev_real = jnp.array(f_obs / population)
     if prev_real is None:
@@ -144,7 +144,7 @@ def plot_models_mean_prevalence(
     population_scale: int = 100,
     log: bool = False,
 ):
-    if prev_real is None and inference_model == "binomial" and population:
+    if prev_real is None and inference_model == "binomial" and population is not None:
         population = population // population_scale
         prev_real = jnp.array(f_obs / population)
     val_n = "Prevalence" if inference_model == "binomial" else "Intensity"
@@ -385,7 +385,7 @@ def plot_inference_run(
             [model_name],
             inference_model.model.func,
             map_data,
-            population_scale=inference_model.get("population_scale", None),
+            population_scale=inference_model.get("population_scale", 1),
         )
     plot_prevalence_scatter_comp(
         prev_real,
@@ -394,7 +394,7 @@ def plot_inference_run(
         population,
         [model_name],
         inference_model.model.func,
-        population_scale=inference_model.get("population_scale", None),
+        population_scale=inference_model.get("population_scale", 1),
     )
 
 

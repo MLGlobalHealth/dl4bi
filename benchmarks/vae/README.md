@@ -24,17 +24,17 @@ DeepRV is a VAE-decoder-only model designed to generate pre-trained priors for g
 
 ## Training DeepRV Priors
 - The user has the following choices:
-    - **Spatial prior class**:  Available classes the GP kernels: `rbf`, `matern_1_2`, `matern_3_2`, `matern_5_2`, `periodic`. And the graph-based model `car`.
+    - **Spatial prior class**:  Available classes are the GP kernels: `rbf`, `matern_1_2`, `matern_3_2`, `matern_5_2`, `periodic`. And the graph-based CAR model `car`.
     - **Priors for hyperparameters**: Specify priors for heperparameters of the chosen kernel, which must be distributions supported by NumPyro. Refer to the [NumPyro documentation](https://num.pyro.ai/en/stable/distributions.html). For a documented example, see `configs/inference_model/poisson.yaml`.
-    - **Map choice**: The user needs to provide a GeoPandas-readable map to the path `map_path`.
-    - **Grid**: In case the user doesn't provide a map, they can set `data=1d` or `data=2d` to work on a simple grid.
+    - **Map choice**: The user needs to provide a GeoPandas-readable map to the path `data.map_path`.
+    - **Grid**: In case the user doesn't provide a map, they can set `data=1d` or `data=2d` to work on a simple grid (CAR model is not supported for this case).
     - **Experiment name**: The user needs to provide a name to save the experiment under.
 
 - Running a training process with map data:
     ```bash
-    python vae.py exp_name=experiment_name map_path=user_path/map_path \
+    python vae.py exp_name=experiment_name data.map_path=user_path/map_path \
         [inference_model.spatial_prior.func=matern_3_2 (defaults to rbf)] \
-        [seed=7 (defaults to 42)] \
+        [seed=7 (defaults to 0)] \
         [wandb=False (defaults to True)]
     ```
     - The default training prior is the RBF GP kernel. To use a custom prior, either replace `inference_model.spatial_prior.func` as in the example above, or add a new inference model file to `configs/inference_model/<custom_prior>.yaml` and set your spatial prior and training hyperparameter priors there.
@@ -44,7 +44,7 @@ DeepRV is a VAE-decoder-only model designed to generate pre-trained priors for g
       results/deep_RV/<experiment_name>/<spatial_prior>/<seed>/
       ```
     - Provide meaningful experiment names and update them for new maps to avoid overwriting results.
-    - `map_path` can be a path to a directory or a single file, depending on the GeoPandas file type.
+    - `data.map_path` can be a path to a directory or a single file, depending on the GeoPandas file type.
 
 - Running a training process with 1d grid:
     ```bash
@@ -64,7 +64,7 @@ DeepRV is a VAE-decoder-only model designed to generate pre-trained priors for g
 
 - Running inference:
     ```bash
-    python vae.py exp_name=experiment_name map_path=user_path/map_path \
+    python vae.py exp_name=experiment_name data.map_path=user_path/map_path \
         inference_model=poisson (defaults to poisson) \
         [inference_model.spatial_prior.func=matern_3_2 (defaults to rbf)] \
         [seed=7 (defaults to 42)] \
@@ -72,7 +72,7 @@ DeepRV is a VAE-decoder-only model designed to generate pre-trained priors for g
     ```
     - Ensure `exp_name`, `map_path`, `spatial_prior.func`, and `seed` match the trained DeepRV model for proper loading.
     - The model is sensitive to the order of conditionals; use the same order as during training.
-    - A `None` value in the `data` column indicates missing observations (Behavior of feature is not fully tested).
+    - A `None` value in the `data` column indicates missing observations which are masked during inference (Behavior of feature is not fully tested).
 
 - Inference results are stored in:
     ```
@@ -81,33 +81,34 @@ DeepRV is a VAE-decoder-only model designed to generate pre-trained priors for g
     - `<model_name>_hmc_pp.pkl`: Contains `s` (centroids), `f` (data samples), `obs_idxs` (observed location indices), and sampled variables.
     - `<model_name>_hmc_samples.pkl`: Contains all MCMC samples for all chains.
     - `<model_name>_hmc_summary.txt`: Summary statistics (mean, median, percentiles).
+    - `<model_name>_mcmc.pkl`: MCMC object which can be read with arviz.
 
 ## Full Train and Inference Examples
 ### RBF Kernel with Poisson Inference
 ```bash
-python train.py exp_name=experiment_name map_path=user_path/map_path inference_model.spatial_prior.func=rbf seed=19 wandb=False && \
-python infer.py exp_name=experiment_name map_path=user_path/map_path inference_model=poisson inference_model.spatial_prior.func=rbf seed=19 wandb=False
+python train.py exp_name=experiment_name data.map_path=user_path/map_path inference_model.spatial_prior.func=rbf seed=19 wandb=False && \
+python infer.py exp_name=experiment_name data.map_path=user_path/map_path inference_model=poisson inference_model.spatial_prior.func=rbf seed=19 wandb=False
 ```
 
 ### CAR model with Poisson Inference
 ```bash
-python train.py exp_name=experiment_name map_path=user_path/map_path inference_model.spatial_prior.func=car seed=19 wandb=False && \
-python infer.py exp_name=experiment_name map_path=user_path/map_path inference_model=poisson_car_gp seed=19 wandb=False
+python train.py exp_name=experiment_name data.map_path=user_path/map_path inference_model.spatial_prior.func=car seed=19 wandb=False && \
+python infer.py exp_name=experiment_name data.map_path=user_path/map_path inference_model=poisson_car_gp seed=19 wandb=False
 ```
 
 ### Periodic Kernel with binomial Inference
 ```bash
-python train.py exp_name=experiment_name map_path=user_path/map_path inference_model=binomial inference_model.spatial_prior.func=periodic seed=19 wandb=False && \
-python infer.py exp_name=experiment_name map_path=user_path/map_path inference_model=binomial inference_model.spatial_prior.func=periodic seed=19 wandb=False
+python train.py exp_name=experiment_name data.map_path=user_path/map_path inference_model=binomial inference_model.spatial_prior.func=periodic seed=19 wandb=False && \
+python infer.py exp_name=experiment_name data.map_path=user_path/map_path inference_model=binomial inference_model.spatial_prior.func=periodic seed=19 wandb=False
 ```
 
 ## Validating pre-trained prior with empirical bayes
 ```bash
-python train.py exp_name=experiment_name map_path=user_path/map_path inference_model=spatial_only inference_model.spatial_prior.func=matern_5_2 seed=19 wandb=False && \
-python empirical_bayes.py exp_name=experiment_name map_path=user_path/map_path inference_model=spatial_only inference_model.spatial_prior.func=matern_5_2 seed=19 wandb=False
+python train.py exp_name=experiment_name data.map_path=user_path/map_path inference_model=spatial_only inference_model.spatial_prior.func=matern_5_2 seed=19 wandb=False && \
+python empirical_bayes.py exp_name=experiment_name data.map_path=user_path/map_path inference_model=spatial_only inference_model.spatial_prior.func=matern_5_2 seed=19 wandb=False
 ```
 
-## Reproducing Paper Results (Deprecated)
+## Reproducing Paper Results
 
 To reproduce the results, first download the UK LTLA, as well as the England & Wales LAD maps using the following link:  
 
@@ -123,6 +124,7 @@ benchmarks/vae/
 │   │   └── shapefile_data
 │   ├── male_under_50_cancer_mortality_LAD_2023/
 │   │   └── shapefile_data
+│   ├── zwe2016phia_fixed.geojson
 ```
 
 After downloading the maps, run:  
@@ -136,13 +138,15 @@ python -m reproduce_paper/reproduce_plots
 #### Simulated Data  
 - Run 5 seeds across 5 GP kernels.  
 - Train DeepRV & PriorCVAE on the UK LTLA map.  
-- Perform Empirical Bayes inference using DeepRV, PriorCVAE, and an actual GP.  
+- Perform Empirical Bayes inference using DeepRV, PriorCVAE, and the actual process.  
 - Run MCMC inference for a single seed per kernel.  
 
 #### Real Data (Cancer Mortality Under 50)  
 - Train DeepRV on the England & Wales LAD map.  
 - Perform MCMC inference for Poisson & Binomial models.  
-- Use Matern 3/2 and RBF kernels, separately for males and females.  
+- Use Matern 3/2 and Matern 1/2 kernels, separately for males and females.  
+- Train DeepRV on the Zimbabwe 2016 HIV prevalence map. 
+- Perform MCMC inference with the Matern 1/2 for the Zimbabwe 2016 HIV prevalence. 
 
 ### Output  
 

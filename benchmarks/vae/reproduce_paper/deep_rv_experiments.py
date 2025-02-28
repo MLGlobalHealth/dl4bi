@@ -70,18 +70,22 @@ def run_experiments(
         )
 
     if real_data:
-        exp_names = ["total_U50_cancer_mort", "zimbabwe_HIV"]
+        exp_names = ["male_U50_cancer_mort", "female_U50_cancer_mort", "zimbabwe_HIV"]
         map_paths = [
-            "benchmarks/vae/maps/total_under_50_cancer_mortality_LAD_2023",
+            "benchmarks/vae/maps/male_under_50_cancer_mortality_LAD_2023",
+            "benchmarks/vae/maps/female_under_50_cancer_mortality_LAD_2023",
             "benchmarks/vae/maps/zwe2016phia_fixed.geojson",
         ]
-        model_types = ["binomial_real"]
-        spatial_prior_per_exp = [["matern_3_2"], ["matern_1_2"]]
-        models = ["auto_deep_RV"]
-        for exp_name, map_path, spatial_priors in zip(
-            exp_names, map_paths, spatial_prior_per_exp
+        inf_models_per_exp = [["binomial_mort"], ["binomial_mort"], ["binomial_zimb"]]
+        spatial_priors_per_exp = [
+            ["matern_3_2", "matern_1_2"],
+            ["matern_3_2", "matern_1_2"],
+            ["matern_1_2"],
+        ]
+        models = ["auto_deep_RV", "deep_RV_gMLP", "auto_prior_cvae"]
+        for exp_name, map_path, spatial_priors, inf_models in zip(
+            exp_names, map_paths, spatial_priors_per_exp, inf_models_per_exp
         ):
-            pop_scale = 100 if exp_name == "total_U50_cancer_mort" else 1
             run_vae_train(
                 f"deep_RV_{exp_name}",
                 map_path,
@@ -91,7 +95,7 @@ def run_experiments(
                 models,
                 vae_overrides,
             )
-            for model_type in model_types:
+            for inf_model in inf_models:
                 run_inference(
                     f"deep_RV_{exp_name}",
                     map_path,
@@ -99,9 +103,8 @@ def run_experiments(
                     seeds[:1],
                     spatial_priors,
                     models + ["Baseline_GP"],
-                    infer_overrides
-                    + [f"+inference_model.population_scale={pop_scale}"],
-                    model_type=model_type,
+                    infer_overrides + [f"inference_model={inf_model}"],
+                    model_type="binomial",
                 )
 
 

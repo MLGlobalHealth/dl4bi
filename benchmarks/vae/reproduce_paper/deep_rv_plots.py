@@ -48,18 +48,26 @@ def reproduce_plots(seeds: jax.Array):
     print_simulated_latex_table(pd.DataFrame(infer_summary), models_n)
     summarize_inference_runs(
         seed,
-        ["DeepRV_MLP", "Baseline_GP"],
-        ["matern_3_2"],
-        "total_U50_cancer_mort",
-        "maps/total_under_50_cancer_mortality_LAD_2023",
+        models_n,
+        ["matern_1_2", "matern_3_2"],
+        "female_U50_cancer_mort",
+        "benchmarks/vae/maps/total_under_50_cancer_mortality_LAD_2023",
         "binomial",
     )
     summarize_inference_runs(
         seed,
-        ["DeepRV", "Baseline_GP"],
+        models_n,
+        ["matern_1_2", "matern_3_2"],
+        "male_U50_cancer_mort",
+        "benchmarks/vae/maps/total_under_50_cancer_mortality_LAD_2023",
+        "binomial",
+    )
+    summarize_inference_runs(
+        seed,
+        models_n,
         ["matern_1_2"],
         "zimbabwe_HIV",
-        "maps/zwe2016phia_fixed.geojson",
+        "benchmarks/vae/maps/zwe2016phia_fixed.geojson",
         "binomial",
         population_scale=1,
     )
@@ -230,7 +238,11 @@ def summarize_inference_runs(
             lambda_hat = samples["beta"][..., None] + samples["mu"]
             prev_hats.append(lambda_hat)
             f, f_hat = post["f"], post["obs"]
-            if i == 0 and "beta" in post and "spatial_eff" in post:
+            if (
+                i == 0
+                and post.get("beta") is not None
+                and post.get("spatial_eff") is not None
+            ):
                 prev_real = post["beta"] + post["spatial_eff"]
             f_hats[0] = f
             f_hats.append(f_hat)
