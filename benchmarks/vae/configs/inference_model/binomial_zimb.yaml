@@ -2,6 +2,9 @@ model: # Inference model function to choose from inference_models/inference_mode
   func: binomial
 spatial_prior:
   func: matern_1_2
+surrogate_model: True # Whether to use a surrogate model or and actual GP sampling
+num_obs_locations: null # Can be used to randomly select partial number of locations for inference
+population_scale: 1 # whether to scale down the population when it's >> counts
 # priors names and args must be compat with Numpyro distributions
 priors: # Priors for inference model data generation
   beta:
@@ -17,8 +20,6 @@ priors: # Priors for inference model data generation
   ls:
     numpyro_dist: Uniform
     kwargs:
-      low: 5.0
+      low: 0.0
       high: 100.0
-surrogate_model: True # Whether to use a surrogate model or and actual GP sampling
-num_obs_locations: null # Can be used to randomly select partial number of locations for inference
-population_scale: 100
+
