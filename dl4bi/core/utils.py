@@ -7,34 +7,9 @@ from jax import jit, lax, random, vmap
 from jax.tree_util import Partial
 
 
-@jit
-def mask_attn(x: jax.Array, valid_lens: jax.Array, fill=-jnp.inf):
-    r"""Mask `x` with `fill` using `valid_lens`.
-
-    Args:
-        x: Values of dimension $\mathbb{R}^{B\times Q\times K}$
-        valid_lens: Mask consisting of valid length per sequence
-            $\mathbb{R}^{B}$ or $\mathbb{R}^{B\times Q}.
-
-    Returns:
-       `x` with filled values according to mask.
-    """
-    B, Q, K = x.shape
-    if valid_lens.ndim == 1:
-        valid_lens = jnp.repeat(valid_lens, Q)
-    x = x.reshape(B * Q, K)
-    m = jnp.arange(K) < valid_lens.reshape(-1, 1)
-    return jnp.where(m, x, fill).reshape(B, Q, K)
-
-
 def mask_from_valid_lens(max_len: int, valid_lens: jax.Array):
-    """Return a boolean mask using `valid_lens`.
-
-    .. note::
-        Adds a final dimension of 1, which is often used to broadcast across the
-        final tensor dimension.
-    """
-    return (jnp.arange(max_len) < valid_lens[..., None])[..., None]
+    """Return a boolean mask using `valid_lens`."""
+    return jnp.arange(max_len) < valid_lens[..., None]
 
 
 def pad_concat(x: jax.Array, y: jax.Array):
@@ -61,11 +36,12 @@ def pad_concat(x: jax.Array, y: jax.Array):
     return jnp.concatenate([x, y], axis=-1)
 
 
+# TODO(danj): update this to be compatible with mask_ctx
 @partial(jit, static_argnames=("num_samples"))
 def bootstrap(
     rng: jax.Array,
     x: jax.Array,  # [B, L, D]
-    valid_lens: jax.Array,  # [B]
+    mask: jax.Array,  # [B, L]
     num_samples: int = 1,
 ):
     """Bootstrap selects the first `valid_lens` values of `x` `num_samples` times.
@@ -73,19 +49,19 @@ def bootstrap(
     Args:
         rng: A PRNGKey.
         x: Array to bootstrap.
-        valid_lens: The valid entries for every sequence in x.
+        mask: The valid entries for every sequence in x.
 
     Returns:
         A bootstrap sampled array of shape [B * num_samples, L, D].
     """
     (B, L, _), K = x.shape, num_samples
     x = jnp.repeat(x, K, axis=0)
-    valid_lens = jnp.repeat(valid_lens, K, axis=0)
-    mask = mask_from_valid_lens(L, valid_lens).squeeze()
+    boot_mask = jnp.repeat(mask, K, axis=0)
+    # TODO(danj): implement here
     rnd_idx = random.randint(rng, (B * K, L), 0, valid_lens[:, None])
     ord_idx = jnp.repeat(jnp.arange(L)[None, :], B * K, axis=0)
     boot_idx = mask * rnd_idx + ~mask * ord_idx
-    return vmap(lambda row, idx: row[idx], (0, 0))(x, boot_idx), valid_lens
+    return vmap(lambda row, idx: row[idx], (0, 0))(x, boot_idx), mask_boot
 
 
 def breakpoint_if_nonfinite(x):

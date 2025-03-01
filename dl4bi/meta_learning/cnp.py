@@ -5,8 +5,7 @@ import jax
 import jax.numpy as jnp
 
 from ..core.mlp import MLP
-from ..core.utils import mask_from_valid_lens
-from .model_output import GaussianOutput
+from .model_output import DiagonalMVNOutput
 
 
 class CNP(nn.Module):
@@ -31,7 +30,7 @@ class CNP(nn.Module):
 
     enc_det: nn.Module = MLP([128] * 6)
     dec: nn.Module = MLP([128] * 4 + [2])
-    output_fn: Callable = GaussianOutput.from_conditional
+    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
 
     @nn.compact
     def __call__(
@@ -39,28 +38,28 @@ class CNP(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
         **kwargs,
     ):
-        r = self.encode_deterministic(s_ctx, f_ctx, valid_lens_ctx, training)
+        r = self.encode_deterministic(s_ctx, f_ctx, mask_ctx, training)
         return self.decode(r, s_test, training)  # [B, n_z, L_test, d_f]
 
     def encode_deterministic(
         self,
-        s_ctx: jax.Array,  # [B, L, D_s]
-        f_ctx: jax.Array,  # [B, L, D_f]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
+        s_ctx: jax.Array,  # [B, L_ctx, D_s]
+        f_ctx: jax.Array,  # [B, L_ctx, D_f]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
     ):
         (B, L, _) = s_ctx.shape
-        if valid_lens_ctx is None:
-            valid_lens_ctx = jnp.repeat(L, B)
-        mask = mask_from_valid_lens(L, valid_lens_ctx)
+        if mask_ctx is None:
+            mask_ctx = jnp.array([True])
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_det(s_f_ctx, training)
-        return jnp.mean(s_f_ctx_embed, axis=1, where=mask)  # [B, d_ffn]
+        if mask_ctx is not None:
+            return jnp.mean(s_f_ctx_embed, axis=1, where=mask_ctx[..., None])
+        return jnp.mean(s_f_ctx_embed, axis=1)  # [B, d_ffn]
 
     def decode(
         self,

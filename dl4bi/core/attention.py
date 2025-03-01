@@ -1,5 +1,5 @@
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from functools import partial
 from typing import Optional
 
@@ -8,16 +8,12 @@ import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
 import jraph
-from einops import rearrange, repeat
-from jax import jit, lax, random, vmap
+from einops import rearrange
+from jax import jit, lax, random
 from jax.lax import scan
-from jax.nn import dot_product_attention
-from sps.kernels import outer_subtract
 
 from .bias import scanned_rbf_network_bias, scanned_tisa_bias
-from .embed import RBFRandomFourierFeatures
 from .mlp import MLP
-from .utils import mask_attn, mask_from_valid_lens
 
 
 def gaussian_orf(key: jax.Array, m: int, d: int, structured: bool = True):
@@ -182,10 +178,10 @@ class FastAttention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,  # [B, Q, H, D_QK_H]
-        ks: jax.Array,  # [B, K, H D_QK_H]
-        vs: jax.Array,  # [B, K, H, D_H]
-        valid_lens: Optional[jax.Array] = None,  # [B]
+        qs: jax.Array,  # [B, H, Q, D_qk]
+        ks: jax.Array,  # [B, H, K, D_qk]
+        vs: jax.Array,  # [B, H, K, D_v]
+        mask: Optional[jax.Array] = None,  # [B, K]
         training: bool = False,
         redraw_random_features: bool = False,
         **kwargs,
@@ -193,11 +189,10 @@ class FastAttention(nn.Module):
         r"""Performs forward pass of network.
 
         Args:
-            qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_{Q,K}_H}$
-            ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_{Q,K}_H}$
-            vs: Values of dimension $\mathbb{R}^{B\times K\times H\times D_V_H}$
-            valid_lens: Mask consisting of valid length per sequence of dimension
-                $\mathbb{R}^B$.
+            qs: Queries of shape [B, H, Q, D_qk].
+            ks: Keys of shape [B, H, K, D_qk].
+            vs: Values of shape [B, H, K, D_v].
+            mask: Mask for keys and values of shape [B, K].
             training: Boolean indicating whether currently training.
             redraw_random_features: Redraw random features used for
                 softmax kernel approximation.
@@ -206,9 +201,9 @@ class FastAttention(nn.Module):
             `ctx` and `attn`, the updated values and None, respectively,
             since the attention matrix is never materialized in FAVOR+.
         """
-        (H, D_QK_H), K = qs.shape[-2:], ks.shape[1]
+        B, H, Q, D_qk = qs.shape
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        gen_qk_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_QK_H)
+        gen_qk_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_qk)
         qk_proj = self.variable(
             "projections",
             "qk_orf",
@@ -218,84 +213,16 @@ class FastAttention(nn.Module):
             warnings.warn("FastAttention does not currently support bias!")
         if redraw_random_features:
             qk_proj.value = gen_qk_proj(self.make_rng("rng_extra"))
-        qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> (B H) L D"), (qs, ks, vs))
-        normalizer = 1 / jnp.pow(D_QK_H, 0.25)
+        qs, ks, vs = map(lambda x: rearrange(x, "B H L D -> (B H) L D"), (qs, ks, vs))
+        normalizer = 1 / jnp.pow(D_qk, 0.25)
         phi = self.build_phi(qk_proj.value)
         qs_prime = phi(qs * normalizer)
         ks_prime = phi(ks * normalizer)
         # NOTE: mask after phi in case phi maps zero to non-zero values
-        if valid_lens is not None:
-            valid_lens = jnp.repeat(valid_lens, H, axis=0)
-            ks_prime *= mask_from_valid_lens(K, valid_lens)
+        if mask is not None:  # ks_prime: [B*H, K, D]
+            ks_prime *= jnp.repeat(mask, H, axis=0)[..., None]
         ctx = fast_attend(qs_prime, ks_prime, vs)
-        ctx = rearrange(ctx, "(B H) Q D -> B Q H D", H=H)
-        return drop(ctx), None
-
-
-class DistanceBiasedFastAttention(nn.Module):
-    r"""[FAVOR+](https://arxiv.org/abs/2009.14794) implementation, Appendix B.
-
-    Implementation based on [google-research fast attention](https://github.com/google-research/google-research/blob/master/performer/fast_attention/jax/fast_attention.py) and [Teddy Koker's implementation](https://github.com/teddykoker/performer).
-    """
-
-    p_dropout: float = 0.0
-    build_phi: Callable = build_stable_positive_softmax_phi
-    num_ortho_features: int = 64
-    s_rbf_rff: nn.Module = RBFRandomFourierFeatures(48)
-
-    @nn.compact
-    def __call__(
-        self,
-        qs: jax.Array,  # [B, Q, H, D_QK_H]
-        ks: jax.Array,  # [B, K, H D_QK_H]
-        vs: jax.Array,  # [B, K, H, D_H]
-        valid_lens: Optional[jax.Array] = None,  # [B]
-        training: bool = False,
-        redraw_random_features: bool = False,
-        **kwargs,
-    ):
-        r"""Performs forward pass of network.
-
-        Args:
-            qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_{Q,K}_H}$
-            ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_{Q,K}_H}$
-            vs: Values of dimension $\mathbb{R}^{B\times K\times H\times D_V_H}$
-            valid_lens: Mask consisting of valid length per sequence of dimension
-                $\mathbb{R}^B$.
-            training: Boolean indicating whether currently training.
-            redraw_random_features: Redraw random features used for
-                softmax kernel approximation.
-
-        Returns:
-            `ctx` and `attn`, the updated values and None, respectively,
-            since the attention matrix is never materialized in FAVOR+.
-        """
-        (H, D_QK_H), K = qs.shape[-2:], ks.shape[1]
-        E = self.s_rbf_rff.embed_dim
-        stack = lambda *args: jnp.concatenate(args, axis=-1)
-        drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        gen_qk_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_QK_H + E)
-        qk_proj = self.variable(
-            "projections", "qk_orf", lambda: gen_qk_proj(self.make_rng("params"))
-        )
-        if redraw_random_features:
-            qk_proj.value = gen_qk_proj(self.make_rng("rng_extra"))
-        qs_s, ks_s = self.s_rbf_rff(kwargs["qs_s"]), self.s_rbf_rff(kwargs["ks_s"])
-        normalizer = 1 / jnp.pow(D_QK_H, 0.25)
-        qs, ks = qs * normalizer, ks * normalizer
-        qs, ks, vs, qs_s, ks_s = map(
-            lambda x: rearrange(x, "B L H D -> (B H) L D"),
-            (qs, ks, vs, qs_s, ks_s),
-        )
-        phi = self.build_phi(qk_proj.value)
-        # NOTE: concat locations after normalization
-        qs_prime, ks_prime = phi(stack(qs, qs_s)), phi(stack(ks, ks_s))
-        # NOTE: mask after phi in case phi maps zero to non-zero values
-        if valid_lens is not None:
-            valid_lens = jnp.repeat(valid_lens, H, axis=0)
-            ks_prime *= mask_from_valid_lens(K, valid_lens)
-        ctx = fast_attend(qs_prime, ks_prime, vs)
-        ctx = rearrange(ctx, "(B H) Q D -> B Q H D", H=H)
+        ctx = rearrange(ctx, "(B H) Q D -> B H Q D", H=H)
         return drop(ctx), None
 
 
@@ -335,21 +262,20 @@ class ScanAttention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,  # [B, Q, H, D_QK_H]
-        ks: jax.Array,  # [B, K, H D_QK_H]
-        vs: jax.Array,  # [B, K, H, D_H]
-        valid_lens: Optional[jax.Array] = None,  # [B]
+        qs: jax.Array,  # [B, H, Q, D_qk]
+        ks: jax.Array,  # [B, H, K, D_qk]
+        vs: jax.Array,  # [B, H, K, D_v]
+        mask: Optional[jax.Array] = None,  # [B, K]
         training: bool = False,
         **kwargs,
     ):
         r"""Performs forward pass of network.
 
         Args:
-            qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
-            ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
-            vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
-            valid_lens: Mask consisting of valid length per sequence of dimension
-                $\mathbb{R}^B$.
+            qs: Queries of shape [B, H, Q, D_qk].
+            ks: Keys of shape [B, H, K, D_qk].
+            vs: Values of shape [B, H, K, D_v].
+            mask: Mask for keys and values of shape [B, K].
             training: Boolean indicating whether currently training.
 
         Returns:
@@ -358,14 +284,11 @@ class ScanAttention(nn.Module):
         """
         if kwargs.get("bias") is not None:
             warnings.warn("ScanAttention does not currently support bias!")
-        ks_mask = None
-        if valid_lens is not None:
-            ks_mask = mask_from_valid_lens(ks.shape[1], valid_lens)[..., 0]
         return scan_attention(
             qs,
             ks,
             vs,
-            ks_mask,
+            mask,
             self.qs_chunk_size,
             self.ks_chunk_size,
         ), None
@@ -376,7 +299,7 @@ def scan_attention(
     qs: jax.Array,
     ks: jax.Array,
     vs: jax.Array,
-    ks_mask: Optional[jax.Array] = None,
+    mask: Optional[jax.Array] = None,
     qs_chunk_size: int = 1024,
     ks_chunk_size: int = 1024,
 ):
@@ -385,19 +308,19 @@ def scan_attention(
     Implementation inspired by [flash-attention-jax](https://github.com/lucidrains/flash-attention-jax)
     and Google's [memory-efficient-attention](https://bit.ly/4eFA4mC).
     """
-    (B, Q, H, D), Q_c = qs.shape, qs_chunk_size
+    (B, H, Q, D), Q_c = qs.shape, qs_chunk_size
     Q_c = min(Q, qs_chunk_size)
 
     # JAX/numpy store data in row major format, so (theoretically) putting the
     # scanned axes first improves cache locality
-    qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> L B H D"), (qs, ks, vs))
-    if ks_mask is not None:
-        ks_mask = rearrange(ks_mask, "B K -> K B")
+    qs, ks, vs = map(lambda x: rearrange(x, "B H L D -> L B H D"), (qs, ks, vs))
+    if mask is not None:
+        mask = rearrange(mask, "B K -> K B")
 
     @jit
     def qs_scanner(i, _):
         qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
-        return i + Q_c, scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size)
+        return i + Q_c, scan_ks(qs_chunk, ks, vs, mask, ks_chunk_size)
 
     i, os = scan(
         qs_scanner,
@@ -405,14 +328,14 @@ def scan_attention(
         xs=None,
         length=Q // Q_c,
     )
-    os = rearrange(os, "C Q B H D -> B (C Q) H D")
+    os = rearrange(os, "C Q B H D -> B H (C Q) D")
 
     remainder = Q % Q_c
     if remainder:
         qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (remainder, B, H, D))
-        os_chunk = scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size)
-        os_chunk = rearrange(os_chunk, "Q B H D -> B Q H D")
-        os = jnp.concatenate([os, os_chunk], axis=1)
+        os_chunk = scan_ks(qs_chunk, ks, vs, mask, ks_chunk_size)
+        os_chunk = rearrange(os_chunk, "Q B H D -> B H Q D")
+        os = jnp.concatenate([os, os_chunk], axis=2)
 
     return os
 
@@ -421,7 +344,7 @@ def scan_ks(
     qs_chunk: jax.Array,
     ks: jax.Array,
     vs: jax.Array,
-    ks_mask: Optional[jax.Array] = None,
+    mask: Optional[jax.Array] = None,
     ks_chunk_size: int = 1024,
 ):
     (Q_c, B, H, D), K = qs_chunk.shape, ks.shape[0]
@@ -432,12 +355,12 @@ def scan_ks(
     @jit
     def ks_scanner(carry: tuple, _):
         i, os, row_maxs, row_sums = carry
-        ks_chunk, vs_chunk, ks_mask_chunk = chunk_ks(i, K_c)
+        ks_chunk, vs_chunk, mask_chunk = chunk_ks(i, K_c)
         _carry = update(
             qs_chunk,
             ks_chunk,
             vs_chunk,
-            ks_mask_chunk,
+            mask_chunk,
             os,
             row_maxs,
             row_sums,
@@ -447,17 +370,17 @@ def scan_ks(
     def chunk_ks(i, k_c):
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (k_c, B, H, D))
         vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D_V))
-        ks_mask_chunk = jnp.array(True)
-        if ks_mask is not None:
-            ks_mask_chunk = lax.dynamic_slice(ks_mask, (i, 0), (k_c, B))
-            ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
-        return ks_chunk, vs_chunk, ks_mask_chunk
+        mask_chunk = jnp.array(True)
+        if mask is not None:
+            mask_chunk = lax.dynamic_slice(mask, (i, 0), (k_c, B))
+            mask_chunk = rearrange(mask_chunk, "K B -> 1 B 1 K")
+        return ks_chunk, vs_chunk, mask_chunk
 
     @jit
     @partial(jax.remat, prevent_cse=False)
-    def update(qs_chunk, ks_chunk, vs_chunk, ks_mask_chunk, os, row_maxs, row_sums):
+    def update(qs_chunk, ks_chunk, vs_chunk, mask_chunk, os, row_maxs, row_sums):
         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
-        scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
+        scores = jnp.where(mask_chunk, scores, -float("inf"))
         row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
         exp_scores = jnp.exp(scores - new_row_maxs)
@@ -483,12 +406,12 @@ def scan_ks(
     # last block
     remainder = K % K_c
     if remainder:
-        ks_chunk, vs_chunk, ks_mask_chunk = chunk_ks(i, remainder)
+        ks_chunk, vs_chunk, mask_chunk = chunk_ks(i, remainder)
         os, row_maxs, row_sums = update(
             qs_chunk,
             ks_chunk,
             vs_chunk,
-            ks_mask_chunk,
+            mask_chunk,
             os,
             row_maxs,
             row_sums,
@@ -507,7 +430,7 @@ class RBFNetworkBiasedScanAttention(nn.Module):
         num_basis: Number of basis functions for TISA bias.
 
     Returns:
-        A `ScanTISABiasedAttention` module.
+        An `RBFNetworkBiasedScanAttention` module.
     """
 
     qs_chunk_size: int = 1024
@@ -517,42 +440,38 @@ class RBFNetworkBiasedScanAttention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,  # [B, Q, H, D_QK_H]
-        ks: jax.Array,  # [B, K, H D_QK_H]
-        vs: jax.Array,  # [B, K, H, D_H]
-        valid_lens: Optional[jax.Array] = None,  # [B]
+        qs: jax.Array,  # [B, H, Q, D_qk]
+        ks: jax.Array,  # [B, H, K, D_qk]
+        vs: jax.Array,  # [B, H, K, D_v]
+        mask: Optional[jax.Array] = None,  # [B, K]
         training: bool = False,
         **kwargs,
     ):
         r"""Performs forward pass of network.
 
         Args:
-            qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
-            ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
-            vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
-            qs_locs: Query locations of dimension $\mathbb{R}^{B\times Q\times S}$
-            ks_locs: Key locations of dimension $\mathbb{R}^{B\times K\times S}$
-            valid_lens: Mask consisting of valid length per sequence of dimension
-                $\mathbb{R}^B$.
+            qs: Queries of shape [B, H, Q, D_qk].
+            ks: Keys of shape [B, H, Q, D_qk].
+            vs: Values of shape [B, H, K, D_v].
+            mask: Mask for keys and values of shape [B, K].
             training: Boolean indicating whether currently training.
+            qs_locs: Query locations of shape [B, Q, D_s].
+            ks_locs: Key locations of shape [B, K, D_s].
 
         Returns:
             `ctx` and `attn`, the updated values and None, respectively,
             since scanned attention never materializes the attention matrix.
         """
-        K, H, F = ks.shape[1], qs.shape[2], self.num_basis
+        H, F = qs.shape[1], self.num_basis
         a = self.param("a", init.constant(1), (H, F))
         b = self.param("b", init.constant(1), (H, F))
-        ks_mask = None
-        if valid_lens is not None:
-            ks_mask = mask_from_valid_lens(K, valid_lens)[..., 0]
         return biased_scan_attention(
             qs,
             ks,
             vs,
-            kwargs["qs_s"],  # [B, Q, S]
-            kwargs["ks_s"],  # [B, Q, S]
-            ks_mask,
+            kwargs["qs_s"],  # [B, Q, D_s]
+            kwargs["ks_s"],  # [B, Q, D_s]
+            mask,
             self.qs_chunk_size,
             self.ks_chunk_size,
             bias_func=scanned_rbf_network_bias,
@@ -570,7 +489,7 @@ class TISABiasedScanAttention(nn.Module):
         num_basis: Number of basis functions for TISA bias.
 
     Returns:
-        A `ScanTISABiasedAttention` module.
+        A `TISABiasedScanAttention` module.
     """
 
     qs_chunk_size: int = 1024
@@ -580,43 +499,39 @@ class TISABiasedScanAttention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,  # [B, Q, H, D_QK_H]
-        ks: jax.Array,  # [B, K, H D_QK_H]
-        vs: jax.Array,  # [B, K, H, D_H]
-        valid_lens: Optional[jax.Array] = None,  # [B]
+        qs: jax.Array,  # [B, H, Q, D_qk]
+        ks: jax.Array,  # [B, H, K, D_qk]
+        vs: jax.Array,  # [B, H, K, D_v]
+        mask: Optional[jax.Array] = None,  # [B, K]
         training: bool = False,
         **kwargs,
     ):
         r"""Performs forward pass of network.
 
         Args:
-            qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
-            ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
-            vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
-            qs_locs: Query locations of dimension $\mathbb{R}^{B\times Q\times S}$
-            ks_locs: Key locations of dimension $\mathbb{R}^{B\times K\times S}$
-            valid_lens: Mask consisting of valid length per sequence of dimension
-                $\mathbb{R}^B$.
+            qs: Queries of shape [B, H, Q, D_qk].
+            ks: Keys of shape [B, H, K D_qk].
+            vs: Values of shape [B, H, K, D_v].
+            mask: Mask for keys and values of shape [B, K].
             training: Boolean indicating whether currently training.
+            qs_locs: Query locations of shape [B, Q, D_s].
+            ks_locs: Key locations of shape [B, K, D_s].
 
         Returns:
             `ctx` and `attn`, the updated values and None, respectively,
             since scanned attention never materializes the attention matrix.
         """
-        K, H, F = ks.shape[1], qs.shape[2], self.num_basis
+        H, F = qs.shape[1], self.num_basis
         a = self.param("a", init.constant(1), (H, F))
         b = self.param("b", init.constant(1), (H, F))
         c = self.param("c", init.constant(0), (H, F))
-        ks_mask = None
-        if valid_lens is not None:
-            ks_mask = mask_from_valid_lens(K, valid_lens)[..., 0]
         return biased_scan_attention(
             qs,
             ks,
             vs,
-            kwargs["qs_s"],  # [B, Q, S]
-            kwargs["ks_s"],  # [B, Q, S]
-            ks_mask,
+            kwargs["qs_s"],  # [B, Q, D_s]
+            kwargs["ks_s"],  # [B, Q, D_s]
+            mask,
             self.qs_chunk_size,
             self.ks_chunk_size,
             bias_func=scanned_tisa_bias,
@@ -626,26 +541,26 @@ class TISABiasedScanAttention(nn.Module):
 
 @partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size", "bias_func"))
 def biased_scan_attention(
-    qs: jax.Array,  # [B, Q, H, D_QK_H]
-    ks: jax.Array,  # [B, K, H D_QK_H]
-    vs: jax.Array,  # [B, K, H, D_H]
+    qs: jax.Array,  # [B, H, Q, D_qk]
+    ks: jax.Array,  # [B, H, K, D_qk]
+    vs: jax.Array,  # [B, H, K, D_v]
     qs_meta: jax.Array,  # [B, Q, M]
     ks_meta: jax.Array,  # [B, K, M]
-    ks_mask: Optional[jax.Array] = None,  # [B, K]
+    mask: Optional[jax.Array] = None,  # [B, K]
     qs_chunk_size: int = 1024,
     ks_chunk_size: int = 1024,
     bias_func: Callable = scanned_tisa_bias,  # (q_meta, k_meta, **bias_kwargs) -> bias
     bias_kwargs: dict = {},
 ):
-    (B, Q, H, D), M = qs.shape, qs_meta.shape[-1]
+    (B, H, Q, D), M = qs.shape, qs_meta.shape[-1]
     Q_c = min(Q, qs_chunk_size)
 
     # JAX/numpy store data in row major format, so (theoretically) putting the
     # scanned axes first improves cache locality
-    qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> L B H D"), (qs, ks, vs))
+    qs, ks, vs = map(lambda x: rearrange(x, "B H L D -> L B H D"), (qs, ks, vs))
     qs_meta, ks_meta = map(lambda x: rearrange(x, "B L M -> L B M"), (qs_meta, ks_meta))
-    if ks_mask is not None:
-        ks_mask = rearrange(ks_mask, "B K -> K B")
+    if mask is not None:
+        mask = rearrange(mask, "B K -> K B")
 
     @jit
     def qs_scanner(i, _):
@@ -657,7 +572,7 @@ def biased_scan_attention(
             vs,
             qs_meta_chunk,
             ks_meta,
-            ks_mask,
+            mask,
             ks_chunk_size,
             bias_func,
             bias_kwargs,
@@ -670,7 +585,7 @@ def biased_scan_attention(
         length=Q // Q_c,
     )
 
-    os = rearrange(os, "C Q B H D -> B (C Q) H D")
+    os = rearrange(os, "C Q B H D -> B H (C Q) D")
 
     remainder = Q % Q_c
     if remainder:
@@ -682,13 +597,13 @@ def biased_scan_attention(
             vs,
             qs_meta_chunk,
             ks_meta,
-            ks_mask,
+            mask,
             ks_chunk_size,
             bias_func,
             bias_kwargs,
         )
-        os_chunk = rearrange(os_chunk, "Q B H D -> B Q H D")
-        os = jnp.concatenate([os, os_chunk], axis=1)
+        os_chunk = rearrange(os_chunk, "Q B H D -> B H Q D")
+        os = jnp.concatenate([os, os_chunk], axis=2)
 
     return os
 
@@ -699,7 +614,7 @@ def biased_scan_ks(
     vs: jax.Array,  # [K, B, H, D]
     qs_meta_chunk: jax.Array,  # [Q_c, B, M]
     ks_meta: jax.Array,  # [K, B, M]
-    ks_mask: Optional[jax.Array] = None,  # [K, B]
+    mask: Optional[jax.Array] = None,  # [K, B]
     ks_chunk_size: int = 1024,
     bias_func: Callable = scanned_tisa_bias,  # (q_meta, k_meta, **bias_kwargs) -> bias
     bias_kwargs: dict = {},
@@ -712,14 +627,14 @@ def biased_scan_ks(
     @jit
     def ks_scanner(carry: tuple, _):
         i, os, row_maxs, row_sums = carry
-        ks_chunk, vs_chunk, ks_meta_chunk, ks_mask_chunk = chunk_ks(i, K_c)
+        ks_chunk, vs_chunk, ks_meta_chunk, mask_chunk = chunk_ks(i, K_c)
         _carry = update(
             qs_chunk,
             ks_chunk,
             vs_chunk,
             qs_meta_chunk,
             ks_meta_chunk,
-            ks_mask_chunk,
+            mask_chunk,
             os,
             row_maxs,
             row_sums,
@@ -731,11 +646,11 @@ def biased_scan_ks(
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (k_c, B, H, D))
         vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D_V))
         ks_meta_chunk = lax.dynamic_slice(ks_meta, (i, 0, 0), (k_c, B, M))
-        ks_mask_chunk = jnp.array(True)
-        if ks_mask is not None:
-            ks_mask_chunk = lax.dynamic_slice(ks_mask, (i, 0), (k_c, B))
-            ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
-        return ks_chunk, vs_chunk, ks_meta_chunk, ks_mask_chunk
+        mask_chunk = jnp.array(True)
+        if mask is not None:
+            mask_chunk = lax.dynamic_slice(mask, (i, 0), (k_c, B))
+            mask_chunk = rearrange(mask_chunk, "K B -> 1 B 1 K")
+        return ks_chunk, vs_chunk, ks_meta_chunk, mask_chunk
 
     @jit
     @partial(jax.remat, prevent_cse=False)
@@ -745,7 +660,7 @@ def biased_scan_ks(
         vs_chunk,
         qs_meta_chunk,
         ks_meta_chunk,
-        ks_mask_chunk,
+        mask_chunk,
         os,
         row_maxs,
         row_sums,
@@ -756,7 +671,7 @@ def biased_scan_ks(
         bias = bias_func(qs_meta_chunk_, ks_meta_chunk_, **bias_kwargs)
         bias = rearrange(bias, "B H Q K -> Q B H K")
         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk) + bias
-        scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
+        scores = jnp.where(mask_chunk, scores, -float("inf"))
         row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
         exp_scores = jnp.exp(scores - new_row_maxs)
@@ -782,14 +697,14 @@ def biased_scan_ks(
     # last block
     remainder = K % K_c
     if remainder:
-        ks_chunk, vs_chunk, ks_meta_chunk, ks_mask_chunk = chunk_ks(i, remainder)
+        ks_chunk, vs_chunk, ks_meta_chunk, mask_chunk = chunk_ks(i, remainder)
         os, row_maxs, row_sums = update(
             qs_chunk,
             ks_chunk,
             vs_chunk,
             qs_meta_chunk,
             ks_meta_chunk,
-            ks_mask_chunk,
+            mask_chunk,
             os,
             row_maxs,
             row_sums,
@@ -799,72 +714,10 @@ def biased_scan_ks(
     return os / row_sums
 
 
-class DotScorer(nn.Module):
-    r"""Performs dot product attention scoring from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
-
-    $$a(\mathbf{q},\mathbf{k}) = \frac{\mathbf{q}^\intercal\mathbf{k}}{\sqrt{d}}$$
-
-    Returns:
-        An `DotScorer` module.
-    """
-
-    @nn.compact
-    def __call__(self, qs: jax.Array, ks: jax.Array):
-        d = qs.shape[-1]
-        return jnp.einsum("bqd,bkd->bqk", qs, ks) / jnp.sqrt(d)
-
-
-class AdditiveScorer(nn.Module):
-    r"""Performs additive attention scoring from ["Neural Machine Translation by Jointly Learning to Align and Translate"](https://arxiv.org/abs/1409.0473).
-
-    $$a(\mathbf{q},\mathbf{k}) = \mathbf{w}_v^\intercal(\mathbf{W}_q\mathbf{q}+\mathbf{W}_k\mathbf{k})$$
-
-    Args:
-        num_hidden: Number of features to project keys and queries.
-        dtype: A data type to use for calculations.
-
-    Returns:
-        An `MultiplicativeScorer` module.
-    """
-
-    num_hidden: int = 128
-    dtype: jnp.dtype = jnp.float32
-
-    @nn.compact
-    def __call__(self, qs: jax.Array, ks: jax.Array):
-        qs = nn.Dense(self.num_hidden, use_bias=False, dtype=self.dtype)(qs)
-        ks = nn.Dense(self.num_hidden, use_bias=False, dtype=self.dtype)(ks)
-        # [B, Q, 1, H] + [B, 1, K, H]
-        feats = jnp.expand_dims(qs, axis=2) + jnp.expand_dims(ks, axis=1)
-        feats = nn.tanh(feats)
-        return nn.Dense(1, use_bias=False, dtype=self.dtype)(feats).squeeze(-1)
-
-
-class MultiplicativeScorer(nn.Module):
-    r"""Performs multiplicative attention scoring from ["Effective Approaches to Attention-based Neural Machine Translation"](https://arxiv.org/abs/1508.04025).
-
-    $$a(\mathbf{q},\mathbf{k}) = \mathbf{q}^\intercal\mathbf{W}_a\mathbf{k}$$
-
-    Args:
-        dtype: A data type to use for calculations.
-
-    Returns:
-        An `MultiplicativeScorer` module.
-    """
-
-    dtype: jnp.dtype = jnp.float32
-
-    @nn.compact
-    def __call__(self, qs: jax.Array, ks: jax.Array):
-        qs = nn.Dense(qs.shape[-1], use_bias=False, dtype=self.dtype)(qs)
-        return DotScorer()(qs, ks)
-
-
 class Attention(nn.Module):
-    r"""Performs query-key-value attention with dropout using the given scoring function.
+    r"""Performs standard Attention.
 
     Args:
-        scorer: A module used to provide similarity scores between queries and keys.
         p_dropout: A dropout rate.
         dtype: A data type to use for calculations.
 
@@ -872,120 +725,39 @@ class Attention(nn.Module):
         An `Attention` module.
     """
 
-    scorer: nn.Module = DotScorer()
     p_dropout: float = 0.0
-    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,  # [B, Q, H, D_QK_H]
-        ks: jax.Array,  # [B, K, H, D_QK_H]
-        vs: jax.Array,  # [B, K, H, D_H]
-        valid_lens: Optional[jax.Array] = None,  # [B]
+        qs: jax.Array,  # [B, H, Q, D_qk]
+        ks: jax.Array,  # [B, H, K, D_qk]
+        vs: jax.Array,  # [B, H, K, D_v]
+        mask: Optional[jax.Array] = None,  # [B, K]
         training: bool = False,
         **kwargs,
     ):
         r"""Performs forward pass of network.
 
         Args:
-            qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
-            ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
-            vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
-            valid_lens: Mask consisting of valid length per sequence of dimension
-                $\mathbb{R}^B$.
+            qs: Queries of shape [B, H, Q, D_q].
+            ks: Keys of shape [B, H, K, D_k].
+            vs: Values of shape [B, H, K, D_v].
+            mask: Mask for keys and values of shape [B, K].
             training: Boolean indicating whether currently training.
 
         Returns:
             `ctx` and `attn`, the updated values and attention weights.
         """
-        (B, Q, H, _), K = qs.shape, ks.shape[1]
+        D_qk = qs.shape[-1]
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> (B H) L D"), (qs, ks, vs))
-        scores = self.scorer(qs.astype(self.dtype), ks.astype(self.dtype))
-        bias = kwargs.get("bias", None)
-        if bias is not None:
-            scores += jnp.broadcast_to(bias, (B, H, Q, K)).reshape(-1, Q, K)
-        if valid_lens is not None:
-            valid_lens = jnp.repeat(valid_lens, H, axis=0)
-            scores = mask_attn(scores, valid_lens)
-        attn = nn.softmax(scores, axis=-1)  # [B * H, Q, K]
-        ctx = drop(attn) @ vs  # [B * H, Q, D_V_H]
-        ctx = rearrange(ctx, "(B H) Q D -> B Q H D", H=H)
-        return ctx, attn.reshape(B, H, Q, K)
-
-
-class FusedAttention(nn.Module):
-    r"""Performs query-key-value attention.
-
-    Returns:
-        A `FusedAttention` module.
-
-    .. note::
-        Since the CUDA kernel requires `jnp.bfloat16`, this implementation
-        normalizes the queries and keys using `norm_qs` and `norm_ks` in order
-        to stabilize dot product logits in the attention calculation. While this
-        slightly slows computation, it often obviates the need to search for an
-        appropriate `scale` argument.
-
-    .. note::
-        As of 2024-08-29, this requires `jax-nightly` and an NVIDIA GPU of
-        Ampere architecture or above.
-
-    .. note::
-        This version does not support attention dropout since it is a fused
-        softmax attention that operates on an optimized CUDA kernel. It
-        also does not return the attention matrix since it never completely
-        materializes it.
-
-    .. note::
-        The keys and values must have the same shape for this implementation.
-    """
-
-    norm_qs: nn.Module = nn.LayerNorm(dtype=jnp.bfloat16)
-    norm_ks: nn.Module = nn.LayerNorm(dtype=jnp.bfloat16)
-
-    @nn.compact
-    def __call__(
-        self,
-        qs: jax.Array,  # [B, Q, H, D_QK_H]
-        ks: jax.Array,  # [B, K, H D_QK_H]
-        vs: jax.Array,  # [B, K, H, D_H]
-        valid_lens: Optional[jax.Array] = None,  # [B]
-        training: bool = False,
-        **kwargs,
-    ):
-        r"""Performs forward pass of network.
-
-        Args:
-            qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
-            ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
-            vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
-            valid_lens: Mask consisting of valid length per sequence of dimension
-                $\mathbb{R}^B$.
-            training: Boolean indicating whether currently training. Unused here.
-
-        Returns:
-            `ctx` and `attn`, the updated values and attention weights, which are
-            `None` for this implementation.
-        """
-        B, L, H, D = qs.shape
-        bias = kwargs.get("bias")
-        if bias is not None:
-            bias = jnp.bfloat16(bias)
-        if valid_lens is None:
-            valid_lens = jnp.repeat(L, B)
-        # As of 2024-08-29, the CUDA kernel requires bfloat16
-        return dot_product_attention(
-            self.norm_qs(qs),
-            self.norm_ks(ks),
-            jnp.bfloat16(vs),
-            bias,  # None or broadcastable to [B, H, Q, K]
-            # TODO(danj): remove when PR lands https://github.com/google/jax/issues/23349
-            query_seq_lengths=jnp.repeat(L, B),
-            key_value_seq_lengths=valid_lens,
-            implementation="cudnn",
-        ), None
+        scores = jnp.einsum("B H Q D, B H K D -> B H Q K", qs, ks) / jnp.sqrt(D_qk)
+        scores += kwargs.get("bias", 0)
+        if mask is not None:
+            scores = jnp.where(mask[:, None, None, :], scores, -jnp.inf)
+        attn = nn.softmax(scores, axis=-1)  # [B, H, Q, K]
+        ctx = jnp.einsum("B H Q K, B H K D -> B H Q D", drop(attn), vs)
+        return ctx, attn
 
 
 class MultiHeadAttention(nn.Module):
@@ -1014,21 +786,20 @@ class MultiHeadAttention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,  # [B, Q, H, D_QK_H]
-        ks: jax.Array,  # [B, K, H, D_QK_H]
-        vs: jax.Array,  # [B, K, H, D_H]
-        valid_lens: Optional[jax.Array] = None,
+        qs: jax.Array,  # [B, Q, D_q]
+        ks: jax.Array,  # [B, K, D_k]
+        vs: jax.Array,  # [B, K, D_v]
+        mask: Optional[jax.Array] = None,
         training: bool = False,
         **kwargs,
     ):
         r"""Performs forward pass of network.
 
         Args:
-            qs: Queries of dimension $\mathbb{R}^{B\times Q\times D_QK}$
-            ks: Keys of dimension $\mathbb{R}^{B\times K\times D_QK}$
-            vs: Values of dimension $\mathbb{R}^{B\times K\times D_V}$
-            valid_lens: Mask consisting of valid length per sequence of dimension
-                $\mathbb{R}^B$ or $\mathbb{R}^{B\times K}$.
+            qs: Queries of shape [B, Q, D_q].
+            ks: Keys of shape [B, K, D_k].
+            vs: Values of shape [B, K, D_v].
+            mask: Mask for keys and values of shape [B, K].
             training: Boolean indicating whether currently training.
             kwargs: Additional kwargs passed on to attention module.
 
@@ -1038,10 +809,10 @@ class MultiHeadAttention(nn.Module):
         H = self.num_heads
         qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
         qs, ks, vs = map(
-            lambda x: rearrange(x, "B L (H D) -> B L H D", H=H), (qs, ks, vs)
+            lambda x: rearrange(x, "B L (H D) -> B H L D", H=H), (qs, ks, vs)
         )
-        ctx, attn = self.attn(qs, ks, vs, valid_lens, training, **kwargs)
-        ctx = rearrange(ctx, "B L H D -> B L (H D)")
+        ctx, attn = self.attn(qs, ks, vs, mask, training, **kwargs)
+        ctx = rearrange(ctx, "B H L D -> B L (H D)")
         return self.proj_out(ctx), attn
 
 
@@ -1141,34 +912,13 @@ def _graph_conv(
     )
 
 
-# TODO(danj): can make this more efficient by doing (QK^T)V -> Q(K^TV)
-@jit
-def dot_scorer(qs: jax.Array, ks: jax.Array):
-    return jnp.einsum("B Q D, B K D -> B Q K", qs, ks)
-
-
-@jit
-def rbf_scorer(qs: jax.Array, ks: jax.Array):  # [B, L, D]
-    r"""Calculates $\exp\left(-\frac{\lVert xW_x - yW_y\rVert^2}{\sqrt{d_k}}\right)$."""
-    d_sq = jnp.square(vmap(outer_subtract)(qs, ks)).sum(axis=-1)
-    return jnp.exp(-d_sq / jnp.sqrt(ks.shape[-1]))
-
-
-@jit
-def exponential_scorer(qs: jax.Array, ks: jax.Array):  # [B, L, D]
-    r"""Calculates $\exp\left(-\frac{\lVert xW_x - yW_y\rVert^2}{\sqrt{d_k}}\right)$."""
-    scores = jnp.einsum("bqd,bkd->bqk", qs, ks)
-    return jnp.exp(scores / jnp.sqrt(ks.shape[-1]))
-
-
-# TODO(danj): does multiheaded do anything here?
 class DeepKernelAttention(nn.Module):
     r"""Performs query-key-value attention with learned feature maps.
 
     Args:
+        num_heads: Number of attention heads.
         proj_qks: A module for projecting queries.
         proj_vs: A module for projecting values.
-        proj_out: A module for projecting output.
         dtype: A data type to use for calculations.
 
     Returns:
@@ -1183,21 +933,20 @@ class DeepKernelAttention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,  # [B, Q, D_QK]
-        ks: jax.Array,  # [B, K, D_QK]
-        vs: jax.Array,  # [B, K, D_V]
-        valid_lens: Optional[jax.Array] = None,
+        qs: jax.Array,  # [B, Q, D_qk]
+        ks: jax.Array,  # [B, K, D_qk]
+        vs: jax.Array,  # [B, K, D_v]
+        mask: Optional[jax.Array] = None,
         training: bool = False,
         **kwargs,
     ):
         r"""Performs forward pass of network.
 
         Args:
-            qs: Queries of dimension $\mathbb{R}^{B\times Q\times D_QK}$
-            ks: Keys of dimension $\mathbb{R}^{B\times K\times D_QK}$
-            vs: Values of dimension $\mathbb{R}^{B\times K\times D_V}$
-            valid_lens: Mask consisting of valid length per sequence of dimension
-                $\mathbb{R}^B$ or $\mathbb{R}^{B\times K}$.
+            qs: Queries of shape [B, Q, D_qk].
+            ks: Keys of shape [B, K, D_qk].
+            vs: Values of shape [B, K, D_v].
+            mask: Mask for keys and values of shape [B, K].
             training: Boolean indicating whether currently training.
             kwargs: Additional kwargs passed on to attention module.
 
@@ -1214,10 +963,9 @@ class DeepKernelAttention(nn.Module):
             lambda x: self.proj_qks(x).astype(self.dtype) / jnp.pow(D, 0.25), (qs, ks)
         )
         vs = self.proj_vs(vs).astype(self.dtype)
-        # TODO(danj): update for when valid_lens is None
-        if valid_lens is not None:
-            ks *= mask_from_valid_lens(K, valid_lens)
-            vs /= valid_lens[:, None, None]
+        if mask is not None:
+            ks *= mask[..., None]
+            vs /= mask.sum(axis=-1, keepdims=True)[:, None]
         qs, ks, vs = map(
             lambda x: rearrange(x, "B L (H D) -> B H L D", H=H), (qs, ks, vs)
         )
@@ -1225,199 +973,3 @@ class DeepKernelAttention(nn.Module):
         ctx = jnp.einsum("B H Q D, B H D V -> B H Q V", qs, kvs)
         ctx = rearrange(ctx, "B H Q V -> B Q (H V)")
         return nn.LayerNorm()(ctx), None
-
-
-# TODO(danj): add learnable kernel parameters?
-class KernelAttention(nn.Module):
-    r"""Performs query-key-value attention with the given kernel.
-
-    .. note::
-        To make a kernel symmetric, provide the same dense projection
-        matrix for `proj_qs` and `proj_ks`.
-
-    .. note::
-        To use regular kernels, set `proj_qs` and `proj_ks` to the identity
-        function and pass in locations rather than embeddings.
-
-    Args:
-        kernel_scorer: A kernel function that operates on two `[L, D]` arrays and
-            returns a score for every pair.
-        proj_qs: A module for projecting queries.
-        proj_ks: A module for projecting keys.
-        proj_vs: A module for projecting values.
-        proj_out: A module for projecting output.
-        dtype: A data type to use for calculations.
-
-    Returns:
-        An `KernelAttention` module.
-    """
-
-    kernel_scorer: Callable = rbf_scorer
-    proj_qs: Callable = MLP([64])
-    proj_ks: Callable = MLP([64])
-    proj_vs: nn.Module = MLP([64])
-    proj_out: nn.Module = MLP([64])
-    dtype: jnp.dtype = jnp.float32
-
-    @nn.compact
-    def __call__(
-        self,
-        qs: jax.Array,  # [B, Q, D_QK]
-        ks: jax.Array,  # [B, K, D_QK]
-        vs: jax.Array,  # [B, K, D_V]
-        valid_lens: Optional[jax.Array] = None,
-        training: bool = False,
-        **kwargs,
-    ):
-        r"""Performs forward pass of network.
-
-        Args:
-            qs: Queries of dimension $\mathbb{R}^{B\times Q\times D_QK}$
-            ks: Keys of dimension $\mathbb{R}^{B\times K\times D_QK}$
-            vs: Values of dimension $\mathbb{R}^{B\times K\times D_V}$
-            valid_lens: Mask consisting of valid length per sequence of dimension
-                $\mathbb{R}^B$ or $\mathbb{R}^{B\times K}$.
-            training: Boolean indicating whether currently training.
-            kwargs: Additional kwargs passed on to attention module.
-
-        Returns:
-            `ctx` and `attn`, the updated values and attention weights.
-        """
-        if kwargs.get("bias") is not None:
-            warnings.warn("KernelAttention does not support bias!")
-        qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
-        attn = self.kernel_scorer(qs.astype(self.dtype), ks.astype(self.dtype))
-        if valid_lens is not None:
-            attn = mask_attn(attn, valid_lens, fill=0.0)
-        attn = attn / attn.sum(axis=-1)[..., None]  # [B, Q, K]
-        ctx = attn @ vs  # [B, Q, D_V]
-        return self.proj_out(ctx), attn
-
-
-class ProductKernelAttention(nn.Module):
-    r"""Performs product-kernel query-key-value attention.
-
-    Each kernel is responsible for projecting its own input and output.
-    `proj_out` projects the concatenated output of all kernels.
-
-    Args:
-        kernel_scorers: A list of kernel scorers to multiply.
-        proj_out: A module for projecting output.
-
-    Returns:
-        A `MultikernelAttention` module.
-    """
-
-    kernel_scorers: Sequence[nn.Module]
-    proj_out: nn.Module = MLP([64])
-
-    @nn.compact
-    def __call__(
-        self,
-        qs: jax.Array,  # [B, Q, D_QK]
-        ks: jax.Array,  # [B, K, D_QK]
-        vs: jax.Array,  # [B, K, D_V]
-        valid_lens: Optional[jax.Array] = None,
-        training: bool = False,
-        **kwargs,
-    ):
-        (B, Q, _), K = qs.shape, ks.shape[1]
-        ctx = jnp.ones((B, Q, K))
-        attns = []
-        for kernel_scorer in self.kernel_scorers:
-            k_ctx, attn = kernel_scorer(qs, ks, vs, valid_lens, training)
-            ctx *= k_ctx
-            attns += [attn]  # list of [B, Q, K]
-        return self.proj_out(ctx), attns
-
-
-class MultiKernelAttention(nn.Module):
-    r"""Performs multikernel query-key-value attention.
-
-    Each kernel is responsible for projecting its own input and output.
-    `proj_out` projects the concatenated output of all kernels.
-
-    Args:
-        kernels: A list of kernel modules to use.
-        proj_out: A module for projecting output.
-
-    Returns:
-        A `MultikernelAttention` module.
-    """
-
-    kernels: Sequence[nn.Module]
-    proj_out: nn.Module = MLP([64])
-
-    @nn.compact
-    def __call__(
-        self,
-        qs: jax.Array,  # [B, Q, D_QK]
-        ks: jax.Array,  # [B, K, D_QK]
-        vs: jax.Array,  # [B, K, D_V]
-        valid_lens: Optional[jax.Array] = None,
-        training: bool = False,
-        **kwargs,
-    ):
-        ctxs, attns = [], []
-        for kernel in self.kernels:
-            ctx, attn = kernel(qs, ks, vs, valid_lens, training)
-            ctxs += [ctx]  # list of [B, Q, D_V]
-            attns += [attn]  # list of [B, Q, K]
-        return self.proj_out(jnp.concatenate(ctxs, axis=-1)), attns
-
-
-# TODO(danj): implement memory efficient version
-class SpatioTemporalMLPAttention(nn.Module):
-    proj_vs: nn.Module = MLP([64], nn.gelu)
-    proj_scores: nn.Module = MLP([256, 64, 1], nn.gelu)
-    max_dist: float = float("inf")
-
-    @nn.compact
-    def __call__(
-        self,
-        qs: jax.Array,  # [B, Q, F]
-        ks: jax.Array,  # [B, K, F]
-        vs: jax.Array,  # [B, K, D]
-        valid_lens: Optional[jax.Array] = None,
-        training: bool = False,
-        **kwargs,
-    ):
-        stack = lambda *args: jnp.concatenate(args, axis=-1)
-        # standard features
-        (B, Q), K = qs.shape[:-1], ks.shape[1]
-        qs = repeat(qs, "B Q F -> B Q K F", K=K)
-        ks = repeat(ks, "B K F -> B Q K F", Q=Q)
-        m = jnp.concatenate([qs, ks], axis=-1)
-        # vnode (global behavior)
-        vnode = kwargs.get("vnode")
-        if vnode is not None:
-            vnode = repeat(vnode, "B 1 D -> B Q K D", Q=Q, K=K)
-            m = stack(m, vnode)
-        # mask
-        if valid_lens is None:
-            valid_lens = jnp.repeat(K, B)
-        mask = mask_from_valid_lens(K, valid_lens)  # [B, K, 1]
-        mask = repeat(mask, "B K 1 -> B Q K", Q=Q)
-        # spatial features
-        qs_s, ks_s = kwargs.get("qs_s"), kwargs.get("ks_s")
-        if qs_s is not None and ks_s is not None:
-            s_diff = qs_s[..., None, :] - ks_s[:, None, ...]
-            s_dist = jnp.linalg.norm(s_diff, axis=-1, keepdims=True)
-            s_dist_sq = jnp.square(s_dist)
-            s_mask = (s_dist <= self.max_dist)[..., 0]  # [B, Q, K]
-            mask = jnp.logical_and(mask, s_mask)
-            m = stack(m, s_diff, s_dist, s_dist_sq)
-        # temporal features
-        qs_t, ks_t = kwargs.get("qs_t"), kwargs.get("ks_t")
-        if qs_t is not None and ks_t is not None:
-            t_diff = qs_t[..., None, :] - ks_t[:, None, ...]
-            t_mask = (t_diff >= 0)[..., 0]  # [B, Q, K]
-            mask = jnp.logical_and(mask, t_mask)
-            m = stack(m, t_diff)
-        # TODO(danj): gated instead of scalar attention?
-        scores = self.proj_scores(m)[..., 0]
-        scores = jnp.where(mask, scores, -float("inf"))
-        # TODO(danj): replace softmax with post-norm?
-        attn = nn.softmax(scores, axis=-1)
-        ctx = attn @ self.proj_vs(vs)
-        return ctx, attn

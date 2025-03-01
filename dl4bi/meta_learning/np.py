@@ -6,8 +6,7 @@ import jax.numpy as jnp
 from jax import random
 
 from ..core.mlp import MLP
-from ..core.utils import mask_from_valid_lens
-from .model_output import GaussianOutput
+from .model_output import DiagonalMVNOutput
 
 
 class NP(nn.Module):
@@ -35,7 +34,7 @@ class NP(nn.Module):
     z_dist: nn.Module = MLP([128, 256])
     dec: nn.Module = MLP([128] * 4 + [2])
     n_z: int = 1
-    output_fn: Callable = GaussianOutput.from_latent
+    output_fn: Callable = DiagonalMVNOutput.from_latent_np
 
     @nn.compact
     def __call__(
@@ -43,48 +42,46 @@ class NP(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
         **kwargs,
     ):
-        r = self.encode_deterministic(s_ctx, f_ctx, valid_lens_ctx, training)
-        z_mu_ctx, z_std_ctx = self.encode_latent(s_ctx, f_ctx, valid_lens_ctx, training)
+        r = self.encode_deterministic(s_ctx, f_ctx, mask_ctx, training)
+        z_mu_ctx, z_std_ctx = self.encode_latent(s_ctx, f_ctx, mask_ctx, training)
         rng_z, z_shape = self.make_rng("extra"), (self.n_z, *z_mu_ctx.shape)
         z = z_mu_ctx + z_std_ctx * random.normal(rng_z, z_shape)  # [n_z, B, d_z]
         z = z.swapaxes(0, 1)  # [B, n_z, d_z]
         output = self.decode(r, z, s_test, training)  # [B, L_test, d_f]
-        return output, (z_mu_ctx, z_std_ctx)
+        return output, DiagonalMVNOutput(z_mu_ctx, z_std_ctx)
 
     def encode_deterministic(
         self,
         s_ctx: jax.Array,  # [B, L, D_s]
         f_ctx: jax.Array,  # [B, L, D_f]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array],  # [B, K]
         training: bool = False,
     ):
         (B, L, _) = s_ctx.shape
-        if valid_lens_ctx is None:
-            valid_lens_ctx = jnp.repeat(L, B)
-        mask = mask_from_valid_lens(L, valid_lens_ctx)
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_det(s_f_ctx, training)
-        return jnp.mean(s_f_ctx_embed, axis=1, where=mask)  # [B, d_ffn]
+        if mask_ctx is not None:
+            return jnp.mean(s_f_ctx_embed, axis=1, where=mask_ctx[..., None])
+        return jnp.mean(s_f_ctx_embed, axis=1)
 
     def encode_latent(
         self,
         s_ctx: jax.Array,  # [B, L, D_s]
         f_ctx: jax.Array,  # [B, L, D_f]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
     ):
         (B, L, _) = s_ctx.shape
-        if valid_lens_ctx is None:
-            valid_lens_ctx = jnp.repeat(L, B)
-        mask = mask_from_valid_lens(L, valid_lens_ctx)
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_lat(s_f_ctx, training)
-        s_f_ctx_means = jnp.mean(s_f_ctx_embed, axis=1, where=mask)
+        if mask_ctx is None:
+            s_f_ctx_means = jnp.mean(s_f_ctx_embed, axis=1)
+        else:
+            s_f_ctx_means = jnp.mean(s_f_ctx_embed, axis=1, where=mask_ctx[..., None])
         z_dist = self.z_dist(s_f_ctx_means, training)
         z_mu, z_std = jnp.split(z_dist, 2, axis=-1)
         z_std = 0.1 + 0.9 * nn.sigmoid(z_std)

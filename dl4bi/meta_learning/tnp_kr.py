@@ -11,7 +11,7 @@ from ..core.bias import RBFNetworkBias
 from ..core.dist import dist_spatial
 from ..core.mlp import MLP
 from ..core.transformer import KRBlock
-from .model_output import GaussianOutput
+from .model_output import DiagonalMVNOutput
 
 
 class TNPKR(nn.Module):
@@ -51,7 +51,7 @@ class TNPKR(nn.Module):
     blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
-    output_fn: Callable = GaussianOutput.from_conditional
+    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
 
     @nn.compact
     def __call__(
@@ -59,8 +59,7 @@ class TNPKR(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, D_S]
         f_ctx: jax.Array,  # [B, L_ctx, D_F]
         s_test: jax.Array,  # [B, L_test, D_S]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
         **kwargs,
     ):
@@ -77,10 +76,7 @@ class TNPKR(nn.Module):
             s_test: A location array of shape `[B, L_test, D_S]` where `B` is
                 batch size, `L_test` is number of test locations, and `D_S`
                 is the dimension of each location.
-            valid_lens_ctx: An optional array of shape `(B,)` indicating the
-                valid positions for each `L_ctx` sequence in the batch.
-            valid_lens_test: An optional array of shape `(B,)` indicating the
-                valid positions for each `L_test` sequence in the batch.
+            mask_ctx: An optional array of shape `[B, L_ctx]`
             training: A boolean indicating whether this call is performed during
                 training.
 
@@ -111,7 +107,7 @@ class TNPKR(nn.Module):
                     bias = self.bias.copy()
                     qk_kwargs["bias"] = bias(d_qk, d_qk_mask)
                     kk_kwargs["bias"] = bias(d_kk, d_kk_mask)
-                qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
+                qvs, kvs = blk(qvs, kvs, mask_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)
         output = self.head(qvs, training)
         return self.output_fn(output)
@@ -150,7 +146,7 @@ class ScanTNPKR(nn.Module):
     blk: nn.Module = KRBlock(MultiHeadAttention(RBFNetworkBiasedScanAttention()))
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
-    output_fn: Callable = GaussianOutput.from_conditional
+    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
 
     @nn.compact
     def __call__(
@@ -158,8 +154,7 @@ class ScanTNPKR(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, D_S]
         f_ctx: jax.Array,  # [B, L_ctx, D_F]
         s_test: jax.Array,  # [B, L_test, D_S]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
         **kwargs,
     ):
@@ -176,10 +171,8 @@ class ScanTNPKR(nn.Module):
             s_test: A location array of shape `[B, L_test, D_S]` where `B` is
                 batch size, `L_test` is number of test locations, and `D_S`
                 is the dimension of each location.
-            valid_lens_ctx: An optional array of shape `(B,)` indicating the
+            mask_ctx: An optional array of shape `[B, L_ctx]`
                 valid positions for each `L_ctx` sequence in the batch.
-            valid_lens_test: An optional array of shape `(B,)` indicating the
-                valid positions for each `L_test` sequence in the batch.
             training: A boolean indicating whether this call is performed during
                 training.
 
@@ -198,7 +191,7 @@ class ScanTNPKR(nn.Module):
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
-                qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
+                qvs, kvs = blk(qvs, kvs, mask_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)
         output = self.head(qvs, training)
         return self.output_fn(output)

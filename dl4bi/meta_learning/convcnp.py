@@ -8,7 +8,7 @@ from sps.utils import build_grid
 
 from ..core.conv import ConvCNPNet, ConvDeepSet
 from ..core.mlp import MLP
-from .model_output import GaussianOutput
+from .model_output import DiagonalMVNOutput
 
 
 class ConvCNP(nn.Module):
@@ -40,7 +40,7 @@ class ConvCNP(nn.Module):
     conv_net: nn.Module = ConvCNPNet()
     dec: nn.Module = ConvDeepSet()
     head: nn.Module = MLP([128] * 3 + [2])
-    output_fn: Callable = GaussianOutput.from_conditional
+    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
 
     @nn.compact
     def __call__(
@@ -48,8 +48,7 @@ class ConvCNP(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
         **kwargs,
     ):
@@ -64,7 +63,7 @@ class ConvCNP(nn.Module):
         s_grid = jnp.repeat(s_grid[None, :], B, axis=0)  # [B, *P..., s_dim]
         conv_dims = s_grid.shape[:-1]  # [B, *P...]
         s_vec = s_grid.reshape(B, -1, s_dim)  # [B, L_grid, s_dim]
-        h = self.enc(s_ctx, f_ctx, s_vec, valid_lens_ctx)  # [B, L_grid, D]
+        h = self.enc(s_ctx, f_ctx, s_vec, mask_ctx)  # [B, L_grid, D]
         h = self.conv_net(h.reshape(conv_dims + (-1,)))  # [B, *P..., D]
         h = self.dec(s_vec, h.reshape(B, s_vec.shape[1], -1), s_test)  # [B, L_grid, D]
         f_dist = self.head(h)

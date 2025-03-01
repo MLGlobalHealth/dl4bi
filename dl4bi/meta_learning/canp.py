@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 from ..core.attention import MultiHeadAttention
 from ..core.mlp import MLP
-from .model_output import GaussianOutput
+from .model_output import DiagonalMVNOutput
 
 
 class CANP(nn.Module):
@@ -56,7 +56,7 @@ class CANP(nn.Module):
         num_heads=8,
     )
     dec: nn.Module = MLP([128] * 4 + [2])
-    output_fn: Callable = GaussianOutput.from_conditional
+    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
 
     @nn.compact
     def __call__(
@@ -64,25 +64,18 @@ class CANP(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array] = None,  # [B, K]
         training: bool = False,
         **kwargs,
     ):
-        r_ctx = self.encode_deterministic(s_ctx, f_ctx, valid_lens_ctx, training)
-        return self.decode(
-            r_ctx,
-            s_ctx,
-            s_test,
-            valid_lens_ctx,
-            training,
-        )
+        r_ctx = self.encode_deterministic(s_ctx, f_ctx, mask_ctx, training)
+        return self.decode(r_ctx, s_ctx, s_test, mask_ctx, training)
 
     def encode_deterministic(
         self,
-        s_ctx: jax.Array,  # [B, L, D_s]
-        f_ctx: jax.Array,  # [B, L, D_f]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
+        s_ctx: jax.Array,  # [B, L_ctx, D_s]
+        f_ctx: jax.Array,  # [B, L_ctx, D_f]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
     ):
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
@@ -91,7 +84,7 @@ class CANP(nn.Module):
             s_f_ctx_embed,
             s_f_ctx_embed,
             s_f_ctx_embed,
-            valid_lens_ctx,
+            mask_ctx,
             training,
         )
         return r_ctx
@@ -101,15 +94,15 @@ class CANP(nn.Module):
         r_ctx: jax.Array,  # [B, d_ffn]
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         s_test: jax.Array,  # [B, L_test, D_s]
-        valid_lens_ctx: Optional[jax.Array],  # [B]
+        mask_ctx: Optional[jax.Array],  # [B, L_ctx]
         d_f: int,
         training: bool = False,
     ):
         r, _ = self.cross_attn(
-            self.embed_s(s_test),  # qs
-            self.embed_s(s_ctx),  # ks
-            r_ctx,  # vs
-            valid_lens_ctx,
+            self.embed_s(s_test),
+            self.embed_s(s_ctx),
+            r_ctx,
+            mask_ctx,
             training,
         )  # [B, L_test, d_ffn]
         q = jnp.concatenate([r, s_test], -1)  # [B, L_test, d_ffn + D_s]

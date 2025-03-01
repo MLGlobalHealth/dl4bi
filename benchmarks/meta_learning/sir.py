@@ -13,7 +13,6 @@ from jax import jit, random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
-from dl4bi.meta_learning.model_output import pointwise_multinomial
 from dl4bi.meta_learning.train_utils import (
     Callback,
     cfg_to_run_name,
@@ -84,7 +83,7 @@ def main(cfg: DictConfig):
         shape=(*dims, 3),
         num_plots=cfg.data.batch_size,
         remap_colors=remap_colors,
-        transform_model_output=pointwise_multinomial,
+        transform_model_output=lambda x: jax.nn.softmax(x, axis=-1),
     )
     state = train(
         rng_train,

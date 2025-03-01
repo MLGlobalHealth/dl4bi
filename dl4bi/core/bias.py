@@ -24,7 +24,7 @@ class DistanceBias(nn.Module):
         a = self.param("a", init.constant(-1), (self.num_heads,))
         if mask is None:
             mask = jnp.array([True])
-        return distance_bias(d[..., self.channel], mask, a)
+        return distance_bias(d[..., self.channel], mask, a)  # [B, H, Q, K]
 
 
 @jit
@@ -62,7 +62,7 @@ class RBFNetworkBias(nn.Module):
         b = self.param("b", init.constant(1), (self.num_heads, self.num_basis))
         if mask is None:
             mask = jnp.array([True])
-        return rbf_network_bias(d[..., self.channel], mask, a, b)
+        return rbf_network_bias(d[..., self.channel], mask, a, b)  # [B, H, Q, K]
 
 
 @jit
@@ -122,7 +122,7 @@ class TISABias(nn.Module):
         c = self.param("c", init.constant(1), (self.num_heads, self.num_basis))
         if mask is None:
             mask = jnp.array([True])
-        return tisa_bias(d[..., self.channel], mask, a, b, c)
+        return tisa_bias(d[..., self.channel], mask, a, b, c)  # [B, H, Q, K]
 
 
 @jit
@@ -173,7 +173,7 @@ def zero_bias(qs_meta, ks_meta):
     return jnp.zeros((B, 1, Q, K))  # [B, H, Q, K]
 
 
-class SpatioTemporalBias(nn.Module):
+class SpatiotemporalBias(nn.Module):
     spatial_bias: nn.Module = RBFNetworkBias(channel=0)
     temporal_bias: nn.Module = RBFNetworkBias(num_basis=1, channel=1)
     op: Callable = operator.add

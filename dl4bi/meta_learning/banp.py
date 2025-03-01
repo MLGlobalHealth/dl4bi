@@ -8,8 +8,8 @@ from jax.lax import stop_gradient as no_grad
 
 from ..core.attention import MultiHeadAttention
 from ..core.mlp import MLP
-from ..core.utils import bootstrap, mask_from_valid_lens
-from .model_output import GaussianOutput
+from ..core.utils import bootstrap
+from .model_output import DiagonalMVNOutput
 
 
 class BANP(nn.Module):
@@ -68,7 +68,7 @@ class BANP(nn.Module):
     dec_hid: nn.Module = MLP([128])
     dec_boot: nn.Module = MLP([128] * 2)
     dec_out: nn.Module = MLP([128] * 3 + [2])
-    output_fn: Callable = GaussianOutput.from_conditional
+    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
 
     @nn.compact
     def __call__(
@@ -76,88 +76,68 @@ class BANP(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
         **kwargs,
     ):
         rep = jit(lambda x: jnp.repeat(x, self.num_samples, axis=0))
-        r_ctx = self.encode_deterministic(s_ctx, f_ctx, valid_lens_ctx, training)
-        s_ctx_boot, f_ctx_boot, valid_lens_ctx_boot = self.sample_with_replacement(
-            s_ctx, f_ctx, valid_lens_ctx
+        r_ctx = self.encode_deterministic(s_ctx, f_ctx, mask_ctx, training)
+        s_ctx_boot, f_ctx_boot, mask_ctx_boot = self.sample_with_replacement(
+            s_ctx, f_ctx, mask_ctx
         )
         r_ctx_boot = self.encode_deterministic(
-            s_ctx_boot, f_ctx_boot, valid_lens_ctx_boot, training
+            s_ctx_boot, f_ctx_boot, mask_ctx_boot, training
         )
         output_boot = self.decode(
             rep(r_ctx),
             rep(s_ctx),
             rep(s_test),
-            valid_lens_ctx_boot,
+            mask_ctx_boot,
             training,
             r_ctx_boot,
         )
-        output = self.decode(r_ctx, s_ctx, s_test, valid_lens_ctx, training)
+        output = self.decode(r_ctx, s_ctx, s_test, mask_ctx, training)
         return output_boot, output
 
     def sample_with_replacement(
         self,
         s_ctx: jax.Array,
         f_ctx: jax.Array,
-        valid_lens_ctx: Optional[jax.Array] = None,
+        mask_ctx: Optional[jax.Array] = None,
     ):
-        (B, L, _), K = s_ctx.shape, self.num_samples
-        if valid_lens_ctx is None:
-            valid_lens_ctx = jnp.repeat(L, B)
+        K = self.num_samples
         # turn off gradients
-        s_ctx, f_ctx, valid_lens_ctx = (
+        s_ctx, f_ctx, mask_ctx = (
             no_grad(s_ctx),
             no_grad(f_ctx),
-            no_grad(valid_lens_ctx),
+            no_grad(mask_ctx),
         )
         # bootstrap sample residuals
         rng_ctx_boot, rng_res_boot = random.split(self.make_rng("extra"))
         rep = jit(lambda x: jnp.repeat(x, K, axis=0))
-        s_ctx_boot, valid_lens_ctx_boot = bootstrap(
-            rng_ctx_boot, s_ctx, valid_lens_ctx, K
-        )
-        f_ctx_boot, valid_lens_ctx_boot = bootstrap(
-            rng_ctx_boot, f_ctx, valid_lens_ctx, K
-        )
-        r_ctx_boot = self.encode_deterministic(
-            s_ctx_boot, f_ctx_boot, valid_lens_ctx_boot
-        )
+        s_ctx_boot, mask_ctx_boot = bootstrap(rng_ctx_boot, s_ctx, mask_ctx, K)
+        f_ctx_boot, mask_ctx_boot = bootstrap(rng_ctx_boot, f_ctx, mask_ctx, K)
+        r_ctx_boot = self.encode_deterministic(s_ctx_boot, f_ctx_boot, mask_ctx_boot)
         s_ctx_rep = rep(s_ctx)
         # TODO(danj): update residual sampling to work with categorical dists
         f_ctx_mu_boot, f_ctx_std_boot = self.decode(
-            r_ctx_boot, s_ctx_rep, s_ctx_rep, valid_lens_ctx_boot
+            r_ctx_boot, s_ctx_rep, s_ctx_rep, mask_ctx_boot
         )
         res = (rep(f_ctx) - f_ctx_mu_boot) / f_ctx_std_boot
-        res_boot, _ = bootstrap(rng_res_boot, res, valid_lens_ctx_boot)
-        mask = mask_from_valid_lens(L, valid_lens_ctx_boot)
-        res_boot -= res_boot.mean(axis=1, where=mask, keepdims=True)
-        return (
-            s_ctx_rep,
-            f_ctx_mu_boot + f_ctx_std_boot * res_boot,
-            valid_lens_ctx_boot,
-        )
+        res_boot, _ = bootstrap(rng_res_boot, res, mask_ctx_boot)
+        res_boot -= res_boot.mean(axis=1, where=mask_ctx_boot, keepdims=True)
+        return s_ctx_rep, f_ctx_mu_boot + f_ctx_std_boot * res_boot, mask_ctx_boot
 
     def encode_deterministic(
         self,
         s: jax.Array,  # [B, L, D_s]
         f: jax.Array,  # [B, L, D_f]
-        valid_lens: Optional[jax.Array] = None,  # [B]
+        mask: Optional[jax.Array] = None,  # [B, K]
         training: bool = False,
     ):
         s_f = jnp.concatenate([s, f], -1)
         s_f_embed = self.enc_det(s_f, training)
-        r_ctx, _ = self.self_attn_det(
-            s_f_embed,
-            s_f_embed,
-            s_f_embed,
-            valid_lens,
-            training,
-        )
+        r_ctx, _ = self.self_attn_det(s_f_embed, s_f_embed, s_f_embed, mask, training)
         return r_ctx
 
     def decode(
@@ -165,7 +145,7 @@ class BANP(nn.Module):
         r_ctx: jax.Array,
         s_ctx: jax.Array,
         s_test: jax.Array,
-        valid_lens_ctx: Optional[jax.Array] = None,
+        mask_ctx: Optional[jax.Array] = None,
         training: bool = False,
         r_ctx_boot: Optional[jax.Array] = None,
     ):
@@ -176,7 +156,7 @@ class BANP(nn.Module):
             s_test_embed,  # qs
             s_ctx_embed,  # ks
             r_ctx,  # vs
-            valid_lens_ctx,
+            mask_ctx,
             training,
         )  # [B*K, L_test, d_ffn]
         q = jnp.concatenate([r, s_test], -1)  # [B*K, L_test, d_ffn + D_s]
@@ -186,7 +166,7 @@ class BANP(nn.Module):
                 s_test_embed,  # qs
                 s_ctx_embed,  # ks
                 r_ctx_boot,  # vs
-                valid_lens_ctx,
+                mask_ctx,
                 training,
             )  # [B*K, L_test, d_ffn]
             h += self.dec_boot(r_boot, training)

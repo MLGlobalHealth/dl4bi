@@ -6,6 +6,7 @@ import jax.numpy as jnp
 
 from ..core.mlp import MLP
 from ..core.transformer import TransformerEncoder
+from .model_output import TrilMVNOutput
 
 
 class TNPND(nn.Module):
@@ -42,8 +43,7 @@ class TNPND(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, D_S]
         f_ctx: jax.Array,  # [B, L_ctx, D_F]
         s_test: jax.Array,  # [B, L_test, D_S]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
         **kwargs,
     ):
@@ -60,28 +60,36 @@ class TNPND(nn.Module):
             s_test: A location array of shape `[B, L_test, D_S]` where `B` is
                 batch size, `L_test` is number of test locations, and `D_S`
                 is the dimension of each location.
-            valid_lens_ctx: An optional array of shape `(B,)` indicating the
-                valid positions for each `L_ctx` sequence in the batch.
-            valid_lens_test: An optional array of shape `(B,)` indicating the
-                valid positions for each `L_test` sequence in the batch.
+            mask_ctx: An optional array of shape `[B, L_ctx]`
             training: A boolean indicating whether this call is performed during
                 training.
 
         Returns:
             $\mu_f,\log(\sigma_f^2\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
-        (B, L_test, _), d_f = s_test.shape, f_ctx.shape[-1]
+        (B, L_ctx), (L_test, d_f) = s_ctx.shape[:2], f_ctx.shape[-2:]
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], d_f])
-        s_f_test = jnp.concatenate([s_test, f_test], axis=-1)
-        s_f = jnp.concatenate([s_f_ctx, s_f_test], axis=1)
+        s_f_test = jnp.concat([s_test, f_test], axis=-1)
+        s_f = jnp.concat([s_f_ctx, s_f_test], axis=1)
+        if mask_ctx is None:
+            mask_ctx = jnp.ones((B, L_ctx), dtype=bool)
+            mask_test = jnp.zeros((B, L_test), dtype=bool)
+            mask = jnp.concat([mask_ctx, mask_test], axis=1)
+        else:
+            mask = jnp.pad(
+                mask_ctx,
+                pad_width=((0, 0), (0, L_test)),
+                mode="constant",
+                constant_values=False,
+            )
         s_f_embed = self.embed_s_f(s_f, training)
-        s_f_enc = self.enc(s_f_embed, valid_lens_ctx, training, **kwargs)
+        s_f_enc = self.enc(s_f_embed, mask, training, **kwargs)
         s_f_test_enc = s_f_enc[:, -L_test:, ...]
         f_mu = self.dec_f_mu(s_f_test_enc, training)
-        f_std = self.dec_f_std(s_f_test_enc, valid_lens_test, training)
+        f_std = self.dec_f_std(s_f_test_enc, None, training)
         f_std = self.proj_f_std(f_std, training).reshape(B, L_test * d_f, -1)
-        f_L = jnp.tril(jnp.einsum("bid,bjd->bij", f_std, f_std))
+        f_L = jnp.tril(jnp.einsum("B I D, B J D -> B I J", f_std, f_std))
         # WARNING: using min_std can cause instability when solving the system
         # of equations in order to calculate the log pdf of the MVN
         if self.min_std:
@@ -90,4 +98,4 @@ class TNPND(nn.Module):
                 # NOTE: tanh works since diag(f_std @ f_std.T) > 0
                 self.min_std + (1 - self.min_std) * nn.tanh(f_L[:, d, d])
             )
-        return f_mu, f_L
+        return TrilMVNOutput(f_mu, f_L)

@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
-from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -10,9 +9,10 @@ from jax.nn import softmax, softplus
 from jax.scipy.stats import norm
 from optax.losses import safe_softmax_cross_entropy
 
+from ..core.metrics import mvn_logpdf
+
 # TODO(danj):
-# 1. Support bootstrapped data
-# 2. Support Binomial and Poisson
+# Support Binomial and Poisson
 
 
 @dataclass(frozen=True)
@@ -38,24 +38,56 @@ class DistributionOutput(ModelOutput, ABC):
 
 
 @dataclass(frozen=True)
-class GaussianOutput(DistributionOutput):
+class DiagonalMVNOutput(DistributionOutput):
     mu: jax.Array
     std: jax.Array
 
     @classmethod
-    def from_conditional(cls, params: jax.Array, min_std: float = 0.0, **kwargs):
+    def from_conditional_np(cls, params: jax.Array, min_std: float = 0.0, **kwargs):
         mu, std = jnp.split(params, 2, axis=-1)
         std = min_std + (1 - min_std) * softplus(std)
-        return GaussianOutput(mu, std)
+        return DiagonalMVNOutput(mu, std)
 
     @classmethod
-    def from_latent(cls, params: jax.Array, min_std: float = 0.0, **kwargs):
+    def from_latent_np(cls, params: jax.Array, min_std: float = 0.0, **kwargs):
         mu, std = jnp.split(params, 2, axis=-1)
         std = min_std + (1 - min_std) * softplus(std)
-        return mu.mean(axis=1), std.mean(axis=1)  # average over n_z latent samples
+        # average over latent n_z samples
+        return DiagonalMVNOutput(mu.mean(axis=1), std.mean(axis=1))
 
     def nll(self, x: jax.Array, **kwargs):
         return -norm.logpdf(x, self.mu, self.std)
+
+    def forward_kl_div(self, p: "DiagonalMVNOutput"):
+        return forward_kl_div(p, self)
+
+    def reverse_kl_div(self, p: "DiagonalMVNOutput"):
+        return forward_kl_div(self, p)
+
+
+@jit
+def forward_kl_div(p: DiagonalMVNOutput, q: DiagonalMVNOutput):
+    # KL divergence and NLL assume diagonal covariance, i.e. pointwise.
+    # Wikipedia's formulas for MVN KL-div: https://tinyurl.com/wiki-kl-div
+    # Tensorflow's diagonal MVN KL-div impl (used here): https://tinyurl.com/diag-kl-div
+    # KL( z_dist_test (p) || z_dist_ctx (q) ) =
+    diff_log_scale = jnp.log(p.std) - jnp.log(q.std)
+    return (
+        0.5 * ((p.mu - q.mu) / q.std) ** 2
+        + 0.5 * jnp.expm1(2 * diff_log_scale)
+        - diff_log_scale
+    ).sum(axis=-1)
+
+
+@dataclass(frozen=True)
+class TrilMVNOutput(DistributionOutput):
+    mu: jax.Array
+    L: jax.Array
+
+    def nll(self, x: jax.Array, **kwargs):
+        B = x.shape[0]
+        x, mu = x.reshape(B, -1), self.mu.reshape(B, -1)
+        return -mvn_logpdf(x, mu, self.L, is_tril=True)
 
 
 @dataclass(frozen=True)
@@ -71,11 +103,11 @@ class MultinomialOutput(DistributionOutput):
         return jnp.sqrt(self.p * (1 - self.p))
 
     @classmethod
-    def from_conditional(cls, logits: jax.Array, **kwargs):
+    def from_conditional_np(cls, logits: jax.Array, **kwargs):
         return MultinomialOutput(logits)
 
     @classmethod
-    def from_latent(cls, logits: jax.Array, **kwargs):
+    def from_latent_np(cls, logits: jax.Array, **kwargs):
         # average over n_z latent samples
         return MultinomialOutput(logits.mean(axis=1))
 
@@ -83,31 +115,6 @@ class MultinomialOutput(DistributionOutput):
         return safe_softmax_cross_entropy(self.logits, x)
 
 
-@partial(jit, static_argnames=("min_std",))
-def diagonal_mvn(f_dist: jax.Array, min_std: float = 0.0):
-    f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-    f_std = min_std + (1 - min_std) * softplus(f_std)
-    return f_mu, f_std
-
-
-@partial(jit, static_argnames=("min_std",))
-def latent_diagonal_mvn(f_dist: jax.Array, min_std: float = 0.0):
-    f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-    f_std = min_std + (1 - min_std) * softplus(f_std)
-    return f_mu.mean(axis=1), f_std.mean(axis=1)  # average over n_z latent samples
-
-
-@jit
-def identity(output: jax.Array):
-    return output
-
-
-@jit
-def latent_logits(logits: jax.Array):
-    return logits.mean(axis=1)  # average over n_z latent samples
-
-
-@jit
-def pointwise_multinomial(f_dist: jax.Array):
-    p = softmax(f_dist, axis=-1)
-    return p, p * (1 - p)
+@dataclass(frozen=True)
+class LatentOutput(ModelOutput):
+    dist: DistributionOutput

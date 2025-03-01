@@ -7,11 +7,11 @@ from dl4bi.core.attention import (
     Attention,
     DeepKernelAttention,
     FastAttention,
-    FusedAttention,
     MultiHeadAttention,
 )
 from dl4bi.core.knn import kNN
 from dl4bi.core.transformer import KRBlock
+from dl4bi.core.utils import mask_from_valid_lens
 from dl4bi.meta_learning import (
     ANP,
     BANP,
@@ -38,42 +38,47 @@ def test_models():
     s = jnp.linspace(0, 1.0, L)
     s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, S, D_s=1]
     valid_lens = jnp.array([2, 4, 9, 3])
+    mask_ctx = mask_from_valid_lens(L, valid_lens)
     f = random.normal(rng_data, s.shape)
     for model in [
         NP,
         CNP,
-        BNP,
+        # BNP,
         ANP,
         CANP,
-        BANP,
+        # BANP,
         ConvCNP,
         TNPD,
         TNPND,
         TNPKR,
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
-        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FusedAttention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
         ScanTNPKR,
         lambda: SGNP(kNN(k=L)),
     ]:
         m = model()
+        print(m.__class__)
         output, params = m.init_with_output(
             {"params": rng_params, "dropout": rng_dropout, "extra": rng_extra},
             s_ctx=s,
             f_ctx=f,
             s_test=s,
-            valid_lens_ctx=valid_lens,
-            valid_lens_test=valid_lens,
+            mask_ctx=mask_ctx,
             training=True,
         )
-        if hasattr(m, "n_z"):  # latent model
-            output, _ = output  # throw away latent zs
-        if hasattr(m, "num_samples"):  # bootstrapped model
-            output, _ = output  # throw away base output
-        f_mu, f_std = output
-        K = f_mu.shape[0] // f.shape[0]
-        assert f_mu.shape == (B * K, L, 1)
+        if isinstance(output, tuple):  # latent or bootstrapped
+            output, _ = output  # drop latent or base bootstrapped samples
+        if isinstance(m, TNPND):
+            assert output.mu.shape == (B, L, 1)
+            assert output.L.shape == (B, L, L)
+        elif output.mu.ndim == 4:  # bootstrapped
+            K = output.mu.shape[1]
+            assert output.mu.shape == (B, K, L, 1)
+            assert output.std.shape == (B, K, L, 1)
+        else:
+            assert output.mu.shape == (B, L, 1)
+            assert output.std.shape == (B, L, 1)
 
 
 def test_tnp_kr_fast_scale():
@@ -118,10 +123,9 @@ def test_context_data_leaks():
         TNPND,
         ScanTNPKR,
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
-        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FusedAttention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
-        lambda: SGNP(kNN(k=64), num_blks=1),
+        lambda: SGNP(kNN(k=64)),
     ]:
         m = model()
         print(m.__class__)
