@@ -1,17 +1,21 @@
 import jax.numpy as jnp
 from jax import random
 
-from dl4bi.core import (
+from dl4bi.core.attention import (
     MLP,
     AdditiveScorer,
     Attention,
     DotScorer,
     FastAttention,
-    FixedSinusoidalEmbedding,
-    GaussianFourierEmbedding,
     MultiHeadAttention,
     MultiplicativeScorer,
+)
+from dl4bi.core.embed import (
+    FixedSinusoidalEmbedding,
+    GaussianFourierEmbedding,
     NeRFEmbedding,
+)
+from dl4bi.core.transformer import (
     TransformerDecoder,
     TransformerDecoderBlock,
     TransformerEncoder,
@@ -37,11 +41,17 @@ def test_transformer():
             attn = MultiHeadAttention(Attention(scorer))
             enc_blk = TransformerEncoderBlock(attn)
             f_enc, _ = TransformerEncoder(blk=enc_blk).init_with_output(
-                rng_init, s_e, bias, valid_lens
+                rng_init, s_e, valid_lens, bias=bias
             )
             dec_blk = TransformerDecoderBlock(attn)
             f_dec, _ = TransformerDecoder(blk=dec_blk).init_with_output(
-                rng_init, s_e, f_enc, bias, bias, valid_lens, valid_lens
+                rng_init,
+                s_e,
+                f_enc,
+                valid_lens,
+                valid_lens,
+                qq_kwargs={"bias": bias},
+                qk_kwargs={"bias": bias},
             )
             for name, f in [("encoder", f_enc), ("decoder", f_dec)]:
                 assert f_enc.shape == (B, L, E), f"Incorrect {name} output shape!"
@@ -51,10 +61,10 @@ def test_transformer():
         enc_blk = TransformerEncoderBlock(mh_attn)
         dec_blk = TransformerDecoderBlock(mh_attn)
         f_enc, _ = TransformerEncoder(blk=enc_blk).init_with_output(
-            rng_init, s_e, bias, valid_lens
+            rng_init, s_e, valid_lens
         )
         f_dec, _ = TransformerDecoder(blk=dec_blk).init_with_output(
-            rng_init, s_e, f_enc, bias, bias, valid_lens, valid_lens
+            rng_init, s_e, f_enc, valid_lens, valid_lens
         )
         for name, f in [("encoder", f_enc), ("decoder", f_dec)]:
             assert f_enc.shape == (B, L, E), f"Incorrect {name} (fast) output shape!"

@@ -1,0 +1,11 @@
+cls: SGNP
+kwargs:
+  embed_s:
+    func: 'lambda s: jnp.array([])'
+  head:
+    cls: MLP
+    kwargs:
+      dims: [256, 64, 3]
+      act_fn: gelu
+  output_fn:
+    func: identity

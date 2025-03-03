@@ -1,0 +1,15 @@
+name: space_256x256
+type: space
+s:
+  - start: -8
+    stop: 8
+    num: 256
+  - start: -8
+    stop: 8
+    num: 256
+num_ctx:
+  min: 2048 # ~3%
+  max: 8192 # 12.5%
+num_test: 65536 # 100%
+num_steps: 75
+batch_size: 1

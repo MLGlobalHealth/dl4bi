@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from .attention import (
     AdditiveScorer,
     Attention,
@@ -58,3 +59,6 @@ from .utils import (
     mask_from_valid_lens,
     pad_concat,
 )
+=======
+
+>>>>>>> main

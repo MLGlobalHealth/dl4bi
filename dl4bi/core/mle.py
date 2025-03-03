@@ -39,12 +39,12 @@ def gp_nll(
     kernel: Callable,
     var: float,
     ls: float,
-    eps: float,
+    noise: float,
 ):
     N, D = s.size // s.shape[-1], s.shape[-1]
     s = s.reshape(-1, D)
     f = f.reshape(-1)
-    K = kernel(s, s, var, ls) + eps * jnp.eye(N)
+    K = kernel(s, s, var, ls) + noise * jnp.eye(N)
     L = cholesky(K)
     S1 = solve_triangular(L, f, lower=True)
     S2 = solve_triangular(L.T, S1, lower=False)
@@ -86,4 +86,4 @@ def gp_mle_sgd(
                 f"loss_delta: {loss_delta:0.3f}",
                 f"param_delta: {param_delta:0.3f}",
             )
-    return theta  # (var, ls, eps)
+    return theta  # (var, ls, noise)

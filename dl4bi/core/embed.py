@@ -2,7 +2,9 @@ from collections.abc import Callable
 
 import flax.linen as nn
 import jax
+import jax.nn.initializers as init
 import jax.numpy as jnp
+from einops import repeat
 from jax import jit, random, vmap
 from jax.tree_util import Partial
 
@@ -120,3 +122,57 @@ def _pe_gaussian_fourier(B: jax.Array, std: float):
     return jit(
         lambda s: jnp.concatenate([jnp.sin(s_proj(s)), jnp.cos(s_proj(s))], axis=-1)
     )
+
+
+class RBFRandomFourierFeatures(nn.Module):
+    r"""Generate Random Fourier Features with learnable lengthscale and weight.
+
+    $\text{RFF}(x)\approx a * \text{RBF}(d^2 / ls^2)$
+
+    Args:
+        embed_dim: Embedding dimension.
+
+    Returns:
+        An instance of `RBFRandomFourierFeatures` embedding function.
+    """
+
+    embed_dim: int = 256
+    num_heads: int = 4
+
+    @nn.compact
+    def __call__(self, s: jax.Array):
+        H = self.num_heads
+        a = self.param("a", init.constant(1.0), (1, 1, H, 1))
+        ls = self.param("ls", init.constant(1.0), (1, 1, H, 1))
+        omega = self.variable(
+            "projections",
+            "omega",
+            lambda: _gen_omega(
+                self.make_rng("params"),
+                self.embed_dim,
+                s.shape[-1],
+            ),
+        )
+        b = self.variable(
+            "projections",
+            "b",
+            lambda: random.uniform(
+                self.make_rng("params"),
+                shape=(self.embed_dim // 2,),
+            ),
+        )
+        proj = jnp.einsum("B L S, S E -> B L E", s, omega.value)
+        proj = repeat(proj, "B L E -> B L H E", H=H) / ls
+        rffs = jnp.concatenate(
+            [jnp.cos(proj + b.value), jnp.sin(proj + b.value)], axis=-1
+        ) / jnp.sqrt(self.embed_dim // 2)
+        return a * rffs
+
+
+def _gen_omega(rng: jax.Array, embed_dim: int, s_dim: int):
+    omegas = []
+    for _ in range(s_dim):
+        rng_omega, rng = random.split(rng)
+        omega = random.normal(rng_omega, shape=(embed_dim // 2,))
+        omegas += [omega]
+    return jnp.vstack(omegas)

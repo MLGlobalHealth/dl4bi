@@ -1,0 +1,21 @@
+cls: NP
+kwargs:
+  enc_det:
+    cls: MLP
+    kwargs:
+      dims: [512, 256, 128, 128, 128, 128]
+  enc_lat:
+    cls: MLP
+    kwargs:
+      dims: [256, 256, 128]
+  z_dist:
+    cls: MLP
+    kwargs:
+      dims: [128, 256]
+  dec:
+    cls: MLP
+    kwargs:
+      dims: [256, 256, 128, 128, 6]
+  n_z: 1
+  output_fn:
+    func: 'lambda x: latent_diagonal_mvn(x, min_std=0.05)'

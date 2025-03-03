@@ -1,0 +1,83 @@
+cls: ANP
+kwargs:
+  embed_s:
+    cls: MLP
+    kwargs:
+      dims: [256, 128]
+  enc_det:
+    cls: MLP
+    kwargs:
+      dims: [256, 128, 128]
+  enc_lat:
+    cls: MLP
+    kwargs:
+      dims: [256, 128, 128]
+  self_attn_det:
+    cls: MultiHeadAttention
+    kwargs:
+      num_heads: 8
+      proj_qs:
+        cls: MLP
+        kwargs:
+          dims: [128]
+      proj_ks:
+        cls: MLP
+        kwargs:
+          dims: [128]
+      proj_vs:
+        cls: MLP
+        kwargs:
+          dims: [128]
+      proj_out:
+        cls: MLP
+        kwargs:
+          dims: [128]
+  self_attn_lat:
+    cls: MultiHeadAttention
+    kwargs:
+      num_heads: 8
+      proj_qs:
+        cls: MLP
+        kwargs:
+          dims: [128]
+      proj_ks:
+        cls: MLP
+        kwargs:
+          dims: [128]
+      proj_vs:
+        cls: MLP
+        kwargs:
+          dims: [128]
+      proj_out:
+        cls: MLP
+        kwargs:
+          dims: [128]
+  z_dist:
+    cls: MLP
+    kwargs:
+      dims: [128, 256]
+  cross_attn:
+    cls: MultiHeadAttention
+    kwargs:
+      num_heads: 8
+      proj_qs:
+        cls: MLP
+        kwargs:
+          dims: [128]
+      proj_ks:
+        cls: MLP
+        kwargs:
+          dims: [128]
+      proj_vs:
+        cls: MLP
+        kwargs:
+          dims: [128]
+      proj_out:
+        cls: MLP
+        kwargs:
+          dims: [128]
+  dec:
+    cls: MLP
+    kwargs:
+      dims: [256, 128, 128, 2]
+  n_z: 1

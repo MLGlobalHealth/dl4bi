@@ -1,0 +1,29 @@
+cls: TNPND
+kwargs:
+  embed_s_f:
+    cls: MLP
+    kwargs:
+      dims: [64, 64, 64, 64]
+  enc:
+    cls: TransformerEncoder
+    kwargs:
+      blk:
+        cls: TransformerEncoderBlock
+        kwargs:
+          pre_norm: False
+  dec_f_mu:
+    cls: MLP
+    kwargs:
+      dims: [128, 3]
+  dec_f_std:
+    cls: TransformerEncoder
+    kwargs:
+      num_blks: 2
+      blk:
+        cls: TransformerEncoderBlock
+        kwargs:
+          pre_norm: False
+  proj_f_std:
+    cls: MLP
+    kwargs:
+      dims: [128, 128, 128, 20]

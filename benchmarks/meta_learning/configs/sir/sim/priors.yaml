@@ -1,0 +1,24 @@
+cls: LatticeSIR
+kwargs: 
+  beta:
+    cls: Prior
+    kwargs:
+      dist: beta
+      kwargs:
+        a: 2.0
+        b: 8.0
+  gamma:
+    cls: Prior
+    kwargs:
+      dist: inverse_gamma
+      kwargs:
+        alpha: 5.0
+        beta: 0.4
+  num_init:
+    cls: Prior
+    kwargs:
+      dist: randint
+      kwargs:
+        minval: 1
+        maxval: 5
+  kernel_width: 9

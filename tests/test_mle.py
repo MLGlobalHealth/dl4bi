@@ -6,7 +6,7 @@ from sps.kernels import rbf
 from sps.priors import Prior
 from sps.utils import build_grid
 
-from dl4bi.core import gp_mle_bfgs, gp_mle_sgd
+from dl4bi.core.mle import gp_mle_bfgs, gp_mle_sgd
 
 
 @pytest.mark.skip(reason="Difficult to get exact answer from so few data points.")

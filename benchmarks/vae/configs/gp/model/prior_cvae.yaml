@@ -1,5 +1,7 @@
 cls: PriorCVAE
 kwargs:
+  cond_stack_fn:
+    func: cond_as_locs
   encoder:
     cls: MLP
     kwargs:

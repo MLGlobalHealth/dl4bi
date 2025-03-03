@@ -1,0 +1,43 @@
+cls: TNPD
+kwargs:
+  embed_s_f:
+    cls: MLP
+    kwargs:
+      dims: [256, 128, 64]
+  enc:
+    cls: TransformerEncoder
+    kwargs:
+      num_blks: 6
+      blk:
+        cls: TransformerEncoderBlock
+        kwargs:
+          pre_norm: False
+          attn:
+            cls: MultiHeadAttention
+            kwargs:
+              proj_qs:
+                cls: MLP
+                kwargs:
+                  dims: [128]
+              proj_ks:
+                cls: MLP
+                kwargs:
+                  dims: [128]
+              proj_vs:
+                cls: MLP
+                kwargs:
+                  dims: [128, 64]
+              proj_out:
+                cls: MLP
+                kwargs:
+                  dims: [64]
+          ffn:
+            cls: MLP
+            kwargs:
+              dims: [256, 64]
+  head:
+    cls: MLP
+    kwargs:
+      dims: [256, 64, 2]
+  output_fn:
+    func: 'lambda x: diagonal_mvn(x, min_std=0.05)'
