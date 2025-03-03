@@ -130,7 +130,7 @@ def build_dataloader(
     s_grid = jnp.repeat(s_grid[None, ...], B, axis=0)  # [L, 3] -> [B, L, 3]
     valid_lens_test = jnp.repeat(num_test_max, B)
     dataset = dataset.reshape(num_samples, time_frame_size, -1)
-    dataset = 2 * (dataset - 0.5)  # [0, 1] -> [-1, 1]
+    # dataset = 2 * (dataset - 0.5)  # [0, 1] -> [-1, 1]
     offset_range = jnp.arange(1, temporal_cfg.max_past_time_offset + 1)
 
     # NOTE this function to prevent repetitions
@@ -156,7 +156,7 @@ def build_dataloader(
                 minval=temporal_cfg.max_past_time_offset,
                 maxval=time_frame_size,
             )
-            # choosing specific ctx times for each sample in batch
+            choosing specific ctx times for each sample in batch
             ctx_times = (
                 -jax.vmap(sample_offset, in_axes=(0, None))(
                     jax.random.split(rng_t3, B), time_step_ctx_num

@@ -209,6 +209,14 @@ def vis_ave_outbreaks(outbreaks, steps, path, outbreak_name, vmin=0, vmax=1, cma
         print(f"GIF saved at {gif_path}")
     
 def vis_col_distribution(outbreaks, path, outbreak_file, use_step, vmin=0, vmax=1, cmap='bwr'):
+    
+    plt.hist(outbreaks[:, 0], bins=range(int(outbreaks[:, 0].min()), int(outbreaks[:, 0].max()) + 1), edgecolor='black')
+    plt.xlabel('Simulation IDs')
+    plt.ylabel('Frequency')
+    plt.title('Distribution of Simulation IDs in Outbreaks')
+    plt.savefig(path + 'simulation_id_distribution.png')
+    plt.clf()
+    
     # Plot the distribution of the first column values in outbreaks
     plt.hist(outbreaks[:, 1], bins=range(int(outbreaks[:, 1].min()), int(outbreaks[:, 1].max()) + 1), edgecolor='black')
     plt.xlabel('Time steps')
@@ -254,8 +262,10 @@ def vis_col_distribution(outbreaks, path, outbreak_file, use_step, vmin=0, vmax=
     
     unique_sim_ids = np.unique(outbreaks[:, 0])
     sampled_sim_ids = np.random.choice(unique_sim_ids, 5, replace=False)
+    # sampled_sim_ids = [0, 1, 50000, 50001]
+    print("Sampled Simulation IDs:", sampled_sim_ids)
     for vis_sim_id in sampled_sim_ids:
-        vis_outbreaks = outbreaks[outbreaks[:, 0] == vis_sim_id][:use_step+1, 1:]
+        vis_outbreaks = outbreaks[outbreaks[:, 0] == vis_sim_id][:, 1:]
         vis_ave_outbreaks(vis_outbreaks, list(range(0, use_step)), path, outbreak_file.split('.')[0] + '_sim_' + str(vis_sim_id), vmin=vmin, vmax=vmax, cmap=cmap)
     
 def node2vec_features(adj_matrix, dimensions=8):
@@ -283,12 +293,16 @@ def read_csvs(path, csv_file, save_path, save_name, filter_flag=False, use_step=
         file_names = os.listdir(path)
     elif isinstance(csv_file, str):
         file_names = [csv_file]
+    last_sim_id = 0
     for file_name in file_names:
         if file_name.endswith('.csv'):
             file_path = os.path.join(path, file_name)
             df = pd.read_csv(file_path)
+            if df['sim_id'].iloc[0] < last_sim_id:
+                df['sim_id'] = df['sim_id'] + last_sim_id + 1
+            last_sim_id = df['sim_id'].iloc[-1] 
             print(df.shape)
-            print(df.head())
+            print(df)
             df = df[df['time'] <=use_step]
             print("after filtering largest time steps: ", df.shape)
             valid_sim_ids = df.groupby('sim_id')['time'].apply(lambda x: set(x) == set(range(use_step + 1)))
@@ -299,9 +313,9 @@ def read_csvs(path, csv_file, save_path, save_name, filter_flag=False, use_step=
             combined_df = pd.concat([combined_df, df], ignore_index=True, axis=0)
     if normalise_population is not None:
         combined_df.iloc[:, 2:] = combined_df.iloc[:, 2:] / normalise_population
-        from sklearn.preprocessing import MinMaxScaler, PowerTransformer
-        scaler = MinMaxScaler()
-        combined_df.iloc[:, 2:] = scaler.fit_transform(combined_df.iloc[:, 2:])
+        # from sklearn.preprocessing import MinMaxScaler, PowerTransformer
+        # scaler = MinMaxScaler()
+        # combined_df.iloc[:, 2:] = scaler.fit_transform(combined_df.iloc[:, 2:])
         # power = PowerTransformer(method='yeo-johnson', standardize=True)
         # combined_df.iloc[:, 2:] = power.fit_transform(combined_df.iloc[:, 2:])
         
@@ -390,7 +404,7 @@ def preprocess_SIR_continous_data(load_csv=False, graph='SB_high'):
     outbreak_file = 'SIR_outbreaks_continuous.npz'
     outbreak_path = save_path + outbreak_file
     vmin = 0
-    vmax = 1
+    vmax = 0.5
     cmap = 'coolwarm'
     if 'SB_high' in save_path:
         use_step  = 59
@@ -410,8 +424,29 @@ def preprocess_SIR_continous_data(load_csv=False, graph='SB_high'):
             print("Loading CSV files from", load_csv_path)
             read_csvs(load_csv_path, file_name, save_path, save_name=outbreak_file, filter_flag=filter, use_step=use_step, normalise_population=normalise_population)
     
-    print("Loading outbreaks from", outbreak_path)
-    outbreaks = np.load(outbreak_path)['outbreaks']
+    # print("Loading outbreaks from", outbreak_path)
+    # outbreaks = np.load(outbreak_path)['outbreaks']
+    
+    outbreaks = pd.read_csv('cache/synthetic-graphs/SB_high_v2/sim_beta0.8_gamma0.2_T150_n50000.csv').to_numpy()
+    # Plot scatter plot between sim_id 0 and 50000's columns [2:]
+    start_ids = [0, 10, 20, 30, 40, 50]
+    
+    for i in start_ids:
+        compare_ids = [i + n for n in [1,2,3,4,5,6,7,8,9]]
+        sim_id_0 = outbreaks[outbreaks[:, 0] == i][:50, 2:]
+        for n in compare_ids:
+            if n in outbreaks[:, 0]:
+                sim_id_n = outbreaks[outbreaks[:, 0] == n][:50, 2:]
+                
+                plt.scatter(sim_id_0.flatten(), sim_id_n.flatten(), alpha=0.5, label = 'n = ' + str(n), s=0.5)
+                print('largest difference between sim '+ str(i) + ' and sim ' + str(n) + ': ' + str((sim_id_0 - sim_id_n).max()))
+            else: 
+                print("Sim ID", n, "not in the outbreaks")
+        plt.xlabel('Sim ID Values' + str(i))
+        plt.ylabel('Sim ID n Values')
+        plt.legend()
+        plt.savefig(save_path + 'scatter_sim_' + str(i) + '.png')
+        plt.clf()
     
     print("Outbreaks:", outbreaks)
     print("Outbreaks shape:", outbreaks.shape)
@@ -424,8 +459,8 @@ def preprocess_SIR_continous_data(load_csv=False, graph='SB_high'):
     # plt.savefig(save_path + 'time_distribution.png')
     # plt.clf()
     
-def preprocess_SIR_categorical_data(load_csv=False):
-    save_path = 'cache/outbreaks/'
+def preprocess_SIR_categorical_data(load_csv=False, graph='lattice'):
+    save_path = 'cache/outbreaks_' + graph + '/'
     load_csv_path = save_path
     file_name = 'SIR_outbreaks.csv'
     outbreak_file = file_name.split('.')[0] + '.npz'
@@ -446,12 +481,30 @@ def preprocess_SIR_categorical_data(load_csv=False):
             read_csvs(load_csv_path, file_name, save_path, save_name=outbreak_file, filter_flag=filter, use_step=use_step)
         print("Loading outbreaks from", save_path)
     
-    outbreak_path = save_path + outbreak_file
-    outbreaks = np.load(outbreak_path)['outbreaks']
+    # outbreak_path = save_path + outbreak_file
+    # outbreaks = np.load(outbreak_path)['outbreaks']
+    
+    outbreaks = pd.read_csv(save_path + file_name).to_numpy()
+    # Plot scatter plot between sim_id 0 and 50000's columns [2:]
+    # start_ids = [0, 10, 20, 30, 40, 50]
+    start_ids = [0]
+    
+    for i in start_ids:
+        compare_ids = [i + n for n in [1,2,3,4,5,6,7,8,9]]
+        sim_id_0 = outbreaks[outbreaks[:, 0] == i][:30, 2:]
+        for n in compare_ids:
+            sim_id_n = outbreaks[outbreaks[:, 0] == n][:30, 2:]
+            plt.scatter(sim_id_0.flatten(), sim_id_n.flatten(), alpha=0.5, label = 'n = ' + str(n), s=0.5)
+            print('largest difference between sim '+ str(i) + ' and sim ' + str(n) + ': ' + str((sim_id_0 - sim_id_n).max()))
+        plt.xlabel('Sim ID Values' + str(i))
+        plt.ylabel('Sim ID n Values')
+        plt.legend()
+        plt.savefig(save_path + 'scatter_sim_' + str(i) + '.png')
+        plt.clf()
     
     print("Outbreaks:", outbreaks)
     print("Outbreaks shape:", outbreaks.shape)
-    vis_col_distribution(outbreaks, save_path, outbreak_file, use_step, vmin=vmin, vmax=vmax, cmap=cmap)
+    # vis_col_distribution(outbreaks, save_path, outbreak_file, use_step, vmin=vmin, vmax=vmax, cmap=cmap)
     
 def read_us_outbreaks():
     path = 'cache/US_outbreaks/'
@@ -465,6 +518,6 @@ def read_us_outbreaks():
     print(adj_matrix.shape)
     
 if __name__ == "__main__":
-    # preprocess_SIR_categorical_data(load_csv=True)
-    preprocess_SIR_continous_data(load_csv=False, graph='lattice')
+    # preprocess_SIR_categorical_data(load_csv=False, graph='lattice')
+    preprocess_SIR_continous_data(load_csv=False, graph='SB_high_v2')
     # read_us_outbreaks()

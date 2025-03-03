@@ -1011,7 +1011,17 @@ def log_graph_plots(
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
         plt.close(fig)
+        
+        plt.scatter(f_mu_i, f_test_full_i, c='b')
+        plt.xlabel('Prediction')
+        plt.ylabel('Ground Truth')
+        plt.title('Prediction vs Ground Truth')
+        paths_scatter = f"/tmp/{datetime.now().isoformat()} - sample {i} - scatter.png"
+        plt.savefig(paths_scatter, dpi=125)
+        plt.clf()
+        plt.close()
     wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
+    wandb.log({f"Step {step} - scatter": [wandb.Image(p) for p in paths_scatter]})
     
     
 def log_temporal_img_plots(
@@ -1068,24 +1078,37 @@ def log_temporal_img_plots(
             f_mu_i = f_mu[s : s + K].mean(axis=0)
             # Law of total variance: V[Y] = V[E[Y|X]] + E[V[Y|X]]
             f_std_i = f_mu[s : s + K].std(axis=0) + f_std[s : s + K].mean(axis=0)
-        fig = plot_img(
-            i,
-            shape,
-            f_ctx_i,
-            f_mu_i,
-            f_std_i,
-            f_test_full_i,
-            inv_idx_i,
-            cmap=cmap,
-            cmap_std=cmap_std,
-            norm=norm,
-            norm_std=norm_std,
-        )
+        # fig = plot_img(
+        #     i,
+        #     shape,
+        #     f_ctx_i,
+        #     f_mu_i,
+        #     f_std_i,
+        #     f_test_full_i,
+        #     inv_idx_i,
+        #     cmap=cmap,
+        #     cmap_std=cmap_std,
+        #     norm=norm,
+        #     norm_std=norm_std,
+        # )
+        # paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
+        # fig.savefig(paths[-1], dpi=125)
+        # plt.clf()
+        # plt.close(fig)
+        
+        plt.scatter(f_mu_i, f_test_full_i, c='b')
+        plt.xlim(0, 0.5)
+        plt.ylim(0, 0.5)
+        plt.xlabel('Prediction')
+        plt.ylabel('Ground Truth')
+        plt.title('Prediction vs Ground Truth')
         paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
-        fig.savefig(paths[-1], dpi=125)
+        plt.savefig(paths[-1], dpi=125)
         plt.clf()
-        plt.close(fig)
+        plt.close()
+
     wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
+    
 
 def plot_graph(
         id: int,

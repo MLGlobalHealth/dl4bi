@@ -10,8 +10,14 @@ kwargs:
       act_fn: gelu
   dist:
     func: l2_dist
-  bias:
+  graph_bias_flag: true
+  graph_bias:
     cls: GraphDistanceBias
+    kwargs:
+      num_heads: 4
+  temporal_bias_flag: false
+  temporal_bias:
+    cls: ExpTemporalBias
     kwargs:
       num_heads: 4
   attn:

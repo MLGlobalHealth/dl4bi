@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jax import vmap
 from sps.kernels import l2_dist_sq, l2_dist
 
-from ..core import MLP, DistanceBias, GraphDistanceBias, FusedAttention, KRBlock, MultiHeadAttention
+from ..core import MLP, DistanceBias, GraphDistanceBias, TemporalBias, FusedAttention, KRBlock, MultiHeadAttention
 import os
 
 
@@ -45,7 +45,10 @@ class STGTNPKR(nn.Module):
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
     dist: Callable = l2_dist
-    bias: nn.Module = GraphDistanceBias()
+    graph_bias_flag: bool = True
+    graph_bias: nn.Module = GraphDistanceBias()
+    temporal_bias_flag: bool = True
+    temporal_bias: nn.Module = TemporalBias()
     attn: nn.Module = MultiHeadAttention(FusedAttention())
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64], nn.gelu)
@@ -94,9 +97,13 @@ class STGTNPKR(nn.Module):
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
+        
         # d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
-        d_qk, d_kk = vdist(s_test[:,:,0], s_ctx[:,:,0]), vdist(s_ctx[:,:,0], s_ctx[:,:,0])
-        d_qk, d_kk = jnp.zeros_like(d_qk), jnp.zeros_like(d_kk) # ignore the distance
+        d_qk_temporal, d_kk_temporal = vdist(s_test[:,:,-1], s_ctx[:,:,-1]), vdist(s_ctx[:,:,-1], s_ctx[:,:,-1])
+        # print('s_test[:,:,-1]:', s_test[:,:,-1])
+        # print('s_ctx[:,:,-1]:', s_ctx[:,:,-1])
+        # print('d_qk:', d_qk)
+        # d_qk, d_kk = jnp.zeros_like(d_qk), jnp.zeros_like(d_kk) # ignore the distance
         
         graph_dist = kwargs['graph_dist']
         inv_permute_idx = kwargs['inv_permute_idx']
@@ -112,8 +119,18 @@ class STGTNPKR(nn.Module):
         for _ in range(self.num_blks):
             attn, ffn = self.attn.copy(), self.ffn.copy()
             for _ in range(self.num_reps):
-                bias, norm = self.bias.copy(), self.norm.copy()
-                b_qk, b_kk = bias(d_qk, d_qk_graph), bias(d_kk, d_kk_graph)
+                graph_bias = self.graph_bias.copy()
+                gb_qk, gb_kk = graph_bias(d_qk_graph), graph_bias(d_kk_graph)
+                if not self.graph_bias_flag:
+                    gb_qk, gb_kk = jnp.zeros_like(gb_qk), jnp.zeros_like(gb_kk)
+                temporal_bias = self.temporal_bias.copy()
+                tb_qk, tb_kk = temporal_bias(d_qk_temporal), temporal_bias(d_kk_temporal)
+                if not self.temporal_bias_flag:
+                    tb_qk, tb_kk = jnp.zeros_like(tb_qk), jnp.zeros_like(tb_kk)
+                b_qk = gb_qk + tb_qk
+                b_kk = gb_kk + tb_kk
+                
+                norm = self.norm.copy()
                 blk = KRBlock(attn, norm, ffn)
                 qvs, kvs = blk(qvs, kvs, b_qk, b_kk, valid_lens_ctx, training, inv_permute_idx)
         qvs = self.norm.copy()(qvs)

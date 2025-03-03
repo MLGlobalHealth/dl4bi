@@ -17,4 +17,4 @@ data_path: cache/outbreaks_lattice/
 file_name: SIR_outbreaks_continuous.npz
 graph_dist: distances_UT.npy
 vmin: 0
-vmax: 1
+vmax: 0.5
