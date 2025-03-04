@@ -68,7 +68,7 @@ def _batch(
     num_ctx_max: int,
     num_test: int,
     test_includes_ctx: bool,
-    obs_noise: Optional[FrozenDict] = None,
+    obs_noise: Optional[float] = None,
 ):
     rng_p, rng_b, rng_eps = random.split(rng, 3)
     has_x = x is not None
@@ -162,7 +162,7 @@ class SpatialBatch(MetaLearningBatch):
         self,
         f_pred: jax.Array,  # [B, L_test, D_f]
         f_std: jax.Array,  # [B, L_test, D_f]
-        cmap=mpl.colormaps.get_cmap("grey"),
+        cmap=mpl.colormaps.get_cmap("Spectral_r"),
         cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
         norm=None,
         norm_std=None,
@@ -173,7 +173,7 @@ class SpatialBatch(MetaLearningBatch):
     ):
         B, L = self.f_test.shape[0], self.inv_permute_idx.shape[0]
         N = min(num_plots or B, B)
-        reshape = jit(lambda v: v.reshape(*self.s_shape[:-1]))
+        reshape = jit(lambda v: v.reshape(self.s_shape[:-1]))
         if f_std.shape[-1] > 1:  # e.g. uncertainty per RGB channel
             f_std = f_std.mean(axis=-1)
         arrays = unbatch_BLD([self.f_ctx, self.f_test, f_pred, f_std], L)

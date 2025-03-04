@@ -73,7 +73,7 @@ def main(cfg: DictConfig):
         rng_test,
         state,
         model.valid_step,
-        dataloader,
+        valid_dataloader,
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})

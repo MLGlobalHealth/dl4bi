@@ -401,4 +401,3 @@ def test_spatial_data_plot_2d():
     b = SpatialData(x, s, f).batch(rng, num_ctx_min, num_ctx_max, num_test, True)
     fig = b.plot_2d(f_pred, f_std)
     fig.savefig("/tmp/test_spatial_data_plot_2d.png")
-    assert False
