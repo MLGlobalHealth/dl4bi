@@ -94,7 +94,9 @@ def plot_prevalence_scatter_comp(
     population_scale: int = 100,
     log: bool = False,
 ):
-    if prev_real is None and inference_model == "binomial" and population is not None:
+    if prev_real is not None:
+        _to_prev(prev_real, inference_model)
+    elif inference_model == "binomial" and population is not None:
         population = population // population_scale
         prev_real = jnp.array(f_obs / population)
     if prev_real is None:
@@ -144,7 +146,9 @@ def plot_models_mean_prevalence(
     population_scale: int = 100,
     log: bool = False,
 ):
-    if prev_real is None and inference_model == "binomial" and population is not None:
+    if prev_real is not None:
+        _to_prev(prev_real, inference_model)
+    elif inference_model == "binomial" and population is not None:
         population = population // population_scale
         prev_real = jnp.array(f_obs / population)
     val_n = "Prevalence" if inference_model == "binomial" else "Intensity"
@@ -677,6 +681,7 @@ def log_vae_map_plots(
     z_dim: int,
     large_batch_loader: Generator,
     is_decoder_only: bool,
+    data: DictConfig,
 ):
     def log_plots(
         step: int,
@@ -876,6 +881,7 @@ def log_vae_grid_plots(
     z_dim: int,
     large_batch_loader: Generator,
     is_decoder_only: bool,
+    data: DictConfig,
 ):
     def log_plots(
         step: int,
@@ -917,6 +923,27 @@ def log_vae_grid_plots(
                 surrogate_decoder,
                 step=str(step),
             )
+        elif s.shape[-1] == 2:
+            plot_vae_rec_2d(
+                rng_rcn,
+                (data.s[0].num, data.s[1].num),
+                state,
+                model.__class__.__name__,
+                loader,
+                conds_names,
+                is_decoder_only,
+                step=str(step),
+                **kwargs,
+            )
+            plot_vae_decoder_2d(
+                rng_dec,
+                (data.s[0].num, data.s[1].num),
+                loader,
+                conds_names,
+                z_dim,
+                surrogate_decoder,
+                step=str(step),
+            )
         plot_vae_scatter_plot(
             f,
             f_hat,
@@ -936,3 +963,147 @@ def log_vae_grid_plots(
         )
 
     return log_plots
+
+
+def plot_vae_rec_2d(
+    rng: jax.Array,
+    grid_shape: tuple[int, int],
+    state: TrainState,
+    model: str,
+    loader,
+    conds_names: list[str],
+    is_decoder_only: bool,
+    save_dir: Optional[Path] = None,
+    num_plots: int = 5,
+    samples_per_plot: int = 3,
+    step="",
+    **kwargs,
+):
+    """Plots VAE predictions on map"""
+    paths = []
+    for i in range(num_plots):
+        rng_drop, rng_extra, rng = jax.random.split(rng, 3)
+        f, z, conditionals = next(loader)
+        f_hat = state.apply_fn(
+            {"params": state.params, **state.kwargs},
+            z if is_decoder_only else f,
+            conditionals,
+            **kwargs,
+            rngs={"dropout": rng_drop, "extra": rng_extra},
+        )
+        f = f.reshape(-1, grid_shape[0], grid_shape[1])
+        f_hat = f_hat if is_decoder_only else f_hat[0]
+        f_hat = f_hat.reshape(-1, grid_shape[0], grid_shape[1])
+        fig, ax = plt.subplots(1, samples_per_plot * 2, figsize=(20, 5))
+        vmin = min(f.min(), f_hat.min())
+        vmax = max(f.max(), f_hat.max())
+        for j in range(samples_per_plot):
+            im = ax[2 * j].imshow(f[j], vmin=vmin, vmax=vmax)
+            fig.colorbar(im, ax=ax[2 * j])
+            im_hat = ax[2 * j + 1].imshow(f_hat[j], vmin=vmin, vmax=vmax)
+            fig.colorbar(im_hat, ax=ax[2 * j + 1])
+            ax[2 * j].set_title(r"$f$")
+            ax[2 * j + 1].set_title(r"$\hat{f}$")
+        for axis in ax:
+            axis.set_axis_off()
+        plt.tight_layout()
+        title = f"{model}, {conds_to_title(conds_names, conditionals)}"
+        fig.suptitle(title)
+        fig.subplots_adjust(top=0.85)
+        if save_dir:
+            fig.savefig(save_dir / f"rec_{i}.png", dpi=125)
+        else:
+            paths.append(f"/tmp/VAE_2d_Rec {datetime.now().isoformat()} - {title}.png")
+            fig.savefig(paths[-1], dpi=125)
+        plt.clf()
+        plt.close(fig)
+    if save_dir is None:
+        wandb.log({f"Reconstruction {step}": [wandb.Image(p) for p in paths]})
+
+
+def plot_vae_decoder_2d(
+    rng: jax.Array,
+    grid_shape: tuple[int, int],
+    loader: Generator,
+    conds_names: list[str],
+    z_dim: int,
+    surrogate_decoder: Callable,
+    num_batches: int = 5,
+    num_decodings: int = 10,
+    step="",
+    **kwargs,
+):
+    paths = []
+    for i in range(num_batches):
+        rng_z, rng = jax.random.split(rng)
+        fig, ax = plt.subplots(1, num_decodings + 1, figsize=(5 * num_decodings, 5))
+        f_batch, _, conditionals = next(loader)
+        f = f_batch[0].reshape(grid_shape[0], grid_shape[1])
+        z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim))
+        f_hat = surrogate_decoder(z, conditionals, **kwargs).reshape(
+            -1, grid_shape[0], grid_shape[1]
+        )
+        vmin = min(f.min(), f_hat.min())
+        vmax = max(f.max(), f_hat.max())
+        im = ax[0].imshow(f, vmin=vmin, vmax=vmax)
+        fig.colorbar(im, ax=ax[0])
+        ax[0].set_title(r"$f$")
+        for j in range(num_decodings):
+            im = ax[j + 1].imshow(f_hat[j], vmin=vmin, vmax=vmax)
+            fig.colorbar(im, ax=ax[j + 1])
+            ax[j + 1].set_title(r"$\hat{f}$")
+        for axis in ax:
+            axis.set_axis_off()
+        plt.tight_layout()
+        timestamp = datetime.now().isoformat()
+        title = f"Sample {i} {conds_to_title(conds_names, conditionals)}"
+        paths.append(f"/tmp/VAE_2d_Dec {timestamp} - {title}.png")
+        fig.suptitle(title)
+        fig.subplots_adjust(top=0.86)
+        fig.savefig(paths[-1], dpi=125)
+        plt.clf()
+        plt.close(fig)
+    wandb.log({f"Decoder {step}": [wandb.Image(p) for p in paths]})
+
+
+def plot_2d_histograms_dec(
+    rng: jax.Array,
+    grid_shape: tuple[int, int],
+    loader: Generator,
+    conds_names: list[str],
+    z_dim: int,
+    surrogate_decoder: Callable,
+    num_batches: int = 5,
+    num_decodings: int = 10,
+    step="",
+    **kwargs,
+):
+    paths = []
+    for i in range(num_batches):
+        rng_z, rng = jax.random.split(rng)
+        fig, ax = plt.subplots(1, num_decodings + 1, figsize=(5 * num_decodings, 5))
+        f_batch, _, conditionals = next(loader)
+        f = f_batch[0].reshape(grid_shape[0], grid_shape[1])
+        z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim))
+        f_hat = surrogate_decoder(z, conditionals, **kwargs).reshape(
+            -1, grid_shape[0], grid_shape[1]
+        )
+        vmin = min(f.min(), f_hat.min())
+        vmax = max(f.max(), f_hat.max())
+        ax[0].hist(f.ravel(), bins=50, range=(vmin, vmax), color="blue", alpha=0.7)
+        ax[0].set_title(r"$f$")
+        ax[0].set_xlim(vmin, vmax)
+        for j in range(num_decodings):
+            ax[j + 1].hist(f_hat[j].ravel(), bins=50, range=(vmin, vmax), color="red")
+            ax[j + 1].set_title(r"$\hat{f}$")
+            ax[j + 1].set_xlim(vmin, vmax)
+        plt.tight_layout()
+        timestamp = datetime.now().isoformat()
+        title = f"Sample {i} {conds_to_title(conds_names, conditionals)}"
+        paths.append(f"/tmp/Hist_2d_Dec {timestamp} - {title}.png")
+        fig.suptitle(title)
+        fig.subplots_adjust(top=0.86)
+        fig.savefig(paths[-1], dpi=125)
+        plt.clf()
+        plt.close(fig)
+    wandb.log({f"Histograms {step}": [wandb.Image(p) for p in paths]})
