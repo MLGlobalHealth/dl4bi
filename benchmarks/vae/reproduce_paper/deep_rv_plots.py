@@ -43,7 +43,6 @@ def reproduce_plots(seeds: jax.Array):
         "UK_LTLA_sim",
         "benchmarks/vae/maps/UK",
         "poisson",
-        log_plot=False,
     )
     print_simulated_latex_table(pd.DataFrame(infer_summary), models_n)
     summarize_inference_runs(
@@ -51,7 +50,7 @@ def reproduce_plots(seeds: jax.Array):
         models_n,
         ["matern_1_2", "matern_3_2"],
         "female_U50_cancer_mort",
-        "benchmarks/vae/maps/total_under_50_cancer_mortality_LAD_2023",
+        "benchmarks/vae/maps/female_under_50_cancer_mortality_LAD_2023",
         "binomial",
     )
     summarize_inference_runs(
@@ -59,7 +58,7 @@ def reproduce_plots(seeds: jax.Array):
         models_n,
         ["matern_1_2", "matern_3_2"],
         "male_U50_cancer_mort",
-        "benchmarks/vae/maps/total_under_50_cancer_mortality_LAD_2023",
+        "benchmarks/vae/maps/male_under_50_cancer_mortality_LAD_2023",
         "binomial",
     )
     summarize_inference_runs(

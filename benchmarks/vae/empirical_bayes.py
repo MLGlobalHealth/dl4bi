@@ -165,7 +165,7 @@ def empirical_infer(
         list of best fitted parameters
     """
     # NOTE: bounds for conditionals, noise is unbounded
-    bounds = [(0.05, 1)] * (len(initial_conditionals) - 1) + [(1e-5, None)]
+    bounds = [(0.05, 100)] * (len(initial_conditionals) - 1) + [(1e-5, None)]
     result = minimize(
         partial(
             marginal_log_likelihood,
