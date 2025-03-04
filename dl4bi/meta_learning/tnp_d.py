@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from ..core.mlp import MLP
 from ..core.transformer import TransformerEncoder
 from .model_output import DiagonalMVNOutput
+from .steps import likelihood_train_step, likelihood_valid_step
 
 
 class TNPD(nn.Module):
@@ -18,6 +19,8 @@ class TNPD(nn.Module):
         head: Transforms the tokens into model output.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
+        train_step: What training step to use.
+        valid_step: What validation step to use.
 
     Returns:
         An instance of the `TNP-D` model.
@@ -27,6 +30,8 @@ class TNPD(nn.Module):
     enc: nn.Module = TransformerEncoder()
     head: nn.Module = MLP([128, 2], nn.relu)
     output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    train_step: Callable = likelihood_train_step
+    valid_step: Callable = likelihood_valid_step
 
     @nn.compact
     def __call__(

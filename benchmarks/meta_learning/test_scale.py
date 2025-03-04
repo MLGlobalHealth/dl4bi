@@ -10,10 +10,8 @@ from jax import jit, random
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from dl4bi.meta_learning.train_utils import (
-    cfg_to_run_name,
-    load_ckpt,
-)
+from dl4bi.core.train import load_ckpt
+from dl4bi.meta_learning.utils import cfg_to_run_name
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 

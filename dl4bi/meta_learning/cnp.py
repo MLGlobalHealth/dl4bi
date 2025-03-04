@@ -6,6 +6,7 @@ import jax.numpy as jnp
 
 from ..core.mlp import MLP
 from .model_output import DiagonalMVNOutput
+from .steps import likelihood_train_step, likelihood_valid_step
 
 
 class CNP(nn.Module):
@@ -23,6 +24,8 @@ class CNP(nn.Module):
         dec: A module for decoding at test points.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
+        train_step: What training step to use.
+        valid_step: What validation step to use.
 
     Returns:
         An instance of `CNP`.
@@ -31,6 +34,8 @@ class CNP(nn.Module):
     enc_det: nn.Module = MLP([128] * 6)
     dec: nn.Module = MLP([128] * 4 + [2])
     output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    train_step: Callable = likelihood_train_step
+    valid_step: Callable = likelihood_valid_step
 
     @nn.compact
     def __call__(

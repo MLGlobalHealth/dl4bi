@@ -205,12 +205,12 @@ class SpatiotemporalBatch(MetaLearningBatch):
     s_ctx: jax.Array  # [B, L_ctx, D_s]
     t_ctx: jax.Array  # [B, L_ctx, 1]
     f_ctx: jax.Array  # [B, L_ctx, D_f]
-    valid_lens_ctx: jax.Array  # [B]
+    mask_ctx: jax.Array  # [B, L_ctx]
     x_test: Optional[jax.Array]  # [B, L_test, D_x]
     s_test: jax.Array  # [B, L_test, D_s]
     t_test: jax.Array  # [B, L_test, 1]
     f_test: jax.Array  # [B, L_test, D_f]
-    valid_lens_test: jax.Array  # [B]
+    mask_test: jax.Array  # [B, L_test]
     inv_permute_idx: jax.Array  # [L]
     s_shape: tuple
 
@@ -294,12 +294,12 @@ jax.tree_util.register_pytree_node(
             d.s_ctx,
             d.t_ctx,
             d.f_ctx,
-            d.valid_lens_ctx,
+            d.mask_ctx,
             d.x_test,
             d.s_test,
             d.t_test,
             d.f_test,
-            d.valid_lens_test,
+            d.mask_test,
             d.inv_permute_idx,
         ),
         (d.s_shape,),

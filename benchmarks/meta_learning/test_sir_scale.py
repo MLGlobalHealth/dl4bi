@@ -5,13 +5,14 @@ from pathlib import Path
 from time import time
 
 import hydra
+from hydra.utils import instantiate
 from jax import random
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from dl4bi.meta_learning.train_utils import TrainState, load_ckpt
+from dl4bi.core.train import TrainState, load_ckpt
 
-from .sir import build_dataloader, instantiate, select_steps
+from .sir import build_dataloader
 
 
 @hydra.main("configs/sir", config_name="default", version_base=None)
@@ -29,7 +30,7 @@ def main(cfg: DictConfig):
             "ANP",
             "CANP",
             "ConvCNP",
-            "TNP-D",
+            "TNPD",
         ]:
             continue
         # need to expand internal grid of ConvCNP
@@ -52,11 +53,10 @@ def main(cfg: DictConfig):
                 kwargs=state.kwargs,
                 tx=state.tx,
             )
-        _, valid_step = select_steps(model, is_categorical=True)
         batches = dataloader(rng_data)
         batch = next(batches)
         try:
-            valid_step(rng, state, batch)  # precompile
+            model.valid_step(rng, state, batch)  # precompile
         except Exception:
             with open(out_fn.with_suffix(".txt"), "w") as f:
                 f.write("OOM\n")
@@ -72,7 +72,7 @@ def main(cfg: DictConfig):
             rng_i, rng = random.split(rng)
             batch = next(batches)
             start = time()
-            m = valid_step(rng_i, state, batch)
+            m = model.valid_step(rng_i, state, batch)
             end = time()
             m["s_elapsed"] = end - start
             for k, v in m.items():

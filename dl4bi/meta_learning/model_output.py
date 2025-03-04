@@ -87,6 +87,14 @@ def forward_kl_div(p: DiagonalMVNOutput, q: DiagonalMVNOutput):
     ).sum(axis=-1)
 
 
+# register to use in jitted functions
+jax.tree_util.register_pytree_node(
+    DiagonalMVNOutput,
+    lambda d: ((d.mu, d.std), None),
+    lambda _aux, children: DiagonalMVNOutput(*children),
+)
+
+
 @dataclass(frozen=True)
 class MultinomialOutput(DistributionOutput):
     logits: jax.Array
@@ -113,3 +121,11 @@ class MultinomialOutput(DistributionOutput):
 
     def metrics(self, x: jax.Array, mask: Optional[jax.Array]):
         return {"NLL": self.nll(x, mask)}
+
+
+# register to use in jitted functions
+jax.tree_util.register_pytree_node(
+    MultinomialOutput,
+    lambda d: ((d.logits,), None),
+    lambda _aux, children: MultinomialOutput(*children),
+)

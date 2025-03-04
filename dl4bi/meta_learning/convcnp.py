@@ -9,6 +9,7 @@ from sps.utils import build_grid
 from ..core.conv import ConvCNPNet, ConvDeepSet
 from ..core.mlp import MLP
 from .model_output import DiagonalMVNOutput
+from .steps import likelihood_train_step, likelihood_valid_step
 
 
 class ConvCNP(nn.Module):
@@ -29,6 +30,8 @@ class ConvCNP(nn.Module):
         head: Transforms the decoder output into model output.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
+        train_step: What training step to use.
+        valid_step: What validation step to use.
     Returns:
         An instance of `ConvCNP`.
     """
@@ -41,6 +44,8 @@ class ConvCNP(nn.Module):
     dec: nn.Module = ConvDeepSet()
     head: nn.Module = MLP([128] * 3 + [2])
     output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    train_step: Callable = likelihood_train_step
+    valid_step: Callable = likelihood_valid_step
 
     @nn.compact
     def __call__(

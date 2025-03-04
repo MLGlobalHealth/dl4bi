@@ -7,6 +7,7 @@ from jax import random
 
 from ..core.mlp import MLP
 from .model_output import DiagonalMVNOutput
+from .steps import elbo_train_step, likelihood_valid_step
 
 
 class NP(nn.Module):
@@ -24,6 +25,8 @@ class NP(nn.Module):
         n_z: Number of latent `z` samples to use.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
+        train_step: What training step to use.
+        valid_step: What validation step to use.
 
     Returns:
         An instance of `NP`.
@@ -35,6 +38,8 @@ class NP(nn.Module):
     dec: nn.Module = MLP([128] * 4 + [2])
     n_z: int = 1
     output_fn: Callable = DiagonalMVNOutput.from_latent_np
+    train_step: Callable = elbo_train_step
+    valid_step: Callable = likelihood_valid_step
 
     @nn.compact
     def __call__(
@@ -52,7 +57,7 @@ class NP(nn.Module):
         z = z_mu_ctx + z_std_ctx * random.normal(rng_z, z_shape)  # [n_z, B, d_z]
         z = z.swapaxes(0, 1)  # [B, n_z, d_z]
         output = self.decode(r, z, s_test, training)  # [B, L_test, d_f]
-        return output, DiagonalMVNOutput(z_mu_ctx, z_std_ctx)
+        return self.output_fn(output), DiagonalMVNOutput(z_mu_ctx, z_std_ctx)
 
     def encode_deterministic(
         self,
@@ -101,5 +106,4 @@ class NP(nn.Module):
         r_ctx_z = jnp.repeat(r_ctx_z, L_test, axis=2)  # [B, n_z, L_test, d_ffn + d_z]
         s = jnp.repeat(s_test[:, None, ...], self.n_z, axis=1)  # [B, n_z, L_test, D_s]
         q = jnp.concatenate([r_ctx_z, s], -1)  # [B, n_z, L_test, d_ffn + d_z + D_s]
-        output = self.dec(q, training)
-        return self.output_fn(output)
+        return self.dec(q, training)

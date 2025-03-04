@@ -75,10 +75,10 @@ jax.tree_util.register_pytree_node(
 class TabularBatch(MetaLearningBatch):
     x_ctx: jax.Array
     f_ctx: jax.Array
-    valid_lens_ctx: jax.Array
+    mask_ctx: jax.Array
     x_test: jax.Array
     f_test: jax.Array
-    valid_lens_test: jax.Array
+    mask_test: jax.Array
     inv_permute_idx: jax.Array
 
 
@@ -89,10 +89,10 @@ jax.tree_util.register_pytree_node(
         (
             d.x_ctx,
             d.f_ctx,
-            d.valid_lens_ctx,
+            d.mask_ctx,
             d.x_test,
             d.f_test,
-            d.valid_lens_test,
+            d.mask_test,
             d.inv_permute_idx,
         ),
         None,

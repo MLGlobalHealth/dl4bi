@@ -41,10 +41,10 @@ class ANP(nn.Module):
         dec: A decoder for test locations.
         cross_attn: A cross attention module used in decoding.
         n_z: Number of latent `z` samples to use.
-        train_step: What training step to use.
-        valid_step: What validation step to use.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
+        train_step: What training step to use.
+        valid_step: What validation step to use.
 
     Returns:
         An instance of an `ANP`.
@@ -77,9 +77,9 @@ class ANP(nn.Module):
     )
     dec: nn.Module = MLP([128] * 4 + [2])
     n_z: int = 1
+    output_fn: Callable = DiagonalMVNOutput.from_latent_np
     train_step: Callable = elbo_train_step
     valid_step: Callable = likelihood_valid_step
-    output_fn: Callable = DiagonalMVNOutput.from_latent_np
 
     @nn.compact
     def __call__(

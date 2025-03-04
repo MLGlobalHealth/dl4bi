@@ -1,4 +1,4 @@
-from . import train_utils
+from . import utils
 from .anp import ANP
 from .canp import CANP
 from .cnp import CNP

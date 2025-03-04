@@ -9,22 +9,20 @@ import jax
 import jax.numpy as jnp
 import optax
 import wandb
+from hydra.utils import instantiate
 from jax import jit, random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
-from dl4bi.meta_learning.train_utils import (
+from dl4bi.core.train import (
     Callback,
-    cfg_to_run_name,
     cosine_annealing_lr,
     evaluate,
-    instantiate,
     load_ckpt,
-    log_img_plots,
     save_ckpt,
-    select_steps,
     train,
 )
+from dl4bi.meta_learning.utils import cfg_to_run_name
 
 # Example command to evaluate only:
 # python sir.py \
@@ -61,16 +59,15 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
-    train_step, valid_step = select_steps(model, is_categorical=True)
     if cfg.evaluate_only:
         state, _ = load_ckpt(path.with_suffix(".ckpt"))
         # run once to compile
-        evaluate(rng_test, state, valid_step, dataloader, num_steps=1)
+        evaluate(rng_test, state, model.valid_step, dataloader, num_steps=1)
         start = time()
         metrics = evaluate(
             rng_test,
             state,
-            valid_step,
+            model.valid_step,
             dataloader,
             cfg.valid_num_steps,
         )
@@ -89,8 +86,8 @@ def main(cfg: DictConfig):
         rng_train,
         model,
         optimizer,
-        train_step,
-        valid_step,
+        model.train_step,
+        model.valid_step,
         dataloader,
         dataloader,
         cfg.train_num_steps,
@@ -101,7 +98,7 @@ def main(cfg: DictConfig):
     metrics = evaluate(
         rng_test,
         state,
-        valid_step,
+        model.valid_step,
         dataloader,
         cfg.valid_num_steps,
     )

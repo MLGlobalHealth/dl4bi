@@ -2,8 +2,9 @@ import shutil
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
+import flax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -14,12 +15,12 @@ from flax.core import FrozenDict
 from flax.training import orbax_utils, train_state
 from hydra.utils import instantiate
 from jax import random
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from orbax.checkpoint import PyTreeCheckpointer
 from tqdm import tqdm
 
 
-@dataclass
+@flax.struct.dataclass
 class TrainState(train_state.TrainState):
     # kwargs stores any extra information associated with training,
     # i.e. batch norm stats or fixed (random) projections

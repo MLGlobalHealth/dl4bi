@@ -15,8 +15,10 @@ def test_tabular_data():
     f_shape = (B, L, D_f)
     x_ctx_shape = (B, num_ctx_max, D_x)
     f_ctx_shape = (B, num_ctx_max, D_f)
+    mask_ctx_shape = (B, num_ctx_max)
     x_test_shape = (B, num_test, D_x)
     f_test_shape = (B, num_test, D_f)
+    mask_test_shape = (B, num_test)
     x = random.normal(rng, x_shape)
     f = random.normal(rng, f_shape)
     # test basic instantiation
@@ -28,10 +30,10 @@ def test_tabular_data():
     b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
     assert b.x_ctx.shape == x_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test.shape == x_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
     assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
     # test batching where test does not include context
@@ -39,10 +41,10 @@ def test_tabular_data():
     b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
     assert b.x_ctx.shape == x_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test.shape == x_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert not (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
 
@@ -57,9 +59,11 @@ def test_spatial_data_with_x():
     x_ctx_shape = (B, num_ctx_max, D_x)
     s_ctx_shape = (B, num_ctx_max, D_s)
     f_ctx_shape = (B, num_ctx_max, D_f)
+    mask_ctx_shape = (B, num_ctx_max)
     x_test_shape = (B, num_test, D_x)
     s_test_shape = (B, num_test, D_s)
     f_test_shape = (B, num_test, D_f)
+    mask_test_shape = (B, num_test)
     x = random.normal(rng, x_shape)
     f = random.normal(rng, f_shape)
     s = build_grid([{"start": -2, "stop": 2, "num": S}] * D_s)
@@ -75,11 +79,11 @@ def test_spatial_data_with_x():
     assert b.x_ctx.shape == x_ctx_shape
     assert b.s_ctx.shape == s_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test.shape == x_test_shape
     assert b.s_test.shape == s_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
     assert (b.s_ctx[:, :num_ctx_max] == b.s_test[:, :num_ctx_max]).all()
     assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
@@ -89,11 +93,11 @@ def test_spatial_data_with_x():
     assert b.x_ctx.shape == x_ctx_shape
     assert b.s_ctx.shape == s_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test.shape == x_test_shape
     assert b.s_test.shape == s_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert not (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
     assert not (b.s_ctx[:, :num_ctx_max] == b.s_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
@@ -107,8 +111,10 @@ def test_spatial_data_without_x():
     f_shape = (B, *[S] * D_s, D_f)
     s_ctx_shape = (B, num_ctx_max, D_s)
     f_ctx_shape = (B, num_ctx_max, D_f)
+    mask_ctx_shape = (B, num_ctx_max)
     s_test_shape = (B, num_test, D_s)
     f_test_shape = (B, num_test, D_f)
+    mask_test_shape = (B, num_test)
     f = random.normal(rng, f_shape)
     s = build_grid([{"start": -2, "stop": 2, "num": S}] * D_s)
     s = jnp.repeat(s[None, ...], B, axis=0)
@@ -123,11 +129,11 @@ def test_spatial_data_without_x():
     assert b.x_ctx is None
     assert b.s_ctx.shape == s_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test is None
     assert b.s_test.shape == s_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert (b.s_ctx[:, :num_ctx_max] == b.s_test[:, :num_ctx_max]).all()
     assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
     # test batching where test does not include context
@@ -136,11 +142,11 @@ def test_spatial_data_without_x():
     assert b.x_ctx is None
     assert b.s_ctx.shape == s_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test is None
     assert b.s_test.shape == s_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert not (b.s_ctx[:, :num_ctx_max] == b.s_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
 
@@ -155,9 +161,11 @@ def test_spatial_data_broadcast_x():
     x_ctx_shape = (B, num_ctx_max, D_x)
     s_ctx_shape = (B, num_ctx_max, D_s)
     f_ctx_shape = (B, num_ctx_max, D_f)
+    mask_ctx_shape = (B, num_ctx_max)
     x_test_shape = (B, num_test, D_x)
     s_test_shape = (B, num_test, D_s)
     f_test_shape = (B, num_test, D_f)
+    mask_test_shape = (B, num_test)
     x = random.normal(rng, x_shape)
     f = random.normal(rng, f_shape)
     s = build_grid([{"start": -2, "stop": 2, "num": S}] * D_s)
@@ -173,11 +181,11 @@ def test_spatial_data_broadcast_x():
     assert b.x_ctx.shape == x_ctx_shape
     assert b.s_ctx.shape == s_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test.shape == x_test_shape
     assert b.s_test.shape == s_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
     assert (b.s_ctx[:, :num_ctx_max] == b.s_test[:, :num_ctx_max]).all()
     assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
@@ -187,11 +195,11 @@ def test_spatial_data_broadcast_x():
     assert b.x_ctx.shape == x_ctx_shape
     assert b.s_ctx.shape == s_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test.shape == x_test_shape
     assert b.s_test.shape == s_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert not (b.s_ctx[:, :num_ctx_max] == b.s_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
 
@@ -206,9 +214,11 @@ def test_temporal_data_with_x():
     x_ctx_shape = (B, num_ctx_max, D_x)
     t_ctx_shape = (B, num_ctx_max, 1)
     f_ctx_shape = (B, num_ctx_max, D_f)
+    mask_ctx_shape = (B, num_ctx_max)
     x_test_shape = (B, num_test, D_x)
     t_test_shape = (B, num_test, 1)
     f_test_shape = (B, num_test, D_f)
+    mask_test_shape = (B, num_test)
     x = random.normal(rng, x_shape)
     f = random.normal(rng, f_shape)
     t = jnp.repeat(jnp.arange(T)[None, :], B, axis=0)
@@ -223,11 +233,11 @@ def test_temporal_data_with_x():
     assert b.x_ctx.shape == x_ctx_shape
     assert b.t_ctx.shape == t_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test.shape == x_test_shape
     assert b.t_test.shape == t_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
     assert (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
@@ -237,11 +247,11 @@ def test_temporal_data_with_x():
     assert b.x_ctx.shape == x_ctx_shape
     assert b.t_ctx.shape == t_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test.shape == x_test_shape
     assert b.t_test.shape == t_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert not (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
     assert not (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
@@ -255,8 +265,10 @@ def test_temporal_data_without_x():
     f_shape = (B, T, D_f)
     t_ctx_shape = (B, num_ctx_max, 1)
     f_ctx_shape = (B, num_ctx_max, D_f)
+    mask_ctx_shape = (B, num_ctx_max)
     t_test_shape = (B, num_test, 1)
     f_test_shape = (B, num_test, D_f)
+    mask_test_shape = (B, num_test)
     f = random.normal(rng, f_shape)
     t = jnp.repeat(jnp.arange(T)[None, :], B, axis=0)
     # test basic instantiation
@@ -270,11 +282,11 @@ def test_temporal_data_without_x():
     assert b.x_ctx is None
     assert b.t_ctx.shape == t_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test is None
     assert b.t_test.shape == t_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
     # test batching where test does not include context
@@ -283,11 +295,11 @@ def test_temporal_data_without_x():
     assert b.x_ctx is None
     assert b.t_ctx.shape == t_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test is None
     assert b.t_test.shape == t_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert not (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
 
@@ -302,9 +314,11 @@ def test_temporal_data_broadcast_x():
     x_ctx_shape = (B, num_ctx_max, D_x)
     t_ctx_shape = (B, num_ctx_max, 1)
     f_ctx_shape = (B, num_ctx_max, D_f)
+    mask_ctx_shape = (B, num_ctx_max)
     x_test_shape = (B, num_test, D_x)
     t_test_shape = (B, num_test, 1)
     f_test_shape = (B, num_test, D_f)
+    mask_test_shape = (B, num_test)
     x = random.normal(rng, x_shape)
     f = random.normal(rng, f_shape)
     t = jnp.repeat(jnp.arange(T)[None, :], B, axis=0)
@@ -319,11 +333,11 @@ def test_temporal_data_broadcast_x():
     assert b.x_ctx.shape == x_ctx_shape
     assert b.t_ctx.shape == t_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test.shape == x_test_shape
     assert b.t_test.shape == t_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
     assert (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
@@ -333,11 +347,11 @@ def test_temporal_data_broadcast_x():
     assert b.x_ctx.shape == x_ctx_shape
     assert b.t_ctx.shape == t_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
-    assert b.valid_lens_ctx.shape == (B,)
+    assert b.mask_ctx.shape == mask_ctx_shape
     assert b.x_test.shape == x_test_shape
     assert b.t_test.shape == t_test_shape
     assert b.f_test.shape == f_test_shape
-    assert b.valid_lens_test.shape == (B,)
+    assert b.mask_test.shape == mask_test_shape
     assert not (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
 
