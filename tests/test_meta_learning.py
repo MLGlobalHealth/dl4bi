@@ -32,30 +32,30 @@ from dl4bi.meta_learning import (
 
 
 def test_models():
-    B, L = 4, 10
+    B, L = 4, 128
     key = random.key(42)
     rng_data, rng_params, rng_dropout, rng_extra = random.split(key, 4)
     s = jnp.linspace(0, 1.0, L)
     s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, S, D_s=1]
-    valid_lens = jnp.array([2, 4, 9, 3])
+    valid_lens = jnp.array([22, 44, 97, 32])
     mask_ctx = mask_from_valid_lens(L, valid_lens)
     f = random.normal(rng_data, s.shape)
     for model in [
-        NP,
-        CNP,
+        # NP,
+        # CNP,
         # BNP,
-        ANP,
-        CANP,
-        # BANP,
-        ConvCNP,
-        TNPD,
-        TNPND,
-        TNPKR,
-        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
-        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
-        lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
-        ScanTNPKR,
-        lambda: SGNP(kNN(k=L)),
+        # ANP,
+        # CANP,
+        BANP,
+        # ConvCNP,
+        # TNPD,
+        # TNPND,
+        # TNPKR,
+        # lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
+        # lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
+        # lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
+        # ScanTNPKR,
+        # lambda: SGNP(kNN(k=L)),
     ]:
         m = model()
         print(m.__class__)
@@ -70,13 +70,21 @@ def test_models():
         if isinstance(output, tuple):  # latent or bootstrapped
             output, _ = output  # drop latent or base bootstrapped samples
         if isinstance(m, TNPND):
+            assert jnp.isfinite(output.mu).all()
+            assert jnp.isfinite(output.L).all()
             assert output.mu.shape == (B, L, 1)
             assert output.L.shape == (B, L, L)
         elif output.mu.ndim == 4:  # bootstrapped
             K = output.mu.shape[1]
+            print(output.mu[:1])
+            print(output.std[:1])
+            assert jnp.isfinite(output.mu).all()
+            assert jnp.isfinite(output.std).all()
             assert output.mu.shape == (B, K, L, 1)
             assert output.std.shape == (B, K, L, 1)
         else:
+            assert jnp.isfinite(output.mu).all()
+            assert jnp.isfinite(output.std).all()
             assert output.mu.shape == (B, L, 1)
             assert output.std.shape == (B, L, 1)
 

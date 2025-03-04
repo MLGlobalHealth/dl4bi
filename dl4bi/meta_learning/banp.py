@@ -80,7 +80,8 @@ class BANP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        rep = jit(lambda x: jnp.repeat(x, self.num_samples, axis=0))
+        (B, L_test), K = s_test.shape[:2], self.num_samples
+        rep = jit(lambda x: jnp.repeat(x, K, axis=0))
         r_ctx = self.encode_deterministic(s_ctx, f_ctx, mask_ctx, training)
         s_ctx_boot, f_ctx_boot, mask_ctx_boot = self.sample_with_replacement(
             s_ctx, f_ctx, mask_ctx
@@ -88,16 +89,17 @@ class BANP(nn.Module):
         r_ctx_boot = self.encode_deterministic(
             s_ctx_boot, f_ctx_boot, mask_ctx_boot, training
         )
+        # TODO(danj): need to reorder stuff here
         output_boot = self.decode(
             rep(r_ctx),
             rep(s_ctx),
             rep(s_test),
-            mask_ctx_boot,
+            rep(mask_ctx),
             training,
             r_ctx_boot,
-        )
+        ).reshape(B, K, L_test, -1)
         output = self.decode(r_ctx, s_ctx, s_test, mask_ctx, training)
-        return output_boot, output
+        return self.output_fn(output_boot), self.output_fn(output)
 
     def sample_with_replacement(
         self,
@@ -118,15 +120,27 @@ class BANP(nn.Module):
         s_ctx_boot, mask_ctx_boot = bootstrap(rng_ctx_boot, s_ctx, mask_ctx, K)
         f_ctx_boot, mask_ctx_boot = bootstrap(rng_ctx_boot, f_ctx, mask_ctx, K)
         r_ctx_boot = self.encode_deterministic(s_ctx_boot, f_ctx_boot, mask_ctx_boot)
-        s_ctx_rep = rep(s_ctx)
+        s_ctx_rep, mask_ctx_rep = rep(s_ctx), rep(mask_ctx)
+        f_dist_boot = self.decode(r_ctx_boot, s_ctx_rep, s_ctx_rep, mask_ctx_rep)
+        f_ctx_mu_boot, f_ctx_std_boot = jnp.split(f_dist_boot, 2, axis=-1)
         # TODO(danj): update residual sampling to work with categorical dists
-        f_ctx_mu_boot, f_ctx_std_boot = self.decode(
-            r_ctx_boot, s_ctx_rep, s_ctx_rep, mask_ctx_boot
-        )
         res = (rep(f_ctx) - f_ctx_mu_boot) / f_ctx_std_boot
-        res_boot, _ = bootstrap(rng_res_boot, res, mask_ctx_boot)
-        res_boot -= res_boot.mean(axis=1, where=mask_ctx_boot, keepdims=True)
-        return s_ctx_rep, f_ctx_mu_boot + f_ctx_std_boot * res_boot, mask_ctx_boot
+        res_boot, mask_ctx_boot = bootstrap(rng_res_boot, res, mask_ctx_rep)
+        res_boot -= res_boot.mean(axis=1, where=mask_ctx_boot[..., None], keepdims=True)
+        # *_rep values have a different mask than mask_ctx_boot of res_boot; so
+        # to ensure that only valid indices of each are multiplied, pull them
+        # all to the beginning of all relevant arrays (they should all have the
+        # same number of valid elements); the test output order will not be the
+        # same as the input order, but that should be ok.
+        order_rep = jnp.argsort(mask_ctx_rep, axis=1, descending=True)[..., None]
+        order_res = jnp.argsort(mask_ctx_boot, axis=1, descending=True)[..., None]
+        return (
+            jnp.take_along_axis(s_ctx_rep, order_rep, axis=1),
+            jnp.take_along_axis(f_ctx_mu_boot, order_rep, axis=1)
+            + jnp.take_along_axis(f_ctx_std_boot, order_rep, axis=1)
+            * jnp.take_along_axis(res_boot, order_res, axis=1),
+            jnp.take_along_axis(mask_ctx_boot, order_res[..., 0], axis=1),
+        )
 
     def encode_deterministic(
         self,
@@ -149,7 +163,6 @@ class BANP(nn.Module):
         training: bool = False,
         r_ctx_boot: Optional[jax.Array] = None,
     ):
-        (B, L_test), K = self.s_test.shape[:2], self.num_samples
         s_ctx_embed = self.embed_s(s_ctx)
         s_test_embed = self.embed_s(s_test)
         r, _ = self.cross_attn(
@@ -170,5 +183,4 @@ class BANP(nn.Module):
                 training,
             )  # [B*K, L_test, d_ffn]
             h += self.dec_boot(r_boot, training)
-        output = self.dec_out(h, training).reshape(B, K, L_test, -1)
-        return self.output_fn(output)  # [B, K, L_test, d_f]
+        return self.dec_out(h, training)

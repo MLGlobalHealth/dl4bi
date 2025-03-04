@@ -53,6 +53,7 @@ class BNP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        (B, L_test), K = s_test.shape[:2], self.num_samples
         rep = jit(lambda x: jnp.repeat(x, self.num_samples, axis=0))
         r_ctx = self.encode_deterministic(s_ctx, f_ctx, mask_ctx, training)
         s_ctx_boot, f_ctx_boot, mask_ctx_boot = self.sample_with_replacement(
@@ -62,8 +63,9 @@ class BNP(nn.Module):
             s_ctx_boot, f_ctx_boot, mask_ctx_boot, training
         )
         output_boot = self.decode(rep(r_ctx), rep(s_test), training, r_ctx_boot)
+        output_boot = output_boot.reshape(B, K, L_test, -1)
         output = self.decode(r_ctx, s_test, training)
-        return output_boot, output
+        return self.output_fn(output_boot), self.output_fn(output)
 
     def sample_with_replacement(
         self,
@@ -71,7 +73,7 @@ class BNP(nn.Module):
         f_ctx: jax.Array,
         mask_ctx: Optional[jax.Array] = None,
     ):
-        (B, L_ctx), K = self.s_ctx.shape[:2], self.num_samples
+        K = self.num_samples
         # turn off gradients
         s_ctx, f_ctx, mask_ctx = (
             no_grad(s_ctx),
@@ -83,19 +85,28 @@ class BNP(nn.Module):
         rep = jit(lambda x: jnp.repeat(x, K, axis=0))
         s_ctx_boot, mask_ctx_boot = bootstrap(rng_ctx_boot, s_ctx, mask_ctx, K)
         f_ctx_boot, mask_ctx_boot = bootstrap(rng_ctx_boot, f_ctx, mask_ctx, K)
-        s_ctx_boot = s_ctx_boot.reshape(B * K, L_ctx, -1)
-        f_ctx_boot = f_ctx_boot.reshape(B * K, L_ctx, -1)
-        mask_ctx_boot = mask_ctx_boot.reshape(B * K, L_ctx)
         r_ctx_boot = self.encode_deterministic(s_ctx_boot, f_ctx_boot, mask_ctx_boot)
-        s_ctx_rep = rep(s_ctx)
-        f_ctx_mu_boot, f_ctx_std_boot = self.decode(r_ctx_boot, s_ctx_rep)
+        s_ctx_rep, mask_ctx_rep = rep(s_ctx), rep(mask_ctx)
+        f_dist_boot = self.decode(r_ctx_boot, s_ctx_rep)
+        f_ctx_mu_boot, f_ctx_std_boot = jnp.split(f_dist_boot, 2, axis=-1)
         # TODO(danj): update residual sampling to work with categorical dists
         res = (rep(f_ctx) - f_ctx_mu_boot) / f_ctx_std_boot
-        res_boot, _ = bootstrap(rng_res_boot, res, mask_ctx_boot, num_samples=1)
-        res_boot = res_boot.reshape(B * K, L_ctx, -1)
-        res_boot -= res_boot.mean(axis=1, where=mask_ctx_boot, keepdims=True)
-        # TODO(danj): indexing is weird when using new bootstrap
-        return s_ctx_rep, f_ctx_mu_boot + f_ctx_std_boot * res_boot, mask_ctx_boot
+        res_boot, mask_ctx_boot = bootstrap(rng_res_boot, res, mask_ctx_rep)
+        res_boot -= res_boot.mean(axis=1, where=mask_ctx_boot[..., None], keepdims=True)
+        # *_rep values have a different mask than mask_ctx_boot of res_boot; so
+        # to ensure that only valid indices of each are multiplied, pull them
+        # all to the beginning of all relevant arrays (they should all have the
+        # same number of valid elements); the test output order will not be the
+        # same as the input order, but that should be ok.
+        order_rep = jnp.argsort(mask_ctx_rep, axis=1, descending=True)[..., None]
+        order_res = jnp.argsort(mask_ctx_boot, axis=1, descending=True)[..., None]
+        return (
+            jnp.take_along_axis(s_ctx_rep, order_rep, axis=1),
+            jnp.take_along_axis(f_ctx_mu_boot, order_rep, axis=1)
+            + jnp.take_along_axis(f_ctx_std_boot, order_rep, axis=1)
+            * jnp.take_along_axis(res_boot, order_res, axis=1),
+            jnp.take_along_axis(mask_ctx_boot, order_res[..., 0], axis=1),
+        )
 
     def encode_deterministic(
         self,
@@ -118,12 +129,11 @@ class BNP(nn.Module):
         training: bool = False,
         r_ctx_boot: Optional[jax.Array] = None,
     ):
-        (B, L_test), K = s_test.shape[:2], self.num_samples
+        L_test = s_test.shape[1]
         r_ctx = jnp.repeat(r_ctx[:, None, :], L_test, axis=1)  # [B*K, L_test, d_ffn]
         q = jnp.concatenate([r_ctx, s_test], -1)  # [B*K, L_test, d_ffn + D_s]
         h = self.dec_hid(q, training)
         if r_ctx_boot is not None:
             r_ctx_boot = jnp.repeat(r_ctx_boot[:, None, :], L_test, axis=1)
             h += self.dec_boot(r_ctx_boot, training)
-        output = self.dec_out(h, training).reshape(B, K, L_test, -1)
-        return self.output_fn(output)  # [B, K, L_test, D_f]
+        return self.dec_out(h, training)

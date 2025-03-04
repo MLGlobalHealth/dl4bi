@@ -64,36 +64,23 @@ def bootstrap_from_valid_lens(
     return vmap(lambda row, idx: row[idx], (0, 0))(x, boot_idx), valid_lens
 
 
+@partial(jit, static_argnames=("num_samples",))
 def bootstrap(
     rng: jax.Array,
-    x: jax.Array,  # [B, L, D]
-    mask: Optional[jax.Array],  # [B, L]
-    num_samples: int,
+    x: jax.Array,
+    mask: Optional[jax.Array],
+    num_samples: int = 1,
 ):
-    B = x.shape[0]
-    rngs = random.split(rng, B)
-    xs, masks = [], []
-    for i in range(B):  # can't vmap variable concrete arrays
-        mask_i = None if mask is None else mask[i]
-        x_b, mask_b = _bootstrap_one(rngs[i], x[i], mask_i, num_samples)
-        xs += [x_b]
-        masks += [mask_b]
-    return jnp.array(xs), jnp.array(masks)  # [B, K, L, D]
+    """This generates a bootstrap sample of shape `[B * K, L, D]`.
 
-
-def _bootstrap_one(
-    rng: jax.Array,
-    x_i: jax.Array,  # [L, D]
-    mask_i: Optional[jax.Array],  # [L] or None
-    num_samples: int,
-):
-    idx = jnp.arange(x_i.shape[0]) if mask_i is None else jnp.where(mask_i)[0]
-    K, L, L_valid = num_samples, x_i.shape[0], idx.shape[0]
-    idx = random.choice(rng, idx, shape=(K, L_valid))
-    x_boot = x_i[idx]  # x_k: [K, L_valid, D]
-    x_boot = nan_pad(x_boot, axis=1, L=L)  # [K, L, D]
-    mask_boot = mask_from_valid_lens(L, jnp.repeat(L_valid, K))
-    return x_boot, mask_boot  # [K, L, D]
+    It also "packs" the valid data in the front part of the array.
+    """
+    if mask is not None:
+        x = jnp.where(mask[..., None], x, jnp.nan)
+    x = jnp.repeat(x, num_samples, axis=0)
+    x = random.permutation(rng, x, axis=1, independent=True)
+    mask = jnp.isfinite(x)
+    return x, mask[..., 0]
 
 
 def nan_pad(v: jax.Array, axis: int, L: int):
