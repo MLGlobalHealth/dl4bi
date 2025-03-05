@@ -1,8 +1,7 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
-import hydra
 import jax
 import jax.numpy as jnp
 from jax import jit, random
@@ -43,6 +42,7 @@ def run(
     config: OmegaConf,
     seed: int,
     job_name: str,
+    output_dir: Path,
     num_paths: int,  # number of paths to sample autoregressively, will be rounded up to be a multiple of batch size
     batch_size: int,  # how to batch the autoregressive sampling. this parameter only affects runtime efficiency
     ls: float | None = None,  # override the ls in the config
@@ -53,10 +53,10 @@ def run(
 ):
     rng = random.key(seed)
 
-    results_dir = Path(f"results/{job_name}")
-    results_dir.mkdir(parents=True)
-
-    jnp.save(results_dir / "seed.npy", seed)
+    output_dir = output_dir / job_name
+    output_dir.mkdir(parents=True)
+    print("Results dir:", output_dir)
+    jnp.save(output_dir / "seed.npy", seed)
 
     rng, rng_dataloader = jax.random.split(rng)
 
@@ -72,7 +72,7 @@ def run(
     if obs_noise is not None:
         config.data.obs_noise = obs_noise
 
-    OmegaConf.save(config, results_dir / "config.yaml")
+    OmegaConf.save(config, output_dir / "config.yaml")
     print("Seed:", seed)
     print("GP:", config.kernel)
     print("Data:", config.data)
@@ -91,8 +91,8 @@ def run(
         _period,  # unused
     ) = next(dataloader)
     print(f"var {var}, ls {ls}")
-    jnp.save(results_dir / "var.npy", var)
-    jnp.save(results_dir / "ls.npy", ls)
+    jnp.save(output_dir / "var.npy", var)
+    jnp.save(output_dir / "ls.npy", ls)
 
     f_ctx = f_ctx[:valid_lens_ctx]
     s_ctx = s_ctx[:valid_lens_ctx]
@@ -105,19 +105,19 @@ def run(
         s_test = jnp.array(s_test, dtype=jnp.float32).reshape(len(s_test), 1)
 
     # Save everything that can be needed for later analysis
-    jnp.save(results_dir / "s_ctx.npy", s_ctx)
-    jnp.save(results_dir / "f_ctx.npy", f_ctx)
-    jnp.save(results_dir / "s_test.npy", s_test)
-    jnp.save(results_dir / "s.npy", s)
-    jnp.save(results_dir / "f.npy", f)
+    jnp.save(output_dir / "s_ctx.npy", s_ctx)
+    jnp.save(output_dir / "f_ctx.npy", f_ctx)
+    jnp.save(output_dir / "s_test.npy", s_test)
+    jnp.save(output_dir / "s.npy", s)
+    jnp.save(output_dir / "f.npy", f)
 
     # Regular (diagonal) TNP-KR
     [diagonal_mu], [diagonal_sd] = apply(
         s_ctx[None], f_ctx[None], s_test[None]
     )  # note need to expand dims
     diagonal_var = diagonal_sd**2
-    jnp.save(results_dir / "diagonal_mu", diagonal_mu)
-    jnp.save(results_dir / "diagonal_var", diagonal_var)
+    jnp.save(output_dir / "diagonal_mu", diagonal_mu)
+    jnp.save(output_dir / "diagonal_var", diagonal_var)
 
     # Put arrays on gpu explicitly
     s_ctx = jax.device_put(s_ctx, device)
@@ -136,20 +136,19 @@ def run(
             num_paths,
             strategy,
         )
-        jnp.save(results_dir / f"{strategy}_paths.npy", paths)
-        jnp.save(results_dir / f"{strategy}_densities.npy", log_densities)
+        jnp.save(output_dir / f"{strategy}_paths.npy", paths)
+        jnp.save(output_dir / f"{strategy}_densities.npy", log_densities)
 
 
 if __name__ == "__main__":
-    from argparse import ONE_OR_MORE, REMAINDER, ArgumentParser
+    from argparse import ONE_OR_MORE, ArgumentParser
 
-    import hydra
-    import hydra.core.override_parser.overrides_parser
-
+    # TODO @pgrynfelder: can we somehow integrate this with hydra?
     parser = ArgumentParser()
     parser.add_argument("path", type=str)
     parser.add_argument("-s", "--seed", type=int, default=0)
-    parser.add_argument("-n", "--job-name", type=str, default=str(datetime.now()))
+    parser.add_argument("-o", "--output-dir", type=Path, default=Path("results"))
+    parser.add_argument("-j", "--job-name", type=str, default=str(datetime.now()))
     parser.add_argument("-N", "--num-paths", type=int, default=128)
     parser.add_argument("-B", "--batch-size", type=int, default=16)
     parser.add_argument("-l", "--ls", type=float, default=None)
@@ -157,18 +156,18 @@ if __name__ == "__main__":
     parser.add_argument("-C", "--num-ctx", type=int, default=None)
     parser.add_argument("--obs-noise", type=float, default=None)
     parser.add_argument("--s-test", type=float, nargs=ONE_OR_MORE, default=None)
-    parser.add_argument("hydra", nargs=REMAINDER, help="These will be passed to hydra.")
     args = parser.parse_args()
 
     apply, config = load_model(args.path)
 
-    # TODO @pgrynfelder: can we somehow integrate this with hydra overrides?
+    print(args)
 
     run(
         apply=apply,
         config=config,
         seed=args.seed,
         job_name=args.job_name,
+        output_dir=args.output_dir,
         num_paths=args.num_paths,
         batch_size=args.batch_size,
         ls=args.ls,

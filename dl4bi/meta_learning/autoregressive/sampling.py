@@ -3,9 +3,16 @@ from typing import Callable, Literal
 
 import jax
 import jax.numpy as jnp
-import permutations
 import tqdm
 from jax import jit, random
+
+from .permutations import (
+    closest_first,
+    furthest_first,
+    invert_permutation,
+    ltr,
+    random_permutations,
+)
 
 Apply = Callable[
     [jax.Array, jax.Array, jax.Array, jax.Array], tuple[jax.Array, jax.Array]
@@ -150,14 +157,14 @@ def autoregressive_sample_multiple_paths(
             case "preserve":
                 idx = idx_inv = ...
             case "closest":
-                idx = permutations.closest_first(s_ctx, s_test)
-                idx_inv = permutations.invert_permutation(idx)
+                idx = closest_first(s_ctx, s_test)
+                idx_inv = invert_permutation(idx)
             case "furthest":
-                idx = permutations.furthest_first(s_ctx, s_test)
-                idx_inv = permutations.invert_permutation(idx)
+                idx = furthest_first(s_ctx, s_test)
+                idx_inv = invert_permutation(idx)
             case "ltr":
-                idx = permutations.ltr(s_test)
-                idx_inv = permutations.invert_permutation(idx)
+                idx = ltr(s_test)
+                idx_inv = invert_permutation(idx)
 
         s_test = s_test[idx]
         s_test = jnp.repeat(s_test[None], batch_size, axis=0)
@@ -196,8 +203,9 @@ def autoregressive_sample_multiple_paths(
             rng, rng_perm = jax.random.split(rng)
 
             # Locations for each path are permuted independently.
-            idx = permutations.random_permutations(rng_perm, L_test, batch_size)
-            idx_inv = jax.vmap(permutations.invert_permutation)(idx)
+            # TODO: this is slow, perhaps add flag to shuffle per-batch?
+            idx = random_permutations(rng_perm, L_test, batch_size)
+            idx_inv = jax.vmap(invert_permutation)(idx)
 
             # idx needs to match dimension of array in take_along_axis to permute the data correctly
             idx = jnp.repeat(idx[..., None], D_s, axis=-1)
