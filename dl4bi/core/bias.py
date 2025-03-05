@@ -10,57 +10,21 @@ from jax import jit, vmap
 from jax.typing import ArrayLike
 
 from .dist import dist_spatial
-
-
-class DistanceBias(nn.Module):
-    num_heads: int = 4
-    channel: int = 0
-
-    @nn.compact
-<<<<<<< HEAD
-    def __call__(self, d: jax.Array):
-        d = jnp.repeat(d[:, None, ...], self.num_heads, axis=1)
-        a = self.param("a", init.constant(-1), (1, self.num_heads, 1, 1))
-        return a * d  # [B, H, Q, K]
-    
-# class GraphDistanceBias(nn.Module):
+  
+# class ExpTemporalBias(nn.Module):
 #     num_heads: int = 4
 
 #     @nn.compact
-#     def __call__(self, d: jax.Array, d2: jax.Array):
+#     def __call__(self, d: jax.Array):
 #         d = jnp.repeat(d[:, None, ...], self.num_heads, axis=1)
-#         d2 = jnp.repeat(d2[:, None, ...], self.num_heads, axis=1)
-#         a = self.param("a", init.constant(-1), (1, self.num_heads, 1, 1))
-#         b = self.param("b", init.constant(-1), (1, self.num_heads, 1, 1))
-#         return a * d + b * d2 # [B, H, Q, K]
+#         a = self.param("a", init.constant(1), (1, self.num_heads, 1, 1))
+#         return jnp.exp(- a * d) # [B, H, Q, K]
     
-class GraphDistanceBias(nn.Module):
+class DistanceBias(nn.Module):
     num_heads: int = 4
-
-    @nn.compact
-    def __call__(self, d: jax.Array):
-        d = jnp.repeat(d[:, None, ...], self.num_heads, axis=1)
-        a = self.param("a", init.constant(-1), (1, self.num_heads, 1, 1))
-        return a * d # [B, H, Q, K]
+    channel: int = 0
     
-class TemporalBias(nn.Module):
-    num_heads: int = 4
-
     @nn.compact
-    def __call__(self, d: jax.Array):
-        d = jnp.repeat(d[:, None, ...], self.num_heads, axis=1)
-        a = self.param("a", init.constant(-1), (1, self.num_heads, 1, 1))
-        return a * d  # [B, H, Q, K]
-    
-class ExpTemporalBias(nn.Module):
-    num_heads: int = 4
-
-    @nn.compact
-    def __call__(self, d: jax.Array):
-        d = jnp.repeat(d[:, None, ...], self.num_heads, axis=1)
-        a = self.param("a", init.constant(1), (1, self.num_heads, 1, 1))
-        return jnp.exp(- a * d) # [B, H, Q, K]
-=======
     def __call__(
         self,
         d: jax.Array,  # [B, Q, K, D] or [E, D]
@@ -147,7 +111,6 @@ def scanned_rbf_network_bias(
     d = vmap(func)(qs_meta, ks_meta)[..., channel]  # [B, Q, K]
     mask = jnp.isfinite(d)
     return rbf_network_bias(d, mask, a, b)
->>>>>>> main
 
 
 class TISABias(nn.Module):

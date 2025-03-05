@@ -111,18 +111,25 @@ def train(
 ):
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
     batches = train_dataloader(rng_data)
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, _, _, (inv_permute_idx, inv_permute_idx_test), graph_dist = next(batches)
-    rngs = {"params": rng_params, "extra": rng_extra}
-    kwargs = model.init(rngs, s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test, inv_permute_idx=inv_permute_idx, inv_permute_idx_test=inv_permute_idx_test, graph_dist=graph_dist)
-    params = kwargs.pop("params")
-    # param_count = nn.tabulate(model, rngs)(
-    #     s_ctx,
-    #     f_ctx,
-    #     s_test,
-    #     valid_lens_ctx,
-    #     valid_lens_test,
-    # )
-    # print(param_count)
+    # TODO: refactor this to be more general
+    if isinstance(model, (STGTNPKR,)):
+        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, _, _, (inv_permute_idx, inv_permute_idx_test), graph_dist = next(batches)
+        rngs = {"params": rng_params, "extra": rng_extra}
+        kwargs = model.init(rngs, s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test, inv_permute_idx=inv_permute_idx, inv_permute_idx_test=inv_permute_idx_test, graph_dist=graph_dist)
+        params = kwargs.pop("params")
+    else: 
+        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = next(batches)    
+        rngs = {"params": rng_params, "extra": rng_extra}
+        kwargs = model.init(rngs, s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test)
+        params = kwargs.pop("params")
+        param_count = nn.tabulate(model, rngs)(
+            s_ctx,
+            f_ctx,
+            s_test,
+            valid_lens_ctx,
+            valid_lens_test,
+        )
+        print(param_count)
     state = TrainState.create(
         apply_fn=model.apply,
         params=params if state is None else state.params,
@@ -273,9 +280,6 @@ def vanilla_valid_step(
     **kwargs,
 ):
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
-    # s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, _,_,(inv_permute_idx, inv_permute_idx_test), graph_dist = batch
-    # f_mu, f_std, *_ = jit(state.apply_fn)(
-    #         {"params": state.params, **state.kwargs},
     output = jit(state.apply_fn)(
         {"params": state.params, **state.kwargs},
         s_ctx,
@@ -726,7 +730,7 @@ def fast_attention_train_step(
 def cfg_to_run_name(cfg: DictConfig):
     name = cfg.model.cls
     if "TNPKR" in name:
-        name = {"TNPKR": "TNP-KR", "ScanTNPKR": "Scan TNP-KR"}[name]
+        name = {"TNPKR": "TNP-KR", "ScanTNPKR": "Scan TNP-KR", "STGTNPKR": "STG-TNP-KR"}[name]
         prefix = "model.kwargs.blk.kwargs.attn."
         attn_cls = OmegaConf.select(cfg, prefix + "cls")
         if attn_cls == "MultiHeadAttention":
@@ -896,7 +900,7 @@ def log_img_plots(
     f_mu, f_std = transform_model_output(output)
     paths = []
     for i in range(num_plots):
-        inv_idx_i = inv_permute_id
+        inv_idx_i = inv_permute_idx
         if inv_permute_idx.ndim > 1:  # each row was permuted separately
             inv_idx_i = inv_permute_idx[i]
         v = valid_lens_ctx[i]
@@ -1030,6 +1034,7 @@ def log_graph_plots(
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
     paths = []
+    paths_scatter = []
     for i in range(num_plots):
         inv_idx_i = inv_permute_idx
         v = valid_lens_ctx[i]
@@ -1067,8 +1072,8 @@ def log_graph_plots(
         plt.xlabel('Prediction')
         plt.ylabel('Ground Truth')
         plt.title('Prediction vs Ground Truth')
-        paths_scatter = f"/tmp/{datetime.now().isoformat()} - sample {i} - scatter.png"
-        plt.savefig(paths_scatter, dpi=125)
+        paths_scatter += [f"/tmp/{datetime.now().isoformat()} - sample {i} - scatter.png"]
+        plt.savefig(paths_scatter[-1], dpi=125)
         plt.clf()
         plt.close()
     wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})

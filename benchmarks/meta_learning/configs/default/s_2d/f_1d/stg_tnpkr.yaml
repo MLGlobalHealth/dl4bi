@@ -3,35 +3,51 @@ cls: STGTNPKR
 kwargs:
   num_blks: 6
   num_reps: 1
-  min_std: 0.05
   embed_all:
     cls: MLP
     kwargs:
       dims: [256, 128, 64]
       act_fn: gelu
   dist:
-    func: l2_dist
+    func: dist_spatial
   graph_bias_flag: true
   graph_bias:
-    cls: GraphDistanceBias
+    cls: RBFNetworkBias
     kwargs:
+      num_basis: 5
       num_heads: 4
   temporal_bias_flag: false
   temporal_bias:
-    cls: ExpTemporalBias
+    cls: RBFNetworkBias
     kwargs:
+      num_basis: 5
       num_heads: 4
-  attn:
-    cls: MultiHeadAttention
+  blk:
+    cls: KRBlock
     kwargs:
-      num_heads: 4
       attn:
-        cls: FusedAttention
-  ffn:
-    cls: MLP
-    kwargs:
-      dims: [256, 64]
-      act_fn: gelu
+        cls: MultiHeadAttention
+        kwargs:
+          num_heads: 4
+          attn:
+            cls: Attention
+          proj_qs:
+            cls: MLP
+            kwargs:
+              dims: [128]
+          proj_ks:
+            cls: MLP
+            kwargs:
+              dims: [128]
+          proj_vs:
+            cls: MLP
+            kwargs:
+              dims: [128, 64]
+    ffn:
+      cls: MLP
+      kwargs:
+        dims: [256, 64]
+        act_fn: gelu
   head:
     cls: MLP
     kwargs:

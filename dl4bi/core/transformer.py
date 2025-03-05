@@ -220,14 +220,12 @@ class KRBlock(nn.Module):
         kvs: jax.Array,
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
-<<<<<<< HEAD
-        inv_permute_idx: Optional[jax.Array] = None,
-    ):
-        drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
-        qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, bias_qk, valid_lens, training, inv_permute_idx)
-        kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, bias_kk, valid_lens, training, inv_permute_idx)
-=======
+    #     inv_permute_idx: Optional[jax.Array] = None,
+    # ):
+    #     drop = nn.Dropout(self.p_dropout, deterministic=not training)
+    #     qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
+    #     qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, bias_qk, valid_lens, training, inv_permute_idx)
+    #     kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, bias_kk, valid_lens, training, inv_permute_idx)
         qk_kwargs: dict = {},
         kk_kwargs: dict = {},
         **kwargs,
@@ -236,7 +234,6 @@ class KRBlock(nn.Module):
         qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
         qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, valid_lens, training, **qk_kwargs)
         kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, valid_lens, training, **kk_kwargs)
->>>>>>> main
         qvs_3, kvs_3 = qvs + drop(qvs_2), kvs + drop(kvs_2)
         norm_2 = self.norm.copy()
         qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)

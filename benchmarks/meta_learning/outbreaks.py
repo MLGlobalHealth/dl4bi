@@ -72,6 +72,7 @@ def main(cfg: DictConfig):
         model,
         optimizer,
         train_step,
+        valid_step,
         train_dataloader,
         valid_dataloader,
         cfg.train_num_steps,

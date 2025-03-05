@@ -1041,14 +1041,12 @@ class MultiHeadAttention(nn.Module):
         """
         H = self.num_heads
         qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
-<<<<<<< HEAD
-        (B, Q, D_QK), (K, D_V), H = qs.shape, vs.shape[-2:], self.num_heads
-        qs = qs.reshape(B, Q, H, D_QK // H)
-        ks = ks.reshape(B, K, H, D_QK // H)
-        vs = vs.reshape(B, K, H, D_V // H)
-        ctx, attn = self.attn(qs, ks, vs, bias, valid_lens, training, inv_permute_idx, **kwargs)
-        return self.proj_out(ctx.reshape(B, Q, D_V)), attn
-=======
+        # (B, Q, D_QK), (K, D_V), H = qs.shape, vs.shape[-2:], self.num_heads
+        # qs = qs.reshape(B, Q, H, D_QK // H)
+        # ks = ks.reshape(B, K, H, D_QK // H)
+        # vs = vs.reshape(B, K, H, D_V // H)
+        # ctx, attn = self.attn(qs, ks, vs, bias, valid_lens, training, inv_permute_idx, **kwargs)
+        # return self.proj_out(ctx.reshape(B, Q, D_V)), attn
         qs, ks, vs = map(
             lambda x: rearrange(x, "B L (H D) -> B L H D", H=H), (qs, ks, vs)
         )
@@ -1157,7 +1155,6 @@ def _graph_conv(
 @jit
 def dot_scorer(qs: jax.Array, ks: jax.Array):
     return jnp.einsum("B Q D, B K D -> B Q K", qs, ks)
->>>>>>> main
 
 
 @jit

@@ -6,7 +6,7 @@ seed: 42
 wandb: True
 project: Outbreaks
 train_num_steps: 100000
-valid_num_steps: 1000
+valid_num_steps: 5000
 valid_interval: 25000
 plot_interval: 5000
 batch_size: 16

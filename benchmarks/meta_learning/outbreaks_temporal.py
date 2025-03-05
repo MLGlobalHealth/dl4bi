@@ -19,7 +19,7 @@ import json
 import networkx as nx
 
 import wandb
-from dl4bi.meta_regression.train_utils import (
+from dl4bi.meta_learning.train_utils import (
     Callback,
     cfg_to_run_name,
     cosine_annealing_lr,
@@ -28,6 +28,7 @@ from dl4bi.meta_regression.train_utils import (
     log_graph_plots,
     log_temporal_img_plots,
     save_ckpt,
+    select_steps,
     train,
 )
 
@@ -59,6 +60,7 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
+    train_step, valid_step = select_steps(model)
     # cmap = mpl.colormaps.get_cmap("grey")
     cmap = mpl.colormaps.get_cmap("coolwarm")
     # cmap.set_bad("blue")
@@ -81,6 +83,8 @@ def main(cfg: DictConfig):
         rng_train,
         model,
         optimizer,
+        train_step,
+        valid_step,
         train_dataloader,
         valid_dataloader,
         cfg.train_num_steps,
@@ -88,7 +92,7 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         callbacks=[img_cbk],
     )
-    metrics = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
+    metrics = evaluate(rng_test, state, valid_step, valid_dataloader, cfg.valid_num_steps)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
@@ -156,7 +160,7 @@ def build_dataloader(
                 minval=temporal_cfg.max_past_time_offset,
                 maxval=time_frame_size,
             )
-            choosing specific ctx times for each sample in batch
+            # choosing specific ctx times for each sample in batch
             ctx_times = (
                 -jax.vmap(sample_offset, in_axes=(0, None))(
                     jax.random.split(rng_t3, B), time_step_ctx_num
