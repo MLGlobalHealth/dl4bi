@@ -88,6 +88,7 @@ def main(cfg: DictConfig):
                     z_dim,
                     large_batch_loader,
                     decoder_only,
+                    cfg.data,
                 ),
                 cfg.plot_interval,
             )
