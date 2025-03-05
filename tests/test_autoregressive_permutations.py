@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import tqdm
 from jax import random
 
-from dl4bi.meta_learning.autoregressive import (
+from dl4bi.meta_learning.autoregressive.permutations import (
     closest_first,
     furthest_first,
     invert_permutation,
