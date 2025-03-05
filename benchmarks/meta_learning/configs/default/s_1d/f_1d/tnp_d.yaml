@@ -3,7 +3,7 @@ embed_s_f:
   _target_: dl4bi.mlp.MLP
   dims: [64, 64, 64, 64]
 enc:
-  _target_: TransformerEncoder
+  _target_: dl4bi.transformer.TransformerEncoder
   num_blks: 6
   blk:
     _target_: dl4bi.transformer.TransformerEncoderBlock
@@ -16,11 +16,9 @@ enc:
       proj_ks:
         _target_: dl4bi.mlp.MLP
         dims: [64]
-        cls: MLP
       proj_vs:
         _target_: dl4bi.mlp.MLP
         dims: [64]
-        cls: MLP
       proj_out:
         _target_: dl4bi.mlp.MLP
         dims: [64]
