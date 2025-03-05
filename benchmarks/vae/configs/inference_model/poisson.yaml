@@ -1,0 +1,52 @@
+model: # Inference model function to choose from inference_models/inference_models.py
+  func: poisson
+spatial_prior:
+  func: rbf
+surrogate_model: True # Whether to use a surrogate model or and actual process sampling
+num_obs_locations: null # Can be used to randomly select partial number of locations for inference
+# priors names and args must be compat with Numpyro distributions
+priors: # Priors for training DeepRV or for inference
+  beta:
+    numpyro_dist: Normal
+    kwargs:
+      loc: 0.0
+      scale: 2.0
+  var:
+    numpyro_dist: Dirichlet # Replacement for Delta distribution which always outputs '1'
+    kwargs:
+      concentration: [1.0]
+  ls:
+    numpyro_dist: Uniform
+    kwargs:
+      low: 0.0
+      high: 50.0
+  period: # Would only be used if training prior is Periodic
+    numpyro_dist: Uniform
+    kwargs:
+      low: 10.0
+      high: 50.0
+  # CAR model params, does not effect GP kernel runs and vice-versa. K = inverse(tau(D - alpha*A))
+  tau: 
+    numpyro_dist: Dirichlet
+    kwargs:
+      concentration: [1.0]
+  alpha:
+    numpyro_dist: Beta
+    kwargs:
+      concentration1: 4.0
+      concentration0: 1.0
+# In case you want specific distributions or values to simulate data over the map, simulation_priors will override
+# the above priors when generating the observed data for simulation tests.
+simulation_priors:
+  ls:
+    numpyro_dist: Delta
+    kwargs:
+      v: 10
+  beta:
+    numpyro_dist: Delta
+    kwargs:
+      v: 1.0
+  alpha: #CAR model param
+    numpyro_dist: Delta
+    kwargs:
+      v: 0.95

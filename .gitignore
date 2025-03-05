@@ -14,7 +14,7 @@ __pycache__
 **/wandb/**
 *log.txt
 .python-version
-
-# macos filesystem artifacts
 .DS_Store
 results
+benchmarks/vae/maps
+**.vscode/**

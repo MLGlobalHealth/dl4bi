@@ -4,10 +4,11 @@ from pathlib import Path
 import hydra
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
 import optax
 import pandas as pd
 import wandb
-from inference_models.utils import collect_infer_funcs, compute_metrics, run_mcmc
+from inference_models.utils import collect_infer_funcs, run_hmc
 from jax import jit, random
 from jax.experimental import enable_x64
 from omegaconf import DictConfig, OmegaConf
@@ -22,6 +23,7 @@ from dl4bi.meta_learning.train_utils import (
     select_steps,
     train,
 )
+from dl4bi.metrics import compute_inference_metrics
 
 # TODO:
 # Can you use distance bias on covariates too??
@@ -116,10 +118,10 @@ def compare_inference(path: Path, cfg: DictConfig):
     rng_sample, rng_mcmc, rng_post, rng = random.split(rng, 4)
     batch = next(dataloader(rng_sample))
     kwargs = batch_to_infer_kwargs(batch, cfg.data, cfg.infer)
-    mcmc = run_mcmc(rng_mcmc, numpyro_model, cfg.infer.mcmc, **kwargs)
-    mcmc.print_summary()
-    post_samples = mcmc.get_samples()
-    f_mu_pyro, f_std_pyro = numpyro_pointwise_post_pred(
+    hmc = run_hmc(rng_mcmc, numpyro_model, cfg.infer.mcmc, **kwargs)
+    hmc.print_summary()
+    post_samples = hmc.get_samples()
+    f_mu_hmc, f_std_hmc = numpyro_pointwise_post_pred(
         rng_post,
         **kwargs,
         **post_samples,
@@ -133,24 +135,29 @@ def compare_inference(path: Path, cfg: DictConfig):
     f_std_model = f_std_model[0, :, 0]
     f_mu_model = f_mu_model.at[:Nc].set(f_ctx)
     f_std_model = f_std_model.at[:Nc].set(0.0)
-    f_mu_pyro = jnp.hstack([f_ctx, f_mu_pyro])
-    f_std_pyro = jnp.hstack([jnp.zeros(Nc), f_std_pyro])
+    f_mu_hmc = jnp.hstack([f_ctx, f_mu_hmc])
+    f_std_hmc = jnp.hstack([jnp.zeros(Nc), f_std_hmc])
     results = {
-        "s_ctx": s_ctx,
-        "f_ctx": f_ctx,
-        "valid_lens_ctx": Nc,
-        "s": s,
-        "f": f,
-        "f_mu_model": f_mu_model,
-        "f_std_model": f_std_model,
-        "f_mu_pyro": f_mu_pyro,
-        "f_std_pyro": f_std_pyro,
-        "inv_permute_idx": inv_permute_idx,
-        **{k + "_true": v for k, v in prior_samples.items()},
-        **{k + "_post": v for k, v in post_samples.items()},
+        "data": {
+            "s_ctx": s_ctx,
+            "f_ctx": f_ctx,
+            "valid_lens_ctx": Nc,
+            "s": s,
+            "f": f,
+            "inv_permute_idx": inv_permute_idx,
+        },
+        "predictions": {
+            "hmc": {"f_mu": f_mu_hmc, "f_std": f_std_hmc},
+            "model": {"f_mu": f_mu_model, "f_std": f_std_model},
+        },
+        "hmc_posterior": {
+            **{k + "_true": v for k, v in prior_samples.items()},
+            **{k + "_post": v for k, v in post_samples.items()},
+        },
     }
-    jnp.save(path.with_suffix(f".{cfg.infer_seed}.npy"), results)
-    metrics = compute_metrics(**results)
+    # save with numpy so can load in torch
+    np.save(path.with_suffix(f".{cfg.infer_seed}.npy"), results, allow_pickle=True)
+    metrics = compute_inference_metrics(**results)
     data = []
     for metric, models in metrics.items():
         for model, value in models.items():

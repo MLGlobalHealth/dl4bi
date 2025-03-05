@@ -1,8 +1,0 @@
-cls: DeepRV
-kwargs:
-  cond_stack_fn: 
-    func: cond_as_locs
-  decoder:
-    cls: MLP
-    kwargs:
-      dims: [128, 128]
