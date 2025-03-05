@@ -126,6 +126,7 @@ def run(
 
     strategies = ["ltr", "random", "furthest", "closest"]
     for strategy in strategies:
+        start = datetime.now()
         paths, log_densities = autoregressive_sample_multiple_paths(
             rng,
             apply,
@@ -136,8 +137,10 @@ def run(
             num_paths,
             strategy,
         )
+        end = datetime.now()
         jnp.save(output_dir / f"{strategy}_paths.npy", paths)
         jnp.save(output_dir / f"{strategy}_densities.npy", log_densities)
+        print(f"{strategy} took {end - start}")
 
 
 if __name__ == "__main__":

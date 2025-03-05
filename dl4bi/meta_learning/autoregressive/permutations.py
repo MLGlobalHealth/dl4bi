@@ -99,14 +99,14 @@ def random_permutations(rng: jax.Array, n: int, batch_size: int):
     return idx
 
 
-def ltr(
+def left_to_right(
     s_ctx: jax.Array,  # [L_ctx, D]
 ):
     """
     Orders such that points are considered left-to-right
     (wrt to the first coordinate if the dimension is >1).
     """
-    idx = jnp.argsort(s_ctx, axis=0)[0]  # sort by the first coordinate
+    idx = jnp.argsort(s_ctx, axis=0)[:, 0]  # sort by the first coordinate
     return idx
 
 

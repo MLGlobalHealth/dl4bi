@@ -10,7 +10,7 @@ from .permutations import (
     closest_first,
     furthest_first,
     invert_permutation,
-    ltr,
+    left_to_right,
     random_permutations,
 )
 
@@ -163,7 +163,7 @@ def autoregressive_sample_multiple_paths(
                 idx = furthest_first(s_ctx, s_test)
                 idx_inv = invert_permutation(idx)
             case "ltr":
-                idx = ltr(s_test)
+                idx = left_to_right(s_test)
                 idx_inv = invert_permutation(idx)
 
         s_test = s_test[idx]
