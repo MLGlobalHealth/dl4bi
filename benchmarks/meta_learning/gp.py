@@ -87,10 +87,11 @@ def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = F
     gp = instantiate(kernel)
     B, D_s, Nc_max = data.batch_size, len(data.s), data.num_ctx.max
     s_g = build_grid(data.s).reshape(-1, D_s)  # flatten spatial dims
-    L = Nc_max + s_g.shape[0]  # L = num test or all points
+    L = Nc_max + s_g.shape[0]  # L = all points / num_test
     s_min = jnp.array([axis["start"] for axis in data.s])
     s_max = jnp.array([axis["stop"] for axis in data.s])
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
+    to_extra = jit(lambda d: {k: v.item() for k, v in d.items() if v is not None})
 
     def dataloader(rng: jax.Array):
         while True:
@@ -109,12 +110,7 @@ def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = F
                 obs_noise=data.obs_noise,
             )
             if is_callback:
-                extra = {"var": var.item(), "ls": ls.item()}
-                if period is None:
-                    yield b, extra
-                else:
-                    extra["period"] = period.item()
-                    yield b, extra
+                yield b, to_extra({"var": var, "ls": ls, "period": period})
             else:
                 yield b
 

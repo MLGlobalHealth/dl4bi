@@ -140,13 +140,12 @@ class SpatialBatch(MetaLearningBatch):
         _, axs = plt.subplots(N, 1, figsize=(8, N * 4))
         for i in range(N):
             if i == 0:
-                if subtitle:
-                    axs[i].set_title(f"Spatial Posterior Predictive\n{subtitle}")
-                else:
-                    axs[i].set_title("Spatial Posterior Predictive")
+                title = "Spatial Posterior Predictive"
+                title += f"\n{subtitle}" if subtitle else ""
+                axs[i].set_title(title, fontsize=30)
             elif i == B - 1:
-                axs[i].set_xlabel("s")
-            axs[i].set_ylabel(f"Sample {i+1}", rotation=90)
+                axs[i].set_xlabel("s", fontsize=30)
+            axs[i].set_ylabel(f"Sample {i+1}", fontsize=20, rotation=90)
             axs[i].scatter(self.s_ctx[i, :, 0], self.f_ctx[i, :, 0], color="black")
             axs[i].plot(s_test[i], f_test[i], color="black")
             axs[i].plot(s_test[i], f_pred[i], color="steelblue")
