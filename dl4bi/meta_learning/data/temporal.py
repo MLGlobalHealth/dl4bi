@@ -12,9 +12,7 @@ from .utils import (
     MetaLearningBatch,
     MetaLearningData,
     batch_BLD,
-    inv_permute_L_in_BLD,
     permute_L_in_BLD,
-    unbatch_BLD,
 )
 
 
@@ -67,23 +65,27 @@ def _batch(
     test_includes_ctx: bool,
     obs_noise: Optional[float] = None,
 ):
-    rng_p, rng_b = random.split(rng)
+    rng_p, rng_b, rng_eps = random.split(rng, 3)
     has_x = x is not None
-    broadcast_x = x.ndim == 2 if has_x else None
+    full_x = has_x and x.shape[:-1] == t.shape
+    broadcast_x = has_x and x.ndim == 2
     batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
     t = t[..., None]
-    if broadcast_x or not has_x:
-        x_ctx = x_test = x
-        t, f, inv_permute_idx = permute_L_in_BLD(rng_p, [t, f])
-        args = batch_BLD(rng_b, [t, f], *batch_args)
-        t_ctx, f_ctx, v_ctx, t_test, f_test, *rest = args
-        if broadcast_x:
-            x_ctx = jnp.repeat(x_ctx[:, None], num_ctx_max, axis=1)
-            x_test = jnp.repeat(x_test[:, None], num_test, axis=1)
-        args = (x_ctx, t_ctx, f_ctx, v_ctx, x_test, t_test, f_test, *rest)
-    else:
+    if full_x:
         x, t, f, inv_permute_idx = permute_L_in_BLD(rng_p, [x, t, f])
         args = batch_BLD(rng_b, [x, t, f], *batch_args)
+    elif broadcast_x:
+        t, f, inv_permute_idx = permute_L_in_BLD(rng_p, [t, f])
+        args = batch_BLD(rng_b, [t, f], *batch_args)
+        t_ctx, f_ctx, m_ctx, *rest = args
+        x_ctx = jnp.repeat(x[:, None], num_ctx_max, axis=1)
+        x_test = jnp.repeat(x[:, None], num_test, axis=1)
+        args = (x_ctx, t_ctx, f_ctx, m_ctx, x_test, *rest)
+    else:
+        t, f, inv_permute_idx = permute_L_in_BLD(rng_p, [t, f])
+        args = batch_BLD(rng_b, [t, f], *batch_args)
+        t_ctx, f_ctx, m_ctx, *rest = args
+        args = (None, t_ctx, f_ctx, m_ctx, None, *rest)
     if obs_noise:
         x_ctx, s_ctx, f_ctx, *rest = args
         f_ctx += obs_noise * random.normal(rng_eps, f_ctx.shape)

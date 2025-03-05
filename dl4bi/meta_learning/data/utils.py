@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Optional, Sequence
+from typing import Sequence
 
 import jax
 import jax.numpy as jnp
@@ -93,10 +93,3 @@ def batch_BLD(
 @partial(jit, static_argnames=("L",))
 def unbatch_BLD(arrays: Sequence[jax.Array], L: int):
     return [nan_pad(a, axis=1, L=L) for a in arrays]
-
-
-@jit
-def flatten_spatial(v: Optional[jax.Array]):
-    if v is None:
-        return None
-    return v.reshape(v.shape[0], -1, v.shape[-1])

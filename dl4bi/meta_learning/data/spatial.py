@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from flax.core.frozen_dict import FrozenDict
 from jax import jit, random
 from jax.scipy.stats import norm
 
@@ -14,7 +13,6 @@ from .utils import (
     MetaLearningBatch,
     MetaLearningData,
     batch_BLD,
-    flatten_spatial,
     inv_permute_L_in_BLD,
     permute_L_in_BLD,
     unbatch_BLD,
@@ -71,24 +69,29 @@ def _batch(
     obs_noise: Optional[float] = None,
 ):
     rng_p, rng_b, rng_eps = random.split(rng, 3)
-    has_x = x is not None
-    broadcast_x = x.ndim == 2 if has_x else None
     s_shape = s.shape
-    s, f = flatten_spatial(s), flatten_spatial(f)
+    has_x = x is not None
+    full_x = has_x and x.shape[:-1] == s.shape[:-1]
+    broadcast_x = has_x and x.ndim == 2
+    S_to_L = jit(lambda v: v.reshape(v.shape[0], -1, v.shape[-1]))
     batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
-    if broadcast_x or not has_x:
-        x_ctx = x_test = x
-        s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [s, f])
-        args = batch_BLD(rng_b, [s, f], *batch_args)
-        s_ctx, f_ctx, m_ctx, s_test, f_test, *rest = args
-        if broadcast_x:
-            x_ctx = jnp.repeat(x_ctx[:, None], num_ctx_max, axis=1)
-            x_test = jnp.repeat(x_test[:, None], num_test, axis=1)
-        args = (x_ctx, s_ctx, f_ctx, m_ctx, x_test, s_test, f_test, *rest)
-    else:
-        x = flatten_spatial(x)
+    if full_x:
+        x, s, f = map(S_to_L, (x, s, f))
         x, s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [x, s, f])
         args = batch_BLD(rng_b, [x, s, f], *batch_args)
+    elif broadcast_x:
+        s, f = map(S_to_L, (s, f))
+        s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [s, f])
+        s_ctx, f_ctx, m_ctx, *rest = batch_BLD(rng_b, [s, f], *batch_args)
+        x_ctx = jnp.repeat(x[:, None], num_ctx_max, axis=1)
+        x_test = jnp.repeat(x[:, None], num_test, axis=1)
+        args = (x_ctx, s_ctx, f_ctx, m_ctx, x_test, *rest)
+    else:
+        s, f = map(S_to_L, (s, f))
+        s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [s, f])
+        args = batch_BLD(rng_b, [s, f], *batch_args)
+        s_ctx, f_ctx, m_ctx, *rest = args
+        args = (None, s_ctx, f_ctx, m_ctx, None, *rest)
     if obs_noise:
         x_ctx, s_ctx, f_ctx, *rest = args
         f_ctx += obs_noise * random.normal(rng_eps, f_ctx.shape)
