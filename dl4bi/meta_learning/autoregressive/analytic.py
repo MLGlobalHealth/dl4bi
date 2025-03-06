@@ -12,10 +12,11 @@ def analytic_gp(
     kernel: Callable,
     var: float,
     ls: float,
-    obs_noise: float = 0,  # observation noise, note this is \sigma, not \sigma^2
+    obs_noise: float,  # observation noise, note this is \sigma, not \sigma^2
 ) -> tuple[jax.Array, jax.Array]:
     """
-    Analytic solution for conditioning a GP.
+    Analytic solution for conditioning a GP based on observations.
+    This gives a solution to the **underlying** process, not the observation process.
 
     Kevin P. Murphy, Probabilistic Machine Learning: An Introduction,
     Equations (17.32 - 17.36)
@@ -24,23 +25,8 @@ def analytic_gp(
     and requires the covariance matrix `cov_cc = kernel(s_ctx, s_ctx, var, ls) + obs_noise**2 * I`
     to be strictly positive definite.
     """
-    L_test = s_test.shape[0]
-
     if f_ctx.ndim > 1:
         f_ctx = f_ctx.squeeze(-1)
-
-    take_from_context = obs_noise < 1e-2
-    if take_from_context:
-        print(
-            "Assuming no observation noise, will take values from context set if f_ctx and s_test overlap to avoid numerical issues."
-        )
-        appear_in_context = []
-        for i, s in enumerate(s_test):
-            if s in s_ctx:
-                appear_in_context.append(i)
-        appear_in_context = jnp.array(appear_in_context, dtype=jnp.int32)
-        mask = jnp.ones(L_test, dtype=bool).at[appear_in_context].set(False)
-        s_test = s_test[mask]
 
     # 64-bit precision is required for numerical stability.
     with enable_x64():
@@ -64,9 +50,14 @@ def analytic_gp(
         mean = mean.astype(jnp.float32)
         cov = cov.astype(jnp.float32)
 
-    if take_from_context:
-        mean = jnp.zeros(L_test).at[mask].set(mean).at[~mask].set(f_ctx)
-        mask2 = jnp.outer(mask, mask)
-        cov = jnp.zeros((L_test, L_test)).at[mask2].set(cov.reshape(-1))
-
     return mean, cov
+
+
+def analytic_observed_gp(s_ctx, f_ctx, s_test, kernel, var, ls, obs_noise):
+    """
+    Analytic solution for the observation process of a GP based on observations.
+    This gives a solution to the **observed** process, not the underlying process.
+    """
+    L_test = s_test.shape[0]
+    mean, cov = analytic_gp(s_ctx, f_ctx, s_test, kernel, var, ls, obs_noise)
+    return mean, cov + obs_noise**2 * jnp.eye(L_test)
