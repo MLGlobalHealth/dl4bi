@@ -9,13 +9,15 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import wandb
-from gp import build_gp_dataloader, plot_posterior_predictive
+from gp import build_dataloader
 from jax import jit, random
 from jax.scipy import stats
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from dl4bi.core.train import TrainState, load_ckpt
+from dl4bi.core.utils import mask_from_valid_lens
+from dl4bi.meta_learning.data.spatial import SpatialBatch
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
@@ -27,7 +29,8 @@ def main(cfg: DictConfig):
         project_parent = project_parent or cfg.project
         cfg.project = "Bayesian Optimization"
     run_name = cfg.get("name", cfg_to_run_name(cfg))
-    path = f"results/{project_parent}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
+    kernel = cfg.kernel._target_.split(".")[-1]
+    path = f"results/{project_parent}/{cfg.data.name}/{kernel}/{cfg.seed}/{run_name}"
     path = Path(path)
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
@@ -41,7 +44,7 @@ def main(cfg: DictConfig):
     num_tasks, budget, num_init = 100, 50, 10
     rng = random.key(cfg.seed)
     rng_data, rng_opt = random.split(rng)
-    dataloader = build_gp_dataloader(cfg.data, cfg.kernel)
+    dataloader = build_dataloader(cfg.data, cfg.kernel)
     model_state, _ = load_ckpt(path.with_suffix(".ckpt"))
     model_fn = jit_model_fn(model_state)
     s_test, f_test = build_dataset(rng_data, dataloader, num_tasks)
@@ -50,7 +53,6 @@ def main(cfg: DictConfig):
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     jnp.save(path.with_suffix(".npy"), regret)
-    log_regret_dist(regret)
     log_worst_regret(
         s_ctx,
         f_ctx,
@@ -68,7 +70,7 @@ def jit_model_fn(state: TrainState):
         s_ctx: jax.Array,
         f_ctx: jax.Array,
         s_test: jax.Array,
-        valid_lens_ctx: jax.Array,
+        mask_ctx: jax.Array,
         rng_extra: jax.Array,
     ):
         return state.apply_fn(
@@ -76,7 +78,7 @@ def jit_model_fn(state: TrainState):
             s_ctx,
             f_ctx,
             s_test,
-            valid_lens_ctx,
+            mask_ctx,
             rngs={"extra": rng_extra},
         )
 
@@ -91,19 +93,13 @@ def build_dataset(rng: jax.Array, dataloader: Callable, num_samples: int = 100):
         requires an $O(n^3)$ calculation (for GPs). If we did this in parallel,
         some machines would run out of memory.
     """
-    B = num_samples
-    rng_data, rng_permute = random.split(rng)
-    batches = dataloader(rng_data)
+    batches = dataloader(rng)
     s_tests, f_tests = [], []
-    for i in tqdm(range(B), desc="Building dataset"):
-        _, _, _, s_test, f_test, *_ = next(batches)
-        s_tests += [s_test]
-        f_tests += [f_test]
-    s_test, f_test = jnp.vstack(s_tests), jnp.vstack(f_tests)
-    s_test = random.permutation(rng_permute, s_test, axis=1, independent=True)
-    f_test = random.permutation(rng_permute, f_test, axis=1, independent=True)
-    D_s, D_f = s_test.shape[-1], f_test.shape[-1]
-    return s_test.reshape(B, -1, D_s), f_test.reshape(B, -1, D_f)  # [B, L, D]
+    for i in tqdm(range(num_samples), desc="Building dataset"):
+        b = next(batches)
+        s_tests += [b.s_test]
+        f_tests += [b.f_test]
+    return jnp.vstack(s_tests), jnp.vstack(f_tests)
 
 
 def optimize(
@@ -126,26 +122,28 @@ def optimize(
     f_ctx = f_ctx.at[:, :num_init, :].set(f_test[:, :num_init, :])
     valid_lens_ctx = jnp.repeat(num_init, B)
     mask = mask_from_valid_lens(L_ctx, valid_lens_ctx)
-    opt_min = jnp.full((B, budget + 1, 1), jnp.inf)
-    opt_min = opt_min.at[:, 0, :].set(f_ctx.min(axis=1, where=mask, initial=jnp.inf))
+    est_min = jnp.full((B, budget + 1, 1), jnp.inf)
+    est_min = est_min.at[:, 0, :].set(
+        f_ctx.min(axis=1, where=mask[..., None], initial=jnp.inf)
+    )
     B_idx = jnp.arange(B)
     for i in tqdm(range(budget), desc="Optimizing"):
         rng_extra, rng = random.split(rng)
-        output = model_fn(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
-        if isinstance(output[1], tuple):  # latent
+        output = model_fn(s_ctx, f_ctx, s_test, mask, rng_extra)
+        if isinstance(output, tuple):  # latent
             output, _ = output  # throw away latent samples
-        f_mu, f_std = output
-        ei = expected_improvement(opt_min[:, [i], :], f_mu, f_std)
+        f_mu, f_std = output.mu, output.std
+        ei = expected_improvement(est_min[:, [i], :], f_mu, f_std)
         min_idx = jnp.argmax(ei, axis=1).squeeze()  # [B]
         s_ctx = s_ctx.at[B_idx, num_init + i, :].set(s_test[B_idx, min_idx, :])
         f_ctx = f_ctx.at[B_idx, num_init + i, :].set(f_test[B_idx, min_idx, :])
         valid_lens_ctx += 1
         mask = mask_from_valid_lens(L_ctx, valid_lens_ctx)
-        opt_min = opt_min.at[:, i + 1, :].set(
-            f_ctx.min(axis=1, where=mask, initial=jnp.inf)
+        est_min = est_min.at[:, i + 1, :].set(
+            f_ctx.min(axis=1, where=mask[..., None], initial=jnp.inf)
         )
-    global_min = f_test.min(axis=1, keepdims=True)
-    regret = opt_min - global_min
+    opt_min = f_test.min(axis=1, keepdims=True)
+    regret = est_min - opt_min
     return regret.squeeze(), s_ctx, f_ctx, f_mu, f_std
 
 
@@ -185,31 +183,6 @@ def probability_of_improvement(
     return stats.norm.cdf(z)
 
 
-def log_regret_dist(regret: jax.Array, hdi_prob: float = 0.95):
-    regret = regret[:, 1:]  # ignore iteration 0, before model selected anything
-    mu, std = regret.mean(axis=0), regret.std(axis=0)
-    z = jnp.abs(stats.norm.ppf((1 - hdi_prob) / 2))
-    iter = jnp.arange(regret.shape[1])
-    plt.plot(iter, mu, color="black")
-    plt.fill_between(
-        iter,
-        jnp.clip(mu - z * std, min=0),  # regret can't be negative
-        mu + z * std,
-        color="steelblue",
-        alpha=0.4,
-        interpolate=True,
-    )
-    ax = plt.gca()
-    ax.set_xlabel("Iteration")
-    ax.set_ylabel("Minimum Simple Regret")
-    path = f"/tmp/{datetime.now().isoformat()} regret_dist.png"
-    plt.title("Regret Distribution")
-    plt.savefig(path, dpi=125)
-    plt.clf()
-    wandb.log({"Regret Distribution": wandb.Image(path)})
-    return path
-
-
 def log_worst_regret(
     s_ctx: jax.Array,
     f_ctx: jax.Array,
@@ -219,36 +192,42 @@ def log_worst_regret(
     f_std: jax.Array,
     regret: jax.Array,
     num_samples: int = 16,
-    hdi_prob: float = 0.95,
 ):
-    if s_test.shape[-1] != 1:  # TODO(danj): support 2D
-        return
     worst_idxs = jnp.argsort(regret[:, -1], descending=True)[:num_samples]
-    paths = []
-    for rank, i in enumerate(worst_idxs):
-        # plot posterior predictive
-        s_ctx_i, f_ctx_i = s_ctx[i].squeeze(), f_ctx[i].squeeze()
-        s_test_i, f_test_i = s_test[i].squeeze(), f_test[i].squeeze()
-        f_mu_i, f_std_i = f_mu[i].squeeze(), f_std[i].squeeze()
-        if f_mu[i].shape != f_std[i].shape:  # marginal from tril cov
-            f_std_i = jnp.diag(f_std[i]).squeeze()  # TODO(danj): valid?
-        fig = plot_posterior_predictive(
-            s_ctx_i, f_ctx_i, s_test_i, f_test_i, f_mu_i, f_std_i
+    L_ctx, L_test = s_ctx.shape[1], s_test.shape[1]
+    b = SpatialBatch(
+        None,
+        s_ctx[worst_idxs],
+        f_ctx[worst_idxs],
+        mask_from_valid_lens(L_ctx, jnp.repeat(L_ctx, num_samples)),
+        None,
+        s_test[worst_idxs],
+        f_test[worst_idxs],
+        mask_from_valid_lens(L_test, jnp.repeat(L_test, num_samples)),
+        jnp.arange(L_test),
+        s_shape=s_test.shape,
+    )
+    fig = b.plot_1d(f_mu[worst_idxs], f_std[worst_idxs], subtitle="with worst regret")
+    regret = regret[:, -1][worst_idxs]
+    for i, ax in enumerate(fig.axes):
+        est_min = b.f_ctx[i].argmin()
+        opt_min = b.f_test[i].argmin()
+        x, y = b.s_ctx[i, est_min, 0], b.f_ctx[i, est_min, 0]
+        ax.plot(x, y, "ro")
+        ax.text(
+            0.975,
+            0.95,
+            f"Regret: {regret[i]:0.2f}",
+            transform=ax.transAxes,  # Use axes-relative coordinates
+            fontsize=16,
+            verticalalignment="top",
+            horizontalalignment="right",
         )
-        ax = fig.axes[0]
-        # add estimated min and true global min
-        opt_min_idx = f_ctx_i.argmin()
-        global_min_idx = f_test_i.argmin()
-        ax.plot(s_ctx_i[opt_min_idx], f_ctx_i[opt_min_idx], "ro", alpha=0.5)
-        ax.plot(s_test_i[global_min_idx], f_test_i[global_min_idx], "go", alpha=0.5)
-        paths += [
-            f"/tmp/{datetime.now().isoformat()} worst regret {rank+1} sample {i}.png"
-        ]
-        fig.suptitle(f"Sample {i}, Regret {regret[i, -1]:.3f}")
-        fig.savefig(paths[-1], dpi=125)
-        plt.clf()
-        plt.close(fig)
-    wandb.log({"Worst Regrets": [wandb.Image(p) for p in paths]})
+        ax.plot(b.s_test[i, opt_min, 0], b.f_test[i, opt_min, 0], "go")
+    path = f"/tmp/bayes_opt_{datetime.now().isoformat()}.png"
+    fig.savefig(path)
+    plt.close(fig)
+    wandb.log({"Worst Regrets": wandb.Image(path)})
 
 
 if __name__ == "__main__":

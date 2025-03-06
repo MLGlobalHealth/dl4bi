@@ -10,22 +10,23 @@ import optax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import wandb
+from hydra.utils import instantiate
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
-from dl4bi.meta_learning.data.spatial import SpatialData
-from dl4bi.meta_learning.train_utils import (
+from dl4bi.core.train import (
     Callback,
-    cfg_to_run_name,
     cosine_annealing_lr,
     evaluate,
-    instantiate,
-    log_img_plots,
-    regression_to_rgb,
     save_ckpt,
-    select_steps,
     train,
+)
+from dl4bi.meta_learning.data.spatial import SpatialData
+from dl4bi.meta_learning.utils import (
+    cfg_to_run_name,
+    regression_to_rgb,
+    wandb_2d_callback,
 )
 
 
@@ -42,7 +43,7 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader, valid_dataloader, callback_dataloader = build_dataloaders()
+    train_dataloader, valid_dataloader, clbk_dataloader = build_dataloaders()
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -53,12 +54,11 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
-    train_step, valid_step = select_steps(model)
+    model = model.replace(output_fn=lambda x: model.output_fn(x, min_std=0.05))
     cmap = mpl.colormaps.get_cmap("grey")
     cmap.set_bad("blue")
     clbk = partial(
-        log_img_plots,
-        shape=(28, 28, 1),
+        wandb_2d_callback,
         cmap=cmap,
         remap_colors=regression_to_rgb,
     )
@@ -66,11 +66,11 @@ def main(cfg: DictConfig):
         rng_train,
         model,
         optimizer,
-        train_step,
-        valid_step,
+        model.train_step,
+        model.valid_step,
         train_dataloader,
         valid_dataloader,
-        callback_dataloader,
+        clbk_dataloader,
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
@@ -79,7 +79,7 @@ def main(cfg: DictConfig):
     metrics = evaluate(
         rng_test,
         state,
-        valid_step,
+        model.valid_step,
         valid_dataloader,
         cfg.valid_num_steps,
     )
@@ -94,7 +94,7 @@ def build_dataloaders(
     buffer_size: int = 1024,
     num_ctx_min: int = 16,
     num_ctx_max: int = 128,
-    num_test_max: int = 256,
+    num_test: int = 256,
 ):
     B = batch_size
     normalize = lambda sample: 2 * (
@@ -108,20 +108,41 @@ def build_dataloaders(
     s = build_grid([dict(start=-2.0, stop=2.0, num=28)] * 2)
     s = jnp.repeat(s[None, ...], B, axis=0)
 
-    def build_dataloader(dataset, num_test_max):
+    def build_dataloader(dataset):
         def dataloader(rng: jax.Array):
             for f in dataset.as_numpy_iterator():
                 rng_i, rng = random.split(rng)
                 yield SpatialData(x=None, s=s, f=f).batch(
-                    rng_i, num_ctx_min, num_ctx_max, num_test_max, True
+                    rng_i,
+                    num_ctx_min,
+                    num_ctx_max,
+                    num_test,
+                    test_includes_ctx=True,
+                )
+
+        return dataloader
+
+    def build_callback_dataloader(dataset):
+        def dataloader(rng: jax.Array):
+            for f in dataset.as_numpy_iterator():
+                rng_i, rng = random.split(rng)
+                yield (
+                    SpatialData(x=None, s=s, f=f).batch(
+                        rng_i,
+                        num_ctx_min,
+                        num_ctx_max,
+                        num_test=28 * 28,
+                        test_includes_ctx=True,
+                    ),
+                    None,
                 )
 
         return dataloader
 
     return (
-        build_dataloader(train_ds, num_test_max),
-        build_dataloader(valid_ds, num_test_max),
-        build_dataloader(valid_ds, 28 * 28),
+        build_dataloader(train_ds),
+        build_dataloader(valid_ds),
+        build_callback_dataloader(valid_ds),
     )
 
 
