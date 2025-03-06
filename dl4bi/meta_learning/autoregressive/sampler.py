@@ -261,13 +261,50 @@ class AutoregressiveSampler:
 
         return log_densities.sum(axis=1)
 
-    def logpdf_random(
+    def _logpdf_random(
         self,
         rng: jax.Array,
-        s_ctx: jax.Array,  # [L_ctx, D_s]
-        f_ctx: jax.Array,  # [L_ctx, D_f]
-        s_test: jax.Array,  # [L_test, D_s]
-        f_test: jax.Array,  # [L_test, D_f]
+        s_ctx: jax.Array,  # [B, L_ctx, D_s]
+        f_ctx: jax.Array,  # [B, L_ctx, D_f]
+        s_test: jax.Array,  # [B, L_test, D_s]
+        f_test: jax.Array,  # [B, L_test, D_f]
         M: int,  # number of samples for Monte Carlo estimation
+        permute_each_batch_item_independently=False,
     ):
-        pass
+        """
+        Monte Carlo estimate of the log-likelihood induced by the autoregressive model with random reordering.
+        """
+
+        def batch_independent(rng, s_ctx, s_test, f_test):
+            B, L_test, D_s = s_test.shape
+            _, _, D_f = f_test.shape
+            rng = random.split(rng, B)
+            idx = vmap(random.permutation, in_axes=(0, None))(rng, L_test)
+
+            idx_s = idx[..., None].repeat(D_s, axis=-1)
+            idx_f = idx[..., None].repeat(D_f, axis=-1)
+
+            s_test = jnp.take_along_axis(s_test, idx_s, axis=1)
+            f_test = jnp.take_along_axis(f_test, idx_f, axis=1)
+
+            return self._logpdf(s_ctx, f_ctx, s_test, f_test)
+
+        def fun(rng, s_ctx, s_test, f_test):
+            _, L_test, _ = s_test.shape
+            idx = random.permutation(rng, L_test)
+            s_test = s_test[:, idx]
+            f_test = f_test[:, idx]
+
+            return self._logpdf(s_ctx, f_ctx, s_test, f_test)
+
+        rng = random.split(rng, M)
+
+        log_densities = (
+            vmap(batch_independent, in_axes=(0, None, None, None))(
+                rng, s_ctx, s_test, f_test
+            )
+            if permute_each_batch_item_independently
+            else vmap(fun, in_axes=(0, None, None, None))(rng, s_ctx, s_test, f_test)
+        )
+
+        return jax.nn.logsumexp(log_densities, axis=0) - jnp.log(M)
