@@ -7,38 +7,15 @@ import jax.numpy as jnp
 from jax import jit, random
 from omegaconf import OmegaConf
 
-from dl4bi.meta_learning.autoregressive import autoregressive_sample_multiple_paths
+from dl4bi.meta_learning.autoregressive import AutoregressiveSampler
 from dl4bi.meta_learning.train_utils import build_gp_dataloader, load_ckpt
 
 device = jax.devices()[0]
 
 
-def load_model(path):
-    state, config = load_ckpt(path)
-
-    def apply(
-        s_ctx: jax.Array,
-        f_ctx: jax.Array,
-        s_test: jax.Array,
-        valid_lens_ctx: jax.Array | None = None,
-    ):
-        return state.apply_fn(
-            {"params": state.params, **state.kwargs},
-            s_ctx,
-            f_ctx,
-            s_test,
-            valid_lens_ctx,
-            training=False,
-            # this is not used for TNP-KR, removed so that it is not necessary to pass rng to apply
-            # rngs={"extra": rng_extra},
-        )
-
-    return jit(apply), config
-
-
 def run(
     *,
-    apply: Callable,
+    sampler: AutoregressiveSampler,
     config: OmegaConf,
     seed: int,
     job_name: str,
@@ -112,24 +89,20 @@ def run(
     jnp.save(output_dir / "f.npy", f)
 
     # Regular (diagonal) TNP-KR
-    [diagonal_mu], [diagonal_sd] = apply(
-        s_ctx[None], f_ctx[None], s_test[None]
+    [diagonal_mu], [diagonal_sd] = sampler.model(
+        s_ctx[None],
+        f_ctx[None],
+        s_test[None],
     )  # note need to expand dims
     diagonal_var = diagonal_sd**2
     jnp.save(output_dir / "diagonal_mu", diagonal_mu)
     jnp.save(output_dir / "diagonal_var", diagonal_var)
 
-    # Put arrays on gpu explicitly
-    s_ctx = jax.device_put(s_ctx, device)
-    f_ctx = jax.device_put(f_ctx, device)
-    s_test = jax.device_put(s_test, device)
-
     strategies = ["ltr", "random", "furthest", "closest"]
     for strategy in strategies:
         start = datetime.now()
-        paths, log_densities = autoregressive_sample_multiple_paths(
+        paths = sampler.sample_multiple_paths(
             rng,
-            apply,
             s_ctx,
             f_ctx,
             s_test,
@@ -139,7 +112,6 @@ def run(
         )
         end = datetime.now()
         jnp.save(output_dir / f"{strategy}_paths.npy", paths)
-        jnp.save(output_dir / f"{strategy}_densities.npy", log_densities)
         print(f"{strategy} took {end - start}")
 
 
@@ -161,12 +133,13 @@ if __name__ == "__main__":
     parser.add_argument("--s-test", type=float, nargs=ONE_OR_MORE, default=None)
     args = parser.parse_args()
 
-    apply, config = load_model(args.path)
+    state, config = load_ckpt(args.path)
+    sampler = AutoregressiveSampler.from_state(state)
 
     print(args)
 
     run(
-        apply=apply,
+        sampler=sampler,
         config=config,
         seed=args.seed,
         job_name=args.job_name,

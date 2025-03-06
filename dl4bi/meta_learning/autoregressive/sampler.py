@@ -1,0 +1,261 @@
+from functools import partial
+from typing import Callable, Literal
+
+from attr import dataclass
+import jax
+import jax.numpy as jnp
+import tqdm
+from jax import jit, random, vmap
+
+from dl4bi.meta_learning.train_utils import TrainState
+
+from .permutations import (
+    closest_first,
+    furthest_first,
+    invert_permutation,
+    left_to_right,
+)
+
+
+Strategy = Literal["preserve", "ltr", "random", "furthest", "closest"]
+
+
+@dataclass(frozen=True)
+class AutoregressiveSampler:
+    model: Callable
+
+    def __init__(self, model: Callable):
+        self.model = jit(model)
+
+    @classmethod
+    def from_state(cls, state: TrainState):
+        def apply(
+            s_ctx: jax.Array,
+            f_ctx: jax.Array,
+            s_test: jax.Array,
+            valid_lens_ctx: jax.Array | None = None,
+        ) -> jax.Array:
+            return state.apply_fn(
+                {"params": state.params, **state.kwargs},
+                s_ctx,
+                f_ctx,
+                s_test,
+                valid_lens_ctx,
+                training=False,
+                # this is not used for TNP-KR, removed so that it is not necessary to pass rng to apply
+                # rngs={"extra": rng_extra},
+            )
+
+        return cls(apply)
+
+    @partial(jit, static_argnums=0)
+    def _sample(
+        self,
+        rng: jax.Array,
+        s_ctx: jax.Array,  # [B, L_ctx, D_s]
+        f_ctx: jax.Array,  # [B, L_ctx, D_f]
+        s_test: jax.Array,  # [B, L_test, D_s]
+    ):
+        """
+        Implementation of the autoregressive sampling generative model, batched.
+        """
+        B, L_ctx, _ = s_ctx.shape
+        _, L_test, _ = s_test.shape
+        _, _, D_f = f_ctx.shape
+
+        s = jnp.concat([s_ctx, s_test], axis=1)
+        f = jnp.pad(f_ctx, ((0, 0), (0, L_test), (0, 0)))
+
+        # Note that the independent random normals can be pre-sampled.
+        # It doesn't matter whether sampling is done here, or in the for loop,
+        # as in each iteration the N(0, 1) sampling is independent
+        normals = random.normal(rng, (B, L_test, D_f))
+
+        def loop(i: int, f: jax.Array):
+            s_test_i = s_test[:, i][:, None]  # [B, 1, D_s]
+            eps = normals[:, i]  # [B, D_f]
+            valid_lens_ctx = jnp.repeat(L_ctx + i, B)  # [B]
+
+            f_mu_i, f_std_i = self.model(s, f, s_test_i, valid_lens_ctx)
+            f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)  # [B, D_f]
+            f_sampled = eps * f_std_i + f_mu_i
+
+            return f.at[:, L_ctx + i].set(f_sampled)
+
+        f = jax.lax.fori_loop(
+            0,
+            L_test,
+            loop,
+            f,
+        )
+
+        return f[:, L_ctx:]
+
+    def sample(
+        self,
+        rng: jax.Array,
+        s_ctx: jax.Array,  # [B, L_ctx, D_s]
+        f_ctx: jax.Array,  # [B, L_ctx, D_f]
+        s_test: jax.Array,  # [B, L_test, D_s]
+        strategy: Strategy,
+    ):
+        """
+        Autoregressive sampling with a choice of strategy.
+        """
+        if strategy == "preserve":
+            return self._sample(
+                rng,
+                s_ctx,
+                f_ctx,
+                s_test,
+            )
+        else:
+            B, L_test, D_s = s_test.shape
+            _, _, D_f = f_ctx.shape
+            match strategy:
+                case "closest":
+                    idx = vmap(closest_first)(s_ctx, s_test)
+                case "furthest":
+                    idx = vmap(furthest_first)(s_ctx, s_test)
+                case "ltr":
+                    idx = vmap(left_to_right)(s_test)
+                case "random":
+                    rng, rng_perm = random.split(rng)
+                    idx = vmap(jax.random.permutation, in_axes=(0, None))(
+                        random.split(rng_perm, B), L_test
+                    )
+
+            idx_inv = vmap(invert_permutation)(idx)
+            idx = idx[..., None].repeat(D_s, axis=-1)
+            idx_inv = idx_inv[..., None].repeat(D_f, axis=-1)
+
+            assert idx.shape == (B, L_test, D_s)
+            assert idx_inv.shape == (B, L_test, D_f)
+
+            s_test = jnp.take_along_axis(s_test, idx, axis=1)
+            f_sampled = self._sample(
+                rng,
+                s_ctx,
+                f_ctx,
+                s_test,
+            )
+            f_sampled = jnp.take_along_axis(f_sampled, idx_inv, axis=1)
+            return f_sampled
+
+    def sample_multiple_paths(
+        self,
+        rng: jax.Array,
+        s_ctx: jax.Array,  # [L_ctx, D_s]
+        f_ctx: jax.Array,  # [L_ctx, D_f]
+        s_test: jax.Array,  # [L_test, D_s]
+        batch_size: int,
+        num_paths: int,
+        strategy: Strategy,
+    ):
+        """
+        Autoregressively sample `num_paths` from the model using the specified strategy.
+
+        `num_paths` will be rounded up to a multiple of `batch_size`.
+
+        More efficient than calling `autoregressive_sample` multiple times
+        as it permutes the locations only once (except for the random strategy).
+        """
+        num_iters = (num_paths - 1) // batch_size + 1  # ceil division
+        all_paths = []
+
+        if strategy != "random":
+            match strategy:
+                case "preserve":
+                    idx = idx_inv = ...
+                case "closest":
+                    idx = closest_first(s_ctx, s_test)
+                    idx_inv = invert_permutation(idx)
+                case "furthest":
+                    idx = furthest_first(s_ctx, s_test)
+                    idx_inv = invert_permutation(idx)
+                case "ltr":
+                    idx = left_to_right(s_test)
+                    idx_inv = invert_permutation(idx)
+
+            s_test = s_test[idx]
+            s_test = jnp.repeat(s_test[None], batch_size, axis=0)
+            f_ctx = jnp.repeat(f_ctx[None], batch_size, axis=0)
+            s_ctx = jnp.repeat(s_ctx[None], batch_size, axis=0)
+
+            for i in tqdm.trange(num_iters, desc=f"Strategy {strategy}"):
+                rng, rng_i = random.split(rng)
+                paths = self._sample(
+                    rng_i,
+                    s_ctx,
+                    f_ctx,
+                    s_test,
+                )
+                assert paths.shape == (batch_size, s_test.shape[1], 1)
+                all_paths.append(paths)
+
+            all_paths = jnp.concat(all_paths, axis=0)
+            return all_paths[:, idx_inv]
+
+        else:
+            # We permute each path independently
+            # so this is effectively a call to `autoregressive_sample` with 'random' strategy
+
+            s_ctx = jnp.repeat(s_ctx[None], batch_size, axis=0)
+            f_ctx = jnp.repeat(f_ctx[None], batch_size, axis=0)
+            s_test = jnp.repeat(s_test[None], batch_size, axis=0)
+
+            for i in tqdm.trange(num_iters, desc="Strategy random"):
+                rng, rng_i = random.split(rng)
+                paths = self.sample(
+                    rng_i,
+                    s_ctx,
+                    f_ctx,
+                    s_test,
+                    "random",
+                )
+                all_paths.append(paths)
+
+            all_paths = jnp.concat(all_paths, axis=0)
+            return all_paths
+
+    @partial(jit, static_argnums=0)
+    def _logpdf(
+        self,
+        s_ctx: jax.Array,  # [B, L_ctx, D_s]
+        f_ctx: jax.Array,  # [B, L_ctx, D_f]
+        s_test: jax.Array,  # [B, L_test, D_s]
+        f_test: jax.Array,  # [B, L_test, D_f]
+    ):
+        """
+        Computes the log-likelihood induced by the autoregressive model, batched.
+
+        Assumes the model where samples are taken in the order given by `s_test`, `f_test`.
+        """
+        B, L_test, _ = s_test.shape
+
+        s = jnp.concat([s_ctx, s_test], axis=1)
+        f = jnp.concat([f_ctx, f_test], axis=1)
+
+        def fun(valid_lens_ctx, s_test_i, f_test_i):
+            f_mu_i, f_std_i = self.apply(s, f, s_test_i, valid_lens_ctx)
+            f_mu_i, f_std_i = f_mu_i.model(1), f_std_i.squeeze(1)  # [B, D_f]
+            return jax.scipy.stats.norm.logpdf(f_test_i, f_mu_i, f_std_i)
+
+        log_densities = jax.vmap(fun, in_axes=(1, 1, 1), out_axes=1)(
+            jnp.arange(L_test)[None].repeat(B),  # [B, L_test]
+            s_test,  # [B, L_test, D_s]
+            f_test,  # [B, L_test, D_f]
+        )  # -> [B, L_test, D_f]
+
+        return log_densities.sum(axis=1)
+
+    def logpdf_random(
+        self,
+        rng: jax.Array,
+        s_ctx: jax.Array,  # [L_ctx, D_s]
+        f_ctx: jax.Array,  # [L_ctx, D_f]
+        s_test: jax.Array,  # [L_test, D_s]
+        f_test: jax.Array,  # [L_test, D_f]
+        M: int,  # number of samples for Monte Carlo estimation
+    ):
+        pass
