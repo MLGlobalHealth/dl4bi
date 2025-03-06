@@ -69,8 +69,10 @@ class AutoregressiveSampler:
         # It doesn't matter whether sampling is done here, or in the for loop,
         # as in each iteration the N(0, 1) sampling is independent
         normals = random.normal(rng, (B, L_test, D_f))
+        log_densities = jax.scipy.stats.norm.logpdf(normals).sum(axis=-1)
 
-        def loop(i: int, f: jax.Array):
+        def loop(i: int, carry: tuple[jax.Array, jax.Array]):
+            f, log_densities = carry
             s_test_i = s_test[:, i][:, None]  # [B, 1, D_s]
             eps = normals[:, i]  # [B, D_f]
             valid_lens_ctx = jnp.repeat(L_ctx + i, B)  # [B]
@@ -79,17 +81,21 @@ class AutoregressiveSampler:
             f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)  # [B, D_f]
             f_sampled = eps * f_std_i + f_mu_i
 
-            return f.at[:, L_ctx + i].set(f_sampled)
+            return (
+                f.at[:, L_ctx + i].set(f_sampled),
+                log_densities - jnp.log(f_std_i),  # Jacobian correction
+            )
 
         f = jax.lax.fori_loop(
             0,
             L_test,
             loop,
-            f,
+            (f, log_densities),
         )
 
-        return f[:, L_ctx:]
+        return f[:, L_ctx:], log_densities
 
+    @partial(jit, static_argnames=["self", "strategy"])
     def sample(
         self,
         rng: jax.Array,
@@ -100,6 +106,9 @@ class AutoregressiveSampler:
     ):
         """
         Autoregressive sampling with a choice of strategy.
+        Returns induced log-densities along with the sample paths.
+
+        NOTE: For the "random" strategy the densities will be incorrect.
         """
         if strategy == "preserve":
             return self._sample(
@@ -132,14 +141,14 @@ class AutoregressiveSampler:
             assert idx_inv.shape == (B, L_test, D_f)
 
             s_test = jnp.take_along_axis(s_test, idx, axis=1)
-            f_sampled = self._sample(
+            f_sampled, log_densities = self._sample(
                 rng,
                 s_ctx,
                 f_ctx,
                 s_test,
             )
             f_sampled = jnp.take_along_axis(f_sampled, idx_inv, axis=1)
-            return f_sampled
+            return f_sampled, log_densities
 
     def sample_multiple_paths(
         self,
@@ -161,6 +170,7 @@ class AutoregressiveSampler:
         """
         num_iters = (num_paths - 1) // batch_size + 1  # ceil division
         all_paths = []
+        all_densities = []
 
         if strategy != "random":
             match strategy:
@@ -183,7 +193,7 @@ class AutoregressiveSampler:
 
             for i in tqdm.trange(num_iters, desc=f"Strategy {strategy}"):
                 rng, rng_i = random.split(rng)
-                paths = self._sample(
+                paths, log_densities = self._sample(
                     rng_i,
                     s_ctx,
                     f_ctx,
@@ -191,9 +201,11 @@ class AutoregressiveSampler:
                 )
                 assert paths.shape == (batch_size, s_test.shape[1], 1)
                 all_paths.append(paths)
+                all_densities.append(log_densities)
 
             all_paths = jnp.concat(all_paths, axis=0)
-            return all_paths[:, idx_inv]
+            all_densities = jnp.concat(all_densities, axis=0)
+            return all_paths[:, idx_inv], all_densities
 
         else:
             # We permute each path independently
@@ -215,6 +227,7 @@ class AutoregressiveSampler:
                 all_paths.append(paths)
 
             all_paths = jnp.concat(all_paths, axis=0)
+            all_densities = jnp.concatenate(all_densities, axis=0)
             return all_paths
 
     @partial(jit, static_argnums=0)
