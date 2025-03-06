@@ -53,7 +53,7 @@ def analytic_gp(
     return mean, cov
 
 
-def analytic_observed_gp(s_ctx, f_ctx, s_test, kernel, var, ls, obs_noise):
+def analytic_observation_gp(s_ctx, f_ctx, s_test, kernel, var, ls, obs_noise):
     """
     Analytic solution for the observation process of a GP based on observations.
     This gives a solution to the **observed** process, not the underlying process.
