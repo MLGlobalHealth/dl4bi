@@ -1,7 +1,7 @@
+from dataclasses import dataclass
 from functools import partial
 from typing import Callable, Literal
 
-from attr import dataclass
 import jax
 import jax.numpy as jnp
 import tqdm
@@ -15,7 +15,6 @@ from .permutations import (
     invert_permutation,
     left_to_right,
 )
-
 
 Strategy = Literal["preserve", "ltr", "random", "furthest", "closest"]
 
