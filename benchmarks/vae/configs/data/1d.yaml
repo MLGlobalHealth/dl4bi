@@ -1,7 +1,7 @@
 s:
   - start: 0
-    stop: 100
-    num: 32
+    stop: 1
+    num: 80
 batch_size: 32
 large_batch_size: 1024
 graph_construction:
