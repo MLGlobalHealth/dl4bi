@@ -156,7 +156,7 @@ def build_dataloader(
                 minval=temporal_cfg.max_past_time_offset,
                 maxval=time_frame_size,
             )
-            choosing specific ctx times for each sample in batch
+            # choosing specific ctx times for each sample in batch
             ctx_times = (
                 -jax.vmap(sample_offset, in_axes=(0, None))(
                     jax.random.split(rng_t3, B), time_step_ctx_num
