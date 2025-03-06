@@ -55,13 +55,9 @@ class DiagonalMVNOutput(DistributionOutput):
         return DiagonalMVNOutput(mu.mean(axis=1), std.mean(axis=1))
 
     def nll(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
-        if mask is not None:
-            mask = mask[..., None]
         return -norm.logpdf(x, self.mu, self.std).mean(where=mask)
 
     def metrics(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
-        if mask is not None:
-            mask = mask[..., None]
         hdi_prob = kwargs.get("hdi_prob", 0.95)
         z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
         rmse = jnp.sqrt(jnp.square(x - self.mu).mean(where=mask))
