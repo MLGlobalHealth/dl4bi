@@ -26,7 +26,7 @@ from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.utils import (
     cfg_to_run_name,
     regression_to_rgb,
-    wandb_2d_callback,
+    wandb_2d_img_callback,
 )
 
 
@@ -59,7 +59,7 @@ def main(cfg: DictConfig):
     cmap = mpl.colormaps.get_cmap("grey")
     cmap.set_bad("blue")
     clbk = partial(
-        wandb_2d_callback,
+        wandb_2d_img_callback,
         cmap=cmap,
         remap_colors=regression_to_rgb,
     )
@@ -109,7 +109,7 @@ def build_dataloaders(
     s = build_grid([dict(start=-2.0, stop=2.0, num=28)] * 2)
     s = jnp.repeat(s[None, ...], B, axis=0)
 
-    def build_dataloader(dataset):
+    def build_dataloader(dataset, is_callback: bool = False):
         def dataloader(rng: jax.Array):
             for f in dataset.as_numpy_iterator():
                 rng_i, rng = random.split(rng)
@@ -117,25 +117,8 @@ def build_dataloaders(
                     rng_i,
                     num_ctx_min,
                     num_ctx_max,
-                    num_test,
+                    28 * 28 if is_callback else num_test,
                     test_includes_ctx=True,
-                )
-
-        return dataloader
-
-    def build_callback_dataloader(dataset):
-        def dataloader(rng: jax.Array):
-            for f in dataset.as_numpy_iterator():
-                rng_i, rng = random.split(rng)
-                yield (
-                    SpatialData(x=None, s=s, f=f).batch(
-                        rng_i,
-                        num_ctx_min,
-                        num_ctx_max,
-                        num_test=28 * 28,
-                        test_includes_ctx=True,
-                    ),
-                    None,
                 )
 
         return dataloader
@@ -143,7 +126,7 @@ def build_dataloaders(
     return (
         build_dataloader(train_ds),
         build_dataloader(valid_ds),
-        build_callback_dataloader(valid_ds),
+        build_dataloader(valid_ds, True),
     )
 
 

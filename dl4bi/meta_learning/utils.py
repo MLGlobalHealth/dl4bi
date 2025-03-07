@@ -40,7 +40,7 @@ def regression_to_rgb(f: jax.Array):
     return jnp.clip(f / 2 + 0.5, 0, 1)  # [-1, 1] => [0, 1]
 
 
-def wandb_2d_callback(
+def wandb_2d_img_callback(
     step: int,
     rng_step: int,
     state: TrainState,

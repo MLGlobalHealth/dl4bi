@@ -1,41 +1,30 @@
-cls: TNPD
-kwargs:
-  embed_s_f:
-    cls: MLP
-    kwargs:
-      dims: [64, 64, 64, 64]
-  enc:
-    cls: TransformerEncoder
-    kwargs:
-      num_blks: 6
-      blk:
-        cls: TransformerEncoderBlock
-        kwargs:
-          pre_norm: False
-          attn:
-            cls: MultiHeadAttention
-            kwargs:
-              proj_qs:
-                cls: MLP
-                kwargs:
-                  dims: [64]
-              proj_ks:
-                cls: MLP
-                kwargs:
-                  dims: [64]
-              proj_vs:
-                cls: MLP
-                kwargs:
-                  dims: [64]
-              proj_out:
-                cls: MLP
-                kwargs:
-                  dims: [64]
-          ffn:
-            cls: MLP
-            kwargs:
-              dims: [128, 64]
-  head:
-    cls: MLP
-    kwargs:
-      dims: [128, 6]
+_target_: dl4bi.meta_learning.TNPD
+embed_s_f:
+  _target_: dl4bi.mlp.MLP
+  dims: [64, 64, 64, 64]
+enc:
+  _target_: dl4bi.transformer.TransformerEncoder
+  num_blks: 6
+  blk:
+    _target_: dl4bi.transformer.TransformerEncoderBlock
+    pre_norm: False
+    attn:
+      _target_: dl4bi.attention.MultiHeadAttention
+      proj_qs:
+        _target_: dl4bi.mlp.MLP
+        dims: [64]
+      proj_ks:
+        _target_: dl4bi.mlp.MLP
+        dims: [64]
+      proj_vs:
+        _target_: dl4bi.mlp.MLP
+        dims: [64]
+      proj_out:
+        _target_: dl4bi.mlp.MLP
+        dims: [64]
+    ffn:
+      _target_: dl4bi.mlp.MLP
+      dims: [128, 64]
+head:
+  _target_: dl4bi.mlp.MLP
+  dims: [128, 6]

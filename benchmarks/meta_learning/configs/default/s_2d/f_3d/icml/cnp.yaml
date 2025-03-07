@@ -1,10 +1,7 @@
-cls: CNP
-kwargs:
-  enc_det:
-    cls: MLP
-    kwargs:
-      dims: [512, 256, 256, 128, 128, 128]
-  dec: 
-    cls: MLP
-    kwargs:
-      dims: [512, 256, 128, 128, 6]
+_target_: dl4bi.meta_learning.CNP
+enc_det:
+  _target_: dl4bi.mlp.MLP
+  dims: [512, 256, 256, 128, 128, 128]
+dec:
+  _target_: dl4bi.mlp.MLP
+  dims: [512, 256, 128, 128, 6]
