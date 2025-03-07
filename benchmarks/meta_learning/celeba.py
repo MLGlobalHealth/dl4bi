@@ -100,7 +100,7 @@ def build_dataloaders(
     train_ds = 2 * (np.load("cache/celeba/train.npy", mmap_mode="r") / 255.0 - 0.5)
     valid_ds = 2 * (np.load("cache/celeba/valid.npy", mmap_mode="r") / 255.0 - 0.5)
     test_ds = 2 * (np.load("cache/celeba/test.npy", mmap_mode="r") / 255.0 - 0.5)
-    s = build_grid([dict(start=-2.0, stop=2.0, num=32)] * 2).reshape(L, 2)
+    s = build_grid([dict(start=-2.0, stop=2.0, num=32)] * 2)
     s = jnp.repeat(s[None], B, axis=0)  # [B, S, S, 2]
 
     def build_dataloader(dataset, is_callback: bool = False):

@@ -179,7 +179,7 @@ class SpatialBatch(MetaLearningBatch):
     ):
         B, L = self.f_test.shape[0], self.inv_permute_idx.shape[0]
         N = min(num_plots or B, B)
-        reshape = jit(lambda v: v.reshape(self.s_shape[:-1]))
+        reshape = jit(lambda v: v.reshape(*self.s_shape[:-1], v.shape[-1]).squeeze())
         if f_std.shape[-1] > 1:  # e.g. uncertainty per RGB channel
             f_std = f_std.mean(axis=-1)
         f_ctx = jnp.where(self.mask_ctx[..., None], self.f_ctx, jnp.nan)

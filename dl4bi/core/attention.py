@@ -335,7 +335,7 @@ def scan_attention(
         qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (remainder, B, H, D))
         os_chunk = scan_ks(qs_chunk, ks, vs, mask, ks_chunk_size)
         os_chunk = rearrange(os_chunk, "Q B H D -> B H Q D")
-        os = jnp.concatenate([os, os_chunk], axis=2)
+        os = jnp.concat([os, os_chunk], axis=2)
 
     return os
 
@@ -348,7 +348,7 @@ def scan_ks(
     ks_chunk_size: int = 1024,
 ):
     (Q_c, B, H, D), K = qs_chunk.shape, ks.shape[0]
-    D_V = vs.shape[-1]
+    D_v = vs.shape[-1]
     K_c = min(K, ks_chunk_size)
     qs_chunk /= jnp.sqrt(D)
 
@@ -369,7 +369,7 @@ def scan_ks(
 
     def chunk_ks(i, k_c):
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (k_c, B, H, D))
-        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D_V))
+        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D_v))
         mask_chunk = jnp.array(True)
         if mask is not None:
             mask_chunk = lax.dynamic_slice(mask, (i, 0), (k_c, B))
@@ -380,7 +380,7 @@ def scan_ks(
     @partial(jax.remat, prevent_cse=False)
     def update(qs_chunk, ks_chunk, vs_chunk, mask_chunk, os, row_maxs, row_sums):
         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
-        scores = jnp.where(mask_chunk, scores, -float("inf"))
+        scores = jnp.where(mask_chunk, scores, -jnp.inf)
         row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
         exp_scores = jnp.exp(scores - new_row_maxs)
@@ -392,9 +392,9 @@ def scan_ks(
         os += os_chunk
         return os, new_row_maxs, new_row_sums
 
-    os = jnp.zeros((Q_c, B, H, D_V))
+    os = jnp.zeros((Q_c, B, H, D_v))
     row_sums = jnp.zeros((Q_c, B, H, 1))
-    row_maxs = jnp.full((Q_c, B, H, 1), -float("inf"))
+    row_maxs = jnp.full((Q_c, B, H, 1), -jnp.inf)
 
     (i, os, row_maxs, row_sums), _ = scan(
         ks_scanner,
@@ -621,7 +621,7 @@ def biased_scan_ks(
 ):
     (Q_c, B, H, D), (K, _, M) = qs_chunk.shape, ks_meta.shape
     K_c = min(K, ks_chunk_size)
-    D_V = vs.shape[-1]
+    D_v = vs.shape[-1]
     qs_chunk /= jnp.sqrt(D)
 
     @jit
@@ -644,7 +644,7 @@ def biased_scan_ks(
 
     def chunk_ks(i, k_c):
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (k_c, B, H, D))
-        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D_V))
+        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D_v))
         ks_meta_chunk = lax.dynamic_slice(ks_meta, (i, 0, 0), (k_c, B, M))
         mask_chunk = jnp.array(True)
         if mask is not None:
@@ -683,9 +683,9 @@ def biased_scan_ks(
         os += os_chunk
         return os, new_row_maxs, new_row_sums
 
-    os = jnp.zeros((Q_c, B, H, D_V))
+    os = jnp.zeros((Q_c, B, H, D_v))
     row_sums = jnp.zeros((Q_c, B, H, 1))
-    row_maxs = jnp.full((Q_c, B, H, 1), -float("inf"))
+    row_maxs = jnp.full((Q_c, B, H, 1), -jnp.inf)
 
     (i, os, row_maxs, row_sums), _ = scan(
         ks_scanner,
@@ -789,7 +789,7 @@ class MultiHeadAttention(nn.Module):
         qs: jax.Array,  # [B, Q, D_q]
         ks: jax.Array,  # [B, K, D_k]
         vs: jax.Array,  # [B, K, D_v]
-        mask: Optional[jax.Array] = None,
+        mask: Optional[jax.Array] = None,  # [B, K]
         training: bool = False,
         **kwargs,
     ):
@@ -808,9 +808,8 @@ class MultiHeadAttention(nn.Module):
         """
         H = self.num_heads
         qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
-        qs, ks, vs = map(
-            lambda x: rearrange(x, "B L (H D) -> B H L D", H=H), (qs, ks, vs)
-        )
+        reshape = jit(lambda x: rearrange(x, "B L (H D) -> B H L D", H=H))
+        qs, ks, vs = map(reshape, (qs, ks, vs))
         ctx, attn = self.attn(qs, ks, vs, mask, training, **kwargs)
         ctx = rearrange(ctx, "B H L D -> B L (H D)")
         return self.proj_out(ctx), attn
@@ -954,13 +953,13 @@ class DeepKernelAttention(nn.Module):
             `ctx` and `attn`, the updated values and `None` for the `attn`
             since it is never materialized.
         """
-        (K, D), H = ks.shape[-2:], self.num_heads
+        D_q, H = qs.shape[-1], self.num_heads
         if kwargs.get("bias") is not None:
             warnings.warn("DeepKernelAttention does not support bias!")
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         qs, ks = stack(kwargs["qs_s"], qs), stack(kwargs["ks_s"], ks)
         qs, ks = map(
-            lambda x: self.proj_qks(x).astype(self.dtype) / jnp.pow(D, 0.25), (qs, ks)
+            lambda x: self.proj_qks(x).astype(self.dtype) / jnp.pow(D_q, 0.25), (qs, ks)
         )
         vs = self.proj_vs(vs).astype(self.dtype)
         if mask is not None:
