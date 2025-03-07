@@ -41,7 +41,7 @@ def train(
     valid_step: Callable,
     train_dataloader: Callable,
     valid_dataloader: Callable,
-    callback_dataloader: Callable,
+    callback_dataloader: Optional[Callable] = None,
     train_num_steps: int = 100000,
     valid_num_steps: Optional[int] = None,
     valid_interval: int = 25000,
@@ -69,7 +69,7 @@ def train(
     patience = 0
     best_state = state
     early_stop_patience = early_stop_patience or train_num_steps
-    train_nll, valid_nll, best_metric = float("inf"), float("inf"), float("inf")
+    train_loss, metric, best_metric = float("inf"), float("inf"), float("inf")
     pbar = tqdm(range(1, train_num_steps + 1), unit=" batches", dynamic_ncols=True)
     for i in pbar:
         batch = next(batches)
@@ -77,9 +77,9 @@ def train(
         state, loss = train_step(rng_train_step, state, batch)
         losses += [loss]
         if i % log_loss_interval == 0:
-            train_nll = np.mean(losses)
+            train_loss = np.mean(losses)
             losses = []
-            wandb.log({"Train NLL": train_nll})
+            wandb.log({"Train Loss": train_loss})
         if i % valid_interval == 0:
             rng_valid, rng_train = random.split(rng_train)
             metrics = evaluate(
@@ -89,7 +89,6 @@ def train(
                 valid_dataloader,
                 valid_num_steps,
             )
-            valid_nll = metrics["NLL"]
             metric = metrics[monitor_metric]
             wandb.log({f"Valid {m}": v for m, v in metrics.items()})
             patience += 1
@@ -101,11 +100,13 @@ def train(
                 return best_state
         for cbk in callbacks:
             if i % cbk.interval == 0:
-                batch = next(callback_dataloader(rng_train_step))
-                batch, extra = batch if isinstance(batch, tuple) else (batch, None)
+                extra = None
+                if callback_dataloader is not None:
+                    batch = next(callback_dataloader(rng_train_step))
+                    batch, extra = batch if isinstance(batch, tuple) else (batch, None)
                 cbk.fn(i, rng_train_step, state, batch, extra)
         pbar.set_postfix(
-            {"Train NLL": f"{train_nll:.3f}", "Valid NLL": f"{valid_nll:.3f}"}
+            {"Train Loss": f"{train_loss:.3f}", monitor_metric: f"{metric:.3f}"}
         )
     return best_state
 
