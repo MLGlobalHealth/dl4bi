@@ -29,6 +29,7 @@ from dl4bi.core.train import (
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.utils import (
     cfg_to_run_name,
+    regression_to_rgb,
     wandb_2d_img_callback,
 )
 
@@ -61,6 +62,11 @@ def main(cfg: DictConfig):
     model = instantiate(cfg.model)
     output_fn = model.output_fn
     model = model.copy(output_fn=lambda x: output_fn(x, min_std=0.05))
+    clbk = partial(
+        wandb_2d_img_callback,
+        remap_colors=regression_to_rgb,
+        filename_prefix="celeba",
+    )
     state = train(
         rng_train,
         model,
@@ -73,7 +79,7 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        callbacks=[Callback(wandb_2d_img_callback, cfg.plot_interval)],
+        callbacks=[Callback(clbk, cfg.plot_interval)],
     )
     metrics = evaluate(
         rng_test,
@@ -95,7 +101,7 @@ def build_dataloaders(
     num_test: int = 256,
 ):
     prepare_data()
-    B, L = batch_size, 32 * 32
+    B = batch_size
     # load & convert from [0, 255] -> [-0.5, 0.5] -> [-1, 1]
     train_ds = 2 * (np.load("cache/celeba/train.npy", mmap_mode="r") / 255.0 - 0.5)
     valid_ds = 2 * (np.load("cache/celeba/valid.npy", mmap_mode="r") / 255.0 - 0.5)

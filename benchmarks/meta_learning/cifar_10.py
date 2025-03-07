@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from functools import partial
 from pathlib import Path
 
 import hydra
@@ -24,6 +25,7 @@ from dl4bi.core.train import (
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.utils import (
     cfg_to_run_name,
+    regression_to_rgb,
     wandb_2d_img_callback,
 )
 
@@ -54,6 +56,13 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
+    output_fn = model.output_fn
+    model = model.copy(output_fn=lambda x: output_fn(x, min_std=0.05))
+    clbk = partial(
+        wandb_2d_img_callback,
+        remap_colors=regression_to_rgb,
+        filename_prefix="cifar_10",
+    )
     state = train(
         rng_train,
         model,
@@ -66,7 +75,7 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        callbacks=[Callback(wandb_2d_img_callback, cfg.plot_interval)],
+        callbacks=[Callback(clbk, cfg.plot_interval)],
     )
     metrics = evaluate(
         rng_test,

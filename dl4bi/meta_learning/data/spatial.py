@@ -33,6 +33,7 @@ class SpatialData(MetaLearningData):
         num_test: int,
         test_includes_ctx: bool = False,
         obs_noise: Optional[float] = None,
+        batch_size: Optional[int] = None,
     ):
         return _batch(
             rng,
@@ -44,6 +45,7 @@ class SpatialData(MetaLearningData):
             num_test,
             test_includes_ctx,
             obs_noise,
+            batch_size,
         )
 
 
@@ -55,6 +57,7 @@ class SpatialData(MetaLearningData):
         "num_test",
         "test_includes_ctx",
         "obs_noise",
+        "batch_size",
     ),
 )
 def _batch(
@@ -67,14 +70,18 @@ def _batch(
     num_test: int,
     test_includes_ctx: bool,
     obs_noise: Optional[float] = None,
+    batch_size: Optional[int] = None,
 ):
-    rng_p, rng_b, rng_eps = random.split(rng, 3)
+    rng_i, rng_p, rng_b, rng_eps = random.split(rng, 4)
     s_shape = s.shape
     has_x = x is not None
     full_x = has_x and x.shape[:-1] == s.shape[:-1]
     broadcast_x = has_x and x.ndim == 2
     S_to_L = jit(lambda v: v.reshape(v.shape[0], -1, v.shape[-1]))
     batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    if batch_size is not None:
+        idx = random.choice(rng_i, f.shape[0], (batch_size,), replace=False)
+        x, s, f = x[idx] if has_x else None, s[idx], f[idx]
     if full_x:
         x, s, f = map(S_to_L, (x, s, f))
         x, s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [x, s, f])
@@ -177,15 +184,17 @@ class SpatialBatch(MetaLearningBatch):
         num_plots: Optional[int] = None,
         **kwargs,
     ):
-        B, L = self.f_test.shape[0], self.inv_permute_idx.shape[0]
+        B = self.f_test.shape[0]
+        inv_p = self.inv_permute_idx
+        L = inv_p.shape[0] if inv_p.ndim == 1 else inv_p.shape[1]
         N = min(num_plots or B, B)
-        reshape = jit(lambda v: v.reshape(*self.s_shape[:-1], v.shape[-1]).squeeze())
-        if f_std.shape[-1] > 1:  # e.g. uncertainty per RGB channel
-            f_std = f_std.mean(axis=-1)
         f_ctx = jnp.where(self.mask_ctx[..., None], self.f_ctx, jnp.nan)
         f_test = self.f_test
+        if f_std.shape[-1] > 1:  # e.g. uncertainty per RGB channel
+            f_std = f_std.mean(axis=-1, keepdims=True)
         if self.mask_test is not None:
             f_test = jnp.where(self.mask_test[..., None], self.f_test, jnp.nan)
+        reshape = jit(lambda v: v.reshape(*self.s_shape[:-1], v.shape[-1]).squeeze())
         arrays = unbatch_BLD([f_ctx, f_test, f_pred, f_std], L)
         arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
         arrays = map(reshape, arrays)

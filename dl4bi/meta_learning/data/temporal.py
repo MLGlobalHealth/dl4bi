@@ -30,6 +30,7 @@ class TemporalData(MetaLearningData):
         num_test: int,
         test_includes_ctx: bool = False,
         obs_noise: Optional[float] = None,
+        batch_size: Optional[int] = None,
     ):
         return _batch(
             rng,
@@ -41,6 +42,7 @@ class TemporalData(MetaLearningData):
             num_test,
             test_includes_ctx,
             obs_noise,
+            batch_size,
         )
 
 
@@ -52,6 +54,7 @@ class TemporalData(MetaLearningData):
         "num_test",
         "test_includes_ctx",
         "obs_noise",
+        "batch_size",
     ),
 )
 def _batch(
@@ -64,13 +67,17 @@ def _batch(
     num_test: int,
     test_includes_ctx: bool,
     obs_noise: Optional[float] = None,
+    batch_size: Optional[int] = None,
 ):
-    rng_p, rng_b, rng_eps = random.split(rng, 3)
+    rng_i, rng_p, rng_b, rng_eps = random.split(rng, 4)
     has_x = x is not None
     full_x = has_x and x.shape[:-1] == t.shape
     broadcast_x = has_x and x.ndim == 2
     batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
     t = t[..., None]
+    if batch_size is not None:
+        idx = random.choice(rng_i, f.shape[0], (batch_size,), replace=False)
+        x, t, f = x[idx] if has_x else None, t[idx], f[idx]
     if full_x:
         x, t, f, inv_permute_idx = permute_L_in_BLD(rng_p, [x, t, f])
         args = batch_BLD(rng_b, [x, t, f], *batch_args)

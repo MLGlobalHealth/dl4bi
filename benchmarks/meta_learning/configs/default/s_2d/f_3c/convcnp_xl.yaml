@@ -10,9 +10,9 @@ conv_net:
   _target_: dl4bi.conv.ConvCNPNet
   r_dim: 128
   kernel: [9, 9]
-  num_blks: 8
+  num_blks: 12
 dec:
-  _target_: dl4bi.conv.ConvDeepSet
+  _target_: ConvDeepSet
   d_out: 128
 head:
   _target_: dl4bi.mlp.MLP

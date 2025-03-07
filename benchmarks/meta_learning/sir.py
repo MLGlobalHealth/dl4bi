@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import math
 from functools import partial
 from pathlib import Path
 from time import time
@@ -22,7 +21,8 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
-from dl4bi.meta_learning.utils import cfg_to_run_name
+from dl4bi.meta_learning.data.spatial import SpatialData
+from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
 
 # Example command to evaluate only:
 # python sir.py \
@@ -74,13 +74,11 @@ def main(cfg: DictConfig):
         end = time()
         metrics["time_elapsed_s"] = end - start
         return print(metrics)
-    dims = [dim.num for dim in cfg.data.s]
     clbk = partial(
-        log_img_plots,
-        shape=(*dims, 3),
-        num_plots=cfg.data.batch_size,
+        wandb_2d_img_callback,
+        filename_prefix="sir",
         remap_colors=remap_colors,
-        transform_model_output=lambda x: jax.nn.softmax(x, axis=-1),
+        transform_model_output=lambda x: (x.p, x.std),
     )
     state = train(
         rng_train,
@@ -88,6 +86,7 @@ def main(cfg: DictConfig):
         optimizer,
         model.train_step,
         model.valid_step,
+        dataloader,
         dataloader,
         dataloader,
         cfg.train_num_steps,
@@ -108,108 +107,29 @@ def main(cfg: DictConfig):
 
 
 def build_dataloader(data: DictConfig, priors: DictConfig):
-    if data.type == "space":
-        return build_space_dataloader(data, priors)
-    return build_time_dataloader(data, priors)
-
-
-def build_space_dataloader(data: DictConfig, priors: DictConfig):
     """A 2D Lattice SIR dataloader over space only."""
+    B = data.batch_size
     sir = instantiate(priors)
-    dims, D_s = tuple([dim.num for dim in data.s]), len(data.s)
-    Lc_min, Lc_max, Lt = data.num_ctx.min, data.num_ctx.max, data.num_test
-    L, B, N = math.prod(dims), data.batch_size, data.num_steps
-    s_grid = build_grid(data.s).reshape(-1, D_s)  # flatten spatial dims
-    s = jnp.repeat(s_grid[None, ...], B, axis=0)
-    valid_lens_test = jnp.repeat(Lt, B)
-
-    @jit
-    def transform_and_permute(rng: jax.Array, steps: jax.Array):
-        # convert RSI categories to GBR (RGB) one-hot color vectors;
-        # serves dual purpose of one-hot encoding and easier plotting
-        steps = rsi_to_rgb(steps)
-        permute_steps_idx = random.choice(rng, N, (N,), replace=False)
-        steps = steps[permute_steps_idx]
-        return steps
-
-    @jit
-    def create_batch(rng: jax.Array, steps: jax.Array):
-        rng_permute, rng_valid = random.split(rng)
-        permute_idx = random.choice(rng_permute, L, (L,), replace=False)
-        inv_permute_idx = jnp.argsort(permute_idx)
-        valid_lens_ctx = random.randint(rng_valid, (B,), Lc_min, Lc_max)
-        s_i = s[:, permute_idx, :]
-        f_i = steps[:, permute_idx, :]
-        return s_i[:, :Lt, :], f_i[:, :Lt, :], valid_lens_ctx, inv_permute_idx
+    s = build_grid(data.s)
+    s = jnp.repeat(s[None, ...], data.num_steps, axis=0)
+    dims = tuple(axis.num for axis in data.s)
 
     def dataloader(rng: jax.Array):
         while True:
-            steps = None  # signal garbage collect
-            rng_sim, rng_tx_pre, rng = random.split(rng, 3)
-            steps, *_ = sir.simulate(rng_sim, dims, N)
-            steps = transform_and_permute(rng_tx_pre, steps)
-            for i in range(N // B):
-                rng_i, rng = random.split(rng)
-                steps_i = steps[i * B : (i + 1) * B].reshape(B, L, 3)
-                s_i, f_i, valid_lens_ctx, inv_permute_idx = create_batch(rng_i, steps_i)
-                yield (
-                    s_i[:, :Lc_max, :],
-                    f_i[:, :Lc_max, :],
-                    valid_lens_ctx,
-                    s_i,
-                    f_i,
-                    valid_lens_test,
-                    s,  # add full originals for use in callbacks, e.g. log_plots
-                    steps_i,
-                    inv_permute_idx,
-                )
-
-    return dataloader
-
-
-def build_time_dataloader(data: DictConfig, priors: DictConfig):
-    """A 2D Lattice SIR dataloader over time."""
-    sir = instantiate(priors)
-    dims, D_s = tuple([dim.num for dim in data.s]), len(data.s)
-    Lc_min, Lc_max, Lt = data.num_ctx.min, data.num_ctx.max, data.num_test
-    L, B, N = math.prod(dims), data.batch_size, data.num_steps
-    s_grid = build_grid(data.s).reshape(-1, D_s)  # flatten spatial dims
-    s = jnp.repeat(s_grid[None, ...], B, axis=0)
-    valid_lens_test = jnp.repeat(Lt, B)
-
-    # TODO(danj): option to permute locations/specify valid lens or not
-    # TODO(danj): randomly select a few timesteps
-    # TODO(danj): create a plotting function
-    @jit
-    def create_batch(rng: jax.Array, steps: jax.Array):
-        rng_permute, rng_valid = random.split(rng)
-        permute_idx = random.choice(rng_permute, L, (L,), replace=False)
-        inv_permute_idx = jnp.argsort(permute_idx)
-        valid_lens_ctx = random.randint(rng_valid, (B,), Lc_min, Lc_max)
-        s_i = s[:, permute_idx, :]
-        f_i = steps[:, permute_idx, :]
-        return s_i[:, :Lt, :], f_i[:, :Lt, :], valid_lens_ctx, inv_permute_idx
-
-    def dataloader(rng: jax.Array):
-        while True:
-            steps = None  # signal garbage collect
-            rng_sim, rng_frames, rng = random.split(rng, 3)
-            steps, *_ = sir.simulate(rng_sim, dims, N)
+            steps = None  # signal garbage collection
+            rng_i, rng = random.split(rng)
+            steps, *_ = sir.simulate(rng_i, dims, data.num_steps)
             steps = rsi_to_rgb(steps)
-            for i in range(N // B):
-                rng_i, rng = random.split(rng)
-                steps_i = steps[i * B : (i + 1) * B].reshape(B, L, 3)
-                s_i, f_i, valid_lens_ctx, inv_permute_idx = create_batch(rng_i, steps_i)
-                yield (
-                    s_i[:, :Lc_max, :],
-                    f_i[:, :Lc_max, :],
-                    valid_lens_ctx,
-                    s_i,
-                    f_i,
-                    valid_lens_test,
-                    s,  # add full originals for use in callbacks, e.g. log_plots
-                    steps_i,
-                    inv_permute_idx,
+            d = SpatialData(x=None, s=s, f=steps)
+            for b in range(data.num_steps // B):
+                rng_b, rng = random.split(rng)
+                yield d.batch(
+                    rng_b,
+                    data.num_ctx.min,
+                    data.num_ctx.max,
+                    data.num_test,
+                    test_includes_ctx=True,
+                    batch_size=B,
                 )
 
     return dataloader

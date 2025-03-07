@@ -62,6 +62,7 @@ def main(cfg: DictConfig):
         wandb_2d_img_callback,
         cmap=cmap,
         remap_colors=regression_to_rgb,
+        filename_prefix="mnist",
     )
     state = train(
         rng_train,

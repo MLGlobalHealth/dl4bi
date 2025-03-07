@@ -117,6 +117,7 @@ class MultinomialOutput(DistributionOutput):
         return MultinomialOutput(logits.mean(axis=1))
 
     def nll(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
+        mask = None if mask is None else mask[..., 0]
         return safe_softmax_cross_entropy(self.logits, x).mean(where=mask)
 
     def metrics(self, x: jax.Array, mask: Optional[jax.Array]):

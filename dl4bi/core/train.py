@@ -101,8 +101,8 @@ def train(
                 return best_state
         for cbk in callbacks:
             if i % cbk.interval == 0:
-                output = next(callback_dataloader(rng_train_step))
-                output, extra = output if isinstance(output, tuple) else (output, None)
+                batch = next(callback_dataloader(rng_train_step))
+                batch, extra = batch if isinstance(batch, tuple) else (batch, None)
                 cbk.fn(i, rng_train_step, state, batch, extra)
         pbar.set_postfix(
             {"Train NLL": f"{train_nll:.3f}", "Valid NLL": f"{valid_nll:.3f}"}

@@ -7,25 +7,29 @@ embed_all:
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
-dist: null
-bias: null
+dist:
+  _target_: dl4bi.dist.dist_spatial
+  _partial_: true
+bias:
+  _target_: dl4bi.bias.RBFNetworkBias
+  num_basis: 5
+  num_heads: 4
 blk:
   _target_: dl4bi.transformer.KRBlock
   attn:
-    _target_: DeepKernelAttention
-    num_heads: 1
-    proj_qks:
+    _target_: dl4bi.attention.MultiHeadAttention
+    num_heads: 4
+    attn:
+      _target_: dl4bi.attention.Attention
+    proj_qs:
       _target_: dl4bi.mlp.MLP
-      dims: [128, 128]
-      act_fn:
-        _target_: jax.nn.gelu
-        _partial_: true
+      dims: [128]
+    proj_ks:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
     proj_vs:
       _target_: dl4bi.mlp.MLP
-      dims: [128, 64]
-      act_fn:
-        _target_: jax.nn.gelu
-        _partial_: true
+      dims: [128]
   ffn:
     _target_: dl4bi.mlp.MLP
     dims: [256, 64]

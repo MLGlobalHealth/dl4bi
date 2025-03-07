@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Union
+from typing import Callable, Optional, Union
 
 import jax
 import jax.numpy as jnp
@@ -46,6 +46,8 @@ def wandb_2d_img_callback(
     state: TrainState,
     batch: SpatialBatch,
     extra: dict,
+    filename_prefix: Optional[str] = "step",
+    transform_model_output: Callable = lambda x: (x.mu, x.std),
     **kwargs,
 ):
     """Logs `num_plots` from the given batch for 2D GPs."""
@@ -57,8 +59,13 @@ def wandb_2d_img_callback(
     )
     if isinstance(output, tuple):
         output, _ = output  # throw away latent samples
-    path = f"/tmp/step_{step}_{datetime.now().isoformat()}.png"
-    fig = batch.plot_2d(output.mu, output.std, **kwargs)
+    f_pred, f_std = transform_model_output(output)
+    path = f"/tmp/{filename_prefix}_{step}_{datetime.now().isoformat()}.png"
+    fig = batch.plot_2d(f_pred, f_std, **kwargs)
     fig.savefig(path)
     plt.close(fig)
     wandb.log({f"Step {step}": wandb.Image(path)})
+
+
+def x_to_empty_array(x: jax.Array):
+    return jnp.array([])
