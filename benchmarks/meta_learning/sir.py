@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import math
 from functools import partial
 from pathlib import Path
 from time import time
@@ -48,7 +49,9 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    dataloader = build_dataloader(cfg.data, cfg.sim)
+    train_dataloader, valid_dataloader, clbk_dataloader = build_dataloader(
+        cfg.data, cfg.sim
+    )
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -68,7 +71,7 @@ def main(cfg: DictConfig):
             rng_test,
             state,
             model.valid_step,
-            dataloader,
+            valid_dataloader,
             cfg.valid_num_steps,
         )
         end = time()
@@ -86,9 +89,9 @@ def main(cfg: DictConfig):
         optimizer,
         model.train_step,
         model.valid_step,
-        dataloader,
-        dataloader,
-        dataloader,
+        train_dataloader,
+        valid_dataloader,
+        clbk_dataloader,
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
@@ -98,7 +101,7 @@ def main(cfg: DictConfig):
         rng_test,
         state,
         model.valid_step,
-        dataloader,
+        valid_dataloader,
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
@@ -113,8 +116,9 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
     s = build_grid(data.s)
     s = jnp.repeat(s[None, ...], data.num_steps, axis=0)
     dims = tuple(axis.num for axis in data.s)
+    L = math.prod(dims)
 
-    def dataloader(rng: jax.Array):
+    def dataloader(rng: jax.Array, is_callback: bool = False):
         while True:
             steps = None  # signal garbage collection
             rng_i, rng = random.split(rng)
@@ -127,12 +131,12 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
                     rng_b,
                     data.num_ctx.min,
                     data.num_ctx.max,
-                    data.num_test,
+                    L if is_callback else data.num_test,
                     test_includes_ctx=True,
                     batch_size=B,
                 )
 
-    return dataloader
+    return dataloader, dataloader, partial(dataloader, is_callback=True)
 
 
 @jit
@@ -151,7 +155,7 @@ def rsi_to_rgb(steps: jax.Array):
 def remap_colors(x: jax.Array):
     # palette from https://davidmathlogic.com/colorblind
     C = jnp.array([[216, 27, 96], [0, 77, 64], [30, 136, 229]]) / 255.0
-    C = C[None, None, ...]
+    C = C[None, None, None, ...]
     return (C * x[..., None]).sum(axis=-2)
 
 

@@ -73,7 +73,6 @@ def _batch(
     batch_size: Optional[int] = None,
 ):
     rng_i, rng_p, rng_b, rng_eps = random.split(rng, 4)
-    s_shape = s.shape
     has_x = x is not None
     full_x = has_x and x.shape[:-1] == s.shape[:-1]
     broadcast_x = has_x and x.ndim == 2
@@ -82,6 +81,7 @@ def _batch(
     if batch_size is not None:
         idx = random.choice(rng_i, f.shape[0], (batch_size,), replace=False)
         x, s, f = x[idx] if has_x else None, s[idx], f[idx]
+    s_shape = s.shape
     if full_x:
         x, s, f = map(S_to_L, (x, s, f))
         x, s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [x, s, f])
@@ -197,8 +197,8 @@ class SpatialBatch(MetaLearningBatch):
         reshape = jit(lambda v: v.reshape(*self.s_shape[:-1], v.shape[-1]).squeeze())
         arrays = unbatch_BLD([f_ctx, f_test, f_pred, f_std], L)
         arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
-        arrays = map(reshape, arrays)
-        f_ctx, f_test, f_pred, f_std = map(remap_colors, arrays)
+        f_ctx, f_test, f_pred, f_std = map(reshape, arrays)
+        f_ctx, f_test, f_pred = map(remap_colors, [f_ctx, f_test, f_pred])
         _, axs = plt.subplots(N, 4, figsize=(20, N * 5))
         for i in range(N):
             if i == 0:
