@@ -15,12 +15,13 @@ def evaluate(
     rng,
     model: AutoregressiveSampler,
     dataloader: Generator,
+    N:int, # len of the dataloader
     strategies: list[Strategy],
     num_samples_for_random: int,
 ):
     nlls = defaultdict(list)
 
-    for i, datum in (pbar := tqdm(enumerate(dataloader), desc="Evaluating")):
+    for i, datum in (pbar := tqdm(enumerate(dataloader), total=N, desc="Evaluating")):
         s_ctx, f_ctx, s_test, f_test, valid_lens_ctx = datum
         for strategy in strategies:
             rng, rng_i = jax.random.split(rng)
@@ -90,6 +91,7 @@ if __name__ == "__main__":
         rng_mc,
         model,
         dataloader,
+        args.N,
         strategies=["diagonal", "preserve", "ltr", "closest", "furthest", "random"],
         num_samples_for_random=10,
     )

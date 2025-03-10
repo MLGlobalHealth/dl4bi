@@ -354,17 +354,10 @@ class AutoregressiveSampler:
         Therefore different paths of interest should be within one batch.
         """
 
-        # log_densities = vmap(
-        #     self._logpdf_random,
-        #     in_axes=(0, None, None, None, None, None),  # only map along the rng
-        # )(random.split(rng, M), s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
-        log_densities = []
-        for rng in tqdm.tqdm(random.split(rng, M), desc="MC estimate"):
-            log_densities.append(
-                self._logpdf_random(rng, s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
-            )
-        log_densities = jnp.vstack(log_densities)
-
+        def fun(rng):
+            return self._logpdf_random(rng, s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
+        log_densities = jax.lax.map(fun, random.split(rng, M))
+ 
         # TODO: add option to return the individual log densities to see if MC estimate converges
         if debug:
             mkdir("tmp")
