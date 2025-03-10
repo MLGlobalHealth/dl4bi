@@ -58,6 +58,7 @@ def evaluate(
         pbar.set_postfix(
             {f"NLL {strategy}": np.mean(nlls[strategy]) for strategy in strategies}
         )
+    print(max_nll)
 
 
 # TODO @pgrynfelder: add other dataloaders
