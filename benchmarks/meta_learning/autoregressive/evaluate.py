@@ -52,7 +52,7 @@ def evaluate(
 # TODO @pgrynfelder: add other dataloaders
 def dataloader(rng, data, kernel, N):
     gp_dataloader = build_gp_dataloader(data, kernel)(rng)
-
+    num_ctx = data.num_ctx.max
     for i, datum in enumerate(gp_dataloader):
         if i >= N:
             raise StopIteration
@@ -61,7 +61,7 @@ def dataloader(rng, data, kernel, N):
 
         # note that s, f come directly from the GP not the observation process
         # TODO @pgrynfelder: might be desirable to change this
-        yield s_ctx, f_ctx, s, f, valid_lens_ctx
+        yield s_ctx, f_ctx, s[:, num_ctx:], f[:, num_ctx:], valid_lens_ctx
 
 
 if __name__ == "__main__":
