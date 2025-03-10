@@ -101,7 +101,7 @@ if __name__ == "__main__":
         "--batch-size",
         type=int,
         default=None,
-        help="override the batch size set in config",
+        help="override the batch size set in config (recommended 128)",
     )
     parser.add_argument("--results-dir", type=Path, default=Path("results"))
 
