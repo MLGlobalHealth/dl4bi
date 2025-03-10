@@ -20,14 +20,18 @@ def evaluate(
     N: int,  # len of the dataloader
     strategies: list[Strategy],
     num_samples_for_random: int,
+    batching_for_random: int | None,
 ):
     nlls = defaultdict(list)
+    max_nll = defaultdict(lambda: float("-inf"))
 
     logfile = open(Path(os.environ["RESULTS_DIR"]) / "log.csv", "a", newline="")
     writer = csv.DictWriter(logfile, strategies)
     writer.writeheader()
 
-    for datum in (pbar := tqdm(dataloader, total=N, desc="Evaluating")):
+    pbar = tqdm(dataloader, total=N, desc="Evaluating")
+
+    for i, datum in enumerate(pbar):
         s_ctx, f_ctx, s_test, f_test, valid_lens_ctx = datum
         for strategy in strategies:
             rng, rng_i = jax.random.split(rng)
@@ -40,7 +44,14 @@ def evaluate(
                 valid_lens_ctx,
                 strategy,
                 num_samples_for_random,
+                batching_for_random,
             )
+            max = nll.max()
+            if max_nll[strategy] < max:
+                print(
+                    f"New lowest probability assigned for {strategy}: batch {i}, index in batch {nll.argmax()}, nll {max}"
+                )
+                max_nll[strategy] = max
             nll = np.mean(nll)  # average nll over batch
             nlls[strategy].append(nll)
         writer.writerow({strategy: nll[-1] for strategy, nll in nlls.items()})
@@ -71,12 +82,20 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("model", type=Path)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--N", type=int, default=1000, help="size of the test dataset")
+    parser.add_argument(
+        "-N", type=int, default=250, help="evaluate against N*batch_size sample paths"
+    )
     parser.add_argument(
         "-M",
         type=int,
         default=100,
         help="num samples for the SMC estimate of logpdf for the random strategy",
+    )
+    parser.add_argument(
+        "-Mb",
+        type=int,
+        default=None,
+        help="how to batch the SMC (batch size effectively becomes batch_size*this)",
     )
     parser.add_argument(
         "--batch-size",
@@ -110,6 +129,7 @@ if __name__ == "__main__":
         model,
         dataloader,
         args.N,
-        strategies=["diagonal", "preserve", "ltr", "closest", "furthest", "random"],
+        strategies=["diagonal", "ltr", "closest", "furthest", "random"],
         num_samples_for_random=args.M,
+        batching_for_random=args.Mb,
     )

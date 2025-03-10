@@ -346,6 +346,7 @@ class AutoregressiveSampler:
         f_test: jax.Array,  # [B, L_test, D_f]
         valid_lens_ctx: jax.Array | None,  # [B]
         M: int,  # number of samples for Monte Carlo estimation
+        Mb: int | None,  # batch size for the MC estimate
     ):
         """
         Monte Carlo estimate of the log-likelihood induced by the autoregressive model with random reordering.
@@ -359,7 +360,7 @@ class AutoregressiveSampler:
                 rng, s_ctx, f_ctx, s_test, f_test, valid_lens_ctx
             )
 
-        log_densities = jax.lax.map(fun, random.split(rng, M))
+        log_densities = jax.lax.map(fun, random.split(rng, M), batch_size=Mb)
 
         # TODO @pgrynfelder: make this nicer
         if DEBUG:
@@ -377,6 +378,8 @@ class AutoregressiveSampler:
         valid_lens_ctx: jax.Array | None,  # [B]
         strategy: Strategy,
         num_samples_for_random: int,  # number of samples for Monte Carlo estimation for the random strategy
+        batching_for_random: int | None,
+        # batch the random ll estimation (batch size effectively becomes B*this)
     ):
         match strategy:
             case "preserve":
@@ -390,6 +393,7 @@ class AutoregressiveSampler:
                     f_test,
                     valid_lens_ctx,
                     num_samples_for_random,
+                    batching_for_random,
                 )
             case "diagonal":
                 return self.logpdf_diagonal(
