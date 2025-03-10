@@ -1,4 +1,3 @@
-import argparse
 from collections import defaultdict
 from pathlib import Path
 from typing import Generator
@@ -17,26 +16,29 @@ def evaluate(
     model: AutoregressiveSampler,
     dataloader: Generator,
     strategies: list[Strategy],
-    update_every: int = 1,
+    num_samples_for_random: int,
 ):
-    logpdfs = defaultdict(list)
+    nlls = defaultdict(list)
 
     for i, datum in (pbar := tqdm(enumerate(dataloader), desc="Evaluating")):
         s_ctx, f_ctx, s_test, f_test, valid_lens_ctx = datum
         for strategy in strategies:
             rng, rng_i = jax.random.split(rng)
             nll = -model.logpdf(
-                rng_i, s_ctx, f_ctx, s_test, f_test, valid_lens_ctx, strategy
+                rng_i,
+                s_ctx,
+                f_ctx,
+                s_test,
+                f_test,
+                valid_lens_ctx,
+                strategy,
+                num_samples_for_random,
             )
-            logpdfs[strategy].append(nll)
+            nlls[strategy].append(nll)
 
-        if i % update_every == 0:
-            pbar.set_postfix(
-                {
-                    f"NLL {strategy}": np.mean(logpdfs[strategy])
-                    for strategy in strategies
-                }
-            )
+        pbar.set_postfix(
+            {f"NLL {strategy}": np.mean(nlls[strategy]) for strategy in strategies}
+        )
 
 
 # TODO @pgrynfelder: add other dataloaders
@@ -61,18 +63,33 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("model", type=Path)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--N", type=int, default=1000, help="size of the test dataset")
     parser.add_argument(
-        "--N", type=int, default=1000, help="size of the test dataset"
-    )  # number of data points to evaluate at
+        "--batch-size",
+        type=int,
+        default=None,
+        help="override the batch size set in config",
+    )
+
     args = parser.parse_args()
 
     state, config = load_ckpt(args.model)
     print(json.dumps(OmegaConf.to_object(config), indent=2))
     print(f"Evaluation seed: {args.seed}")
 
+    if args.batch_size is not None:
+        print(f"Overriding batch size to {args.batch_size}")
+        config.data.batch_size = args.batch_size
+
     model = AutoregressiveSampler.from_state(state)
     rng = jax.random.key(args.seed)
     rng_dataloader, rng_mc = jax.random.split(rng)
     dataloader = dataloader(rng_dataloader, config.data, config.kernel, args.N)
 
-    evaluate(rng_mc, model, dataloader, strategies=["ltr", "closest", "furthest"])
+    evaluate(
+        rng_mc,
+        model,
+        dataloader,
+        strategies=["diagonal", "preserve", "ltr", "closest", "furthest", "random"],
+        num_samples_for_random=10,
+    )

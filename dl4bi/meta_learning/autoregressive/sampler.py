@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from functools import partial
 from os import mkdir
+from re import L
 from typing import Callable, Literal
 
 import jax
@@ -18,7 +19,14 @@ from .permutations import (
     left_to_right,
 )
 
-Strategy = StrEnum("Strategy", "preserve ltr random furthest closest")
+
+class Strategy(StrEnum):
+    preserve = "preserve"
+    ltr = "ltr"
+    random = "random"
+    furthest = "furthest"
+    closest = "closest"
+    diagonal = "diagonal"
 
 
 @jit
@@ -32,7 +40,11 @@ def _concatenate(
     return jax.lax.dynamic_update_slice_in_dim(s, test, valid_lens_ctx, axis=0)
 
 
-concatenate = vmap(_concatenate)
+concatenate = jit(vmap(_concatenate))
+"""
+Concatenates context and test points such that:
+`result[b] = ctx[b][:valid_lens_ctx[b]] ++ test[b] ++ 0s`
+"""
 
 
 @dataclass(frozen=True)
@@ -246,21 +258,24 @@ class AutoregressiveSampler:
             return all_paths
 
     @partial(jit, static_argnums=0)
-    def __logpdf(
+    def logpdf_diagonal(self, s_ctx, f_ctx, s_test, f_test, valid_lens_ctx):
+        mu, std = self.model(s_ctx, f_ctx, s_test, valid_lens_ctx)
+        return jax.scipy.stats.norm.logpdf(f_test, mu, std).sum(axis=1)
+
+    @partial(jit, static_argnums=0)
+    def logpdf_one_point(
         self,
-        s_ctx: jax.Array,
-        f_ctx: jax.Array,
-        s_test_i: jax.Array,
-        f_test_i: jax.Array,
-        valid_lens_ctx: jax.Array,
+        s_ctx: jax.Array,  # [B, L_ctx, D_s]
+        f_ctx: jax.Array,  # [B, L_ctx, D_f]
+        s_test_i: jax.Array,  # [B, D_s]
+        f_test_i: jax.Array,  # [B, D_f]
+        valid_lens_ctx: jax.Array,  # [B]
     ):
         """
         Log-likelihood of a single test point, batched.
         """
         s_test_i = s_test_i[:, None]  # [B, 1, D_s]
-        f_mu_i, f_std_i = self.model(s_ctx, f_ctx, s_test_i, valid_lens_ctx)
-        f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)
-        return jax.scipy.stats.norm.logpdf(f_test_i, f_mu_i, f_std_i)
+        return self.logpdf_diagonal(s_ctx, f_ctx, s_test_i, f_test_i, valid_lens_ctx)
 
     def _logpdf(
         self,
@@ -287,7 +302,7 @@ class AutoregressiveSampler:
             f = concatenate(f_ctx, f_test, valid_lens_ctx)
 
         log_densities = jax.vmap(
-            self.__logpdf,
+            self.logpdf_one_point,
             in_axes=(None, None, 1, 1, 1),
             out_axes=1,
         )(
@@ -355,14 +370,24 @@ class AutoregressiveSampler:
         f_test: jax.Array,  # [B, L_test, D_f]
         valid_lens_ctx: jax.Array | None,  # [B]
         strategy: Strategy,
-        M: int = 100,  # number of samples for Monte Carlo estimation in the random strategy
+        num_samples_for_random: int,  # number of samples for Monte Carlo estimation for the random strategy
     ):
         match strategy:
             case "preserve":
                 return self._logpdf(s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
             case "random":
                 return self.logpdf_random(
-                    rng, s_ctx, f_ctx, s_test, f_test, valid_lens_ctx, M
+                    rng,
+                    s_ctx,
+                    f_ctx,
+                    s_test,
+                    f_test,
+                    valid_lens_ctx,
+                    num_samples_for_random,
+                )
+            case "diagonal":
+                return self.logpdf_diagonal(
+                    s_ctx, f_ctx, s_test, f_test, valid_lens_ctx
                 )
             case "closest":
                 idx = vmap(closest_first)(s_ctx, s_test)
