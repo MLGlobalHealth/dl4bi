@@ -275,6 +275,7 @@ class AutoregressiveSampler:
         Log-likelihood of a single test point, batched.
         """
         s_test_i = s_test_i[:, None]  # [B, 1, D_s]
+        f_test_i = f_test_i[:, None]  # [B, 1, D_s]
         return self.logpdf_diagonal(s_ctx, f_ctx, s_test_i, f_test_i, valid_lens_ctx)
 
     def _logpdf(
@@ -355,9 +356,12 @@ class AutoregressiveSampler:
         """
 
         def fun(rng):
-            return self._logpdf_random(rng, s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
+            return self._logpdf_random(
+                rng, s_ctx, f_ctx, s_test, f_test, valid_lens_ctx
+            )
+
         log_densities = jax.lax.map(fun, random.split(rng, M))
- 
+
         # TODO: add option to return the individual log densities to see if MC estimate converges
         if debug:
             mkdir("tmp")
