@@ -1,1 +1,1 @@
-from .sampler import AutoregressiveSampler
+from .sampler import AutoregressiveSampler, Strategy

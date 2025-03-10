@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+from enum import StrEnum
 from functools import partial
+from os import mkdir
 from typing import Callable, Literal
 
 import jax
@@ -16,7 +18,7 @@ from .permutations import (
     left_to_right,
 )
 
-Strategy = Literal["preserve", "ltr", "random", "furthest", "closest"]
+Strategy = StrEnum("Strategy", "preserve ltr random furthest closest")
 
 
 @jit
@@ -299,47 +301,75 @@ class AutoregressiveSampler:
     def _logpdf_random(
         self,
         rng: jax.Array,
+        s_ctx: jax.Array,  # [L_ctx, D_s]
+        f_ctx: jax.Array,  # [L_ctx, D_f]
+        s_test: jax.Array,  # [L_test, D_s]
+        f_test: jax.Array,  # [L_test, D_f]
+        valid_lens_ctx: jax.Array | None,
+    ):
+        _, L_test, _ = s_test.shape
+        idx = random.permutation(rng, L_test)
+        s_test = s_test[:, idx]
+        f_test = f_test[:, idx]
+        return self._logpdf(s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
+
+    def logpdf_random(
+        self,
+        rng: jax.Array,
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
         f_test: jax.Array,  # [B, L_test, D_f]
+        valid_lens_ctx: jax.Array | None,  # [B]
         M: int,  # number of samples for Monte Carlo estimation
-        permute_each_batch_item_independently=False,
+        debug=False,
     ):
         """
         Monte Carlo estimate of the log-likelihood induced by the autoregressive model with random reordering.
+
+        The same permutation is applied to all items in the batch.
+        Therefore different paths of interest should be within one batch.
         """
 
-        def batch_independent(rng, s_ctx, s_test, f_test):
-            B, L_test, D_s = s_test.shape
-            _, _, D_f = f_test.shape
-            rng = random.split(rng, B)
-            idx = vmap(random.permutation, in_axes=(0, None))(rng, L_test)
+        log_densities = vmap(
+            self._logpdf_random,
+            in_axes=(0, None, None, None, None, None),  # only map along the rng
+        )(random.split(rng, M), s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
 
-            idx_s = idx[..., None].repeat(D_s, axis=-1)
-            idx_f = idx[..., None].repeat(D_f, axis=-1)
-
-            s_test = jnp.take_along_axis(s_test, idx_s, axis=1)
-            f_test = jnp.take_along_axis(f_test, idx_f, axis=1)
-
-            return self._logpdf(s_ctx, f_ctx, s_test, f_test)
-
-        def fun(rng, s_ctx, s_test, f_test):
-            _, L_test, _ = s_test.shape
-            idx = random.permutation(rng, L_test)
-            s_test = s_test[:, idx]
-            f_test = f_test[:, idx]
-
-            return self._logpdf(s_ctx, f_ctx, s_test, f_test)
-
-        rng = random.split(rng, M)
-
-        log_densities = (
-            vmap(batch_independent, in_axes=(0, None, None, None))(
-                rng, s_ctx, s_test, f_test
-            )
-            if permute_each_batch_item_independently
-            else vmap(fun, in_axes=(0, None, None, None))(rng, s_ctx, s_test, f_test)
-        )
+        # TODO: add option to return the individual log densities to see if MC estimate converges
+        if debug:
+            mkdir("tmp")
+            jnp.save("tmp/log_densities.npy", log_densities)
 
         return jax.nn.logsumexp(log_densities, axis=0) - jnp.log(M)
+
+    def logpdf(
+        self,
+        rng: jax.Array,  # needed for the random strategy
+        s_ctx: jax.Array,  # [B, L_ctx, D_s]
+        f_ctx: jax.Array,  # [B, L_ctx, D_f]
+        s_test: jax.Array,  # [B, L_test, D_s]
+        f_test: jax.Array,  # [B, L_test, D_f]
+        valid_lens_ctx: jax.Array | None,  # [B]
+        strategy: Strategy,
+        M: int = 100,  # number of samples for Monte Carlo estimation in the random strategy
+    ):
+        match strategy:
+            case "preserve":
+                return self._logpdf(s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
+            case "random":
+                return self.logpdf_random(
+                    rng, s_ctx, f_ctx, s_test, f_test, valid_lens_ctx, M
+                )
+            case "closest":
+                idx = vmap(closest_first)(s_ctx, s_test)
+            case "furthest":
+                idx = vmap(furthest_first)(s_ctx, s_test)
+            case "ltr":
+                idx = vmap(left_to_right)(s_test)
+
+        D_s = s_test.shape[-1]
+        D_f = f_test.shape[-1]
+        s_test = jnp.take_along_axis(s_test, idx[..., None].repeat(D_s), axis=1)
+        f_test = jnp.take_along_axis(f_test, idx[..., None].repeat(D_f), axis=1)
+        return self._logpdf(s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
