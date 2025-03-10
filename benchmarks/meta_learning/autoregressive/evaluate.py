@@ -1,3 +1,5 @@
+import csv
+import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Generator
@@ -21,6 +23,10 @@ def evaluate(
 ):
     nlls = defaultdict(list)
 
+    logfile = open(Path(os.environ["RESULTS_DIR"]) / "log.csv", "w", newline="")
+    writer = csv.DictWriter(logfile, strategies)
+    writer.writeheader()
+
     for datum in (pbar := tqdm(dataloader, total=N, desc="Evaluating")):
         s_ctx, f_ctx, s_test, f_test, valid_lens_ctx = datum
         for strategy in strategies:
@@ -35,8 +41,9 @@ def evaluate(
                 strategy,
                 num_samples_for_random,
             )
+            nll = np.mean(nll)  # average nll over batch
             nlls[strategy].append(nll)
-
+        writer.writerow({strategy: nll[-1] for strategy, nll in nlls.items()})
         pbar.set_postfix(
             {f"NLL {strategy}": np.mean(nlls[strategy]) for strategy in strategies}
         )
@@ -77,8 +84,12 @@ if __name__ == "__main__":
         default=None,
         help="override the batch size set in config",
     )
+    parser.add_argument("--results-dir", type=Path, default=Path("results"))
 
     args = parser.parse_args()
+
+    os.environ["RESULTS_DIR"] = str(args.results_dir)
+    args.results_dir.mkdir(parents=True, exist_ok=True)
 
     state, config = load_ckpt(args.model)
     print(json.dumps(OmegaConf.to_object(config), indent=2))

@@ -8,7 +8,6 @@ from typing import Callable
 
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import tqdm
 from jax import jit, random, vmap
 
@@ -35,8 +34,8 @@ DEBUG = bool(os.environ.get("DEBUG", False))
 
 
 def dump_log_densities(log_densities):
-    path = Path("tmp") / f"{datetime.now()}.npy"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    results_dir = os.environ.get("RESULTS_DIR")
+    path = Path(results_dir) / f"log_densities_{datetime.now()}.npy"
     jnp.save(path, log_densities)
 
 
