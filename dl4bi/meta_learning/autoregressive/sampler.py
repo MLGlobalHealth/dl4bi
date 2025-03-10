@@ -19,6 +19,17 @@ from .permutations import (
 Strategy = Literal["preserve", "ltr", "random", "furthest", "closest"]
 
 
+@jit
+def _concatenate(ctx, test, valid_lens_ctx):
+    L_test, _ = test.shape[0]
+
+    s = jnp.pad(ctx, (0, L_test), (0, 0))
+    return jax.lax.dynamic_update_slice_in_dim(s, test, valid_lens_ctx)
+
+
+concatenate = vmap(_concatenate)
+
+
 @dataclass(frozen=True)
 class AutoregressiveSampler:
     model: Callable
@@ -231,12 +242,28 @@ class AutoregressiveSampler:
             return all_paths
 
     @partial(jit, static_argnums=0)
+    def __logpdf(
+        self,
+        s_ctx: jax.Array,
+        f_ctx: jax.Array,
+        s_test_i: jax.Array,
+        f_test_i: jax.Array,
+        valid_lens_ctx: jax.Array,
+    ):
+        """
+        Log-likelihood of a single test point, batched.
+        """
+        f_mu_i, f_std_i = self.model(s_ctx, f_ctx, s_test_i, valid_lens_ctx)
+        f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)
+        return jax.scipy.stats.norm.logpdf(f_test_i, f_mu_i, f_std_i)
+
     def _logpdf(
         self,
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
         f_test: jax.Array,  # [B, L_test, D_f]
+        valid_lens_ctx: jax.Array | None,  # [B]
     ):
         """
         Computes the log-likelihood induced by the autoregressive model, batched.
@@ -244,19 +271,27 @@ class AutoregressiveSampler:
         Assumes the model where samples are taken in the order given by `s_test`, `f_test`.
         """
         B, L_test, _ = s_test.shape
+        _, L_ctx, _ = s_ctx.shape
 
-        s = jnp.concat([s_ctx, s_test], axis=1)
-        f = jnp.concat([f_ctx, f_test], axis=1)
+        if valid_lens_ctx is None:
+            s = jnp.concat([s_ctx, s_test], axis=1)
+            f = jnp.concat([f_ctx, f_test], axis=1)
+            valid_lens_ctx = jnp.repeat(L_ctx, B)
+        else:
+            s = concatenate(s_ctx, s_test, valid_lens_ctx)
+            f = concatenate(f_ctx, f_test, valid_lens_ctx)
 
-        def fun(valid_lens_ctx, s_test_i, f_test_i):
-            f_mu_i, f_std_i = self.apply(s, f, s_test_i, valid_lens_ctx)
-            f_mu_i, f_std_i = f_mu_i.model(1), f_std_i.squeeze(1)  # [B, D_f]
-            return jax.scipy.stats.norm.logpdf(f_test_i, f_mu_i, f_std_i)
-
-        log_densities = jax.vmap(fun, in_axes=(1, 1, 1), out_axes=1)(
-            jnp.arange(L_test)[None].repeat(B),  # [B, L_test]
+        log_densities = jax.vmap(
+            self.__logpdf,
+            in_axes=(None, None, 1, 1, 1),
+            out_axes=1,
+        )(
+            s,
+            f,
             s_test,  # [B, L_test, D_s]
             f_test,  # [B, L_test, D_f]
+            valid_lens_ctx[..., None].repeat(L_test, axis=1)
+            + jnp.arange(L_test)[None].repeat(B, axis=0),  # [B, L_test]
         )  # -> [B, L_test, D_f]
 
         return log_densities.sum(axis=1)
