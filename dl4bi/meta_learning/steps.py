@@ -21,7 +21,8 @@ def likelihood_train_step(
             training=True,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
         )
-        return output.nll(batch.f_test, batch.mask_test[..., None])
+        mask = None if batch.mask_test is None else batch.mask_test[..., None]
+        return output.nll(batch.f_test, mask)
 
     nll, grads = jax.value_and_grad(loss_fn)(state.params)
     return state.apply_gradients(grads=grads), nll
@@ -42,7 +43,8 @@ def likelihood_valid_step(
     )
     if isinstance(output, tuple):
         output, _ = output  # latent output not used here
-    return output.metrics(batch.f_test, batch.mask_test[..., None])
+    mask = None if batch.mask_test is None else batch.mask_test[..., None]
+    return output.metrics(batch.f_test, mask)
 
 
 @jit
@@ -71,7 +73,8 @@ def elbo_train_step(
             training=True,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
         )
-        nll = output.nll(batch.f_test, batch.mask_test[..., None])
+        mask = None if batch.mask_test is None else batch.mask_test[..., None]
+        nll = output.nll(batch.f_test, mask)
         kl_div = latent_output_ctx.forward_kl_div(latent_output_test)
         return nll + kl_div
 
