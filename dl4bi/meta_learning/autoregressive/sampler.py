@@ -1,11 +1,14 @@
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from functools import partial
+from pathlib import Path
 from typing import Callable
 
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import tqdm
 from jax import jit, random, vmap
 
@@ -29,6 +32,12 @@ class Strategy(StrEnum):
 
 
 DEBUG = bool(os.environ.get("DEBUG", False))
+
+
+def dump_log_densities(log_densities):
+    path = Path("tmp") / f"{datetime.now()}.npy"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    jnp.save(path, log_densities)
 
 
 @jit
@@ -353,10 +362,9 @@ class AutoregressiveSampler:
 
         log_densities = jax.lax.map(fun, random.split(rng, M))
 
-        # TODO: add option to return the individual log densities to see if MC estimate converges
+        # TODO @pgrynfelder: make this nicer
         if DEBUG:
-            os.mkdir("tmp")
-            jnp.save("tmp/log_densities.npy", log_densities)
+            dump_log_densities(log_densities)
 
         return jax.nn.logsumexp(log_densities, axis=0) - jnp.log(M)
 

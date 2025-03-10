@@ -66,7 +66,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--N", type=int, default=1000, help="size of the test dataset")
     parser.add_argument(
-        "--M",
+        "-M",
         type=int,
         default=100,
         help="num samples for the SMC estimate of logpdf for the random strategy",
@@ -87,6 +87,7 @@ if __name__ == "__main__":
     if args.batch_size is not None:
         print(f"Overriding batch size to {args.batch_size}")
         config.data.batch_size = args.batch_size
+    print(f"SMC estimate for random logpdf using {args.M} samples.")
 
     model = AutoregressiveSampler.from_state(state)
     rng = jax.random.key(args.seed)
