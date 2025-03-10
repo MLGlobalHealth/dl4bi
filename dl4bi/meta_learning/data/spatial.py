@@ -96,7 +96,6 @@ def _batch(
     else:
         s, f = map(S_to_L, (s, f))
         s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [s, f])
-        inv_permute_idx = jnp.arange(s.shape[1])
         args = batch_BLD(rng_b, [s, f], *batch_args)
         s_ctx, f_ctx, m_ctx, *rest = args
         args = (None, s_ctx, f_ctx, m_ctx, None, *rest)
