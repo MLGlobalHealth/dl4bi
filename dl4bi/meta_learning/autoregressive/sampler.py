@@ -1,8 +1,7 @@
+import os
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import partial
-from os import mkdir
-
 from typing import Callable
 
 import jax
@@ -27,6 +26,9 @@ class Strategy(StrEnum):
     furthest = "furthest"
     closest = "closest"
     diagonal = "diagonal"
+
+
+DEBUG = bool(os.environ.get("DEBUG", False))
 
 
 @jit
@@ -346,7 +348,6 @@ class AutoregressiveSampler:
         f_test: jax.Array,  # [B, L_test, D_f]
         valid_lens_ctx: jax.Array | None,  # [B]
         M: int,  # number of samples for Monte Carlo estimation
-        debug=False,
     ):
         """
         Monte Carlo estimate of the log-likelihood induced by the autoregressive model with random reordering.
@@ -363,8 +364,8 @@ class AutoregressiveSampler:
         log_densities = jax.lax.map(fun, random.split(rng, M))
 
         # TODO: add option to return the individual log densities to see if MC estimate converges
-        if debug:
-            mkdir("tmp")
+        if DEBUG:
+            os.mkdir("tmp")
             jnp.save("tmp/log_densities.npy", log_densities)
 
         return jax.nn.logsumexp(log_densities, axis=0) - jnp.log(M)

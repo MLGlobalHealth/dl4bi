@@ -66,6 +66,12 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--N", type=int, default=1000, help="size of the test dataset")
     parser.add_argument(
+        "--M",
+        type=int,
+        default=100,
+        help="num samples for the SMC estimate of logpdf for the random strategy",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=None,
@@ -93,5 +99,5 @@ if __name__ == "__main__":
         dataloader,
         args.N,
         strategies=["diagonal", "preserve", "ltr", "closest", "furthest", "random"],
-        num_samples_for_random=10,
+        num_samples_for_random=args.M,
     )
