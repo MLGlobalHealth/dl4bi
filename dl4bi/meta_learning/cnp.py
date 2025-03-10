@@ -58,8 +58,6 @@ class CNP(nn.Module):
         training: bool = False,
     ):
         (B, L, _) = s_ctx.shape
-        if mask_ctx is None:
-            mask_ctx = jnp.array([True])
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_det(s_f_ctx, training)
         if mask_ctx is not None:
