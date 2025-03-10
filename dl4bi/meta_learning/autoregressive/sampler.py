@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from functools import partial
 from os import mkdir
-from re import L
-from typing import Callable, Literal
+
+from typing import Callable
 
 import jax
 import jax.numpy as jnp
@@ -301,17 +301,22 @@ class AutoregressiveSampler:
             s = concatenate(s_ctx, s_test, valid_lens_ctx)
             f = concatenate(f_ctx, f_test, valid_lens_ctx)
 
+        # valid_lens_ctx needs to be valid_lens_ctx, valid_lens_ctx + 1, valid_lens_ctx + 2, ...
+        # at each step of the autoregressive model
+        valid_lens_ctx = valid_lens_ctx[..., None].repeat(L_test, axis=1) + jnp.arange(
+            L_test
+        )[None].repeat(B, axis=0)
+
         log_densities = jax.vmap(
             self.logpdf_one_point,
-            in_axes=(None, None, 1, 1, 1),
+            in_axes=(None, None, 1, 1, 1),  # keep fixed context
             out_axes=1,
         )(
             s,
             f,
             s_test,  # [B, L_test, D_s]
             f_test,  # [B, L_test, D_f]
-            valid_lens_ctx[..., None].repeat(L_test, axis=1)
-            + jnp.arange(L_test)[None].repeat(B, axis=0),  # [B, L_test]
+            valid_lens_ctx,  # [B, L_test]
         )  # -> [B, L_test, D_f]
 
         return log_densities.sum(axis=1)
@@ -319,11 +324,11 @@ class AutoregressiveSampler:
     def _logpdf_random(
         self,
         rng: jax.Array,
-        s_ctx: jax.Array,  # [L_ctx, D_s]
-        f_ctx: jax.Array,  # [L_ctx, D_f]
-        s_test: jax.Array,  # [L_test, D_s]
-        f_test: jax.Array,  # [L_test, D_f]
-        valid_lens_ctx: jax.Array | None,
+        s_ctx: jax.Array,  # [B, L_ctx, D_s]
+        f_ctx: jax.Array,  # [B, L_ctx, D_f]
+        s_test: jax.Array,  # [B, L_test, D_s]
+        f_test: jax.Array,  # [B, L_test, D_f]
+        valid_lens_ctx: jax.Array | None,  # [B]
     ):
         _, L_test, _ = s_test.shape
         idx = random.permutation(rng, L_test)
@@ -349,10 +354,16 @@ class AutoregressiveSampler:
         Therefore different paths of interest should be within one batch.
         """
 
-        log_densities = vmap(
-            self._logpdf_random,
-            in_axes=(0, None, None, None, None, None),  # only map along the rng
-        )(random.split(rng, M), s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
+        # log_densities = vmap(
+        #     self._logpdf_random,
+        #     in_axes=(0, None, None, None, None, None),  # only map along the rng
+        # )(random.split(rng, M), s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
+        log_densities = []
+        for rng in tqdm.tqdm(random.split(rng, M), desc="MC estimate"):
+            log_densities.append(
+                self._logpdf_random(rng, s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
+            )
+        log_densities = jnp.vstack(log_densities)
 
         # TODO: add option to return the individual log densities to see if MC estimate converges
         if debug:
