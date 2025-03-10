@@ -23,7 +23,7 @@ def evaluate(
 ):
     nlls = defaultdict(list)
 
-    logfile = open(Path(os.environ["RESULTS_DIR"]) / "log.csv", "w", newline="")
+    logfile = open(Path(os.environ["RESULTS_DIR"]) / "log.csv", "a", newline="")
     writer = csv.DictWriter(logfile, strategies)
     writer.writeheader()
 
