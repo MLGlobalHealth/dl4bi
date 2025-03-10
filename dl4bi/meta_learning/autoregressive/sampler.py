@@ -293,8 +293,8 @@ class AutoregressiveSampler:
 
         Assumes the model where samples are taken in the order given by `s_test`, `f_test`.
         """
-        B, L_test, _ = s_test.shape
-        _, L_ctx, _ = s_ctx.shape
+        B, L_ctx, _ = s_ctx.shape
+        _, L_test, D_f = f_test.shape
 
         if valid_lens_ctx is None:
             s = jnp.concat([s_ctx, s_test], axis=1)
@@ -304,25 +304,15 @@ class AutoregressiveSampler:
             s = concatenate(s_ctx, s_test, valid_lens_ctx)
             f = concatenate(f_ctx, f_test, valid_lens_ctx)
 
-        # valid_lens_ctx needs to be valid_lens_ctx, valid_lens_ctx + 1, valid_lens_ctx + 2, ...
-        # at each step of the autoregressive model
-        valid_lens_ctx = valid_lens_ctx[..., None].repeat(L_test, axis=1) + jnp.arange(
-            L_test
-        )[None].repeat(B, axis=0)
+        def fun(i, log_densities):
+            s_test_i = s_test[:, i]
+            f_test_i = f_test[:, i]
+            valid_lens_ctx_i = valid_lens_ctx + i
+            return log_densities + self.logpdf_one_point(
+                s, f, s_test_i, f_test_i, valid_lens_ctx_i
+            )
 
-        log_densities = jax.vmap(
-            self.logpdf_one_point,
-            in_axes=(None, None, 1, 1, 1),  # keep fixed context
-            out_axes=1,
-        )(
-            s,
-            f,
-            s_test,  # [B, L_test, D_s]
-            f_test,  # [B, L_test, D_f]
-            valid_lens_ctx,  # [B, L_test]
-        )  # -> [B, L_test, D_f]
-
-        return log_densities.sum(axis=1)
+        return jax.lax.fori_loop(0, L_test, fun, jnp.zeros((B, D_f)))
 
     def _logpdf_random(
         self,
