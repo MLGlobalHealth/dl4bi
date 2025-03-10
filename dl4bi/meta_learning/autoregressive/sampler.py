@@ -22,11 +22,14 @@ Strategy = StrEnum("Strategy", "preserve ltr random furthest closest")
 
 
 @jit
-def _concatenate(ctx, test, valid_lens_ctx):
-    L_test, _ = test.shape[0]
-
-    s = jnp.pad(ctx, (0, L_test), (0, 0))
-    return jax.lax.dynamic_update_slice_in_dim(s, test, valid_lens_ctx)
+def _concatenate(
+    ctx,  # [L_ctx, D]
+    test,  # [L_test, D]
+    valid_lens_ctx,  # []
+):
+    L_test = test.shape[0]
+    s = jnp.pad(ctx, ((0, L_test), (0, 0)))
+    return jax.lax.dynamic_update_slice_in_dim(s, test, valid_lens_ctx, axis=0)
 
 
 concatenate = vmap(_concatenate)
@@ -35,9 +38,6 @@ concatenate = vmap(_concatenate)
 @dataclass(frozen=True)
 class AutoregressiveSampler:
     model: Callable
-
-    def __init__(self, model: Callable):
-        self.model = jit(model)
 
     @classmethod
     def from_state(cls, state: TrainState):
@@ -57,6 +57,8 @@ class AutoregressiveSampler:
                 # this is not used for TNP-KR, removed so that it is not necessary to pass rng to apply
                 # rngs={"extra": rng_extra},
             )
+
+        apply = jit(apply)
 
         return cls(apply)
 
@@ -255,6 +257,7 @@ class AutoregressiveSampler:
         """
         Log-likelihood of a single test point, batched.
         """
+        s_test_i = s_test_i[:, None]  # [B, 1, D_s]
         f_mu_i, f_std_i = self.model(s_ctx, f_ctx, s_test_i, valid_lens_ctx)
         f_mu_i, f_std_i = f_mu_i.squeeze(1), f_std_i.squeeze(1)
         return jax.scipy.stats.norm.logpdf(f_test_i, f_mu_i, f_std_i)
@@ -266,7 +269,7 @@ class AutoregressiveSampler:
         s_test: jax.Array,  # [B, L_test, D_s]
         f_test: jax.Array,  # [B, L_test, D_f]
         valid_lens_ctx: jax.Array | None,  # [B]
-    ):
+    ) -> jax.Array:
         """
         Computes the log-likelihood induced by the autoregressive model, batched.
 
@@ -370,6 +373,8 @@ class AutoregressiveSampler:
 
         D_s = s_test.shape[-1]
         D_f = f_test.shape[-1]
-        s_test = jnp.take_along_axis(s_test, idx[..., None].repeat(D_s), axis=1)
-        f_test = jnp.take_along_axis(f_test, idx[..., None].repeat(D_f), axis=1)
+        idx_s = idx[..., None].repeat(D_s, axis=-1)
+        idx_f = idx[..., None].repeat(D_f, axis=-1)
+        s_test = jnp.take_along_axis(s_test, idx_s, axis=1)
+        f_test = jnp.take_along_axis(f_test, idx_f, axis=1)
         return self._logpdf(s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
