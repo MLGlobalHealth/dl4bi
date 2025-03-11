@@ -332,6 +332,8 @@ class AutoregressiveSampler:
         valid_lens_ctx: jax.Array | None,  # [B]
     ):
         _, L_test, _ = s_test.shape
+
+        # TODO @pgrynfelder: do I need to worry about the corellation introduced by permuting the test locations the same way within batch for the NLL estimation?
         idx = random.permutation(rng, L_test)
         s_test = s_test[:, idx]
         f_test = f_test[:, idx]
