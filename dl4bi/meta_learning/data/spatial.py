@@ -200,6 +200,8 @@ class SpatialBatch(MetaLearningBatch):
         f_ctx, f_test, f_pred, f_std = map(reshape, arrays)
         f_ctx, f_test, f_pred = map(remap_colors, [f_ctx, f_test, f_pred])
         _, axs = plt.subplots(N, 4, figsize=(20, N * 5))
+        kwargs = dict(cmap=cmap, norm=norm, interpolation="none")
+        std_kwargs = dict(cmap=cmap_std, norm=norm_std, interpolation="none")
         for i in range(N):
             if i == 0:
                 axs[i, 0].set_title("Task", fontsize=30)
@@ -210,12 +212,10 @@ class SpatialBatch(MetaLearningBatch):
             for j in range(4):
                 axs[i, j].set_xticks([])
                 axs[i, j].set_yticks([])
-            axs[i, 0].imshow(f_ctx[i], cmap=cmap, norm=norm, interpolation="none")
-            axs[i, 1].imshow(
-                f_std[i], cmap=cmap_std, norm=norm_std, interpolation="none"
-            )
-            axs[i, 2].imshow(f_pred[i], cmap=cmap, norm=norm, interpolation="none")
-            axs[i, 3].imshow(f_test[i], cmap=cmap, norm=norm, interpolation="none")
+            axs[i, 0].imshow(f_ctx[i], **kwargs)
+            axs[i, 1].imshow(f_std[i], **std_kwargs)
+            axs[i, 2].imshow(f_pred[i], **kwargs)
+            axs[i, 3].imshow(f_test[i], **kwargs)
         if subtitle:
             plt.suptitle(subtitle + "\n", fontsize=30)
         plt.tight_layout()
