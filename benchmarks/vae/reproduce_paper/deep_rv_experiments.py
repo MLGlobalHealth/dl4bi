@@ -76,15 +76,15 @@ def run_experiments(
             "benchmarks/vae/maps/female_under_50_cancer_mortality_LAD_2023",
             "benchmarks/vae/maps/zwe2016phia_fixed.geojson",
         ]
-        inf_models_per_exp = [["binomial_mort"], ["binomial_mort"], ["binomial_zimb"]]
+        inf_model_per_exp = ["binomial_mort", "binomial_mort", "binomial_zimb"]
         spatial_priors_per_exp = [
             ["matern_3_2", "matern_1_2"],
             ["matern_3_2", "matern_1_2"],
             ["matern_1_2"],
         ]
         models = ["auto_deep_RV", "deep_RV_gMLP", "auto_prior_cvae"]
-        for exp_name, map_path, spatial_priors, inf_models in zip(
-            exp_names, map_paths, spatial_priors_per_exp, inf_models_per_exp
+        for exp_name, map_path, spatial_priors, inf_model in zip(
+            exp_names, map_paths, spatial_priors_per_exp, inf_model_per_exp
         ):
             run_vae_train(
                 f"deep_RV_{exp_name}",
@@ -93,19 +93,18 @@ def run_experiments(
                 seeds[:1],
                 spatial_priors,
                 models,
-                vae_overrides,
+                vae_overrides + [f"inference_model={inf_model}"],
             )
-            for inf_model in inf_models:
-                run_inference(
-                    f"deep_RV_{exp_name}",
-                    map_path,
-                    exp_name,
-                    seeds[:1],
-                    spatial_priors,
-                    models + ["Baseline_GP"],
-                    infer_overrides + [f"inference_model={inf_model}"],
-                    model_type="binomial",
-                )
+            run_inference(
+                f"deep_RV_{exp_name}",
+                map_path,
+                exp_name,
+                seeds[:1],
+                spatial_priors,
+                models + ["Baseline_GP"],
+                infer_overrides + [f"inference_model={inf_model}"],
+                model_type="binomial",
+            )
 
 
 def run_vae_train(
