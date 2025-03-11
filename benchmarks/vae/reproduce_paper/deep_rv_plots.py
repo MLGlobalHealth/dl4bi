@@ -13,6 +13,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import pandas as pd
 from infer import load_ckpt
+from omegaconf import OmegaConf
 from train import build_spatial_dataloaders
 from utils.map_utils import gen_locations
 from utils.obj_utils import generate_model_name, instantiate
@@ -51,7 +52,7 @@ def reproduce_plots(seeds: jax.Array):
         ["matern_1_2", "matern_3_2"],
         "female_U50_cancer_mort",
         "benchmarks/vae/maps/female_under_50_cancer_mortality_LAD_2023",
-        "binomial",
+        "binomial_mort",
     )
     print_simulated_latex_table(pd.DataFrame(infer_summary), models_n)
     infer_summary = summarize_inference_runs(
@@ -60,7 +61,7 @@ def reproduce_plots(seeds: jax.Array):
         ["matern_1_2", "matern_3_2"],
         "male_U50_cancer_mort",
         "benchmarks/vae/maps/male_under_50_cancer_mortality_LAD_2023",
-        "binomial",
+        "binomial_mort",
     )
     print_simulated_latex_table(pd.DataFrame(infer_summary), models_n)
     infer_summary = summarize_inference_runs(
@@ -69,7 +70,7 @@ def reproduce_plots(seeds: jax.Array):
         ["matern_1_2"],
         "zimbabwe_HIV",
         "benchmarks/vae/maps/zwe2016phia_fixed.geojson",
-        "binomial",
+        "binomial_zimb",
         population_scale=1,
     )
     print_simulated_latex_table(pd.DataFrame(infer_summary), models_n)
@@ -152,7 +153,7 @@ def plot_vae_scatter_comp(
     f, z, conditionals = next(loader)
     f_hat = state.apply_fn(
         {"params": state.params, **state.kwargs},
-        z if model == "DeepRV" else f,
+        z if is_decoder_only else f,
         conditionals,
         **kwargs,
         rngs={"dropout": rng_drop, "extra": rng_extra},
@@ -209,21 +210,22 @@ def summarize_inference_runs(
     spatial_priors: list[str],
     exp_name: str,
     map_path: str,
-    model_type: str,
+    inference_model_name: str,
     population_scale: int = 100,
     log_plot: bool = True,
 ):
-    rng, _ = jax.random.split(jax.random.key(seed))
-    save_dir = Path(
-        f"results/final_plots/{'simulated_data' if exp_name == 'UK_LTLA_sim' else 'real_data'}"
+    inf_cfg = OmegaConf.load(
+        f"benchmarks/vae/configs/inference_model/{inference_model_name}.yaml"
     )
+    priors = {pr: instantiate(pr_dist) for pr, pr_dist in inf_cfg.priors.items()}
+    model_type = inf_cfg.model.func
+    rng, _ = jax.random.split(jax.random.key(seed))
+    save_dir = Path(f"results/final_plots/{exp_name}")
     map_data = gpd.read_file(map_path)
     save_dir.mkdir(parents=True, exist_ok=True)
     infer_summary = []
     for spatial_prior in spatial_priors:
-        f_hats = [None]
-        prev_hats = []
-        prev_real = None
+        prev_hats, prev_real, f_hats, all_samples = [], None, [None], []
         for i, model in enumerate(models):
             result_dir = Path(
                 f"results/{exp_name}/{spatial_prior}/{seed}/{model}/{model_type}/complete_info/"
@@ -234,6 +236,7 @@ def summarize_inference_runs(
                 samples = pickle.load(ff)
             with open(result_dir / "mcmc.pkl", "rb") as ff:
                 mcmc = pickle.load(ff)
+            all_samples.append(samples)
             inferred_var = "alpha" if spatial_prior == "car" else "ls"
             mcmc_sum = az.summary(mcmc, round_to=3)
             ess = az.ess(mcmc, method="mean")
@@ -246,6 +249,11 @@ def summarize_inference_runs(
                 and post.get("spatial_eff") is not None
             ):
                 prev_real = post["beta"] + post["spatial_eff"]
+            conditionals = {
+                k: post[k]
+                for k in ["tau", "alpha", "beta", "var", "ls", "period"]
+                if k in post
+            }
             f_hats[0] = f
             f_hats.append(f_hat)
             infer_summary.append(
@@ -273,7 +281,7 @@ def summarize_inference_runs(
                 f,
                 f_hat,
                 map_data,
-                save_dir / f"{exp_name}_{model}_{spatial_prior}_infer_summary.png",
+                save_dir / f"{model}_{spatial_prior}_infer_summary.png",
                 log=log_plot,
             )
             plot_infer_trace(
@@ -283,22 +291,28 @@ def summarize_inference_runs(
                 var_names=["alpha", "tau"]
                 if spatial_prior == "car"
                 else ["ls", "var", "beta"],
-                save_path=save_dir
-                / f"{exp_name}_{model}_{spatial_prior}_infer_trace.png",
+                save_path=save_dir / f"{model}_{spatial_prior}_infer_trace.png",
             )
             plot_map_predictive(
                 rng,
                 f,
                 f_hat,
                 map_data,
-                save_dir / f"{exp_name}_{model}_{spatial_prior}_infer_samples.png",
+                save_dir / f"{model}_{spatial_prior}_infer_samples.png",
                 log=log_plot,
             )
+        plot_histogram_comparisons(
+            all_samples,
+            conditionals,
+            priors,
+            models,
+            save_dir / f"{spatial_prior}",
+        )
         plot_models_predictive_means(
             f_hats,
             map_data,
             models,
-            save_dir / f"{exp_name}_{spatial_prior}_predictive_means.png",
+            save_dir / f"{spatial_prior}_predictive_means.png",
             log=log_plot,
         )
         population = (
@@ -314,7 +328,7 @@ def summarize_inference_runs(
             models,
             model_type,
             map_data,
-            save_dir / f"{exp_name}_{spatial_prior}_prevalence_means.png",
+            save_dir / f"{spatial_prior}_prevalence_means.png",
             population_scale=population_scale,
         )
         plot_prevalence_scatter_comp(
@@ -324,10 +338,75 @@ def summarize_inference_runs(
             population,
             models,
             model_type,
-            save_dir / f"{exp_name}_{spatial_prior}_prevalence_scatter.png",
+            save_dir / f"{spatial_prior}_prevalence_scatter.png",
             population_scale=population_scale,
         )
     return infer_summary
+
+
+def plot_histogram_comparisons(
+    samples: list[dict],
+    conditionals: dict,
+    priors: dict,
+    model_names: list[str],
+    save_prefix: Path,
+):
+    num_models = len(model_names)
+    baseline_index = model_names.index("Baseline_GP")
+    for i, (var_name, actual_val) in enumerate(conditionals.items()):
+        fig, axes = plt.subplots(1, num_models - 1, figsize=(12, 4))
+        baseline_samples = samples[baseline_index].get(str(var_name), None)
+        for j, model_name in enumerate(model_names):
+            if model_name == "Baseline_GP":
+                continue
+            model_idx = model_names.index(model_name)
+            ax = axes[j - (1 if j > baseline_index else 0)]
+            model_samples = samples[model_idx].get(str(var_name), None)
+            if baseline_samples is not None:
+                ax.hist(
+                    baseline_samples,
+                    bins=20,
+                    density=True,
+                    color="blue",
+                    alpha=0.5,
+                    label="Baseline_GP",
+                    edgecolor="black",
+                )
+            if model_samples is not None:
+                ax.hist(
+                    model_samples,
+                    bins=20,
+                    density=True,
+                    color="green",
+                    alpha=0.5,
+                    label=model_name,
+                    edgecolor="black",
+                )
+            prior_dist = priors.get(var_name, None)
+            if prior_dist is not None and baseline_samples is not None:
+                x_vals = jnp.linspace(min(baseline_samples), max(baseline_samples), 100)
+                prior_pdf = jnp.exp(prior_dist.log_prob(x_vals))
+                ax_range = ax.get_xlim()[1] - ax.get_xlim()[0]
+                ax.plot(
+                    x_vals,
+                    prior_pdf * ax_range / 20,
+                    color="orange",
+                    linestyle="--",
+                    linewidth=1,
+                    label="Prior",
+                )
+            if actual_val is not None:
+                ax.axvline(
+                    actual_val, color="red", linestyle="--", linewidth=1, label="GT"
+                )
+            model_title_name = model_name.replace("_MLP", "")
+            ax.set_title(f"{model_title_name} vs Baseline")
+            ax.set_xlabel(var_name)
+            ax.legend(loc="upper right", fontsize=6)
+        plt.tight_layout()
+        plt.savefig(f"{save_prefix}_histogram_{var_name}.png", dpi=150)
+        plt.clf()
+        plt.close(fig)
 
 
 def plot_models_predictive_means(

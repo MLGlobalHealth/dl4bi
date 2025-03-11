@@ -6,7 +6,7 @@ DeepRV is a VAE-decoder-only model designed to generate pre-trained priors for g
 - Follow the main README "Development Setup"
 - Install additional dependencies for the pyenv generated in the previous step:
     ```bash
-    pip install numpyro, seaborn, geopandas
+    pip install numpyro seaborn geopandas
     ```
 - In case of GPU usage, install the JAX GPU library (e.g., for CUDA 12): 
     ```bash
@@ -25,10 +25,10 @@ DeepRV is a VAE-decoder-only model designed to generate pre-trained priors for g
 ## Training DeepRV Priors
 - The user has the following choices:
     - **Spatial prior class**:  Available classes are the GP kernels: `rbf`, `matern_1_2`, `matern_3_2`, `matern_5_2`, `periodic`. And the graph-based CAR model `car`.
-    - **Priors for hyperparameters**: Specify priors for heperparameters of the chosen kernel, which must be distributions supported by NumPyro. Refer to the [NumPyro documentation](https://num.pyro.ai/en/stable/distributions.html). For a documented example, see `configs/inference_model/poisson.yaml`.
+    - **Priors for hyperparameters**: Specify priors for heperparameters of the chosen spatial prior, which must be distributions supported by NumPyro. Refer to the [NumPyro documentation](https://num.pyro.ai/en/stable/distributions.html). For a documented example, see `configs/inference_model/poisson.yaml`.
     - **Map choice**: The user needs to provide a GeoPandas-readable map to the path `data.map_path`.
     - **Grid**: In case the user doesn't provide a map, they can set `data=1d` or `data=2d` to work on a simple grid (CAR model is not supported for this case).
-    - **Experiment name**: The user needs to provide a name to save the experiment under.
+    - **Experiment name**: The user needs to provide a name to save the experiment under `exp_name=experiment_name`.
 
 - Running a training process with map data:
     ```bash
@@ -151,7 +151,7 @@ python -m reproduce_paper/reproduce_plots
 ### Output  
 
 Results are stored in: 
-results/Experiment type/GP kernel used/seed/model name/inference model used/
+results/Experiment_name/spatial_prior/seed/model_name/inference_model_name/
 They are also uploaded to wandb.
 
 The final plots are stored in /results/final_plots/ directory

@@ -250,20 +250,32 @@ def plot_infer_trace(
     plt.close()
 
 
-def plot_histograms(samples, conditionals, priors):
+def plot_histograms(
+    samples: list[dict],
+    conditionals: dict,
+    priors: dict,
+    model_names: list[str],
+    save_path: Optional[Path] = None,
+):
     num_plots = len(conditionals)
+    num_models = len(model_names)
+    colors = plt.cm.get_cmap("tab10", num_models)
     fig, axes = plt.subplots(1, num_plots, figsize=(12, 4))
     for i, (name, actual_val) in enumerate(conditionals.items()):
         ax = axes[i]
-        if str(name) in samples:
-            sample_values = samples[str(name)]
-            ax.hist(
-                sample_values,
-                bins=20,
-                color="skyblue",
-                edgecolor="black",
-                label="Posterior Samples",
-            )
+        for j, model_name in enumerate(model_names):
+            model_samples = samples[j].get(str(name), None)
+            if model_samples is not None:
+                ax.hist(
+                    model_samples,
+                    bins=20,
+                    color=colors(j),
+                    alpha=0.5,
+                    edgecolor="black",
+                    label=f"{model_name}",
+                )
+        if str(name) in samples[0]:
+            sample_values = samples[0].get(str(name), [])
             prior_dist = priors[name]
             x_vals = jnp.linspace(min(sample_values), max(sample_values), 100)
             prior_pdf = jnp.exp(prior_dist.log_prob(x_vals))
@@ -274,26 +286,22 @@ def plot_histograms(samples, conditionals, priors):
                 color="orange",
                 linestyle="--",
                 linewidth=1,
-                label="Prior Distribution",
+                label="Prior",
             )
         if actual_val is not None:
-            ax.axvline(
-                actual_val,
-                color="red",
-                linestyle="--",
-                linewidth=1,
-                label="True Value",
-            )
+            ax.axvline(actual_val, color="red", linestyle="--", linewidth=1, label="GT")
         title = f"{name}: {actual_val:.2f}" if actual_val is not None else name
         ax.set_title(title)
         ax.set_xlabel(name)
-        ax.legend()
-
+        ax.legend(loc="upper right", fontsize=6)
     plt.tight_layout()
     timestamp = datetime.now().isoformat()
-    path = f"/tmp/histograms_{timestamp}.png"
-    plt.savefig(path, dpi=150)
-    wandb.log({"Histograms for Conditionals": wandb.Image(path)})
+    if save_path is None:
+        path = f"/tmp/histograms_{timestamp}.png"
+        plt.savefig(path, dpi=150)
+        wandb.log({"Histograms for Conditionals": wandb.Image(path)})
+    else:
+        plt.savefig(save_path, dpi=150)
     plt.clf()
     plt.close(fig)
 
@@ -362,7 +370,7 @@ def plot_inference_run(
     # NOTE: in case the chains\samples are very tightly batch (not converged) the plotting will fail
     try:
         plot_infer_trace(samples, mcmc, surrogate_conds)
-        plot_histograms(samples, surrogate_conds, priors)
+        plot_histograms([samples], surrogate_conds, priors, [model_name])
     except ValueError:
         pass
     plot_vae_scatter_plot(
