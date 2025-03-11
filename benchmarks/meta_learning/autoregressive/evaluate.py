@@ -1,6 +1,7 @@
 import csv
 import os
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Generator
 
@@ -17,21 +18,25 @@ def evaluate(
     rng,
     model: AutoregressiveSampler,
     dataloader: Generator,
-    N: int,  # len of the dataloader
+    N: int,  # how many samples to take from the dataloader
     strategies: list[Strategy],
     num_samples_for_random: int,
     batching_for_random: int | None,
+    save_full_log_every: int | None,
 ):
     nlls = defaultdict(list)
     max_nll = defaultdict(lambda: float("-inf"))
 
-    logfile = open(Path(os.environ["RESULTS_DIR"]) / "log.csv", "a", newline="")
+    results_dir = Path(os.environ["RESULTS_DIR"])
+    logfile = open(results_dir / "log.csv", "a", newline="")
     writer = csv.DictWriter(logfile, strategies)
     writer.writeheader()
 
     pbar = tqdm(dataloader, total=N, desc="Evaluating")
 
     for i, datum in enumerate(pbar):
+        if i >= N:
+            break
         s_ctx, f_ctx, s_test, f_test, valid_lens_ctx = datum
         for strategy in strategies:
             rng, rng_i = jax.random.split(rng)
@@ -46,29 +51,42 @@ def evaluate(
                 num_samples_for_random,
                 batching_for_random,
             )
+
+            # alert about low assigned densities
             max = nll.max()
             if max_nll[strategy] < max:
                 print(
                     f"New lowest probability assigned for {strategy}: batch {i}, index in batch {nll.argmax()}, nll {max}"
                 )
                 max_nll[strategy] = max
-            nll = np.mean(nll)  # average nll over batch
+
+            # save data
             nlls[strategy].append(nll)
-        writer.writerow({strategy: nll[-1] for strategy, nll in nlls.items()})
+
+        # log batch-mean nll to csv
+        writer.writerow({strategy: np.mean(nll[-1]) for strategy, nll in nlls.items()})
+        # report running mean to tqdm
         pbar.set_postfix(
             {f"NLL {strategy}": np.mean(nlls[strategy]) for strategy in strategies}
         )
-    print(max_nll)
+
+        if save_full_log_every and i % save_full_log_every == 0:
+            np.savez(
+                results_dir / "full_log.npz",
+                **{strategy: np.array(nll) for strategy, nll in nlls.items()},
+            )
+
+    np.savez(
+        results_dir / "full_log.npz",
+        **{strategy: np.array(nll) for strategy, nll in nlls.items()},
+    )
 
 
 # TODO @pgrynfelder: add other dataloaders
-def dataloader(rng, data, kernel, N):
+def dataloader(rng, data, kernel):
     gp_dataloader = build_gp_dataloader(data, kernel)(rng)
     num_ctx = data.num_ctx.max
-    for i, datum in enumerate(gp_dataloader):
-        if i >= N:
-            raise StopIteration
-
+    for datum in gp_dataloader:
         s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, var, ls, period = datum
 
         # note that s, f come directly from the GP not the observation process
@@ -104,7 +122,11 @@ if __name__ == "__main__":
         default=None,
         help="override the batch size set in config (recommended 128)",
     )
-    parser.add_argument("--results-dir", type=Path, default=Path("results"))
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=Path("results") / f"autoregressive {datetime.now()}",
+    )
 
     args = parser.parse_args()
 
@@ -123,7 +145,7 @@ if __name__ == "__main__":
     model = AutoregressiveSampler.from_state(state)
     rng = jax.random.key(args.seed)
     rng_dataloader, rng_mc = jax.random.split(rng)
-    dataloader = dataloader(rng_dataloader, config.data, config.kernel, args.N)
+    dataloader = dataloader(rng_dataloader, config.data, config.kernel)
 
     evaluate(
         rng_mc,
@@ -133,4 +155,5 @@ if __name__ == "__main__":
         strategies=["diagonal", "ltr", "closest", "furthest", "random"],
         num_samples_for_random=args.M,
         batching_for_random=args.Mb,
+        save_full_log_every=10,
     )
