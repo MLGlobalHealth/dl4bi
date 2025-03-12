@@ -36,7 +36,6 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     dataloader = build_dataloader(cfg.data)
-    print(next(dataloader(rng_train)))
     optimizer = optax.chain(
         optax.clip_by_global_norm(cfg.clip_max_norm),
         optax.yogi(1e-3),
@@ -73,14 +72,14 @@ def build_dataloader(cfg: DictConfig):
     prior_pred = jit(Predictive(partially_pooled, num_samples=B))
     (at_bats, _), _ = load_baseball_dataset()
     ids = jnp.arange(at_bats.shape[0])
-    x = jnp.stack([ids, at_bats], axis=0)
+    x = jnp.stack([ids, at_bats], axis=1)
     x = jnp.repeat(x[None, ...], B, axis=0)
 
     def dataloader(rng):
         while True:
             rng_i, rng_b, rng = random.split(rng, 3)
             samples = prior_pred(rng_i, at_bats)
-            d = TabularData(x=x, f=samples["obs"])
+            d = TabularData(x=x, f=samples["obs"][..., None])
             yield d.batch(
                 rng_b,
                 cfg.num_ctx_min,
@@ -117,6 +116,7 @@ def partially_pooled(at_bats, hits=None):
 def load_baseball_dataset():
     url = "https://raw.githubusercontent.com/pyro-ppl/datasets/refs/heads/master/EfronMorrisBB.txt"
     path = Path("cache/baseball.csv")
+    path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         df = pd.read_csv(path)
     else:

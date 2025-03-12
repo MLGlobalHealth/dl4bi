@@ -17,7 +17,7 @@ class IDEmbedding(nn.Module):
 
     @nn.compact
     def __call__(self, x: jax.Array, training: bool = False):
-        ids = nn.Embed(self.num_ids, self.num_features)(x[..., [0]])
+        ids = nn.Embed(self.num_ids, self.num_features)(x[..., 0])
         return jnp.concat([ids, x[..., 1:]], axis=-1)
 
 

@@ -11,8 +11,8 @@ lr_peak: 1.0e-3
 clip_max_norm: 3.0
 data:
   batch_size: 32
-  num_ctx_min: 18
-  num_ctx_max: 18
+  num_ctx_min: 3
+  num_ctx_max: 12
   num_test: 18
   test_includes_ctx: True
 infer:
