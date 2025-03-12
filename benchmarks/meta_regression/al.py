@@ -7,23 +7,24 @@ from pathlib import Path
 import hydra
 import jax
 import jax.numpy as jnp
+import numpy as np
 import matplotlib.pyplot as plt
 import wandb
 from jax import jit, random
 from jax.scipy import stats
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
+from sps.utils import build_grid
+from jax.scipy.stats import norm
 
 from dl4bi.core import mask_from_valid_lens
 from dl4bi.meta_regression.train_utils import (
     TrainState,
-    build_gp_dataloader,
     cfg_to_run_name,
     load_ckpt,
     log_wandb_line,
     plot_posterior_predictive,
 )
-from outbreaks_temporal import build_dataloader
 
 
 # NOTE: use the same configs as the Outbreaks models
@@ -34,8 +35,6 @@ def main(cfg: DictConfig):
         project_parent = project_parent or cfg.project
         cfg.project = "Active Learning"
     run_name = cfg.get("name", cfg_to_run_name(cfg))
-    path = f"results/{project_parent}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
-    path = Path(path)
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
@@ -43,33 +42,51 @@ def main(cfg: DictConfig):
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
     )
-    cfg.batch_size = 1  # override GP batch argument
+    cfg.batch_size = 1
     print(OmegaConf.to_yaml(cfg))
-    num_tasks, budget, num_init = 100, 50, 10
+    num_tasks, budget, num_init = 10, 90, 10
     rng = random.key(cfg.seed)
-    rng_data, rng_opt = random.split(rng)
-    # dataloader = build_gp_dataloader(cfg.data, cfg.kernel)
-    dataloader = build_dataloader(cfg.data_path, cfg.file_name, cfg.graph_dist, cfg.temporal_data, cfg.batch_size)
+    _, rng_data, rng_opt = random.split(rng, num=3) # TODO: check 
+    # dataloader = build_dataloader(cfg.data_path, cfg.file_name, cfg.graph_dist, cfg.temporal_data, cfg.batch_size) # TODO: add test_time
+    dataloader = build_al_dataloader(cfg.data_path, cfg.test_file_name, num_tasks, budget, num_init)
+    
+    rng_data, rng_permute = random.split(rng)
+    batches = dataloader(rng_data)
+    s_tests, f_tests = [], []
+    for i in tqdm(range(num_init+budget), desc="Building dataset"):
+        s_test, f_test, inv_permute_idx_test = next(batches)
+        # Note: inv_permute_idx_test is the same for different time steps
+        s_tests += [s_test]
+        f_tests += [f_test]
+    s_test, f_test = jnp.vstack(s_tests), jnp.vstack(f_tests)
+    D_s, D_f = s_test.shape[-1], f_test.shape[-1]
+    s_test = s_test.reshape(num_init + budget, num_tasks, -1, D_s) # [T, B, L, D_s=3]
+    f_test = f_test.reshape(num_init + budget, num_tasks, -1, D_f) # [T, B, L, D_f=1]
+    s_test = jnp.transpose(s_test, (1, 0, 2, 3)) #.reshape(num_tasks, -1, D_s) # [B, T * L, D_s]
+    f_test = jnp.transpose(f_test, (1, 0, 2, 3)) #.reshape(num_tasks, -1, D_f) # [B, T * L, D_f]
+    print('s_test shape:', s_test.shape)
+    print('f_test shape:', f_test.shape)
+    
+    # load model
+    path = Path(f"results/{project_parent}/{cfg.seed}/{run_name}")
     model_state, _ = load_ckpt(path.with_suffix(".ckpt"))
     model_fn = jit_model_fn(model_state)
-    s_test, f_test = build_dataset(rng_data, dataloader, num_tasks)
-    regret, s_ctx, f_ctx, f_mu, f_std = optimize(
-        rng_opt, s_test, f_test, model_fn, num_init, budget
+    
+    # load graph
+    graph_dist_path = cfg.data_path + cfg.graph_dist
+    graph_dist = jnp.load(graph_dist_path)
+        
+    loss= optimize(
+        rng_opt, s_test, f_test,  graph_dist, inv_permute_idx_test, model_fn, num_init, budget
     )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    jnp.save(path.with_suffix(".npy"), regret)
-    log_wandb_line(regret.mean(axis=0), "Regret mu")
-    log_wandb_line(regret.std(axis=0), "Regret std")
-    log_regret_dist(regret)
-    log_worst_regret(
-        s_ctx,
-        f_ctx,
-        s_test,
-        f_test,
-        f_mu,
-        f_std,
-        regret,
-    )
+    for k, v in loss.items():
+        v = jnp.array(v)
+        v = v.transpose()
+        print(f'{k} shape:', v.shape)
+        log_wandb_line(v.mean(axis=0), k + " mu")
+        log_wandb_line(v.std(axis=0), k + " std")
+        log_regret_dist(v, k)
+    wandb.finish()
 
 
 def jit_model_fn(state: TrainState):
@@ -79,6 +96,10 @@ def jit_model_fn(state: TrainState):
         f_ctx: jax.Array,
         s_test: jax.Array,
         valid_lens_ctx: jax.Array,
+        valid_lens_test: jax.Array,
+        inv_permute_idx: jax.Array,
+        inv_permute_idx_test: jax.Array,
+        graph_dist: jax.Array,
         rng_extra: jax.Array,
     ):
         return state.apply_fn(
@@ -87,105 +108,187 @@ def jit_model_fn(state: TrainState):
             f_ctx,
             s_test,
             valid_lens_ctx,
+            valid_lens_test,
+            inv_permute_idx=inv_permute_idx,
+            inv_permute_idx_test=inv_permute_idx_test,
+            graph_dist=graph_dist,
             rngs={"extra": rng_extra},
         )
 
     return model_fn
 
-
-def build_dataset(rng: jax.Array, dataloader: Callable, num_samples: int = 100):
-    """Builds a dataset of `num_samples` with independent parameters.
-
-    .. note::
-        This is built sequentially because each "batch" from the dataloader
-        requires an $O(n^3)$ calculation (for GPs). If we did this in parallel,
-        some machines would run out of memory.
+def build_al_dataloader(
+    data_path: str,
+    file_name: str,
+    num_tasks: int,
+    budget: int,
+    num_init: int,
+):
     """
-    B = num_samples
-    rng_data, rng_permute = random.split(rng)
-    batches = dataloader(rng_data)
-    s_tests, f_tests = [], []
-    for i in tqdm(range(B), desc="Building dataset"):
-        _, _, _, s_test, f_test, *_ = next(batches)
-        s_tests += [s_test]
-        f_tests += [f_test]
-    s_test, f_test = jnp.vstack(s_tests), jnp.vstack(f_tests)
-    s_test = random.permutation(rng_permute, s_test, axis=1, independent=True)
-    f_test = random.permutation(rng_permute, f_test, axis=1, independent=True)
-    D_s, D_f = s_test.shape[-1], f_test.shape[-1]
-    return s_test.reshape(B, -1, D_s), f_test.reshape(B, -1, D_f)  # [B, L, D]
+    Build a dataloader for active learning experiments,
+    where generates s_test and f_test from the same simulation_id, with time in order.
+    """
+    path = data_path +  file_name # contains [time, f_test]
+    dataset = np.load(path, mmap_mode="r")['outbreaks'] # [sim_id, time, f_test]
+    print('dataset shape:', dataset.shape)
 
+    # only remain num_init + budget time steps for each simulation
+    dataset = dataset[dataset[:, 1] < num_init + budget] 
+    # check for each sim_id, there are at least num_init + budget time steps
+    sim_ids, counts = np.unique(dataset[:, 0], return_counts=True)
+    assert np.all(counts == num_init + budget)
+    num_sims = len(sim_ids)
+    time_steps = num_init + budget
+    dataset = dataset.reshape(num_sims, time_steps, -1) # [num_sims, time_steps, num_nodes + 2]; 2 for sim_id and time
+    print('dataset shape:', dataset.shape)
+    B = num_tasks
+    L = dataset.shape[-1] - 2
+    
+    
+    s_grid = build_grid([dict(start=-2.0, stop=2.0, num=int(np.ceil(np.sqrt(L))))] * 2).reshape(-1,1)[:L* 2].reshape(L, 2)
+    s_grid = jnp.repeat(s_grid[None, ...], B, axis=0)  # [L, 3] -> [B, L, 3]
+    
+    selected_sim_ids = random.choice(random.PRNGKey(0), num_sims, (B,), replace=False)
+    # print('selected_sim_ids:', selected_sim_ids)
+
+    def dataloader(rng: jax.Array, current_time=0):
+        while True:
+            print('current time:', current_time)
+            print('selected_sim_ids:', selected_sim_ids)
+            batch = dataset[selected_sim_ids, current_time, :]
+            time, f_test = batch[:, [1]], batch[:, 2:]
+            time = jnp.repeat(time[:, None, :], L, axis=1)
+            # f_test = 2 * (f_test - 0.5)  # [0, 1] -> [-1, 1]
+            s_test = jnp.concatenate([s_grid, time], axis=-1)
+            f_test = f_test.reshape(B, -1, 1)  # [B, H, W, 1] -> [B, L, 1]
+            current_time += 1
+            permute_idx_test = random.permutation(rng, L)
+            # debug: identity permutation
+            # permute_idx_test = jnp.arange(L)
+            inv_permute_idx_test = jnp.argsort(permute_idx_test)
+            # TODO: permutation? 
+            yield (
+                s_test[:,permute_idx_test,:],  # s_ctx (permuted over nodes)
+                f_test[:,permute_idx_test,:],  # f_ctx (permuted over nodes)
+                inv_permute_idx_test,
+            )
+    return dataloader     
 
 def optimize(
     rng: jax.Array,
-    s_test: jax.Array,  # [B, L, D_s]
-    f_test: jax.Array,  # [B, L, D_f]
+    s_test: jax.Array,  # [B, T, L, D_s=3]
+    f_test: jax.Array,  # [B, T, L, D_f=1]
+    graph_dist: jax.Array,
+    inv_permute_idx_test: jax.Array,
     model_fn: Callable,
     num_init: int = 1,
     budget: int = 50,
 ):
-    (B, L_test, D_s), L_ctx = s_test.shape, num_init + budget
-    # NOTE: This only works with 1 dimensional D_f because you have to select
-    # 1 position index to add to the context set on each iteration, and if
-    # different positions optimize different elements of the output vector f,
-    # you'd have to arbitrarily select one of them.
-    assert f_test.shape[-1] == 1, "Can only optimize functions with a single output!"
-    s_ctx = jnp.zeros((B, L_ctx, D_s))
-    f_ctx = jnp.zeros((B, L_ctx, 1))
-    s_ctx = s_ctx.at[:, :num_init, :].set(s_test[:, :num_init, :])
-    f_ctx = f_ctx.at[:, :num_init, :].set(f_test[:, :num_init, :])
-    valid_lens_ctx = jnp.repeat(num_init, B)
-    mask = mask_from_valid_lens(L_ctx, valid_lens_ctx)
-    opt_min = jnp.full((B, budget + 1, 1), jnp.inf)
-    opt_min = opt_min.at[:, 0, :].set(f_ctx.min(axis=1, where=mask, initial=jnp.inf))
-    B_idx = jnp.arange(B)
+    (B, T, L, D_s), T_ctx = s_test.shape, num_init + budget
+    # s_ctx = jnp.zeros((B, T_ctx, L, D_s))
+    # f_ctx = jnp.zeros((B, T_ctx, L, 1))
+    # s_ctx = s_ctx.at[:, :num_init, :, :].set(s_test[:, :num_init, :, :])
+    # f_ctx = f_ctx.at[:, :num_init, :, :].set(f_test[:, :num_init, :, :])
+    s_ctx = s_test[:, :num_init, :, :]
+    f_ctx = f_test[:, :num_init, :, :]
+    
+    valid_lens_ctx = jnp.repeat(int(0.1 * L * num_init), B)  # 10% of nodes for num_init time steps are observed
+    valid_lens_test = jnp.repeat(L, B)
+    rng_extra, rng = random.split(rng)
+    
+    loss = {"NLL": [], "RMSE": [], "MAE": [], "Coverage": []}
+    
     for i in tqdm(range(budget), desc="Optimizing"):
-        rng_extra, rng = random.split(rng)
-        f_mu, f_std, *_ = model_fn(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
-        if f_mu.shape != f_test.shape:  # bootstrapped
-            K = f_mu.shape[0] // f_test.shape[0]
-            f_mu = f_mu.reshape(B, K, L_test, 1)
-            f_std = f_std.reshape(B, K, L_test, 1)
-            # law of total variance
-            f_var = (f_std**2).mean(1) + (f_mu**2).mean(1) - (f_mu.mean(1)) ** 2
-            f_std = jnp.sqrt(f_var)
-            f_mu = f_mu.mean(axis=1)
-        ei = expected_improvement(opt_min[:, [i], :], f_mu, f_std)
-        min_idx = jnp.argmax(ei, axis=1).squeeze()  # [B]
-        s_ctx = s_ctx.at[B_idx, num_init + i, :].set(s_test[B_idx, min_idx, :])
-        f_ctx = f_ctx.at[B_idx, num_init + i, :].set(f_test[B_idx, min_idx, :])
-        valid_lens_ctx += 1
-        mask = mask_from_valid_lens(L_ctx, valid_lens_ctx)
-        opt_min = opt_min.at[:, i + 1, :].set(
-            f_ctx.min(axis=1, where=mask, initial=jnp.inf)
-        )
-    global_min = f_test.min(axis=1, keepdims=True)
-    regret = opt_min - global_min
-    return regret.squeeze(), s_ctx, f_ctx, f_mu, f_std
+        inv_permute_idx = jnp.repeat(inv_permute_idx_test, num_init).flatten()
+        # inv_permute_idx_test = jnp.repeat(inv_permute, num_init).flatten()
+        s_ctx = s_ctx.reshape(B, -1, D_s)
+        f_ctx = f_ctx.reshape(B, -1, 1)
+        
+        s_test_i = s_test[:,i + num_init,:,:].reshape(B, -1, D_s)
+        
+        print('s_ctx shape:', s_ctx.shape)
+        print('f_ctx shape:', f_ctx.shape)
+        print('s_test_fit shape:', s_test_i.shape)
+        print('valid_lens_ctx shape:', valid_lens_ctx.shape)
+        print('valid_lens_test shape:', valid_lens_test.shape)
+        print('inv_permute_idx shape:', inv_permute_idx.shape)
+        print('inv_permute_idx_test shape:', inv_permute_idx_test.shape)
+        
+        f_mu, f_std, *_ = model_fn(s_ctx, f_ctx, s_test_i, valid_lens_ctx, valid_lens_test, inv_permute_idx, inv_permute_idx_test, graph_dist, rng_extra)
+        print('f_mu shape:', f_mu.shape)
+        print('f_std shape:', f_std.shape)
+        # print('f_mu:', f_mu)
+        # print('f_std:', f_std)
+        # argmax_f_std = jnp.argsort(f_std, axis=1)[:, -int(0.1 * L):]
+        # max_f_std = jnp.take_along_axis(f_std, argmax_f_std, axis=1)
+        # # print("max_f_std shape: ", max_f_std.shape)
+        # print("max_f_std: ", max_f_std)
+        
+        
+        e = entropy(f_std)
+        # pick the 10% nodes with the highest entropy
+        argmax_e = jnp.argsort(e, axis=1)[:, -int(0.1 * L):]
+        max_e = jnp.take_along_axis(e, argmax_e, axis=1)
+        print("max_e shape: ", max_e.shape)
+        # print("max_e: ", max_e)
+        
+        s_ctx = jnp.concatenate([s_ctx[:,L:,:], s_test_i], axis=1)
+        f_test_i = f_test[:,i + num_init,:,:].reshape(B, -1, 1)
+        f_ctx = jnp.concatenate([f_ctx[:,L:,:], f_test_i], axis=1)
+        valid_lens_ctx = jnp.repeat(int(0.1 * L * (num_init)), B)
+        
+        loss = evaluate_al_t(loss, f_mu, f_std, f_test_i)
+    return loss 
+
+def entropy(f_std: jax.Array):
+    # f_std: [B, L, 1]
+    entropy = 0.5 * jnp.log(2 * jnp.pi * jnp.e * f_std ** 2)
+    print('entropy shape:', entropy.shape)
+    # print('entropy:', entropy)
+    return entropy
 
 
-@jit
-def expected_improvement(
-    f_min: jax.Array,
+def evaluate_al_t(
+    loss: dict,
     f_mu: jax.Array,
     f_std: jax.Array,
-    f_std_jitter: float = 1e-5,  # Copied from BayesO constants
-):
-    """A JAX implementation of BayesO's `acquisition.ei`."""
-    d = f_min - f_mu
-    z = d / (f_std + f_std_jitter)
-    return d * stats.norm.cdf(z) + f_std * stats.norm.pdf(z)
+    f_test: jax.Array,
+    hdi_prob: float = 0.95,
+    ):
+    # f_mu: [B, L, 1]
+    # f_std: [B, L, 1]
+    # f_test: [B, L, 1]
+    print('inside evaluate_al_t')
+    print('f_mu shape:', f_mu.shape)
+    print('f_std shape:', f_std.shape)
+    print('f_test shape:', f_test.shape)
+    B = f_mu.shape[0]
+    nll = -norm.logpdf(f_test, f_mu, f_std).mean(axis=1).reshape(B,) # mean over nodes
+    rmse = jnp.sqrt(jnp.square(f_test - f_mu).mean(axis=1)).reshape(B,)
+    mae = jnp.abs(f_test - f_mu).mean(axis=1).reshape(B,)
+    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
+    f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
+    cvg = ((f_test >= f_lower) & (f_test <= f_upper)).mean(axis=1).reshape(B,)
+    print('nll:', nll)
+    print('rmse:', rmse)
+    print('mae:', mae)
+    print('cvg:', cvg)
+    
+    loss["NLL"] += [nll]
+    loss["RMSE"] += [rmse]
+    loss["MAE"] += [mae]
+    loss["Coverage"] += [cvg]
+    # loss = {m: np.mean(vs) for m, vs in loss.items()}  # average over batches
+    return loss
 
-
-def log_regret_dist(regret: jax.Array, hdi_prob: float = 0.95):
-    regret = regret[:, 1:]  # ignore iteration 0, before model selected anything
+def log_regret_dist(regret: jax.Array, eva_name: str, hdi_prob: float = 0.95):
     mu, std = regret.mean(axis=0), regret.std(axis=0)
     z = jnp.abs(stats.norm.ppf((1 - hdi_prob) / 2))
     iter = jnp.arange(regret.shape[1])
     plt.plot(iter, mu, color="black")
     plt.fill_between(
         iter,
-        jnp.clip(mu - z * std, min=0),  # regret can't be negative
+        mu - z * std,
         mu + z * std,
         color="steelblue",
         alpha=0.4,
@@ -193,60 +296,13 @@ def log_regret_dist(regret: jax.Array, hdi_prob: float = 0.95):
     )
     ax = plt.gca()
     ax.set_xlabel("Iteration")
-    ax.set_ylabel("Minimum Simple Regret")
-    path = f"/tmp/{datetime.now().isoformat()} regret_dist.png"
-    plt.title("Regret Distribution")
+    ax.set_ylabel(eva_name)
+    path = f"/tmp/{datetime.now().isoformat()}{eva_name}_dist.png"
+    plt.title("Performance Distribution")
     plt.savefig(path, dpi=125)
     plt.clf()
-    wandb.log({"Regret Distribution": wandb.Image(path)})
+    wandb.log({"Performance Distribution": wandb.Image(path)})
     return path
-
-
-def log_worst_regret(
-    s_ctx: jax.Array,
-    f_ctx: jax.Array,
-    s_test: jax.Array,
-    f_test: jax.Array,
-    f_mu: jax.Array,
-    f_std: jax.Array,
-    regret: jax.Array,
-    num_samples: int = 16,
-    hdi_prob: float = 0.95,
-):
-    if s_test.shape[-1] != 1:  # TODO(danj): support 2D
-        return
-    worst_idxs = jnp.argsort(regret[:, -1], descending=True)[:num_samples]
-    paths = []
-    for rank, i in enumerate(worst_idxs):
-        # plot posterior predictive
-        s_ctx_i, f_ctx_i = s_ctx[i].squeeze(), f_ctx[i].squeeze()
-        s_test_i, f_test_i = s_test[i].squeeze(), f_test[i].squeeze()
-        f_mu_i, f_std_i = f_mu[i].squeeze(), f_std[i].squeeze()
-        if f_mu[i].shape != f_std[i].shape:  # marginal from tril cov
-            f_std_i = jnp.diag(f_std[i]).squeeze()  # TODO(danj): valid?
-        if f_mu.shape != f_test.shape:  # bootstrapped
-            K = f_mu.shape[0] // f_test.shape[0]
-            s = i * K
-            f_mu_i = f_mu[s : s + K].squeeze()
-            f_std_i = f_std[s : s + K].squeeze()
-        fig = plot_posterior_predictive(
-            s_ctx_i, f_ctx_i, s_test_i, f_test_i, f_mu_i, f_std_i
-        )
-        ax = fig.axes[0]
-        # add estimated min and true global min
-        opt_min_idx = f_ctx_i.argmin()
-        global_min_idx = f_test_i.argmin()
-        ax.plot(s_ctx_i[opt_min_idx], f_ctx_i[opt_min_idx], "ro", alpha=0.5)
-        ax.plot(s_test_i[global_min_idx], f_test_i[global_min_idx], "go", alpha=0.5)
-        paths += [
-            f"/tmp/{datetime.now().isoformat()} worst regret {rank+1} sample {i}.png"
-        ]
-        fig.suptitle(f"Sample {i}, Regret {regret[i, -1]:.3f}")
-        fig.savefig(paths[-1], dpi=125)
-        plt.clf()
-        plt.close(fig)
-    wandb.log({"Worst Regrets": [wandb.Image(p) for p in paths]})
-
 
 if __name__ == "__main__":
     main()

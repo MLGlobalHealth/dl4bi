@@ -517,7 +517,34 @@ def read_us_outbreaks():
     adj_matrix = pd.read_csv(path + adj_matrix_name).to_numpy()
     print(adj_matrix.shape)
     
+
+def split_train_test(data_path, train_ratio=0.8):
+    # read npz file
+    np.random.seed(0)
+    data = np.load(data_path)
+    outbreaks = data['outbreaks']
+    print(outbreaks)
+    sim_ids = np.unique(outbreaks[:, 0])
+    # select train and test sim ids
+    train_sim_ids = np.random.choice(sim_ids, int(len(sim_ids) * train_ratio), replace=False)
+    test_sim_ids = sim_ids[~np.isin(sim_ids, train_sim_ids)]
+    print("Train sim ids:", train_sim_ids)
+    print("Test sim ids:", test_sim_ids)
+    print("Train sim ids size:", len(train_sim_ids))
+    print("Test sim ids size:", len(test_sim_ids))
+    train_outbreaks = outbreaks[np.isin(outbreaks[:, 0], train_sim_ids)]
+    test_outbreaks = outbreaks[np.isin(outbreaks[:, 0], test_sim_ids)]
+    print("Train outbreaks size:", train_outbreaks.shape)
+    print("Test outbreaks size:", test_outbreaks.shape)
+    # save train and test outbreaks
+    np.savez_compressed(data_path.split('.')[0] + '_train.npz', outbreaks=train_outbreaks)
+    np.savez_compressed(data_path.split('.')[0] + '_test.npz', outbreaks=test_outbreaks)
+    # return train_outbreaks, test_outbreaks
+    print("Train and test outbreaks saved.")
+
+    
 if __name__ == "__main__":
     # preprocess_SIR_categorical_data(load_csv=False, graph='lattice')
-    preprocess_SIR_continous_data(load_csv=False, graph='SB_high_v2')
+    # preprocess_SIR_continous_data(load_csv=False, graph='SB_high_v2')
     # read_us_outbreaks()
+    split_train_test('cache/outbreaks_lattice/SIR_outbreaks_continuous.npz')
