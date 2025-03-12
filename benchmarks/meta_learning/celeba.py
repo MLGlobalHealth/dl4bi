@@ -12,23 +12,25 @@ import numpy as np
 import optax
 import pandas as pd
 import wandb
+from hydra.utils import instantiate
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 from sps.utils import build_grid
 from tqdm import tqdm
 
-from dl4bi.meta_learning.train_utils import (
+from dl4bi.core.train import (
     Callback,
-    cfg_to_run_name,
     cosine_annealing_lr,
     evaluate,
-    instantiate,
-    log_img_plots,
-    regression_to_rgb,
     save_ckpt,
-    select_steps,
     train,
+)
+from dl4bi.meta_learning.data.spatial import SpatialData
+from dl4bi.meta_learning.utils import (
+    cfg_to_run_name,
+    regression_to_rgb,
+    wandb_2d_img_callback,
 )
 
 
@@ -45,7 +47,9 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders()
+    train_dataloader, valid_dataloader, test_dataloader, clbk_dataloader = (
+        build_dataloaders()
+    )
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -56,20 +60,22 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
-    train_step, valid_step = select_steps(model)
+    output_fn = model.output_fn
+    model = model.copy(output_fn=lambda x: output_fn(x, min_std=0.05))
     clbk = partial(
-        log_img_plots,
-        shape=(32, 32, 3),
+        wandb_2d_img_callback,
         remap_colors=regression_to_rgb,
+        filename_prefix="celeba",
     )
     state = train(
         rng_train,
         model,
         optimizer,
-        train_step,
-        valid_step,
+        model.train_step,
+        model.valid_step,
         train_dataloader,
         valid_dataloader,
+        clbk_dataloader,  # callback_dataloader
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
@@ -78,7 +84,7 @@ def main(cfg: DictConfig):
     metrics = evaluate(
         rng_test,
         state,
-        valid_step,
+        model.valid_step,
         test_dataloader,
         cfg.valid_num_steps,
     )
@@ -92,50 +98,32 @@ def build_dataloaders(
     batch_size: int = 16,
     num_ctx_min: int = 16,
     num_ctx_max: int = 128,
-    num_test_max: int = 256,
+    num_test: int = 256,
 ):
     prepare_data()
-    B, L = batch_size, 32 * 32
+    B = batch_size
     # load & convert from [0, 255] -> [-0.5, 0.5] -> [-1, 1]
     train_ds = 2 * (np.load("cache/celeba/train.npy", mmap_mode="r") / 255.0 - 0.5)
     valid_ds = 2 * (np.load("cache/celeba/valid.npy", mmap_mode="r") / 255.0 - 0.5)
     test_ds = 2 * (np.load("cache/celeba/test.npy", mmap_mode="r") / 255.0 - 0.5)
-    s_test = build_grid([dict(start=-2.0, stop=2.0, num=32)] * 2).reshape(L, 2)
-    s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
-    valid_lens_test = jnp.repeat(num_test_max, B)  # similar to ANP, Appendix D
+    s = build_grid([dict(start=-2.0, stop=2.0, num=32)] * 2)
+    s = jnp.repeat(s[None], B, axis=0)  # [B, S, S, 2]
 
-    def build_dataloader(dataset):
+    def build_dataloader(dataset, is_callback: bool = False):
         N = dataset.shape[0]
 
         def dataloader(rng: jax.Array):
             while True:
-                rng_batch, rng_permute, rng_valid, rng = random.split(rng, 4)
-                batch_idx = random.choice(rng_batch, N, (B,), replace=False)
-                permute_idx = random.choice(rng_permute, L, (L,), replace=False)
-                f_test = dataset[batch_idx]
-                f_test = f_test.reshape(B, -1, 3)  # [B, H, W, 3] -> [B, L, 3]
-                inv_permute_idx = jnp.argsort(permute_idx)
-                # permute the order and select the first valid_lens_ctx for context
-                s_test_permuted = s_test[:, permute_idx, :]
-                f_test_permuted = f_test[:, permute_idx, :]
-                s_test_permuted = s_test_permuted[:, :num_test_max, :]
-                f_test_permuted = f_test_permuted[:, :num_test_max, :]
-                valid_lens_ctx = random.randint(
-                    rng_valid,
-                    (B,),
+                rng_i, rng_b, rng = random.split(rng, 3)
+                batch_idx = random.choice(rng_i, N, (B,), replace=False)
+                f = dataset[batch_idx]
+                d = SpatialData(x=None, s=s, f=f)
+                yield d.batch(
+                    rng_b,
                     num_ctx_min,
                     num_ctx_max,
-                )
-                yield (
-                    s_test_permuted[:, :num_ctx_max, :],  # s_ctx (permuted)
-                    f_test_permuted[:, :num_ctx_max, :],  # f_ctx (permuted)
-                    valid_lens_ctx,  # only the first valid lens are used/observed
-                    s_test_permuted,  # s_test (permuted)
-                    f_test_permuted,  # f_test (permuted)
-                    valid_lens_test,
-                    s_test,  # add full originals for use in callbacks, e.g. log_plots
-                    f_test,
-                    inv_permute_idx,
+                    32 * 32 if is_callback else num_test,
+                    test_includes_ctx=True,
                 )
 
         return dataloader
@@ -144,6 +132,7 @@ def build_dataloaders(
         build_dataloader(train_ds),
         build_dataloader(valid_ds),
         build_dataloader(test_ds),
+        build_dataloader(valid_ds, True),
     )
 
 

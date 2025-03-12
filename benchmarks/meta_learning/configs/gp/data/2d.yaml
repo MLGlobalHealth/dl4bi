@@ -9,5 +9,6 @@ s:
 num_ctx:
   min: 12 # ~5%
   max: 128 # ~50%
+num_test: 256
 batch_size: 16
 obs_noise: 0.1

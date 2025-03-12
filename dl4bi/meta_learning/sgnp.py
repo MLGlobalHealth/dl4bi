@@ -10,8 +10,8 @@ from jraph import GraphsTuple
 from ..core.gnn import EdgeBiasedGAT
 from ..core.knn import STkNN, kNN
 from ..core.mlp import MLP
-from ..core.utils import mask_from_valid_lens
-from .transform import diagonal_mvn
+from .model_output import DiagonalMVNOutput
+from .steps import likelihood_train_step, likelihood_valid_step
 
 
 class SGNP(nn.Module):
@@ -37,6 +37,8 @@ class SGNP(nn.Module):
         head: Transforms the test nodes into model output.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
+        train_step: What training step to use.
+        valid_step: What validation step to use.
 
     Returns:
         An instance of the `SGNP` model.
@@ -51,7 +53,9 @@ class SGNP(nn.Module):
     norm: nn.Module = nn.LayerNorm()
     gnn: nn.Module = EdgeBiasedGAT()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
-    output_fn: Callable = diagonal_mvn
+    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    train_step: Callable = likelihood_train_step
+    valid_step: Callable = likelihood_valid_step
 
     @nn.compact
     def __call__(
@@ -59,8 +63,7 @@ class SGNP(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, S]
         f_ctx: jax.Array,  # [B, L_ctx, F]
         s_test: jax.Array,  # [B, L_test, S]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
         **kwargs,
     ):
@@ -76,12 +79,12 @@ class SGNP(nn.Module):
         nodes = jnp.vstack([n_ctx.reshape(B * N_c, -1), n_test.reshape(B * N_t, -1)])
         g = self.graph  # if a graph is provided, reuse it, updating only nodes
         if g is None:
-            g = build_graph(self.knn, s_ctx, s_test, valid_lens_ctx)
+            g = build_graph(self.knn, s_ctx, s_test, mask_ctx)
         g = g._replace(nodes=nodes)
         g = self.gnn(g, training, **kwargs)
         n_t = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
-        f_dist = self.head(n_t, training)
-        return self.output_fn(f_dist)
+        output = self.head(n_t, training)
+        return self.output_fn(output)
 
 
 @partial(jit, static_argnames=("knn",))
@@ -89,7 +92,7 @@ def build_graph(
     knn: Union[kNN, STkNN],
     s_ctx: jax.Array,  # [B, L_ctx, S]
     s_test: jax.Array,  # [B, L_test, S]
-    valid_lens_ctx: Optional[jax.Array] = None,  # [B]
+    mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
 ):
     """Builds a single graph from a batch of tasks.
 
@@ -98,10 +101,9 @@ def build_graph(
     `nodes` will be of shape `[B * N_c + B * N_t, D]`.
     """
     (B, N_t), N_c, K = s_test.shape[:-1], s_ctx.shape[1], knn.k
-    if valid_lens_ctx is None:
-        valid_lens_ctx = jnp.repeat(N_c, B)
-    mask = mask_from_valid_lens(N_c, valid_lens_ctx)
-    s_send = jnp.where(mask, s_ctx, jnp.inf)  # masked values = far away for kNN
+    s_send = s_ctx
+    if mask_ctx is not None:  # masked vlaues = far away for kNN
+        s_send = jnp.where(mask_ctx[..., None], s_ctx, jnp.inf)
     s_cc, d_cc = knn(s_ctx, s_send)  # s_cc: [B, Q_c, K], d_cc: [B, Q_c, K, D]
     s_ct, d_ct = knn(s_test, s_send)  # s_ct: [B, Q_t, K], d_ct: [B, Q_t, K, D]
     D = d_cc.shape[-1]

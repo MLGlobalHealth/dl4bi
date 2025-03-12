@@ -1,7 +1,7 @@
 defaults:
   - _self_ # use default global values below
   - data: 1d
-  - model: 1d/tnp_kr
+  - model: 1d/tnp_kr_scan
   - kernel: rbf
 seed: 42
 wandb: True

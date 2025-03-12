@@ -46,8 +46,6 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         "cnp",
         "anp",
         "canp",
-        "bnp",
-        "banp",
     ]
     models = [f"icml/{m}" for m in models]
     gp_benchmark(
@@ -111,9 +109,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     img_benchmark(
         seeds,
         "configs/sir",
-        # BNP & BANP use residual bootstrapping, which doesn't work
-        # for categorical data
-        [m for m in models if m not in ["icml/bnp", "icml/banp"]],
+        models,
         sir_main,
         overrides,
         "ICML TNP-KR - SIR",

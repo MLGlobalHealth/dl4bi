@@ -9,6 +9,18 @@ from jax import jit, random, vmap
 from jax.tree_util import Partial
 
 
+class IDEmbedding(nn.Module):
+    """Embeds IDs, which are assumed to be the first channel of the last dimension of `x`."""
+
+    num_ids: int
+    num_features: int
+
+    @nn.compact
+    def __call__(self, x: jax.Array, training: bool = False):
+        ids = nn.Embed(self.num_ids, self.num_features)(x[..., 0])
+        return jnp.concat([ids, x[..., 1:]], axis=-1)
+
+
 class ResidualEmbedding(nn.Module):
     """Returns [x, embed(x)]."""
 

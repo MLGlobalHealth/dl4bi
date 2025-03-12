@@ -1,6 +1,5 @@
 import importlib
 import math
-from collections import defaultdict
 from functools import partial
 from typing import Callable, Optional
 
@@ -8,8 +7,6 @@ import jax
 import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import numpy as np
-import scoringrules as sr
 from jax import jit, random
 from jax.scipy.stats import norm
 from numpyro.infer import MCMC, NUTS

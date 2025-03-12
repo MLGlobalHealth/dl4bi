@@ -39,8 +39,7 @@ class ConvDeepSet(nn.Module):
         s_ctx: jax.Array,
         f_ctx: jax.Array,
         s_test: jax.Array,
-        valid_lens_ctx: Optional[jax.Array] = None,
-        valid_lens_test: Optional[jax.Array] = None,
+        mask_ctx: Optional[jax.Array] = None,
         **kwargs,
     ):
         d_in = f_ctx.shape[-1] + self.use_density
@@ -49,7 +48,7 @@ class ConvDeepSet(nn.Module):
             s_ctx,
             s_test,
             f_ctx,
-            valid_lens_ctx,
+            mask_ctx,
             self.use_density,
             log_ls,
         )
@@ -61,7 +60,7 @@ def _deep_set(
     s_ctx: jax.Array,
     s_test: jax.Array,
     f_ctx: jax.Array,
-    valid_lens_ctx: Optional[jax.Array],
+    mask_ctx: Optional[jax.Array],
     use_density: bool,
     log_ls: jax.Array,
 ):
@@ -74,10 +73,10 @@ def _deep_set(
         density = jnp.ones((B, L_ctx, 1))
         f_test = jnp.concatenate([density, f_ctx], axis=-1)  # [B, L_ctx, d_in]
     f_test = f_test[:, None, ...] * rbf_w  # [B, L_test, L_ctx, d_in]
-    if valid_lens_ctx is None:
-        valid_lens_ctx = jnp.repeat(L_ctx, B)
-    mask = (jnp.arange(L_ctx) < valid_lens_ctx[:, None])[:, None, :, None]
-    f_test = f_test.sum(axis=2, where=mask)  # [B, L_test, d_in]
+    if mask_ctx is None:
+        f_test = f_test.sum(axis=2)
+    else:
+        f_test = f_test.sum(axis=2, where=mask_ctx[:, None, :, None])
     if use_density:
         density, conv = f_test[..., :1], f_test[..., 1:]
         normed_conv = conv / (density + 1e-8)

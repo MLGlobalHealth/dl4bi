@@ -6,7 +6,8 @@ import jax.numpy as jnp
 
 from ..core.attention import MultiHeadAttention
 from ..core.mlp import MLP
-from .transform import diagonal_mvn
+from .model_output import DiagonalMVNOutput
+from .steps import likelihood_train_step, likelihood_valid_step
 
 
 class CANP(nn.Module):
@@ -34,6 +35,8 @@ class CANP(nn.Module):
         dec: A decoder for test locations, aka a prediction head.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
+        train_step: What training step to use.
+        valid_step: What validation step to use.
 
     Returns:
         An instance of a `CANP`.
@@ -56,7 +59,9 @@ class CANP(nn.Module):
         num_heads=8,
     )
     dec: nn.Module = MLP([128] * 4 + [2])
-    output_fn: Callable = diagonal_mvn
+    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    train_step: Callable = likelihood_train_step
+    valid_step: Callable = likelihood_valid_step
 
     @nn.compact
     def __call__(
@@ -64,25 +69,18 @@ class CANP(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array] = None,  # [B, K]
         training: bool = False,
         **kwargs,
     ):
-        r_ctx = self.encode_deterministic(s_ctx, f_ctx, valid_lens_ctx, training)
-        return self.decode(
-            r_ctx,
-            s_ctx,
-            s_test,
-            valid_lens_ctx,
-            training,
-        )
+        r_ctx = self.encode_deterministic(s_ctx, f_ctx, mask_ctx, training)
+        return self.decode(r_ctx, s_ctx, s_test, mask_ctx, training)
 
     def encode_deterministic(
         self,
-        s_ctx: jax.Array,  # [B, L, D_s]
-        f_ctx: jax.Array,  # [B, L, D_f]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
+        s_ctx: jax.Array,  # [B, L_ctx, D_s]
+        f_ctx: jax.Array,  # [B, L_ctx, D_f]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
     ):
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
@@ -91,7 +89,7 @@ class CANP(nn.Module):
             s_f_ctx_embed,
             s_f_ctx_embed,
             s_f_ctx_embed,
-            valid_lens_ctx,
+            mask_ctx,
             training,
         )
         return r_ctx
@@ -101,17 +99,16 @@ class CANP(nn.Module):
         r_ctx: jax.Array,  # [B, d_ffn]
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         s_test: jax.Array,  # [B, L_test, D_s]
-        valid_lens_ctx: Optional[jax.Array],  # [B]
-        d_f: int,
+        mask_ctx: Optional[jax.Array],  # [B, L_ctx]
         training: bool = False,
     ):
         r, _ = self.cross_attn(
-            self.embed_s(s_test),  # qs
-            self.embed_s(s_ctx),  # ks
-            r_ctx,  # vs
-            valid_lens_ctx,
+            self.embed_s(s_test),
+            self.embed_s(s_ctx),
+            r_ctx,
+            mask_ctx,
             training,
         )  # [B, L_test, d_ffn]
         q = jnp.concatenate([r, s_test], -1)  # [B, L_test, d_ffn + D_s]
-        f_dist = self.dec(q, training)
-        return self.output_fn(f_dist)
+        output = self.dec(q, training)
+        return self.output_fn(output)

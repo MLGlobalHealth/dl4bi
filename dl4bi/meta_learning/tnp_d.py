@@ -6,7 +6,8 @@ import jax.numpy as jnp
 
 from ..core.mlp import MLP
 from ..core.transformer import TransformerEncoder
-from .transform import diagonal_mvn
+from .model_output import DiagonalMVNOutput
+from .steps import likelihood_train_step, likelihood_valid_step
 
 
 class TNPD(nn.Module):
@@ -18,6 +19,8 @@ class TNPD(nn.Module):
         head: Transforms the tokens into model output.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
+        train_step: What training step to use.
+        valid_step: What validation step to use.
 
     Returns:
         An instance of the `TNP-D` model.
@@ -26,7 +29,9 @@ class TNPD(nn.Module):
     embed_s_f: nn.Module = MLP([64] * 4)
     enc: nn.Module = TransformerEncoder()
     head: nn.Module = MLP([128, 2], nn.relu)
-    output_fn: Callable = diagonal_mvn
+    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    train_step: Callable = likelihood_train_step
+    valid_step: Callable = likelihood_valid_step
 
     @nn.compact
     def __call__(
@@ -34,8 +39,7 @@ class TNPD(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, D_S]
         f_ctx: jax.Array,  # [B, L_ctx, D_F]
         s_test: jax.Array,  # [B, L_test, D_S]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
         **kwargs,
     ):
@@ -52,25 +56,31 @@ class TNPD(nn.Module):
             s_test: A location array of shape `[B, L_test, D_S]` where `B` is
                 batch size, `L_test` is number of test locations, and `D_S`
                 is the dimension of each location.
-            valid_lens_ctx: An optional array of shape `(B,)` indicating the
-                valid positions for each `L_ctx` sequence in the batch.
-            valid_lens_test: An optional array of shape `(B,)` indicating the
-                valid positions for each `L_test` sequence in the batch.
+            mask_ctx: An optional array of shape `[B, L_ctx]`
             training: A boolean indicating whether this call is performed during
                 training.
 
         Returns:
             $\mu_f,\log(\sigma_f^2\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
-        (B, L_test, _), L_ctx = s_test.shape, s_ctx.shape[1]
-        if valid_lens_ctx is None:
-            valid_lens_ctx = jnp.repeat(L_ctx, B)
+        (B, L_ctx), L_test = s_ctx[:2], s_test.shape[1]
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         s_f_test = jnp.concatenate([s_test, f_test], axis=-1)
         s_f = jnp.concatenate([s_f_ctx, s_f_test], axis=1)
         s_f_embed = self.embed_s_f(s_f, training)
-        s_f_enc = self.enc(s_f_embed, valid_lens_ctx, training, **kwargs)
+        if mask_ctx is None:
+            mask_ctx = jnp.ones((B, L_ctx), dtype=bool)
+            mask_test = jnp.zeros((B, L_test), dtype=bool)
+            mask = jnp.concat([mask_ctx, mask_test], axis=1)
+        else:
+            mask = jnp.pad(
+                mask_ctx,
+                pad_width=((0, 0), (0, L_test)),
+                mode="constant",
+                constant_values=False,
+            )
+        s_f_enc = self.enc(s_f_embed, mask, training, **kwargs)
         s_f_test_enc = s_f_enc[:, -L_test:, ...]
-        f_dist = self.head(s_f_test_enc, training)
-        return self.output_fn(f_dist)
+        output = self.head(s_f_test_enc, training)
+        return self.output_fn(output)

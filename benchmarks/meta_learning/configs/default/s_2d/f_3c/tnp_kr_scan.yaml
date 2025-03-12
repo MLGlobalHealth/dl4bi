@@ -1,47 +1,45 @@
-cls: ScanTNPKR
-kwargs:
-  num_blks: 6
-  num_reps: 1
-  embed_s:
-    func: 'lambda s: jnp.array([])'
-  embed_all:
-    cls: MLP
-    kwargs:
-      dims: [256, 128, 64]
-      act_fn: gelu
-  blk:
-    cls: KRBlock
-    kwargs:
-      attn:
-        cls: MultiHeadAttention
-        kwargs:
-          attn:
-            cls: RBFNetworkBiasedScanAttention
-            kwargs:
-              qs_chunk_size: 1024
-              ks_chunk_size: 1024
-              num_basis: 5
-          proj_qs:
-            cls: MLP
-            kwargs:
-              dims: [128]
-          proj_ks:
-            cls: MLP
-            kwargs:
-              dims: [128]
-          proj_vs:
-            cls: MLP
-            kwargs:
-              dims: [128, 64]
-      ffn:
-        cls: MLP
-        kwargs:
-          dims: [256, 64]
-          act_fn: gelu
-  head:
-    cls: MLP
-    kwargs:
-      dims: [256, 64, 3]
-      act_fn: gelu
-  output_fn:
-    func: identity
+_target_: dl4bi.meta_learning.ScanTNPKR
+num_blks: 6
+num_reps: 1
+embed_s:
+  _target_: dl4bi.meta_learning.utils.x_to_empty_array
+  _partial_: true
+embed_all:
+  _target_: dl4bi.mlp.MLP
+  dims: [256, 128, 64]
+  act_fn:
+    _target_: jax.nn.gelu
+    _partial_: true
+blk:
+  _target_: dl4bi.transformer.KRBlock
+  attn:
+    _target_: dl4bi.attention.MultiHeadAttention
+    attn:
+      _target_: dl4bi.attention.TISABiasedScanAttention
+      qs_chunk_size: 1024
+      ks_chunk_size: 1024
+      num_basis: 5
+    proj_qs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_ks:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_vs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128, 64]
+  ffn:
+    _target_: dl4bi.mlp.MLP
+    dims: [256, 64]
+    act_fn:
+      _target_: jax.nn.gelu
+      _partial_: true
+head:
+  _target_: dl4bi.mlp.MLP
+  dims: [256, 64, 3]
+  act_fn:
+    _target_: jax.nn.gelu
+    _partial_: true
+output_fn:
+  _target_: dl4bi.meta_learning.model_output.MultinomialOutput.from_conditional_np
+  _partial_: true

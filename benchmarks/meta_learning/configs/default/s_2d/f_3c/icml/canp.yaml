@@ -1,56 +1,43 @@
-cls: CANP
-kwargs:
-  embed_s:
-    cls: MLP
-    kwargs:
-      dims: [512, 128]
-  enc_det:
-    cls: MLP
-    kwargs:
-      dims: [512, 256, 128]
-  self_attn_det:
-    cls: MultiHeadAttention
-    kwargs:
-      num_heads: 8
-      proj_qs:
-        cls: MLP
-        kwargs:
-          dims: [128]
-      proj_ks:
-        cls: MLP
-        kwargs:
-          dims: [128]
-      proj_vs:
-        cls: MLP
-        kwargs:
-          dims: [128]
-      proj_out:
-        cls: MLP
-        kwargs:
-          dims: [128]
-  cross_attn:
-    cls: MultiHeadAttention
-    kwargs:
-      num_heads: 8
-      proj_qs:
-        cls: MLP
-        kwargs:
-          dims: [128]
-      proj_ks:
-        cls: MLP
-        kwargs:
-          dims: [128]
-      proj_vs:
-        cls: MLP
-        kwargs:
-          dims: [128]
-      proj_out:
-        cls: MLP
-        kwargs:
-          dims: [128]
-  dec:
-    cls: MLP
-    kwargs:
-      dims: [512, 128, 128, 128, 3]
-  output_fn:
-    func: identity
+_target_: dl4bi.meta_learning.CANP
+embed_s:
+  _target_: dl4bi.mlp.MLP
+  dims: [512, 128]
+enc_det:
+  _target_: dl4bi.mlp.MLP
+  dims: [512, 256, 128]
+self_attn_det:
+  _target_: dl4bi.attention.MultiHeadAttention
+  num_heads: 8
+  proj_qs:
+    _target_: dl4bi.mlp.MLP
+    dims: [128]
+  proj_ks:
+    _target_: dl4bi.mlp.MLP
+    dims: [128]
+  proj_vs:
+    _target_: dl4bi.mlp.MLP
+    dims: [128]
+  proj_out:
+    _target_: dl4bi.mlp.MLP
+    dims: [128]
+cross_attn:
+  _target_: dl4bi.attention.MultiHeadAttention
+  num_heads: 8
+  proj_qs:
+    _target_: dl4bi.mlp.MLP
+    dims: [128]
+  proj_ks:
+    _target_: dl4bi.mlp.MLP
+    dims: [128]
+  proj_vs:
+    _target_: dl4bi.mlp.MLP
+    dims: [128]
+  proj_out:
+    _target_: dl4bi.mlp.MLP
+    dims: [128]
+dec:
+  _target_: dl4bi.mlp.MLP
+  dims: [512, 128, 128, 128, 3]
+output_fn:
+  _target_: dl4bi.meta_learning.model_output.MultinomialOutput.from_conditional_np
+  _partial_: true

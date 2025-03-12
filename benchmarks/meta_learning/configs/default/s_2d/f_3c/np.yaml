@@ -1,21 +1,17 @@
-cls: NP
-kwargs:
-  enc_det:
-    cls: MLP
-    kwargs:
-      dims: [128, 128, 128, 128, 128, 128]
-  enc_lat:
-    cls: MLP
-    kwargs:
-      dims: [128, 128, 128]
-  z_dist:
-    cls: MLP
-    kwargs:
-      dims: [128, 256]
-  dec:
-    cls: MLP
-    kwargs:
-      dims: [128, 128, 128, 128, 6]
-  n_z: 1
-  output_fn:
-    func: latent_logits
+_target_: dl4bi.meta_learning.NP
+enc_det:
+  _target_: dl4bi.mlp.MLP
+  dims: [128, 128, 128, 128, 128, 128]
+enc_lat:
+  _target_: dl4bi.mlp.MLP
+  dims: [128, 128, 128]
+z_dist:
+  _target_: dl4bi.mlp.MLP
+  dims: [128, 256]
+dec:
+  _target_: dl4bi.mlp.MLP
+  dims: [128, 128, 128, 128, 3]
+n_z: 1
+output_fn:
+  _target_: dl4bi.meta_learning.model_output.MultinomialOutput.from_latent_np
+  _partial_: true

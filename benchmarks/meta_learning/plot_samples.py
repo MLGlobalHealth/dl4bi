@@ -183,8 +183,8 @@ def plot_2d_img_samples(
                 valid_lens_test,
                 rngs={"dropout": rng_dropout, "extra": rng_extra},
             )
-            if isinstance(output[1], tuple):  # latent or bootstrapped
-                output, _ = output  # throw away latent zs or base samples
+            if isinstance(output[1], tuple):  # latent
+                output, _ = output  # throw away latent samples
             if is_categorical:
                 output = pointwise_multinomial(output)
             f_mu, f_std = output
