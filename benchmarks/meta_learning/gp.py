@@ -265,7 +265,9 @@ def plot_posterior_predictives(
             f_mu_i = f_mu[s : s + K].squeeze()
             f_std_i = f_std[s : s + K].squeeze()
         title = f"Sample {i} (var: {var[i]:0.2f}, ls: {ls[i]:0.2f}"
-        title += f", period: {period[i]:0.2f})" if jnp.isfinite(period) else ")"
+        title += (
+            f", period: {period[i]:0.2f})" if period and jnp.isfinite(period) else ")"
+        )
         fig = plot_posterior_predictive(
             s_ctx_i, f_ctx_i, s_test_i, f_test_i, f_mu_i, f_std_i
         )
