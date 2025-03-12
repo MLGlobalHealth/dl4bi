@@ -29,8 +29,6 @@ def evaluate(
 
     results_dir = Path(os.environ["RESULTS_DIR"])
     logfile = open(results_dir / "log.csv", "a", newline="")
-    writer = csv.DictWriter(logfile, strategies)
-    writer.writeheader()
 
     pbar = tqdm(dataloader, total=N, desc="Evaluating")
 
@@ -68,6 +66,9 @@ def evaluate(
             nlls[f"{strategy}_gp"].append(nll_gp)
 
         # log batch-mean nll to csv
+        if i == 0:
+            writer = csv.DictWriter(logfile, list(nlls.keys()))
+            writer.writeheader()
         writer.writerow({strategy: np.mean(nll[-1]) for strategy, nll in nlls.items()})
         # report running mean to tqdm
         pbar.set_postfix(
