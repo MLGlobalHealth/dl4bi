@@ -7,10 +7,10 @@ embed_all:
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
-dist:
-  _target_: dl4bi.dist.dist_spatial
+s_sim:
+  _target_: dl4bi.sim.dist_spatial
   _partial_: true
-bias:
+s_bias:
   _target_: dl4bi.bias.TISABias
   num_basis: 5
   num_heads: 4

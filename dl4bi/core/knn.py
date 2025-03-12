@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap
 
-from .dist import dist_spatial, dist_spatiotemporal
+from .sim import dist_spatial, dist_spatiotemporal
 
 
 @partial(jit, static_argnames=("k", "num_q_parallel", "recall_target"))

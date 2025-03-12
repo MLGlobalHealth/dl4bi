@@ -1,4 +1,3 @@
-import operator
 from functools import partial
 from typing import Callable, Optional
 
@@ -8,23 +7,22 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap
 
-from .dist import dist_spatial
+from .sim import dist_spatial
 
 
 class DistanceBias(nn.Module):
     num_heads: int = 4
-    channel: int = 0
 
     @nn.compact
     def __call__(
         self,
-        d: jax.Array,  # [B, Q, K, D] or [E, D]
+        d: jax.Array,  # [B, Q, K] or [E, D]
         mask: Optional[jax.Array] = None,  # None or [B, Q, K] or [E]
     ):
         a = self.param("a", init.constant(-1), (self.num_heads,))
         if mask is None:
             mask = jnp.array([True])
-        return distance_bias(d[..., self.channel], mask, a)  # [B, H, Q, K]
+        return distance_bias(d, mask, a)  # [B, H, Q, K]
 
 
 @jit
@@ -50,7 +48,6 @@ def distance_bias(
 class RBFNetworkBias(nn.Module):
     num_heads: int = 4
     num_basis: int = 5
-    channel: int = 0
 
     @nn.compact
     def __call__(
@@ -62,7 +59,7 @@ class RBFNetworkBias(nn.Module):
         b = self.param("b", init.constant(1), (self.num_heads, self.num_basis))
         if mask is None:
             mask = jnp.array([True])
-        return rbf_network_bias(d[..., self.channel], mask, a, b)  # [B, H, Q, K]
+        return rbf_network_bias(d, mask, a, b)  # [B, H, Q, K]
 
 
 @jit
@@ -90,16 +87,15 @@ def rbf_network_bias(
     return d_rbf  # [B, H, Q, K]
 
 
-@partial(jit, static_argnames=("func", "channel"))
+@partial(jit, static_argnames=("func",))
 def scanned_rbf_network_bias(
     qs_meta: jax.Array,  # [B, Q, M]
     ks_meta: jax.Array,  # [B, K, M]
     a: jax.Array,  # [H, F]
     b: jax.Array,  # [H, F]
     func: Callable = dist_spatial,
-    channel: int = 0,
 ):
-    d = vmap(func)(qs_meta, ks_meta)[..., channel]  # [B, Q, K]
+    d = vmap(func)(qs_meta, ks_meta)  # [B, Q, K]
     mask = jnp.isfinite(d)
     return rbf_network_bias(d, mask, a, b)
 
@@ -109,7 +105,6 @@ class TISABias(nn.Module):
 
     num_heads: int = 4
     num_basis: int = 5
-    channel: int = 0
 
     @nn.compact
     def __call__(
@@ -122,7 +117,7 @@ class TISABias(nn.Module):
         c = self.param("c", init.constant(1), (self.num_heads, self.num_basis))
         if mask is None:
             mask = jnp.array([True])
-        return tisa_bias(d[..., self.channel], mask, a, b, c)  # [B, H, Q, K]
+        return tisa_bias(d, mask, a, b, c)  # [B, H, Q, K]
 
 
 @jit
@@ -152,7 +147,7 @@ def tisa_bias(
     return d_tisa  # [B, H, Q, K]
 
 
-@partial(jit, static_argnames=("func", "channel"))
+@partial(jit, static_argnames=("func",))
 def scanned_tisa_bias(
     qs_meta: jax.Array,  # [B, Q, M]
     ks_meta: jax.Array,  # [B, K, M]
@@ -160,9 +155,8 @@ def scanned_tisa_bias(
     b: jax.Array,  # [H, F]
     c: jax.Array,  # [H, F]
     func: Callable = dist_spatial,
-    channel: int = 0,
 ):
-    d = vmap(func)(qs_meta, ks_meta)[..., channel]  # [B, Q, K]
+    d = vmap(func)(qs_meta, ks_meta)  # [B, Q, K]
     mask = jnp.isfinite(d)
     return tisa_bias(d, mask, a, b, c)
 
@@ -171,17 +165,3 @@ def scanned_tisa_bias(
 def zero_bias(qs_meta, ks_meta):
     (B, Q, _M), K = qs_meta.shape, ks_meta.shape[1]
     return jnp.zeros((B, 1, Q, K))  # [B, H, Q, K]
-
-
-class SpatiotemporalBias(nn.Module):
-    spatial_bias: nn.Module = RBFNetworkBias(channel=0)
-    temporal_bias: nn.Module = RBFNetworkBias(num_basis=1, channel=1)
-    op: Callable = operator.add
-
-    @nn.compact
-    def __call__(
-        self,
-        d: jax.Array,  # [B, Q, K, D] or [E, D]
-        mask: Optional[jax.Array] = None,  # None or [B, Q, K] or [E]
-    ):
-        return self.op(self.spatial_bias(d, mask), self.temporal_bias(d, mask))

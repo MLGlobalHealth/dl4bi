@@ -34,4 +34,4 @@ def dist_spatiotemporal(
 
 @jit
 def dist_spatial(q: jax.Array, r: jax.Array):
-    return l2_dist(q, r)[..., None]  # [Q, R, D=1]
+    return l2_dist(q, r)
