@@ -1,14 +1,14 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 import jax
 import jax.numpy as jnp
-from jax import jit, random
+from dataloader import build_gp_dataloader
+from jax import random
 from omegaconf import OmegaConf
 
 from dl4bi.meta_learning.autoregressive import AutoregressiveSampler
-from dl4bi.meta_learning.train_utils import build_gp_dataloader, load_ckpt
+from dl4bi.meta_learning.train_utils import load_ckpt
 
 device = jax.devices()[0]
 

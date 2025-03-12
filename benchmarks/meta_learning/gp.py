@@ -104,7 +104,7 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
 
     def gen_batch(rng: jax.Array):
-        rng_s, rng_gp, rng_v, rng_ctx, rng_test = random.split(rng, 5)
+        rng_s, rng_gp, rng_v, rng_ctx = random.split(rng, 4)
         s_r = random.uniform(rng_s, (Nc_max, S), jnp.float32, s_min, s_max)
         s = jnp.vstack([s_r, s_g])
         f, var, ls, period, *_ = gp.simulate(rng_gp, s, B)
@@ -113,7 +113,6 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
         s_ctx = s[:, :Nc_max, :]
         f_ctx = f + obs_noise * random.normal(rng_ctx, f.shape)
         f_ctx = f_ctx[:, :Nc_max, :]
-        f = f + obs_noise * random.normal(rng_test, f.shape)
         return s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, var, ls, period
 
     def dataloader(rng: jax.Array):

@@ -7,11 +7,12 @@ from typing import Generator
 
 import jax
 import numpy as np
+from dataloader import build_gp_dataloader
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
 from dl4bi.meta_learning.autoregressive import AutoregressiveSampler, Strategy
-from dl4bi.meta_learning.train_utils import build_gp_dataloader, load_ckpt
+from dl4bi.meta_learning.train_utils import load_ckpt
 
 
 def evaluate(
