@@ -26,7 +26,6 @@ def evaluate(
     save_full_log_every: int | None,
 ):
     nlls = defaultdict(list)
-    max_nll = defaultdict(lambda: float("-inf"))
 
     results_dir = Path(os.environ["RESULTS_DIR"])
     logfile = open(results_dir / "log.csv", "a", newline="")
@@ -38,10 +37,21 @@ def evaluate(
     for i, datum in enumerate(pbar):
         if i >= N:
             break
-        s_ctx, f_ctx, s_test, f_test, valid_lens_ctx = datum
+        (s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, f_test_obs) = datum
         for strategy in strategies:
             rng, rng_i = jax.random.split(rng)
-            nll = -model.logpdf(
+            nll_obs = -model.logpdf(
+                rng_i,
+                s_ctx,
+                f_ctx,
+                s_test,
+                f_test_obs,
+                valid_lens_ctx,
+                strategy,
+                num_samples_for_random,
+                batching_for_random,
+            )
+            nll_gp = -model.logpdf(
                 rng_i,
                 s_ctx,
                 f_ctx,
@@ -53,16 +63,9 @@ def evaluate(
                 batching_for_random,
             )
 
-            # alert about low assigned densities
-            max = nll.max()
-            if max_nll[strategy] < max:
-                print(
-                    f"New lowest probability assigned for {strategy}: batch {i}, index in batch {nll.argmax()}, nll {max}"
-                )
-                max_nll[strategy] = max
-
             # save data
-            nlls[strategy].append(nll)
+            nlls[f"{strategy}_obs"].append(nll_obs)
+            nlls[f"{strategy}_gp"].append(nll_gp)
 
         # log batch-mean nll to csv
         writer.writerow({strategy: np.mean(nll[-1]) for strategy, nll in nlls.items()})
@@ -88,11 +91,29 @@ def dataloader(rng, data, kernel):
     gp_dataloader = build_gp_dataloader(data, kernel)(rng)
     num_ctx = data.num_ctx.max
     for datum in gp_dataloader:
-        s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, var, ls, period = datum
+        (
+            s_ctx,
+            f_ctx,
+            valid_lens_ctx,
+            s_test,
+            f_test,
+            f_test_obs,
+            valid_lens_test,
+            var,
+            ls,
+            period,
+        ) = datum
 
         # note that s, f come directly from the GP not the observation process
         # TODO @pgrynfelder: might be desirable to change this
-        yield s_ctx, f_ctx, s[:, num_ctx:], f[:, num_ctx:], valid_lens_ctx
+        yield (
+            s_ctx,
+            f_ctx,
+            valid_lens_ctx,
+            s_test[:, num_ctx:],
+            f_test[:, num_ctx:],
+            f_test_obs[:, num_ctx:],
+        )
 
 
 if __name__ == "__main__":

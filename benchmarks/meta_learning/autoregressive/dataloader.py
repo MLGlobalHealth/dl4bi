@@ -10,7 +10,7 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
     """Generates batches of GP observations.
 
     Note that it differs from the dataloader found in `gp.py`
-    in that `f_test` has observation noise.
+    in that it yields `f_test` with observation noise.
     """
     gp = instantiate(kernel)
     B, S = data.batch_size, len(data.s)
@@ -34,13 +34,15 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
         f_ctx = f + obs_noise * random.normal(rng_ctx, f.shape)
         f_ctx = f_ctx[:, :Nc_max, :]
         s_test = s
-        f_test = f + obs_noise * random.normal(rng_test, f.shape)
+        f_test = f
+        f_test_obs = f_test + obs_noise * random.normal(rng_test, f.shape)
         return (
             s_ctx,
             f_ctx,
             valid_lens_ctx,
             s_test,
             f_test,
+            f_test_obs,
             valid_lens_test,
             var,
             ls,
