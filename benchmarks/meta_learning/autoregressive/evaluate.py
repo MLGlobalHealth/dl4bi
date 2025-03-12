@@ -62,8 +62,8 @@ def evaluate(
             )
 
             # save data
-            nlls[f"{strategy}_obs"].append(nll_obs)
-            nlls[f"{strategy}_gp"].append(nll_gp)
+            nlls[f"nll_obs_{strategy}"].append(nll_obs)
+            nlls[f"nll_gp_{strategy}"].append(nll_gp)
 
         # log batch-mean nll to csv
         if i == 0:
@@ -71,9 +71,7 @@ def evaluate(
             writer.writeheader()
         writer.writerow({strategy: np.mean(nll[-1]) for strategy, nll in nlls.items()})
         # report running mean to tqdm
-        pbar.set_postfix(
-            {f"NLL {strategy}": np.mean(nlls[strategy]) for strategy in strategies}
-        )
+        pbar.set_postfix({strategy: np.mean(nll) for strategy, nll in nlls.items()})
 
         if save_full_log_every and i % save_full_log_every == 0:
             np.savez(
