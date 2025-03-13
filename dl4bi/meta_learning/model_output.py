@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 from jax.nn import softmax, softplus
-from jax.scipy.stats import norm
+from jax.scipy.stats import binom, norm
 from optax.losses import safe_softmax_cross_entropy
 
 # TODO(danj):
@@ -42,14 +42,14 @@ class DiagonalMVNOutput(DistributionOutput):
     std: jax.Array
 
     @classmethod
-    def from_conditional_np(cls, params: jax.Array, min_std: float = 0.0, **kwargs):
-        mu, std = jnp.split(params, 2, axis=-1)
+    def from_conditional_np(cls, output: jax.Array, min_std: float = 0.0, **kwargs):
+        mu, std = jnp.split(output, 2, axis=-1)
         std = min_std + (1 - min_std) * softplus(std)
         return DiagonalMVNOutput(mu, std)
 
     @classmethod
-    def from_latent_np(cls, params: jax.Array, min_std: float = 0.0, **kwargs):
-        mu, std = jnp.split(params, 2, axis=-1)
+    def from_latent_np(cls, output: jax.Array, min_std: float = 0.0, **kwargs):
+        mu, std = jnp.split(output, 2, axis=-1)
         std = min_std + (1 - min_std) * softplus(std)
         # average over latent n_z samples
         return DiagonalMVNOutput(mu.mean(axis=1), std.mean(axis=1))
@@ -129,4 +129,28 @@ jax.tree_util.register_pytree_node(
     MultinomialOutput,
     lambda d: ((d.logits,), None),
     lambda _aux, children: MultinomialOutput(*children),
+)
+
+
+@dataclass(frozen=True)
+class BinomialOutput(DistributionOutput):
+    n: jax.Array
+    p: jax.Array
+
+    def std(self, n: jax.Array):
+        return n * (self.p * (1 - self.p))
+
+    def nll(self, k: jax.Array, n: jax.Array, mask: Optional[jax.Array], **kwargs):
+        mask = None if mask is None else mask[..., 0]
+        return binom.logpmf(k, n, self.p).mean(where=mask)
+
+    def metrics(self, k: jax.Array, n: jax.Array, mask: Optional[jax.Array]):
+        return {"NLL": self.nll(k, n, mask)}
+
+
+# register to use in jitted functions
+jax.tree_util.register_pytree_node(
+    BinomialOutput,
+    lambda d: ((d.n, d.p), None),
+    lambda _aux, children: BinomialOutput(*children),
 )

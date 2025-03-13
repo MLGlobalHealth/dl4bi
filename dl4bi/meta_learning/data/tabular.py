@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from functools import partial
+from typing import Optional
 
 import jax
 from jax import jit, random
@@ -78,8 +79,8 @@ class TabularBatch(MetaLearningBatch):
     mask_ctx: jax.Array
     x_test: jax.Array
     f_test: jax.Array
-    mask_test: jax.Array
-    inv_permute_idx: jax.Array
+    mask_test: Optional[jax.Array] = None
+    inv_permute_idx: Optional[jax.Array] = None
 
 
 # register to use in jitted functions
