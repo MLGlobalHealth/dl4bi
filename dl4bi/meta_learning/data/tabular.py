@@ -76,7 +76,7 @@ jax.tree_util.register_pytree_node(
 class TabularBatch(MetaLearningBatch):
     x_ctx: jax.Array
     f_ctx: jax.Array
-    mask_ctx: jax.Array
+    mask_ctx: Optional[jax.Array]
     x_test: jax.Array
     f_test: jax.Array
     mask_test: Optional[jax.Array] = None
