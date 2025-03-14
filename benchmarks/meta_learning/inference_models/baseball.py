@@ -35,7 +35,13 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    rng_train, rng_test = random.split(rng)
+    rng_infer, rng_train, rng_test = random.split(rng, 3)
+    (at_bats_ctx, hits_ctx), (at_bats_test, hits_test) = load_baseball_dataset()
+    z = run_inference(rng_infer, partially_pooled, at_bats_ctx, hits_ctx, cfg.infer)
+    # TODO(danj): there is no easy way to compare log likelihoods, since HMC doesn't
+    # generate parameterized posterior distributions
+    phi_hat = z["phi"]
+    phi_test = hits_test / at_bats_test
     dataloader, test_dataloader = build_dataloaders(cfg.data)
     optimizer = optax.chain(
         optax.clip_by_global_norm(cfg.clip_max_norm),
@@ -64,7 +70,7 @@ def main(cfg: DictConfig):
     )
     batch = next(test_dataloader(rng_test))
     output = state.apply_fn({"params": state.params}, **batch)
-    print(jnp.concat([batch.f_test, output.p, output.std], axis=1))
+    print(jnp.concat([batch.f_test, output.p, output.std], axis=-1))
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -102,26 +108,6 @@ def build_dataloaders(cfg: DictConfig):
         mask_ctx = None
         return TabularBatch(x_ctx, f_ctx, mask_ctx, x_test, f_test)
 
-    # @jit
-    # def gen_batch(rng):
-    #     rng_x, rng_p1, rng_p2 = random.split(rng, 3)
-    #     hits_ctx, hits_test = random.randint(rng_x, (2, L), min_val, max_val)
-    #     ctx_samples = prior_pred(rng_p1, hits_ctx)
-    #     f_ctx = ctx_samples.pop("phi")[..., None]  # [B, L, 1]
-    #     ctx_samples.pop("obs")
-    #     test_samples = post_pred(rng_p2, ctx_samples, hits_test)
-    #     f_test = test_samples["phi"][..., None]  # [B, L, 1]
-    #     mask_ctx = None
-    #     return TabularBatch(ids, f_ctx, mask_ctx, ids, f_test)
-
-    # def test_dataloader(rng):
-    #     L = train_at_bats.shape[0]
-    #     ids = jnp.arange(L)[None, :, None]
-    #     f_ctx = (train_hits / train_at_bats)[None, :, None]  # phi
-    #     f_test = (test_hits / test_at_bats)[None, :, None]  # phi
-    #     mask_ctx = None
-    #     yield TabularBatch(ids, f_ctx, mask_ctx, ids, f_test)
-
     def test_dataloader(rng):
         L = train_at_bats.shape[0]
         ids = jnp.arange(L)[None, :, None]
@@ -156,7 +142,7 @@ def partially_pooled(at_bats, hits=None):
     with numpyro.plate("num_players", num_players):
         phi_prior = dist.Beta(m * kappa, (1 - m) * kappa)
         phi = numpyro.sample("phi", phi_prior)
-        return numpyro.sample("obs", dist.Binomial(at_bats, probs=phi), obs=hits)
+        numpyro.sample("obs", dist.Binomial(at_bats, probs=phi), obs=hits)
 
 
 def load_baseball_dataset():
