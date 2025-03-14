@@ -24,7 +24,7 @@ blk:
       dims: [128]
     proj_vs:
       _target_: dl4bi.mlp.MLP
-      dims: [128, 64]
+      dims: [128]
   ffn:
     _target_: dl4bi.mlp.MLP
     dims: [256, 64]
