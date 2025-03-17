@@ -109,12 +109,23 @@ class STGTNPKR(nn.Module):
         inv_permute_idx = kwargs['inv_permute_idx']
         inv_permute_idx_test = kwargs['inv_permute_idx_test']
     
-        permute_idx = inv_permute_idx.argsort()
-        permute_idx_test = inv_permute_idx_test.argsort()
-        d_qk_permuted = graph_dist[permute_idx_test][:, permute_idx]
-        d_kk_permuted = graph_dist[permute_idx][:, permute_idx]
-        d_qk_graph = jnp.repeat(d_qk_permuted[None,:,:], len(s_ctx), axis=0) # B x L x L
-        d_kk_graph = jnp.repeat(d_kk_permuted[None,:,:], len(s_ctx), axis=0) # B x L x L
+        # TODO: double check inv permute is correct
+        # TODO: update to suit general use (without batch)
+        permute_idx = inv_permute_idx.argsort(axis=1) # B x L
+        permute_idx_test = inv_permute_idx_test.argsort(axis=1) # B x L
+        B = inv_permute_idx.shape[0]
+        L_test = inv_permute_idx_test.shape[1]
+        L_ctx = inv_permute_idx.shape[1]
+        d_qk_graph = jnp.zeros((B, L_test, L_ctx))
+        d_kk_graph = jnp.zeros((B, L_ctx, L_ctx))
+        for b in range(inv_permute_idx.shape[0]):
+            d_qk_graph = d_qk_graph.at[b].set(graph_dist[permute_idx_test[b]][:, permute_idx[b]])
+            d_kk_graph = d_kk_graph.at[b].set(graph_dist[permute_idx[b]][:, permute_idx[b]])
+        
+        # d_qk_permuted = graph_dist[permute_idx_test][:, permute_idx]
+        # d_kk_permuted = graph_dist[permute_idx][:, permute_idx]
+        # d_qk_graph = jnp.repeat(d_qk_permuted[None,:,:], len(s_ctx), axis=0) # B x L x L
+        # d_kk_graph = jnp.repeat(d_kk_permuted[None,:,:], len(s_ctx), axis=0) # B x L x L
         
         for _ in range(self.num_blks):
             attn, ffn = self.attn.copy(), self.ffn.copy()

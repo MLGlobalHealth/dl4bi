@@ -196,11 +196,12 @@ def optimize(
     valid_lens_test = jnp.repeat(L, B)
     rng_extra, rng = random.split(rng)
     
+    inv_permute_idx_ctx = jnp.repeat(jnp.repeat(inv_permute_idx_test, num_init), B).reshape(B, -1)
+    inv_permute_idx_test = jnp.repeat(inv_permute_idx_test, B).reshape(B, -1)
+    
     loss = {"NLL": [], "RMSE": [], "MAE": [], "Coverage": []}
     
     for i in tqdm(range(budget), desc="Optimizing"):
-        inv_permute_idx = jnp.repeat(inv_permute_idx_test, num_init).flatten()
-        # inv_permute_idx_test = jnp.repeat(inv_permute, num_init).flatten()
         s_ctx = s_ctx.reshape(B, -1, D_s)
         f_ctx = f_ctx.reshape(B, -1, 1)
         
@@ -211,10 +212,10 @@ def optimize(
         print('s_test_fit shape:', s_test_i.shape)
         print('valid_lens_ctx shape:', valid_lens_ctx.shape)
         print('valid_lens_test shape:', valid_lens_test.shape)
-        print('inv_permute_idx shape:', inv_permute_idx.shape)
+        print('inv_permute_idx shape:', inv_permute_idx_ctx.shape)
         print('inv_permute_idx_test shape:', inv_permute_idx_test.shape)
         
-        f_mu, f_std, *_ = model_fn(s_ctx, f_ctx, s_test_i, valid_lens_ctx, valid_lens_test, inv_permute_idx, inv_permute_idx_test, graph_dist, rng_extra)
+        f_mu, f_std, *_ = model_fn(s_ctx, f_ctx, s_test_i, valid_lens_ctx, valid_lens_test, inv_permute_idx_ctx, inv_permute_idx_test, graph_dist, rng_extra)
         print('f_mu shape:', f_mu.shape)
         print('f_std shape:', f_std.shape)
         # print('f_mu:', f_mu)
@@ -225,30 +226,62 @@ def optimize(
         # print("max_f_std: ", max_f_std)
         
         
-        e = entropy(f_std)
+        # e = node_entropy(f_std).reshape(B, -1)
+        # e = random_policy(f_std).reshape(B, -1)
+        e = local_entropy(f_std, graph_dist).reshape(B, -1)
         # pick the 10% nodes with the highest entropy
-        argmax_e = jnp.argsort(e, axis=1)[:, -int(0.1 * L):]
+        # permuate s_test_i so that the idx in argmax_e is at the front (observed)
+        permute_idx_al = jnp.argsort(e, axis=1)
+        inv_permute_idx_al = jnp.argsort(permute_idx_al, axis=1)
+        
+        argmax_e = permute_idx_al[:, -int(0.1 * L):]
         max_e = jnp.take_along_axis(e, argmax_e, axis=1)
         print("max_e shape: ", max_e.shape)
+        
         # print("max_e: ", max_e)
+        print('permute_idx_al:', permute_idx_al.shape)
+        print('inv_permute_idx_al', inv_permute_idx_al.shape)
+        
+        print('permute_idx_al:', permute_idx_al)
+        print('inv_permute_idx_al', inv_permute_idx_al)
+        
+        
         
         s_ctx = jnp.concatenate([s_ctx[:,L:,:], s_test_i], axis=1)
         f_test_i = f_test[:,i + num_init,:,:].reshape(B, -1, 1)
         f_ctx = jnp.concatenate([f_ctx[:,L:,:], f_test_i], axis=1)
+        inv_permute_idx_ctx = jnp.concatenate([inv_permute_idx_ctx[:,L:], inv_permute_idx_al], axis=1) # todo: bug here, check inv_permute_idx_ctx[:,L:] length
         valid_lens_ctx = jnp.repeat(int(0.1 * L * (num_init)), B)
         
-        loss = evaluate_al_t(loss, f_mu, f_std, f_test_i)
+        loss = evaluate_al_t(i, loss, f_mu, f_std, f_test_i)
     return loss 
 
-def entropy(f_std: jax.Array):
+def node_entropy(f_std: jax.Array):
     # f_std: [B, L, 1]
     entropy = 0.5 * jnp.log(2 * jnp.pi * jnp.e * f_std ** 2)
     print('entropy shape:', entropy.shape)
     # print('entropy:', entropy)
     return entropy
 
+def local_entropy(f_std: jax.Array, graph_dist: jax.Array):
+    # f_std: [B, L, 1]
+    # for each node, calculate the weighted entropy of its neighbors, and itself
+    # weighted by the inverse graph distance
+    ne = node_entropy(f_std)
+    entropy = jnp.sum(ne[:, None, :] / graph_dist[None, :, :], axis=-1)
+    # entropy = jnp.zeros_like(ne)
+    # for i in range(f_std.shape[1]):
+    #     for j in range(f_std.shape[1]):
+    #         entropy = entropy.at[:, i].add(ne[:, j] / graph_dist[i, j])
+    return entropy
+
+def random_policy(f_std: jax.Array):
+    rng = random.PRNGKey(0)
+    return random.uniform(rng, f_std.shape)
+
 
 def evaluate_al_t(
+    t: int,
     loss: dict,
     f_mu: jax.Array,
     f_std: jax.Array,
@@ -279,6 +312,19 @@ def evaluate_al_t(
     loss["MAE"] += [mae]
     loss["Coverage"] += [cvg]
     # loss = {m: np.mean(vs) for m, vs in loss.items()}  # average over batches
+    
+    # debug
+    paths_scatter = []
+    plt.scatter(f_mu[0], f_test[0], c='b')
+    plt.xlabel('Prediction')
+    plt.ylabel('Ground Truth')
+    plt.title('Prediction vs Ground Truth')
+    paths_scatter += [f"/tmp/{datetime.now().isoformat()} - sample {t} - scatter.png"]
+    plt.savefig(paths_scatter[-1], dpi=125)
+    plt.clf()
+    plt.close()
+    wandb.log({f"Step {t} - scatter": [wandb.Image(p) for p in paths_scatter]}, step=t)
+    
     return loss
 
 def log_regret_dist(regret: jax.Array, eva_name: str, hdi_prob: float = 0.95):

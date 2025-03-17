@@ -979,6 +979,7 @@ def log_graph_plots(
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
     paths = []
+    paths_scatter = []
     for i in range(num_plots):
         inv_idx_i = inv_permute_idx
         v = valid_lens_ctx[i]
@@ -1016,8 +1017,8 @@ def log_graph_plots(
         plt.xlabel('Prediction')
         plt.ylabel('Ground Truth')
         plt.title('Prediction vs Ground Truth')
-        paths_scatter = f"/tmp/{datetime.now().isoformat()} - sample {i} - scatter.png"
-        plt.savefig(paths_scatter, dpi=125)
+        paths_scatter += [f"/tmp/{datetime.now().isoformat()} - sample {i} - scatter.png"]
+        plt.savefig(paths_scatter[-1], dpi=125)
         plt.clf()
         plt.close()
     wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
