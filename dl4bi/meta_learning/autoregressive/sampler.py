@@ -123,7 +123,7 @@ class AutoregressiveSampler:
                 log_densities - jnp.log(f_std_i),  # Jacobian correction
             )
 
-        f = jax.lax.fori_loop(
+        f, log_densities = jax.lax.fori_loop(
             0,
             L_test,
             loop,

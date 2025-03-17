@@ -62,6 +62,7 @@ def run(
         [valid_lens_ctx],
         [s],
         [f],
+        [f_obs],
         _valid_lens_test,  # unused
         [var],
         [ls],
