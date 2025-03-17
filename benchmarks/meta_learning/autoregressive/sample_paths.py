@@ -102,7 +102,7 @@ def run(
     strategies = ["ltr", "random", "furthest", "closest"]
     for strategy in strategies:
         start = datetime.now()
-        paths = sampler.sample_multiple_paths(
+        paths, log_dentities = sampler.sample_multiple_paths(
             rng,
             s_ctx,
             f_ctx,

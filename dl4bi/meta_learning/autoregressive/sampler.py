@@ -254,7 +254,7 @@ class AutoregressiveSampler:
 
             for i in tqdm.trange(num_iters, desc="Strategy random"):
                 rng, rng_i = random.split(rng)
-                paths = self.sample(
+                paths, log_densities = self.sample(
                     rng_i,
                     s_ctx,
                     f_ctx,
@@ -262,10 +262,11 @@ class AutoregressiveSampler:
                     "random",
                 )
                 all_paths.append(paths)
+                all_densities.append(log_densities)
 
             all_paths = jnp.concat(all_paths, axis=0)
             all_densities = jnp.concatenate(all_densities, axis=0)
-            return all_paths
+            return all_paths, all_densities
 
     @partial(jit, static_argnums=0)
     def logpdf_diagonal(self, s_ctx, f_ctx, s_test, f_test, valid_lens_ctx):
