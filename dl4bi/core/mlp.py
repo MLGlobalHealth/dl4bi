@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Optional
+from typing import Optional, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -10,7 +10,7 @@ from jax.nn import initializers as init
 
 
 class MLP(nn.Module):
-    dims: list[int]
+    dims: Sequence[int]
     act_fn: Callable = nn.relu
     p_dropout: float = 0.0
     dtype: jnp.dtype = jnp.float32
