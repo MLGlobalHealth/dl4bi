@@ -16,6 +16,7 @@ from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 from sps.utils import build_grid
 from jax.scipy.stats import norm
+import networkx as nx
 
 from dl4bi.core import mask_from_valid_lens
 from dl4bi.meta_regression.train_utils import (
@@ -75,9 +76,27 @@ def main(cfg: DictConfig):
     # load graph
     graph_dist_path = cfg.data_path + cfg.graph_dist
     graph_dist = jnp.load(graph_dist_path)
+    
+    adj_matrix = jnp.load(cfg.data_path + 'adj_matrix.npy')
+    G = nx.from_numpy_array(adj_matrix)
+    shortest_paths = dict(nx.all_pairs_shortest_path_length(G)) 
+    n = adj_matrix.shape[0]
+    graph_dist_int = np.full((n, n), np.inf)  # Initialize with infinity
+
+    for i, paths in shortest_paths.items():
+        for j, dist in paths.items():
+            graph_dist_int[i, j] = dist  # Fill distance matrix
+    
+    # plt.imshow(graph_dist_int, cmap='viridis')
+    # plt.colorbar()
+    # plt.title('Graph Distance Matrix')
+    # plt.xlabel('Node Index')
+    # plt.ylabel('Node Index')
+    # plt.savefig(f"graph_dist_int.png", dpi=125)
+    # plt.clf()
         
     loss= optimize(
-        rng_opt, s_test, f_test,  graph_dist, inv_permute_idx_test, model_fn, num_init, budget
+        rng_opt, s_test, f_test,  graph_dist, graph_dist_int, inv_permute_idx_test, model_fn, num_init, budget
     )
     for k, v in loss.items():
         v = jnp.array(v)
@@ -153,8 +172,6 @@ def build_al_dataloader(
 
     def dataloader(rng: jax.Array, current_time=0):
         while True:
-            print('current time:', current_time)
-            print('selected_sim_ids:', selected_sim_ids)
             batch = dataset[selected_sim_ids, current_time, :]
             time, f_test = batch[:, [1]], batch[:, 2:]
             time = jnp.repeat(time[:, None, :], L, axis=1)
@@ -179,6 +196,7 @@ def optimize(
     s_test: jax.Array,  # [B, T, L, D_s=3]
     f_test: jax.Array,  # [B, T, L, D_f=1]
     graph_dist: jax.Array,
+    graph_dist_int: jax.Array,
     inv_permute_idx_test: jax.Array,
     model_fn: Callable,
     num_init: int = 1,
@@ -196,8 +214,8 @@ def optimize(
     valid_lens_test = jnp.repeat(L, B)
     rng_extra, rng = random.split(rng)
     
-    inv_permute_idx_ctx = jnp.repeat(jnp.repeat(inv_permute_idx_test, num_init), B).reshape(B, -1)
-    inv_permute_idx_test = jnp.repeat(inv_permute_idx_test, B).reshape(B, -1)
+    inv_permute_idx_ctx = jnp.repeat(jnp.repeat(inv_permute_idx_test, num_init), B).reshape(B, -1, L)
+    inv_permute_idx_test = jnp.repeat(inv_permute_idx_test, B).reshape(B, -1, L)
     
     loss = {"NLL": [], "RMSE": [], "MAE": [], "Coverage": []}
     
@@ -215,7 +233,7 @@ def optimize(
         print('inv_permute_idx shape:', inv_permute_idx_ctx.shape)
         print('inv_permute_idx_test shape:', inv_permute_idx_test.shape)
         
-        f_mu, f_std, *_ = model_fn(s_ctx, f_ctx, s_test_i, valid_lens_ctx, valid_lens_test, inv_permute_idx_ctx, inv_permute_idx_test, graph_dist, rng_extra)
+        f_mu, f_std, *_ = model_fn(s_ctx, f_ctx, s_test_i, valid_lens_ctx, valid_lens_test, inv_permute_idx = inv_permute_idx_ctx, inv_permute_idx_test = inv_permute_idx_test, graph_dist = graph_dist, rng_extra = rng_extra)
         print('f_mu shape:', f_mu.shape)
         print('f_std shape:', f_std.shape)
         # print('f_mu:', f_mu)
@@ -228,7 +246,7 @@ def optimize(
         
         # e = node_entropy(f_std).reshape(B, -1)
         # e = random_policy(f_std).reshape(B, -1)
-        e = local_entropy(f_std, graph_dist).reshape(B, -1)
+        e = local_entropy(f_std, graph_dist_int).reshape(B, -1)
         # pick the 10% nodes with the highest entropy
         # permuate s_test_i so that the idx in argmax_e is at the front (observed)
         permute_idx_al = jnp.argsort(e, axis=1)
@@ -238,7 +256,7 @@ def optimize(
         max_e = jnp.take_along_axis(e, argmax_e, axis=1)
         print("max_e shape: ", max_e.shape)
         
-        # print("max_e: ", max_e)
+        print("max_e: ", max_e)
         print('permute_idx_al:', permute_idx_al.shape)
         print('inv_permute_idx_al', inv_permute_idx_al.shape)
         
@@ -250,7 +268,9 @@ def optimize(
         s_ctx = jnp.concatenate([s_ctx[:,L:,:], s_test_i], axis=1)
         f_test_i = f_test[:,i + num_init,:,:].reshape(B, -1, 1)
         f_ctx = jnp.concatenate([f_ctx[:,L:,:], f_test_i], axis=1)
-        inv_permute_idx_ctx = jnp.concatenate([inv_permute_idx_ctx[:,L:], inv_permute_idx_al], axis=1) # todo: bug here, check inv_permute_idx_ctx[:,L:] length
+        inv_permute_idx_ctx = jnp.concatenate([inv_permute_idx_ctx[:,1:, ...], inv_permute_idx_al[:, None, :]], axis=1)
+        # print('inv_permute_idx_ctx shape:', inv_permute_idx_ctx.shape)
+        # print('inv_permute_idx_ctx:', inv_permute_idx_ctx)
         valid_lens_ctx = jnp.repeat(int(0.1 * L * (num_init)), B)
         
         loss = evaluate_al_t(i, loss, f_mu, f_std, f_test_i)
@@ -263,18 +283,32 @@ def node_entropy(f_std: jax.Array):
     # print('entropy:', entropy)
     return entropy
 
-def local_entropy(f_std: jax.Array, graph_dist: jax.Array):
+def local_entropy(f_std: jax.Array, graph_dist: jax.Array, gamma: float = 1.0, beta: float = 0.5):
+    """
+    Compute the local entropy of each node in the graph.
+    f_std: [B, L, 1] the predicted standard deviation 
+    graph_dist: [L, L] the graph distance matrix (integer, indicating the number of hops)
+    gamma: float, the exponent of the distance weights
+    beta: float, the exponent of the entropy weights
+    """
     # f_std: [B, L, 1]
     # for each node, calculate the weighted entropy of its neighbors, and itself
     # weighted by the inverse graph distance
-    ne = node_entropy(f_std)
-    entropy = jnp.sum(ne[:, None, :] / graph_dist[None, :, :], axis=-1)
-    # entropy = jnp.zeros_like(ne)
-    # for i in range(f_std.shape[1]):
-    #     for j in range(f_std.shape[1]):
-    #         entropy = entropy.at[:, i].add(ne[:, j] / graph_dist[i, j])
-    return entropy
+    entropies = node_entropy(f_std)
+    # Compute distance weights: 1 / (graph_dist ** gamma), avoiding division by zero
+    distance_weights = jnp.array(1 / graph_dist ** gamma)
+    distance_weights = distance_weights.at[jnp.diag_indices_from(distance_weights)].set(1)
 
+    B = entropies.shape[0]
+    L = entropies.shape[1]
+    distance_weights = jnp.broadcast_to(distance_weights, (B, L, L))
+    candidate_scores = jnp.sum(entropies * distance_weights, axis=1) - entropies.squeeze(-1)
+    normalisation = jnp.sum(distance_weights, axis=2) - 1  # Subtract self-weight
+    neighbour_scores = candidate_scores / normalisation
+    final_scores = beta * entropies.squeeze(-1) + (1 - beta) * neighbour_scores
+    
+    return final_scores
+    
 def random_policy(f_std: jax.Array):
     rng = random.PRNGKey(0)
     return random.uniform(rng, f_std.shape)

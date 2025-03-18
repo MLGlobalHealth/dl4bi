@@ -109,13 +109,25 @@ class STGTNPKR(nn.Module):
         inv_permute_idx = kwargs['inv_permute_idx']
         inv_permute_idx_test = kwargs['inv_permute_idx_test']
     
-        # TODO: double check inv permute is correct
         # TODO: update to suit general use (without batch)
-        permute_idx = inv_permute_idx.argsort(axis=1) # B x L
-        permute_idx_test = inv_permute_idx_test.argsort(axis=1) # B x L
-        B = inv_permute_idx.shape[0]
-        L_test = inv_permute_idx_test.shape[1]
-        L_ctx = inv_permute_idx.shape[1]
+
+        if len(inv_permute_idx.shape) == 1:
+            B = s_ctx.shape[0]
+            permute_idx = jnp.repeat(jnp.argsort(inv_permute_idx)[None,:], B, axis=0) # B x L
+            permute_idx_test = jnp.repeat(jnp.argsort(inv_permute_idx_test)[None,:], B, axis=0) # B x L
+        elif len(inv_permute_idx.shape) == 2:
+            permute_idx = jnp.argsort(inv_permute_idx, axis=1) # B x L
+            permute_idx_test = jnp.argsort(inv_permute_idx_test, axis=1) # B x L
+        elif len(inv_permute_idx.shape) == 3:
+            B = inv_permute_idx.shape[0]
+            permute_idx = jnp.argsort(inv_permute_idx, axis=2).reshape(B, -1) # B x L
+            permute_idx_test = jnp.argsort(inv_permute_idx_test, axis=2).reshape(B, -1) # B x L
+        else:    
+            raise ValueError("inv_permute_idx shape not supported")
+        
+        B = permute_idx.shape[0]
+        L_test = permute_idx_test.shape[1]
+        L_ctx = permute_idx.shape[1]
         d_qk_graph = jnp.zeros((B, L_test, L_ctx))
         d_kk_graph = jnp.zeros((B, L_ctx, L_ctx))
         for b in range(inv_permute_idx.shape[0]):
