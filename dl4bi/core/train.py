@@ -71,6 +71,7 @@ def train(
     early_stop_patience = early_stop_patience or train_num_steps
     train_loss, metric, best_metric = float("inf"), float("inf"), float("inf")
     pbar = tqdm(range(1, train_num_steps + 1), unit=" batches", dynamic_ncols=True)
+    postfix = {"Train Loss": f"{train_loss:0.3f}"}
     for i in pbar:
         batch = next(batches)
         rng_train_step, rng_train = random.split(rng_train)
@@ -80,7 +81,7 @@ def train(
             train_loss = np.mean(losses)
             losses = []
             wandb.log({"Train Loss": train_loss})
-        postfix = {"Train Loss": f"{train_loss:.3f}"}
+        postfix["Train Loss"] = f"{train_loss:.3f}"
         if valid_interval and i % valid_interval == 0:
             rng_valid, rng_train = random.split(rng_train)
             metrics = evaluate(

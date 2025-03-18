@@ -8,12 +8,12 @@ s:
     stop: 2
     num: 64
 num_steps: 25
-num_t: 2
-random_t: True
+num_t: 5
+random_t: False
 num_ctx_per_t:
   min: 128 # ~3% of single time step
   max: 512 # 12.5% of single time step
 independent_t_masks: False
 num_test: 1024 # 25% of single time step
 forecast: True
-batch_size: 2
+batch_size: 1

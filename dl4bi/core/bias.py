@@ -10,7 +10,7 @@ from jax import jit, vmap
 from .sim import l2_dist
 
 
-class DistanceBias(nn.Module):
+class ScalarBias(nn.Module):
     num_heads: int = 4
 
     @nn.compact
@@ -22,11 +22,11 @@ class DistanceBias(nn.Module):
         a = self.param("a", init.constant(-1), (self.num_heads,))
         if mask is None:
             mask = jnp.array([True])
-        return distance_bias(d, mask, a)  # [B, H, Q, K]
+        return scalar_bias(d, mask, a)  # [B, H, Q, K]
 
 
 @jit
-def distance_bias(
+def scalar_bias(
     d: jax.Array,  # [B, Q, K] or [E]
     mask: jax.Array,  # [B, Q, K] or [E]
     a: jax.Array,  # [H]

@@ -309,7 +309,7 @@ class SpatiotemporalBatch(MetaLearningBatch):
         f_ctx, f_test, f_pred = map(remap_colors, [f_ctx, f_test, f_pred])
         if f_std.shape[-1] > 1:  # e.g. uncertainty per RGB channel
             f_std = f_std.mean(axis=-1, keepdims=True)
-        _, axs = plt.subplots(B, T_b + 2, figsize=(5 * (T_b + 2), B * 5))
+        _, axs = plt.subplots(B, T_b + 2, figsize=(5 * (T_b + 2), B * 5), squeeze=False)
         kwargs = dict(cmap=cmap, norm=norm, interpolation="none")
         std_kwargs = dict(cmap=cmap_std, norm=norm_std, interpolation="none")
         for i in range(B):

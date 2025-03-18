@@ -18,8 +18,7 @@ t_sim:
   _target_: dl4bi.sim.causal_time
   _partial_: true
 t_bias:
-  _target_: dl4bi.bias.RBFNetworkBias
-  num_basis: 5
+  _target_: dl4bi.bias.ScalarBias
   num_heads: 4
 blk:
   _target_: dl4bi.transformer.KRBlock
