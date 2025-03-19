@@ -1096,13 +1096,42 @@ def log_temporal_img_plots(
         # fig.savefig(paths[-1], dpi=125)
         # plt.clf()
         # plt.close(fig)
-        
-        plt.scatter(f_mu_i, f_test_full_i, c='b')
-        plt.xlim(0, 0.5)
-        plt.ylim(0, 0.5)
-        plt.xlabel('Prediction')
-        plt.ylabel('Ground Truth')
-        plt.title('Prediction vs Ground Truth')
+        s_test_time = s_test_full[i][...,-1]
+        # print('inside log_temporal_img_plots f_mu_i:', f_mu_i.shape)
+        # print('inside log_temporal_img_plots f_test_full_i:', f_test_full_i.shape)
+        # plt.scatter(f_mu_i, f_test_full_i, c='b')
+        # plt.xlim(0, 0.5)
+        # plt.ylim(0, 0.5)
+        # plt.xlabel('Prediction')
+        # plt.ylabel('Ground Truth')
+        # plt.title('Prediction vs Ground Truth')
+        # paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
+        # plt.savefig(paths[-1], dpi=125)
+        # plt.clf()
+        # plt.close()
+        # Get unique time steps and assign a color to each
+        unique_times = np.unique(s_test_time)
+        colors = plt.cm.tab10(np.linspace(0, 1, len(unique_times)))  # Use a categorical colormap
+
+        # Create the figure
+        plt.figure(figsize=(6, 6))
+
+        # Scatter plot for each unique time step
+        for t, color in zip(unique_times, colors):
+            mask = s_test_time == t  # Select data points for this time step
+            plt.scatter(f_mu_i[mask], f_test_full_i[mask], color=color, label=f"Time {t}", alpha=0.8)
+
+        # Set plot limits and labels
+        # plt.xlim(0, 0.5)
+        # plt.ylim(0, 0.5)
+        plt.xlabel("Prediction")
+        plt.ylabel("Ground Truth")
+        plt.title("Prediction vs Ground Truth (Colored by Time)")
+
+        # Add legend to show time labels
+        plt.legend(title="Time Step", loc="upper left")
+
+        # Save the figure
         paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
         plt.savefig(paths[-1], dpi=125)
         plt.clf()

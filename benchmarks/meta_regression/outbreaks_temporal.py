@@ -91,95 +91,7 @@ def main(cfg: DictConfig):
     )
     metrics = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    save_ckpt(state, cfg, path.with_suffix(".ckpt"))
-    
-# def build_temporal_dataloader(
-#     data_path: str,
-#     file_name: str,
-#     graph_dist_path: str,
-#     temporal_cfg: DictConfig,
-#     batch_size: int = 16,
-#     min_ctx_valid_pct: float = 0.05,
-#     max_ctx_valid_pct: float = 0.5,
-#     num_test_max: int = 256,
-#     test_time: int = 50
-# ):
-#     """
-#     Build a dataloader for the temporal outbreak dataset, which in each batch all samples before given test_time as context points, and the test_time as the test point.
-#     """
-#     path = data_path +  file_name # contains [time, f_test]
-#     dataset = np.load(path, mmap_mode="r")['outbreaks']
-#     dataset = dataset[:, 1:]  # remove sim_id
-#     B = batch_size
-#     L = dataset.shape[1] - 1
-#     time_frame_size = dataset.shape[0] // 100000
-#     assert dataset.shape[0] % time_frame_size == 0
-#     print('dataset shape:', dataset.shape)
-#     print('time_frame_size:', time_frame_size)
-#     print('L:', L)
-    
-#     graph_dist_path = data_path + graph_dist_path
-#     graph_dist = jnp.load(graph_dist_path)
-    
-#     num_samples = int(dataset.shape[0] // time_frame_size)
-#     s_grid = build_grid([dict(start=-2.0, stop=2.0, num=int(np.ceil(np.sqrt(L))))] * 2 + [dict(start=1, stop=1, num=1)]).reshape(-1,1)[:L* 3].reshape(L, 3)
-    
-#     s_grid = jnp.repeat(s_grid[None, ...], B, axis=0)  # [L, 3] -> [B, L, 3]
-#     valid_lens_test = jnp.repeat(num_test_max, B)
-#     dataset = dataset.reshape(num_samples, time_frame_size, -1)
-#     # dataset = 2 * (dataset - 0.5)  # [0, 1] -> [-1, 1]
-    
-#     def dataloader(rng: jax.Array):
-#         while True:
-#             rng_b, rng_perm, rng_val, rng_t1, rng_t2, rng_t3, rng = random.split(rng, 7)
-#             batch_idx = random.choice(rng_b, num_samples, (B,), replace=False)
-#             batch = dataset[batch_idx]
-            
-#             test_times = jnp.repeat(test_time, B).reshape(B, 1)
-#             time_step_ctx_num = test_time - 1
-#             ctx_times = jnp.repeat(jnp.arange(1, test_time), B).reshape(B, test_time-1)
-            
-#             s_test = s_grid.at[..., -1].set(s_grid[..., -1] * test_times)
-#             s_ctx = jnp.repeat(s_grid, test_time-1, axis=0)
-#             s_ctx = (
-#                 s_ctx.at[..., -1]
-#                 .set(s_ctx[..., -1] * ctx_times.flatten()[:, None])
-#                 .reshape(B, L * time_step_ctx_num, 3)
-#             )
-#             f_test = jnp.take_along_axis(
-#                 batch,
-#                 test_times[..., None],
-#                 axis=1,
-#             )[..., 0, 1:]
-#             f_ctx = jnp.take_along_axis(
-#                 batch,
-#                 ctx_times[..., None],
-#                 axis=1,
-#             )[..., 1:].reshape(B, -1)
-#             permute_idx_ctx = random.permutation(rng_perm, L * time_step_ctx_num)
-#             permute_idx_test = random.permutation(rng_perm, L)
-#             inv_permute_idx_ctx = jnp.argsort(permute_idx_ctx)
-#             inv_permute_idx_test = jnp.argsort(permute_idx_test)
-#             valid_lens_ctx = random.randint(
-#                 rng_val,
-#                 (B,),
-#                 int(min_ctx_valid_pct * L * (test_time-1)),
-#                 int(max_ctx_valid_pct * L * (test_time-1)),
-#             )
-#             yield (
-#                 s_ctx[:, permute_idx_ctx, :],  # s_ctx (permuted)
-#                 f_ctx[:, permute_idx_ctx, None],  # f_ctx (permuted)
-#                 valid_lens_ctx,  # only the first valid lens are used/observed
-#                 s_test[:, permute_idx_test, :],  # s_test (permuted)
-#                 f_test[..., permute_idx_test, None],  # f_test (permuted)
-#                 valid_lens_test,
-#                 s_test,  # add full originals for use in callbacks, e.g. log_plots
-#                 f_test[..., None],
-#                 (inv_permute_idx_ctx, inv_permute_idx_test),
-#                 graph_dist
-#             )
-#     return dataloader
-                
+    save_ckpt(state, cfg, path.with_suffix(".ckpt"))              
             
 def build_dataloader(
     data_path: str,
@@ -189,8 +101,6 @@ def build_dataloader(
     batch_size: int = 16,
     min_ctx_valid_pct: float = 0.05,
     max_ctx_valid_pct: float = 0.5,
-    num_test_max: int = 256,
-    test_time: Optional[int] = None
 ):
     path = data_path +  file_name # contains [time, f_test]
     dataset = np.load(path, mmap_mode="r")['outbreaks']
@@ -217,14 +127,13 @@ def build_dataloader(
     s_grid = build_grid([dict(start=-2.0, stop=2.0, num=int(np.ceil(np.sqrt(L))))] * 2 + [dict(start=1, stop=1, num=1)]).reshape(-1,1)[:L* 3].reshape(L, 3)
     
     s_grid = jnp.repeat(s_grid[None, ...], B, axis=0)  # [L, 3] -> [B, L, 3]
-    valid_lens_test = jnp.repeat(num_test_max, B)
     dataset = dataset.reshape(num_samples, time_frame_size, -1)
     # dataset = 2 * (dataset - 0.5)  # [0, 1] -> [-1, 1]
-    offset_range = jnp.arange(1, temporal_cfg.max_past_time_offset + 1)
+    # offset_range = jnp.arange(1, temporal_cfg.max_past_time_offset + 1)
 
-    # NOTE this function to prevent repetitions
-    def sample_offset(rng_s, ctx_num):
-        return random.choice(rng_s, offset_range, shape=(ctx_num,), replace=False)
+    # # NOTE this function to prevent repetitions
+    # def sample_offset(rng_s, ctx_num):
+    #     return random.choice(rng_s, offset_range, shape=(ctx_num,), replace=False)
 
     def dataloader(rng: jax.Array):
         while True:
@@ -232,35 +141,63 @@ def build_dataloader(
             batch_idx = random.choice(rng_b, num_samples, (B,), replace=False)
             batch = dataset[batch_idx]
             # # choosing the number of context time steps
-            if test_time is None:
-                # time_step_ctx_num = random.randint(
-                #     rng_t1,
-                #     shape=(1,),
-                #     minval=temporal_cfg.num_time_ctx[0].min,
-                #     maxval=temporal_cfg.num_time_ctx[0].max + 1,
-                # )[0].item()
-                time_step_ctx_num = temporal_cfg.num_time_ctx[0].max
-                # choosing the test times for each sample in batch
-                test_times = random.randint(
-                    rng_t2,
-                    shape=(B, 1),
-                    minval=temporal_cfg.max_past_time_offset,
-                    maxval=time_frame_size,
-                )
-                # choosing specific ctx times for each sample in batch
-                ctx_times = (
-                    -jax.vmap(sample_offset, in_axes=(0, None))(
-                        jax.random.split(rng_t3, B), time_step_ctx_num
-                    )
-                    + test_times
-                )
-            else:
-                test_times = jnp.repeat(test_time, B).reshape(B, 1)
-                start_ctx_time = max(1, test_time - temporal_cfg.num_time_ctx[0].max)
-                time_step_ctx_num = test_time - start_ctx_time
-                ctx_times = jnp.repeat(jnp.arange(start_ctx_time, test_time), B).reshape(B, time_step_ctx_num)
             
-            s_test = s_grid.at[..., -1].set(s_grid[..., -1] * test_times)
+            # time_step_ctx_num = random.randint(
+            #     rng_t1,
+            #     shape=(1,),
+            #     minval=temporal_cfg.num_time_ctx[0].min,
+            #     maxval=temporal_cfg.num_time_ctx[0].max + 1,
+            # )[0].item()
+            time_step_ctx_num = temporal_cfg.history_len
+            time_step_test_num = temporal_cfg.future_len
+            # choosing the test times for each sample in batch
+            test_times = random.randint(
+                rng_t2,
+                shape=(B, 1),
+                minval=time_step_ctx_num+1,
+                maxval=time_frame_size - time_step_test_num,
+            )
+            # # choosing specific ctx times for each sample in batch
+            # ctx_times = (
+            #     -jax.vmap(sample_offset, in_axes=(0, None))(
+            #         jax.random.split(rng_t3, B), time_step_ctx_num
+            #     )
+            #     + test_times
+            # )
+            def get_context_times(test_time, time_step_ctx_num, max_time):
+                """Get the last `time_step_ctx_num` times before `test_time`."""
+                full_range = jnp.arange(max_time)  # Create a fixed-size array
+                start_idx = jnp.maximum(test_time - time_step_ctx_num, 0)  # Prevent negative index
+                return jax.lax.dynamic_slice(full_range, (start_idx,), (time_step_ctx_num,))
+            
+            def get_test_times(test_time, time_step_test_num, max_time):
+                """Get `time_step_test_num` samples after `test_time`, ensuring it stays within bounds."""
+                full_range = jnp.arange(max_time)
+                
+                # Ensure `test_time` does not exceed bounds for slicing
+                start_idx = jnp.minimum(test_time, max_time - time_step_test_num)
+
+                return jax.lax.dynamic_slice(full_range, (start_idx,), (time_step_test_num,))
+
+
+            # chossing history_len number of context times before the test time
+            ctx_times = jax.vmap(lambda t: get_context_times(t, time_step_ctx_num, time_frame_size))(test_times.squeeze(-1))
+            # ctx_times = jax.vmap(lambda t: jnp.arange(t)[-time_step_ctx_num:])(test_times.squeeze(-1))
+            # print('ctx_times shape:', ctx_times.shape)
+            # print('test_times shape:', test_times.shape)
+            # print('test_times:', test_times)
+            # print('ctx_times:', ctx_times)
+            
+            # s_test = s_grid.at[..., -1].set(s_grid[..., -1] * test_times)
+            test_times = jax.vmap(lambda t: get_test_times(t, time_step_test_num, time_frame_size))(test_times.squeeze(-1))
+            # print('test_times shape:', test_times.shape)
+            # print('test_times:', test_times)
+            s_test = jnp.repeat(s_grid, time_step_test_num, axis=0)
+            s_test = (
+                s_test.at[..., -1]
+                .set(s_test[..., -1] * test_times.flatten()[:, None])
+                .reshape(B, L * time_step_test_num, 3)
+            )
             s_ctx = jnp.repeat(s_grid, time_step_ctx_num, axis=0)
             s_ctx = (
                 s_ctx.at[..., -1]
@@ -271,14 +208,14 @@ def build_dataloader(
                 batch,
                 test_times[..., None],
                 axis=1,
-            )[..., 0, 1:]
+            )[..., 1:].reshape(B, -1)
             f_ctx = jnp.take_along_axis(
                 batch,
                 ctx_times[..., None],
                 axis=1,
             )[..., 1:].reshape(B, -1)
             permute_idx_ctx = random.permutation(rng_perm, L * time_step_ctx_num)
-            permute_idx_test = random.permutation(rng_perm, L)
+            permute_idx_test = random.permutation(rng_perm, L * time_step_test_num)
             inv_permute_idx_ctx = jnp.argsort(permute_idx_ctx)
             inv_permute_idx_test = jnp.argsort(permute_idx_test)
             valid_lens_ctx = random.randint(
@@ -287,6 +224,7 @@ def build_dataloader(
                 int(min_ctx_valid_pct * L * time_step_ctx_num),
                 int(max_ctx_valid_pct * L * time_step_ctx_num),
             )
+            valid_lens_test = jnp.repeat(L * time_step_test_num, B)
             # print('s_ctx shape:', s_ctx.shape)
             # print('f_ctx shape:', f_ctx.shape)
             # print('valid_lens_ctx shape:', valid_lens_ctx.shape)
