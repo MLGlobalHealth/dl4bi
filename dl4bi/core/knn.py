@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap
 
-from .sim import dist_spatiotemporal, l2_dist
+from .sim import delta_time, l2_dist
 
 
 @partial(jit, static_argnames=("k", "num_q_parallel", "recall_target"))
@@ -41,7 +41,7 @@ def approx_knn(
         return idx, d[:, None]
 
     idx, d = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
-    return idx, d
+    return idx, {"d": d}
 
 
 @partial(jit, static_argnames=("k", "num_q_parallel"))
@@ -72,7 +72,7 @@ def bf_knn(
         return idx, d[idx, None]
 
     idx, d = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
-    return idx, d
+    return idx, {"d": d}
 
 
 @dataclass(frozen=True)
@@ -97,6 +97,7 @@ class kNN:
         self,
         q: jax.Array,  # [B, Q, D]
         r: jax.Array,  # [B, R, D]
+        **kwargs,
     ):
         f = lambda q, r: self.method(q, r, self.k, self.num_q_parallel)
         return jit(vmap(f))(q, r)
@@ -116,9 +117,8 @@ def st_approx_knn(
 
     This calculation proceeds as follows:
 
-    1. Calculates the spatiotemporal distance, which returns an array of shape
-        `[Q, R, 2]` where `[Q, R, 0]` represent the spatial L2 distances and
-        `[Q, R, 1]` represent signed L1 temporal distances.
+    1. The input arrays `q` and `r` are of shape `[Q, R, D]` where the first D-1
+        dimensions are the spatial locations and the last dimension D is time.
 
     2. A single distance metric is composed as `d_s^2 + (scale_t * d_t)^2` and
         passed to the kNN module to find the nearest k neighbors in spacetime.
@@ -128,7 +128,8 @@ def st_approx_knn(
     3. The function returns the indices of the k nearest neighbors as
         determined by the metric in 2., but returns the original distances of
         shape `[Q, K, 2]` so that the original spatial and temporal distances
-        can be used independently by downstream bias modules.
+        can be used independently by downstream bias modules. `[Q, K, 0]` is
+        the spatial distance and `[Q, K, 1]` is the temporal distance.
 
     Args:
         q: Query points.
@@ -148,14 +149,15 @@ def st_approx_knn(
     def process_batch(q_i: jax.Array):
         # add leading dim to q_i since map processes each q_i individually,
         # even when batch_size is >= 1
-        d = dist_spatiotemporal(q_i[None, ...], r, causal_t).squeeze()  # [R, 2]
-        d_s, d_t = d[..., 0], d[..., 1]  # [R]
-        d_sq_knn = d_s**2 + (scale_t * d_t) ** 2
-        _d_st, idx = jax.lax.approx_min_k(d_sq_knn, k, recall_target=recall_target)
-        return idx, d[idx]
+        q_i = q_i[None, ...]
+        d_s = l2_dist(q_i[..., :-1], r[..., :-1]).squeeze()  # [R]
+        d_t = delta_time(q_i[..., [-1]], r[..., [-1]], causal_t).squeeze()  # [R]
+        d_sq = d_s**2 + (scale_t * d_t) ** 2
+        _, idx = jax.lax.approx_min_k(d_sq, k, recall_target=recall_target)
+        return idx, d_s[idx], d_t[idx]
 
-    idx, d = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
-    return idx, d
+    idx, d_s, d_t = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
+    return idx, {"d_s": d_s, "d_t": d_t}
 
 
 @partial(jit, static_argnums=list(range(2, 6)))
@@ -200,14 +202,15 @@ def st_bf_knn(
     def process_batch(q_i: jax.Array):
         # add leading dim to q_i since map processes each q_i individually,
         # even when batch_size is >= 1
-        d = dist_spatiotemporal(q_i[None, ...], r, causal_t).squeeze()  # [Q, R, 2]
-        d_s, d_t = d[..., 0], d[..., 1]  # [R]
-        d_sq_knn = d_s**2 + (scale_t * d_t) ** 2  # [R]
-        idx = jnp.argsort(d_sq_knn)[:k]
-        return idx, d[idx]
+        q_i = q_i[None, ...]
+        d_s = l2_dist(q_i[..., :-1], r[..., :-1]).squeeze()  # [R]
+        d_t = delta_time(q_i[..., [-1]], r[..., [-1]], causal_t).squeeze()  # [R]
+        d_sq = d_s**2 + (scale_t * d_t) ** 2
+        idx = jnp.argsort(d_sq)[:k]
+        return idx, d_s[idx], d_t[idx]
 
-    idx, d = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
-    return idx, d
+    idx, d_s, d_t = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
+    return idx, {"d_s": d_s, "d_t": d_t}
 
 
 @dataclass(frozen=True)
@@ -234,7 +237,8 @@ class STkNN:
     def __call__(
         self,
         q: jax.Array,  # [B, Q, D]
-        r: jax.Array,  # [B, R, D]
+        r: jax.Array,  # [B, Q, D]
+        **kwargs,
     ):
         f = lambda q, r: self.method(
             q,
@@ -244,4 +248,4 @@ class STkNN:
             self.causal_t,
             self.num_q_parallel,
         )
-        return jit(vmap(f))(q, r)  # idx: [B, Q, K], d: [B, Q, K, D]
+        return jit(vmap(f))(q, r)  # idx: [B, Q, K], d: [B, Q, K]

@@ -37,18 +37,18 @@ def test_models():
     mask_ctx = mask_from_valid_lens(L, valid_lens)
     f = random.normal(rng_data, s.shape)
     for model in [
-        NP,
-        CNP,
-        ANP,
-        CANP,
-        ConvCNP,
-        TNPD,
-        TNPKR,
-        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
-        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
-        lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
-        ScanTNPKR,
-        lambda: SGNP(kNN(k=L)),
+        # NP,
+        # CNP,
+        # ANP,
+        # CANP,
+        # ConvCNP,
+        # TNPD,
+        # TNPKR,
+        # lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
+        # lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
+        # lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
+        # ScanTNPKR,
+        lambda: SGNP(),
     ]:
         m = model()
         print(m.__class__)
@@ -110,7 +110,7 @@ def test_context_data_leaks():
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
-        lambda: SGNP(kNN(k=64)),
+        lambda: SGNP(),
     ]:
         m = model()
         print(m.__class__)

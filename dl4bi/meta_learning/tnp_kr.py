@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Optional, Sequence, Union
+from typing import Optional
 
 import flax.linen as nn
 import jax
@@ -10,19 +10,9 @@ from ..core.attention import MultiHeadAttention, RBFNetworkBiasedScanAttention
 from ..core.mlp import MLP
 from ..core.model_output import DiagonalMVNOutput
 from ..core.transformer import KRBlock
+from ..core.utils import safe_stack
 from .steps import likelihood_train_step, likelihood_valid_step
-
-
-def identity_or_empty(x: Union[jax.Array, None]):
-    if x is None:
-        return jnp.array([])
-    return x
-
-
-def first_shape(arrays: Sequence[Union[jax.Array, None]]):
-    for array in arrays:
-        if array is not None:
-            return array.shape
+from .utils import first_shape
 
 
 class TNPKR(nn.Module):
@@ -58,10 +48,10 @@ class TNPKR(nn.Module):
 
     num_blks: int = 6
     num_reps: int = 1
-    embed_x: Callable = identity_or_empty
-    embed_s: Callable = identity_or_empty
-    embed_t: Callable = identity_or_empty
-    embed_f: Callable = identity_or_empty
+    embed_x: Callable = lambda x: x
+    embed_s: Callable = lambda x: x
+    embed_t: Callable = lambda x: x
+    embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
     x_sim: Optional[Callable] = None
@@ -111,19 +101,18 @@ class TNPKR(nn.Module):
             `ModelOutput`.
         """
         norm = nn.LayerNorm()
-        stack = jit(lambda *args: jnp.concat([x for x in args if x.size > 0], axis=-1))
         test_shape = first_shape([x_test, s_test, t_test])
         f_test = jnp.zeros((*test_shape[:-1], f_ctx.shape[-1]))
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
         unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
-        ctx = stack(
+        ctx = safe_stack(
             self.embed_obs(obs),
             self.embed_x(x_ctx),
             self.embed_s(s_ctx),
             self.embed_t(t_ctx),
             self.embed_f(f_ctx),
         )
-        test = stack(
+        test = safe_stack(
             self.embed_obs(unobs),
             self.embed_x(x_test),
             self.embed_s(s_test),
@@ -257,12 +246,19 @@ class ScanTNPKR(nn.Module):
         Returns:
             $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
-        stack = lambda *args: jnp.concatenate([x for x in args if x.size > 0], axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
         unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
-        ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
-        test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
+        ctx = safe_stack(
+            self.embed_obs(obs),
+            self.embed_s(s_ctx),
+            self.embed_f(f_ctx),
+        )
+        test = safe_stack(
+            self.embed_obs(unobs),
+            self.embed_s(s_test),
+            self.embed_f(f_test),
+        )
         qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
         qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx}
         kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx}

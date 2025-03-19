@@ -1,16 +1,16 @@
 import flax.linen as nn
 import jax
 
-from ..core import Attention, DotScorer, FixedSinusoidalEmbedding
+from ..core.attention import Attention
+from ..core.embed import FixedSinusoidalEmbedding
 
 
 class KernelRegressor(nn.Module):
     location_embedder: nn.Module = FixedSinusoidalEmbedding()
-    kernel: nn.Module = DotScorer()
     p_dropout: float = 0.0
 
     def setup(self):
-        self.attn = Attention(self.kernel, self.p_dropout)
+        self.attn = Attention(self.p_dropout)
         embed_dim = self.location_embedder.embed_dim
         self.W_q = nn.Dense(embed_dim)
         self.W_k = nn.Dense(embed_dim)

@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Sequence, Union
 
 import jax
 import jax.numpy as jnp
@@ -12,6 +12,12 @@ from omegaconf import DictConfig
 
 from ..core.train import TrainState, load_ckpt
 from .data.spatial import SpatialBatch
+
+
+def first_shape(arrays: Sequence[Union[jax.Array, None]]):
+    for array in arrays:
+        if array is not None:
+            return array.shape
 
 
 def cfg_to_run_name(cfg: DictConfig):

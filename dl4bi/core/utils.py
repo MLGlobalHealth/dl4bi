@@ -1,13 +1,27 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import lax
+from jax import jit, lax
 from jax.tree_util import Partial
 
 
 def mask_from_valid_lens(max_len: int, valid_lens: jax.Array):
     """Return a boolean mask using `valid_lens`."""
     return jnp.arange(max_len) < valid_lens[..., None]
+
+
+def exists(*args):
+    return all([x is not None for x in args])
+
+
+@jit
+def safe_stack(*arrays):
+    return jnp.concat([x for x in arrays if x is not None], axis=-1)
+
+
+@jit
+def to_none(x: jax.Array):
+    return None
 
 
 def pad_concat(x: jax.Array, y: jax.Array):
