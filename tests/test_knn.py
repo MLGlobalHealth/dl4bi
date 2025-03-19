@@ -11,7 +11,22 @@ from dl4bi.core.knn import (
     st_approx_knn,
     st_bf_knn,
 )
+from dl4bi.core.sim import l2_dist
 from dl4bi.core.utils import mask_from_valid_lens
+from dl4bi.meta_learning.sgnp import approx_knn
+
+
+def test_approx_knn():
+    B, L, D, K = 4, 10, 2, 3
+    rng = random.key(42)
+    q_s = r_s = random.normal(rng, (B, L, D))
+    v_approx_knn = vmap(
+        lambda **kwargs: approx_knn(**kwargs, k=K, s_sim=l2_dist, num_q_parallel=2)
+    )
+    idx, d_x, d_s, d_t = v_approx_knn(q_s=q_s, r_s=r_s)
+    assert d_s.shape == (B, L, K)
+    assert d_x is None
+    assert d_t is None
 
 
 def test_knn_shapes():

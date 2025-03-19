@@ -4,16 +4,17 @@ from typing import Callable, Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import jit
+from jax import jit, vmap
 from jraph import GraphsTuple
 
 from ..core.gnn import GraphAttentionBlock
 from ..core.mlp import MLP
 from ..core.model_output import DiagonalMVNOutput
-from ..core.sim import delta_time, l2_dist
 from ..core.utils import exists, safe_stack
 from .steps import likelihood_train_step, likelihood_valid_step
 from .utils import first_shape
+
+# TODO(danj): debug!!
 
 
 class SGNP(nn.Module):
@@ -74,9 +75,9 @@ class SGNP(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    x_sim: Optional[Callable] = l2_dist
-    s_sim: Optional[Callable] = l2_dist
-    t_sim: Optional[Callable] = delta_time
+    x_sim: Optional[Callable] = None
+    s_sim: Optional[Callable] = None
+    t_sim: Optional[Callable] = None
     scale_x_sim: float = 1.0
     scale_s_sim: float = 1.0
     scale_t_sim: float = 1.0
@@ -200,10 +201,11 @@ def build_graph(
     scale_t_sim: float = 1.0,
 ):
     ctx, test = [x_ctx, s_ctx, t_ctx], [x_test, s_test, t_test]
-    r_ctx = map(lambda v: _mask(v, mask_ctx), ctx)
+    r_ctx = [_mask(v, mask_ctx) for v in ctx]
     args = [k, x_sim, s_sim, t_sim, causal_t, scale_x_sim, scale_s_sim, scale_t_sim]
-    idx_cc, d_x_cc, d_s_cc, d_t_cc = approx_knn(*ctx, *r_ctx, *args)
-    idx_ct, d_x_ct, d_s_ct, d_t_ct = approx_knn(*test, *r_ctx, *args)
+    v_approx_knn = vmap(lambda *arrays: approx_knn(*arrays, *args))
+    idx_cc, d_x_cc, d_s_cc, d_t_cc = v_approx_knn(*ctx, *r_ctx)
+    idx_ct, d_x_ct, d_s_ct, d_t_ct = v_approx_knn(*test, *r_ctx)
     # convert indices from batch level to graph level
     ctx_shape, test_shape = first_shape(ctx), first_shape(test)
     (B, N_t), N_c = test_shape[:-1], ctx_shape[1]
@@ -211,14 +213,15 @@ def build_graph(
     idx_ct = idx_ct.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_t * k)
     edges = {}
     x_mask = s_mask = t_mask = jnp.array([True])
+    batch_edges = jit(lambda a, b: jnp.concat([a.flatten(), b.flatten()]))
     if exists(d_x_cc, d_x_ct):
-        edges["d_x"] = _batch_edges(d_x_cc, d_x_ct)
+        edges["d_x"] = batch_edges(d_x_cc, d_x_ct)
         x_mask = jnp.isfinite(edges["d_x"])
     if exists(d_s_cc, d_s_ct):
-        edges["d_s"] = _batch_edges(d_s_cc, d_s_ct)
+        edges["d_s"] = batch_edges(d_s_cc, d_s_ct)
         s_mask = jnp.isfinite(edges["d_s"])
     if exists(d_t_cc, d_t_ct):
-        edges["d_t"] = _batch_edges(d_t_cc, d_t_ct)
+        edges["d_t"] = batch_edges(d_t_cc, d_t_ct)
         t_mask = jnp.isfinite(edges["d_t"])
     edge_mask = x_mask & s_mask & t_mask
     return GraphsTuple(
@@ -240,11 +243,6 @@ def _mask(a: Optional[jax.Array], mask: Optional[jax.Array]):
     return jnp.where(mask[..., None], a, jnp.inf)
 
 
-def _batch_edges(d_cc: jax.Array, d_ct: jax.Array):
-    D = d_cc.shape[-1]
-    return jnp.vstack([d_cc.reshape(-1, D), d_ct.reshape(-1, D)])
-
-
 @partial(
     jit,
     static_argnames=(
@@ -261,16 +259,16 @@ def _batch_edges(d_cc: jax.Array, d_ct: jax.Array):
     ),
 )
 def approx_knn(
-    q_x: Optional[jax.Array],
-    q_s: Optional[jax.Array],
-    q_t: Optional[jax.Array],
-    r_x: Optional[jax.Array],
-    r_s: Optional[jax.Array],
-    r_t: Optional[jax.Array],
-    k: int,
-    x_sim: Optional[Callable],
-    s_sim: Optional[Callable],
-    t_sim: Optional[Callable],
+    q_x: Optional[jax.Array] = None,
+    q_s: Optional[jax.Array] = None,
+    q_t: Optional[jax.Array] = None,
+    r_x: Optional[jax.Array] = None,
+    r_s: Optional[jax.Array] = None,
+    r_t: Optional[jax.Array] = None,
+    k: int = 16,
+    x_sim: Optional[Callable] = None,
+    s_sim: Optional[Callable] = None,
+    t_sim: Optional[Callable] = None,
     causal_t: bool = False,
     scale_x_sim: float = 1.0,
     scale_s_sim: float = 1.0,
@@ -278,14 +276,14 @@ def approx_knn(
     num_q_parallel: int = 1024,
     recall_target: float = 0.95,
 ):
-    def process_batch(q: dict):
+    def process_batch(i):
         d_x = d_s = d_t = 0
-        if "q_x" in q and exists(x_sim):
-            d_x = x_sim(q["q_x"][None, ...], r_x).squeeze()  # [R]
-        if "q_s" in q and exists(s_sim):
-            d_s = s_sim(q["q_s"][None, ...], r_s).squeeze()  # [R]
-        if "q_t" in q and exists(t_sim):
-            d_t = t_sim(q["q_t"][None, ...], r_t).squeeze()  # [R]
+        if exists(q_x, x_sim):
+            d_x = x_sim(q_x[[i], :], r_x).squeeze()  # [R]
+        if exists(q_s, s_sim):
+            d_s = s_sim(q_s[[i], :], r_s).squeeze()  # [R]
+        if exists(q_t, t_sim):
+            d_t = t_sim(q_t[[i], :], r_t).squeeze()  # [R]
             if causal_t:
                 d_t = jnp.where(d_t <= 0, d_t, jnp.inf)
         d_sq = (
@@ -297,8 +295,12 @@ def approx_knn(
         d_x, d_s, d_t = map(lambda v: _idx_or_none(v, idx), [d_x, d_s, d_t])
         return idx, d_x, d_s, d_t
 
-    q = {f"q_{k}": v for k, v in [("x", q_x), ("s", q_s), ("t", q_t)] if v is not None}
-    idx, d_x, d_s, d_t = jax.lax.map(process_batch, q, batch_size=num_q_parallel)
+    L = first_shape([q_x, q_s, q_t])[0]
+    idx, d_x, d_s, d_t = jax.lax.map(
+        process_batch,
+        jnp.arange(L),
+        batch_size=num_q_parallel,
+    )
     return idx, d_x, d_s, d_t
 
 
