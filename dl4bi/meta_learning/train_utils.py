@@ -260,6 +260,96 @@ def vanilla_train_step(
     return state.apply_gradients(grads=grads), nll
 
 
+@partial(jit, static_argnames=["gamma", "how_many"])
+def train_step_with_autoregressive_consistency(
+    rng: jax.Array,
+    state: TrainState,
+    batch: tuple,
+    gamma: float,
+    how_many: int = 2,
+    **kwargs,
+):
+    """Training step for meta regression with diagonal covariances,
+    with additional conssitency loss term ensuring that when deployed autoregressively
+    the model is consistent under marginalisation and permutation.
+
+    Args:
+        rng: A PRNG key.
+        state: The current training state.
+        batch: Batch of data.
+        gamma: Constant in front of the consistency loss.
+        how_many: How many test points to use for the consistency loss.
+
+    Returns:
+        `TrainState` with updated parameters.
+    """
+    assert how_many >= 2
+    rng, rng_dropout, rng_extra = random.split(rng, 3)
+
+    def loss_fn(params):
+        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
+
+        s_ctx = jnp.pad(s_ctx, [(0, 0), (0, 1), (0, 0)])
+        f_ctx = jnp.pad(f_ctx, [(0, 0), (0, 1), (0, 0)])
+
+        B, L_test, _ = s_test.shape
+        _, _, Df = f_ctx.shape
+        if valid_lens_test is None:
+            valid_lens_test = jnp.repeat(L_test, B)
+        mask_test = mask_from_valid_lens(L_test, valid_lens_test)
+        output = state.apply_fn(
+            {"params": params, **state.kwargs},
+            s_ctx,
+            f_ctx,
+            s_test,
+            valid_lens_ctx,
+            valid_lens_test,
+            training=True,
+            rngs={"dropout": rng_dropout, "extra": rng_extra},
+        )
+
+        f_mu, f_std = output
+        ll = norm.logpdf(f_test, f_mu, f_std)
+        nll = -ll.mean(where=mask_test)
+
+        # calculating the consistency loss term d( q(j | ctx, i)q(i | ctx) , q(i | ctx, j)q(j | ctx) )
+        # here d(x, y) = |log x - log y|
+        I = random.choice(rng, L_test, (how_many,), replace=False)
+
+        def logpdf_joint_with_f_test_i(i):
+            # log q( . | ctx, i)q(i | ctx)
+
+            s_ctx_i = jax.lax.dynamic_update_index_in_dim(
+                s_ctx, s_test[:, i, :], valid_lens_ctx, 1
+            )
+            f_ctx_i = jax.lax.dynamic_update_index_in_dim(
+                f_ctx, f_test[:, i, :], valid_lens_ctx, 1
+            )
+            mu_given_i, std_given_i = state.apply_fn(
+                {"params": params, **state.kwargs},
+                s_ctx_i,
+                f_ctx_i,
+                s_test,
+                valid_lens_ctx + 1,
+                valid_lens_test,
+                training=True,
+                rngs={"dropout": rng_dropout, "extra": rng_extra},
+            )
+            return norm.logpdf(f_test, mu_given_i, std_given_i)[I] + ll[i]
+
+        ll_joint_with_f_test_i = jax.lax.map(logpdf_joint_with_f_test_i, I)
+        assert ll_joint_with_f_test_i.shape == (how_many, how_many, Df)
+        consistency_loss = jnp.abs(ll_joint_with_f_test_i - ll_joint_with_f_test_i.T)
+        consistency_loss = jnp.sum(consistency_loss)
+        # scale by the number of non-0 ordered pairs in the loss and Df to match order of nll
+        consistency_loss /= how_many * (how_many - 1) * Df
+
+        return nll + gamma * consistency_loss
+
+    loss, grads = jax.value_and_grad(loss_fn)(state.params)
+    return state.apply_gradients(grads=grads), loss
+
+
 @partial(jit, static_argnames=("is_categorical",))
 def vanilla_valid_step(
     rng: jax.Array,
