@@ -128,20 +128,33 @@ def train(
         tx=optimizer,
     )
     losses = []
+    losses_terms = defaultdict(list)
     patience = 0
     best_state = state
     early_stop_patience = early_stop_patience or train_num_steps
-    train_nll, valid_nll, best_metric = float("inf"), float("inf"), float("inf")
+    train_loss, valid_nll, best_metric = float("inf"), float("inf"), float("inf")
     pbar = tqdm(range(1, train_num_steps + 1), unit=" batches", dynamic_ncols=True)
     for i in pbar:
         batch = next(batches)
         rng_train_step, rng_train = random.split(rng_train)
-        state, loss = train_step(rng_train_step, state, batch)
+
+        # train_step may now return an additional dictionary with information about loss terms
+        state, loss, *loss_terms = train_step(rng_train_step, state, batch)
         losses += [loss]
+        if loss_terms:
+            assert len(loss_terms) == 1, (
+                "train_step should return at most one additional data: a dictionary with information about loss terms."
+            )
+            for k, v in loss_terms[0].items():
+                losses_terms[k].append(v)
         if i % log_loss_interval == 0:
-            train_nll = np.mean(losses)
-            losses = []
-            wandb.log({"Train NLL": train_nll})
+            train_loss = np.mean(losses)
+            losses.clear()
+            wandb.log({"Train loss": train_loss})
+            for k, v in losses_terms.items():
+                mean = np.mean(v)
+                v.clear()
+                wandb.log({f"Train {k}": mean})
         if i % valid_interval == 0:
             rng_valid, rng_train = random.split(rng_train)
             metrics = evaluate(
@@ -165,7 +178,7 @@ def train(
             if i % cbk.interval == 0:
                 cbk.fn(i, rng_train_step, state, batch)
         pbar.set_postfix(
-            {"Train NLL": f"{train_nll:.3f}", "Valid NLL": f"{valid_nll:.3f}"}
+            {"Train loss": f"{train_loss:.3f}", "Valid NLL": f"{valid_nll:.3f}"}
         )
     return best_state
 
@@ -197,7 +210,23 @@ def evaluate(
     return {k: np.mean(v) for k, v in metrics.items()}
 
 
-def select_steps(model, is_categorical=False):
+def select_steps(
+    model, is_categorical=False, consistency_loss: DictConfig | None = None
+):
+    if consistency_loss is not None:
+        num_samples = consistency_loss.get("num_samples", 0)
+        gamma = consistency_loss.get("gamma", 0)
+        if num_samples > 0 and gamma > 0:
+            train_step = partial(
+                train_step_with_consistency_loss,
+                num_samples=num_samples,
+                gamma=gamma,
+            )
+            valid_step = vanilla_valid_step
+            return train_step, valid_step
+        else:
+            # if invalid consistency loss params just ignore it
+            pass
     train_step, valid_step = vanilla_train_step, vanilla_valid_step
     if isinstance(model, (NP, ANP)):
         train_step = npf_elbo_train_step
@@ -260,13 +289,13 @@ def vanilla_train_step(
     return state.apply_gradients(grads=grads), nll
 
 
-@partial(jit, static_argnames=["gamma", "how_many"])
-def train_step_with_autoregressive_consistency(
+@partial(jit, static_argnames=["gamma", "num_samples"])
+def train_step_with_consistency_loss(
     rng: jax.Array,
     state: TrainState,
     batch: tuple,
     gamma: float,
-    how_many: int = 2,
+    num_samples: int = 2,
     **kwargs,
 ):
     """Training step for meta regression with diagonal covariances,
@@ -283,8 +312,8 @@ def train_step_with_autoregressive_consistency(
     Returns:
         `TrainState` with updated parameters.
     """
-    assert how_many >= 2
-    rng, rng_dropout, rng_extra = random.split(rng, 3)
+    assert num_samples >= 2
+    rng_consistency, rng_dropout, rng_extra = random.split(rng, 3)
 
     def loss_fn(params):
         s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
@@ -314,17 +343,15 @@ def train_step_with_autoregressive_consistency(
 
         # calculating the consistency loss term d( q(j | ctx, i)q(i | ctx) , q(i | ctx, j)q(j | ctx) )
         # here d(x, y) = |log x - log y|
-        I = random.choice(rng, L_test, (how_many,), replace=False)
+        I = random.choice(rng_consistency, L_test, (num_samples,), replace=False)
 
         def logpdf_joint_with_f_test_i(i):
             # log q( . | ctx, i)q(i | ctx)
 
-            s_ctx_i = jax.lax.dynamic_update_index_in_dim(
-                s_ctx, s_test[:, i, :], valid_lens_ctx, 1
-            )
-            f_ctx_i = jax.lax.dynamic_update_index_in_dim(
-                f_ctx, f_test[:, i, :], valid_lens_ctx, 1
-            )
+            batched_update_at_index = jax.vmap(lambda x, update, i: x.at[i].set(update))
+            s_ctx_i = batched_update_at_index(s_ctx, s_test[:, i, :], valid_lens_ctx)
+            f_ctx_i = batched_update_at_index(f_ctx, f_test[:, i, :], valid_lens_ctx)
+
             mu_given_i, std_given_i = state.apply_fn(
                 {"params": params, **state.kwargs},
                 s_ctx_i,
@@ -335,19 +362,27 @@ def train_step_with_autoregressive_consistency(
                 training=True,
                 rngs={"dropout": rng_dropout, "extra": rng_extra},
             )
-            return norm.logpdf(f_test, mu_given_i, std_given_i)[I] + ll[i]
+            return norm.logpdf(f_test, mu_given_i, std_given_i)[:, I] + ll[:, (i,)]
 
         ll_joint_with_f_test_i = jax.lax.map(logpdf_joint_with_f_test_i, I)
-        assert ll_joint_with_f_test_i.shape == (how_many, how_many, Df)
-        consistency_loss = jnp.abs(ll_joint_with_f_test_i - ll_joint_with_f_test_i.T)
-        consistency_loss = jnp.sum(consistency_loss)
-        # scale by the number of non-0 ordered pairs in the loss and Df to match order of nll
-        consistency_loss /= how_many * (how_many - 1) * Df
+        assert ll_joint_with_f_test_i.shape == (num_samples, B, num_samples, Df)
+        consistency_loss = jnp.abs(
+            ll_joint_with_f_test_i - ll_joint_with_f_test_i.swapaxes(0, 2)
+        )
+        consistency_loss = (
+            jnp.mean(consistency_loss) * num_samples / (num_samples - 1)
+        )  # accounting for the fact the diagonal is null
 
-        return nll + gamma * consistency_loss
+        return nll + gamma * consistency_loss, {
+            "nll": nll,
+            "consistency loss": consistency_loss,
+        }
 
-    loss, grads = jax.value_and_grad(loss_fn)(state.params)
-    return state.apply_gradients(grads=grads), loss
+    (
+        (loss, loss_terms),
+        grads,
+    ) = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
+    return state.apply_gradients(grads=grads), loss, loss_terms
 
 
 @partial(jit, static_argnames=("is_categorical",))

@@ -62,7 +62,9 @@ def main(cfg: DictConfig):
             data=cfg.data,
             kernel=cfg.kernel,
         )
-    train_step, valid_step = select_steps(model)
+    train_step, valid_step = select_steps(
+        model, consistency_loss=cfg.get("consistency_loss")
+    )
     state = train(
         rng_train,
         model,
