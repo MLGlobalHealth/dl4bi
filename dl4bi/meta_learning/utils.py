@@ -14,10 +14,11 @@ from ..core.train import TrainState, load_ckpt
 from .data.spatial import SpatialBatch
 
 
-def first_shape(arrays: Sequence[Union[jax.Array, None]]):
+def first_shape(arrays: Sequence[Union[jax.Array, None]]) -> tuple:
     for array in arrays:
         if array is not None:
             return array.shape
+    return ()
 
 
 def cfg_to_run_name(cfg: DictConfig):

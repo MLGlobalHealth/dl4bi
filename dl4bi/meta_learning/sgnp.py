@@ -63,7 +63,7 @@ class SGNP(nn.Module):
 
     .. note::
         When selecting the k nearest neighbors, the distance formula used is:
-        $d^2 = (\text{scale}_x\cdot d_x)^2+(\text{scale}_s\cdot d_s)^2+(\text{scale}_t\cdot d_t)^2$
+        $d^2 = (k_x\cdot d_x)^2+(k_s\cdot d_s)^2+(k_t\cdot d_t)^2$
     """
 
     k: int = 16
@@ -126,10 +126,10 @@ class SGNP(nn.Module):
             self.embed_t(t_test),
             self.embed_f(f_test),
         )
-        qvs, kvs = map(lambda x: norm(self.embed_all(x)), (test, ctx))
+        test, ctx = map(lambda x: norm(self.embed_all(x)), (test, ctx))
         # nodes for the graph are all the context nodes followed by all test nodes
         (B, N_t), N_c = test_shape[:-1], f_ctx.shape[1]
-        nodes = jnp.vstack([kvs.reshape(B * N_c, -1), qvs.reshape(B * N_t, -1)])
+        nodes = jnp.vstack([ctx.reshape(B * N_c, -1), test.reshape(B * N_t, -1)])
         g = self.graph  # if a graph is provided, reuse it, updating only nodes
         if g is None:
             g = build_graph(
@@ -164,7 +164,8 @@ class SGNP(nn.Module):
                 # NOTE: bucket_size is for numerical stability in
                 # jax.ops.segment_* calls; this is typically only needed for
                 # testing implementation correctness
-                g = blk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
+                # g = blk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
+                g = blk(g, training, bucket_size=kwargs.get("bucket_size"))
         nodes_test = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         output = self.head(nodes_test, training)
         return self.output_fn(output)
@@ -201,11 +202,11 @@ def build_graph(
     scale_t_sim: float = 1.0,
 ):
     ctx, test = [x_ctx, s_ctx, t_ctx], [x_test, s_test, t_test]
-    r_ctx = [_mask(v, mask_ctx) for v in ctx]
+    r_ctx = [_safe_mask(v, mask_ctx) for v in ctx]
     args = [k, x_sim, s_sim, t_sim, causal_t, scale_x_sim, scale_s_sim, scale_t_sim]
-    v_approx_knn = vmap(lambda *arrays: approx_knn(*arrays, *args))
-    idx_cc, d_x_cc, d_s_cc, d_t_cc = v_approx_knn(*ctx, *r_ctx)
-    idx_ct, d_x_ct, d_s_ct, d_t_ct = v_approx_knn(*test, *r_ctx)
+    batched_approx_knn = vmap(lambda *arrays: approx_knn(*arrays, *args))
+    idx_cc, d_x_cc, d_s_cc, d_t_cc = batched_approx_knn(*ctx, *r_ctx)
+    idx_ct, d_x_ct, d_s_ct, d_t_ct = batched_approx_knn(*test, *r_ctx)
     # convert indices from batch level to graph level
     ctx_shape, test_shape = first_shape(ctx), first_shape(test)
     (B, N_t), N_c = test_shape[:-1], ctx_shape[1]
@@ -235,7 +236,7 @@ def build_graph(
     )
 
 
-def _mask(a: Optional[jax.Array], mask: Optional[jax.Array]):
+def _safe_mask(a: Optional[jax.Array], mask: Optional[jax.Array]):
     if a is None:
         return None
     if mask is None:
@@ -259,12 +260,12 @@ def _mask(a: Optional[jax.Array], mask: Optional[jax.Array]):
     ),
 )
 def approx_knn(
-    q_x: Optional[jax.Array] = None,
-    q_s: Optional[jax.Array] = None,
-    q_t: Optional[jax.Array] = None,
-    r_x: Optional[jax.Array] = None,
-    r_s: Optional[jax.Array] = None,
-    r_t: Optional[jax.Array] = None,
+    q_x: Optional[jax.Array] = None,  # [L_q, D_x]
+    q_s: Optional[jax.Array] = None,  # [L_q, D_s]
+    q_t: Optional[jax.Array] = None,  # [L_q, D_t]
+    r_x: Optional[jax.Array] = None,  # [L_r, D_x]
+    r_s: Optional[jax.Array] = None,  # [L_r, D_s]
+    r_t: Optional[jax.Array] = None,  # [L_r, D_t]
     k: int = 16,
     x_sim: Optional[Callable] = None,
     s_sim: Optional[Callable] = None,
@@ -286,19 +287,16 @@ def approx_knn(
             d_t = t_sim(q_t[[i], :], r_t).squeeze()  # [R]
             if causal_t:
                 d_t = jnp.where(d_t <= 0, d_t, jnp.inf)
-        d_sq = (
-            (scale_x_sim * d_x) ** 2
-            + (scale_s_sim * d_s) ** 2
-            + (scale_t_sim * d_t) ** 2
-        )
+        k_x, k_s, k_t = scale_x_sim, scale_s_sim, scale_t_sim
+        d_sq = (k_x * d_x) ** 2 + (k_s * d_s) ** 2 + (k_t * d_t) ** 2
         _, idx = jax.lax.approx_min_k(d_sq, k, recall_target=recall_target)
         d_x, d_s, d_t = map(lambda v: _idx_or_none(v, idx), [d_x, d_s, d_t])
         return idx, d_x, d_s, d_t
 
-    L = first_shape([q_x, q_s, q_t])[0]
+    L_q = first_shape([q_x, q_s, q_t])[0]
     idx, d_x, d_s, d_t = jax.lax.map(
         process_batch,
-        jnp.arange(L),
+        jnp.arange(L_q),
         batch_size=num_q_parallel,
     )
     return idx, d_x, d_s, d_t
