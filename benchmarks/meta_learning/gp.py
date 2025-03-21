@@ -113,7 +113,8 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
         s_ctx = s[:, :Nc_max, :]
         f_ctx = f + obs_noise * random.normal(rng_ctx, f.shape)
         f_ctx = f_ctx[:, :Nc_max, :]
-        f = f + obs_noise * random.normal(rng_obs, f.shape)
+        if data.get("noisy_test", False):
+            f = f + obs_noise * random.normal(rng_obs, f.shape)
         return s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, var, ls, period
 
     def dataloader(rng: jax.Array):
