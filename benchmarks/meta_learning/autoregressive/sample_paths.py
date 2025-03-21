@@ -3,10 +3,10 @@ from pathlib import Path
 
 import jax
 import jax.numpy as jnp
-from dataloader import build_gp_dataloader
 from jax import random
 from omegaconf import OmegaConf
 
+from benchmarks.meta_learning.gp import build_gp_dataloader
 from dl4bi.meta_learning.autoregressive import AutoregressiveSampler
 from dl4bi.meta_learning.train_utils import load_ckpt
 
@@ -62,7 +62,6 @@ def run(
         [valid_lens_ctx],
         [s],
         [f],
-        [f_obs],
         _valid_lens_test,  # unused
         [var],
         [ls],

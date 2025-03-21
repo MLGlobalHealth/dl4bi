@@ -1,12 +1,11 @@
 # %%
-# from dataloader import build_gp_dataloader
 
 import jax
 import jax.numpy as jnp
-from sps.kernels import rbf
 import numpy as np
+from sps.kernels import rbf
 
-from benchmarks.meta_learning.autoregressive.dataloader import build_gp_dataloader
+from benchmarks.meta_learning.gp import build_gp_dataloader
 from dl4bi.meta_learning.autoregressive.analytic import (
     analytic_gp,
     analytic_observation_gp,
@@ -50,7 +49,6 @@ def get_entropy():
         valid_lens_ctx,
         s_test,
         f_test,
-        f_test_obs,
         _valid_lens_test,
         [var],
         [ls],

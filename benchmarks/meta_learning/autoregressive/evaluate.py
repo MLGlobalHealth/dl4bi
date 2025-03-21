@@ -7,10 +7,10 @@ from typing import Generator
 
 import jax
 import numpy as np
-from dataloader import build_gp_dataloader
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
+from benchmarks.meta_learning.gp import build_gp_dataloader
 from dl4bi.meta_learning.autoregressive import AutoregressiveSampler, Strategy
 from dl4bi.meta_learning.train_utils import load_ckpt
 
@@ -30,26 +30,18 @@ def evaluate(
     results_dir = Path(os.environ["RESULTS_DIR"])
     logfile = open(results_dir / "log.csv", "a", newline="")
 
-    pbar = tqdm(dataloader, total=N, desc="Evaluating")
+    if num_samples_for_random <= 0:
+        strategies.remove("random")
+
+    pbar = tqdm(dataloader, total=N, desc="Evaluating", dynamic_ncols=True)
 
     for i, datum in enumerate(pbar):
         if i >= N:
             break
-        (s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, f_test_obs) = datum
+        (s_ctx, f_ctx, valid_lens_ctx, s_test, f_test) = datum
         for strategy in strategies:
             rng, rng_i = jax.random.split(rng)
-            nll_obs = -model.logpdf(
-                rng_i,
-                s_ctx,
-                f_ctx,
-                s_test,
-                f_test_obs,
-                valid_lens_ctx,
-                strategy,
-                num_samples_for_random,
-                batching_for_random,
-            )
-            nll_gp = -model.logpdf(
+            nll = -model.logpdf(
                 rng_i,
                 s_ctx,
                 f_ctx,
@@ -62,8 +54,7 @@ def evaluate(
             )
 
             # save data
-            nlls[f"nll_obs_{strategy}"].append(nll_obs)
-            nlls[f"nll_gp_{strategy}"].append(nll_gp)
+            nlls[f"NLL_{strategy}"].append(nll)
 
         # log batch-mean nll to csv
         if i == 0:
@@ -96,22 +87,18 @@ def dataloader(rng, data, kernel):
             valid_lens_ctx,
             s_test,
             f_test,
-            f_test_obs,
             valid_lens_test,
             var,
             ls,
             period,
         ) = datum
 
-        # note that s, f come directly from the GP not the observation process
-        # TODO @pgrynfelder: might be desirable to change this
         yield (
             s_ctx,
             f_ctx,
             valid_lens_ctx,
             s_test[:, num_ctx:],
             f_test[:, num_ctx:],
-            f_test_obs[:, num_ctx:],
         )
 
 
