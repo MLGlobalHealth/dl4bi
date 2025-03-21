@@ -150,7 +150,7 @@ def train(
         if i % log_loss_interval == 0:
             train_loss = np.mean(losses)
             losses.clear()
-            wandb.log({"Train loss": train_loss})
+            wandb.log({"Train Loss": train_loss})
             for k, v in losses_terms.items():
                 mean = np.mean(v)
                 v.clear()
@@ -178,7 +178,7 @@ def train(
             if i % cbk.interval == 0:
                 cbk.fn(i, rng_train_step, state, batch)
         pbar.set_postfix(
-            {"Train loss": f"{train_loss:.3f}", "Valid NLL": f"{valid_nll:.3f}"}
+            {"Train Loss": f"{train_loss:.3f}", "Valid NLL": f"{valid_nll:.3f}"}
         )
     return best_state
 
@@ -374,8 +374,8 @@ def train_step_with_consistency_loss(
         )  # accounting for the fact the diagonal is null
 
         return nll + gamma * consistency_loss, {
-            "nll": nll,
-            "consistency loss": consistency_loss,
+            "NLL": nll,
+            "Consistency Loss": consistency_loss,
         }
 
     (
