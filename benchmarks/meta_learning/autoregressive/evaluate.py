@@ -1,7 +1,5 @@
-import csv
 import os
 from collections import defaultdict
-from datetime import datetime
 from pathlib import Path
 from typing import Generator
 
@@ -24,11 +22,10 @@ def evaluate(
     num_samples_for_random: int,
     batching_for_random: int | None,
     save_full_log_every: int | None,
+    results_dir: Path,
 ):
     nlls = defaultdict(list)
-
-    results_dir = Path(os.environ["RESULTS_DIR"])
-    logfile = open(results_dir / "log.csv", "a", newline="")
+    results_file = results_dir / "results.npz"
 
     if num_samples_for_random <= 0:
         strategies.remove("random")
@@ -56,22 +53,17 @@ def evaluate(
             # save data
             nlls[f"NLL_{strategy}"].append(nll)
 
-        # log batch-mean nll to csv
-        if i == 0:
-            writer = csv.DictWriter(logfile, list(nlls.keys()))
-            writer.writeheader()
-        writer.writerow({strategy: np.mean(nll[-1]) for strategy, nll in nlls.items()})
         # report running mean to tqdm
         pbar.set_postfix({strategy: np.mean(nll) for strategy, nll in nlls.items()})
 
         if save_full_log_every and i % save_full_log_every == 0:
             np.savez(
-                results_dir / "full_log.npz",
-                **{strategy: np.array(nll) for strategy, nll in nlls.items()},
+                results_file
+                ** {strategy: np.array(nll) for strategy, nll in nlls.items()},
             )
 
     np.savez(
-        results_dir / "full_log.npz",
+        results_file,
         **{strategy: np.array(nll) for strategy, nll in nlls.items()},
     )
 
@@ -133,13 +125,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--results-dir",
         type=Path,
-        default=Path("results") / f"autoregressive {datetime.now()}",
+        default=None,
     )
-
     args = parser.parse_args()
 
-    os.environ["RESULTS_DIR"] = str(args.results_dir)
-    args.results_dir.mkdir(parents=True, exist_ok=True)
+    results_dir = args.results_dir or Path(args.model) / "autoregressive"
+
+    os.environ["RESULTS_DIR"] = str(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
 
     state, config = load_ckpt(args.model)
     print(json.dumps(OmegaConf.to_object(config), indent=2))
@@ -164,4 +157,5 @@ if __name__ == "__main__":
         num_samples_for_random=args.M,
         batching_for_random=args.Mb,
         save_full_log_every=10,
+        results_dir=results_dir,
     )
