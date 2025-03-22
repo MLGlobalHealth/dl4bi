@@ -214,19 +214,13 @@ def select_steps(
     model, is_categorical=False, consistency_loss: DictConfig | None = None
 ):
     if consistency_loss is not None:
-        num_samples = consistency_loss.get("num_samples", 0)
-        gamma = consistency_loss.get("gamma", 0)
-        if num_samples > 0 and gamma > 0:
-            train_step = partial(
-                train_step_with_consistency_loss,
-                num_samples=num_samples,
-                gamma=gamma,
-            )
-            valid_step = vanilla_valid_step
-            return train_step, valid_step
-        else:
-            # if invalid consistency loss params just ignore it
-            pass
+        train_step = partial(
+            train_step_with_consistency_loss,
+            num_samples=consistency_loss.num_samples,
+            gamma=consistency_loss.gamma,
+        )
+        valid_step = vanilla_valid_step
+        return train_step, valid_step
     train_step, valid_step = vanilla_train_step, vanilla_valid_step
     if isinstance(model, (NP, ANP)):
         train_step = npf_elbo_train_step
