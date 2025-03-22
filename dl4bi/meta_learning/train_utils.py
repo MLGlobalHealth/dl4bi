@@ -757,6 +757,10 @@ def cfg_to_run_name(cfg: DictConfig):
         name = "TNP-D"
     if name == "TNPND":
         name = "TNP-ND"
+    if cfg.consistency_loss:
+        gamma = cfg.consistency_loss.gamma
+        num_samples = cfg.consistency_loss.num_samples
+        name += f": ConsistencyLoss {gamma:.2f} {num_samples}"
     return name
 
 
