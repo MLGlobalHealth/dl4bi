@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap
 
-from ..core.attention import MultiHeadAttention, RBFNetworkBiasedScanAttention
 from ..core.mlp import MLP
 from ..core.model_output import DiagonalMVNOutput
 from ..core.transformer import KRBlock
@@ -43,7 +42,7 @@ class TNPKR(nn.Module):
         valid_step: What validation step to use.
 
     Returns:
-        An instance of the `TNP-KR` model.
+        An instance of the `TNPKR` model.
     """
 
     num_blks: int = 6
@@ -174,8 +173,6 @@ class TNPKR(nn.Module):
         return self.output_fn(output)
 
 
-# TODO(danj): expand to support (x, s, t) input
-# TODO(danj): regression test slightly less perf than TNPKR vanilla
 class ScanTNPKR(nn.Module):
     """Transformer Neural Process - Kernel Regression (TNP-KR) using memory efficient
     scanning.
@@ -190,8 +187,14 @@ class ScanTNPKR(nn.Module):
         embed_obs: A module that creates embeddings for observed (context) and
             unobserved (test) points.
         embed_all: A module that jointly embeds `obs`, `s`, and `f` embeddings.
+        x_sim: Similarity function for fixed effects. Non-finite values are masked.
+        s_sim: Similarity function for spatial effects. Non-finite values are masked.
+        t_sim: Similarity function for temporal effects. Non-finite values are masked.
+        x_bias: Bias module for fixed similarity values.
+        s_bias: Bias module for spatial similarity values.
+        t_bias: Bias module for temporal similarity values.
         blk: A block to use for each layer and each repetition.
-        norm: A normalization module used in `KRBlocks`.
+        norm: A module used for normalization between blocks.
         head: Transforms the tokens into model output.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
@@ -199,16 +202,25 @@ class ScanTNPKR(nn.Module):
         valid_step: What validation step to use.
 
     Returns:
-        An instance of the `TNP-KR` model.
+        An instance of the `ScanTNPKR` model.
     """
 
     num_blks: int = 6
     num_reps: int = 1
+    embed_x: Callable = lambda x: x
     embed_s: Callable = lambda x: x
+    embed_t: Callable = lambda x: x
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    blk: nn.Module = KRBlock(MultiHeadAttention(RBFNetworkBiasedScanAttention()))
+    # TODO(danj): update this through blk
+    x_sim: Optional[Callable] = None
+    s_sim: Optional[Callable] = None
+    t_sim: Optional[Callable] = None
+    x_bias: Optional[Callable] = None
+    s_bias: Optional[Callable] = None
+    t_bias: Optional[Callable] = None
+    blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
     output_fn: Callable = DiagonalMVNOutput.from_activations
@@ -218,10 +230,14 @@ class ScanTNPKR(nn.Module):
     @nn.compact
     def __call__(
         self,
-        s_ctx: jax.Array,  # [B, L_ctx, D_s]
-        f_ctx: jax.Array,  # [B, L_ctx, D_f]
-        s_test: jax.Array,  # [B, L_test, D_s]
+        x_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_x]
+        s_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_s]
+        t_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_t]
+        f_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_f]
         mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
+        x_test: Optional[jax.Array] = None,  # [B, L_test, D_x]
+        s_test: Optional[jax.Array] = None,  # [B, L_test, D_s]
+        t_test: Optional[jax.Array] = None,  # [B, L_test, D_t]
         training: bool = False,
         **kwargs,
     ):
@@ -229,39 +245,57 @@ class ScanTNPKR(nn.Module):
 
         Args:
             rng: A psuedo-random number generator.
-            s_ctx: An index set array of shape `[B, L_ctx, D_S]` where
-                `B` is batch size, `L_ctx` is number of context
-                locations, and `L_ctx` is the dimension of each location.
-            f_ctx: A function value array of shape `[B, L_ctx, D_F]` where `B` is
-                batch size, `L_ctx` is number of context locations, and `D_F` is
-                the dimension of each function value.
-            s_test: A location array of shape `[B, L_test, D_S]` where `B` is
-                batch size, `L_test` is number of test locations, and `D_S`
-                is the dimension of each location.
-            mask_ctx: An optional array of shape `[B, L_ctx]`
-                valid positions for each `L_ctx` sequence in the batch.
+            x_ctx: Optional fixed effects for context points.
+            t_ctx: Optional temporal values for context points.
+            s_ctx: Optional spatial values for context points.
+            f_ctx: Function values for context points.
+            mask_ctx: A mask for context points.
+            x_test: Optional fixed effects for test points.
+            t_test: Optional temporal values for test points.
+            s_test: Optional spatial values for test points.
+            f_test: Function values for test points.
             training: A boolean indicating whether this call is performed during
                 training.
 
         Returns:
-            $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
+            `ModelOutput`.
         """
-        f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
+        test_shape = first_shape([x_test, s_test, t_test])
+        f_test = jnp.zeros((*test_shape[:-1], f_ctx.shape[-1]))
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
         unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
         ctx = safe_stack(
             self.embed_obs(obs),
+            self.embed_x(x_ctx),
             self.embed_s(s_ctx),
+            self.embed_t(t_ctx),
             self.embed_f(f_ctx),
         )
         test = safe_stack(
             self.embed_obs(unobs),
+            self.embed_x(x_test),
             self.embed_s(s_test),
+            self.embed_t(t_test),
             self.embed_f(f_test),
         )
-        qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
-        qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx}
-        kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx}
+        norm = nn.LayerNorm()
+        qvs, kvs = map(lambda x: norm(self.embed_all(x)), (test, ctx))
+        qk_kwargs = dict(
+            qs_x=x_test,
+            qs_s=s_test,
+            qs_t=t_test,
+            ks_x=x_ctx,
+            ks_s=s_ctx,
+            ks_t=t_ctx,
+        )
+        kk_kwargs = dict(
+            qs_x=x_ctx,
+            qs_s=s_ctx,
+            qs_t=t_ctx,
+            ks_x=x_ctx,
+            ks_s=s_ctx,
+            ks_t=t_ctx,
+        )
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
