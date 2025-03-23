@@ -272,13 +272,14 @@ class AutoregressiveSampler:
         f_test_i = f_test_i[:, None]  # [B, 1, D_s]
         return self.logpdf_diagonal(s_ctx, f_ctx, s_test_i, f_test_i, valid_lens_ctx)
 
+    @partial(jit, static_argnums=0)
     def _logpdf(
         self,
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
         f_test: jax.Array,  # [B, L_test, D_f]
-        valid_lens_ctx: jax.Array | None,  # [B]
+        valid_lens_ctx: jax.Array,  # [B]
     ) -> jax.Array:
         """
         Computes the log-likelihood induced by the autoregressive model, batched.
@@ -288,13 +289,8 @@ class AutoregressiveSampler:
         B, L_ctx, _ = s_ctx.shape
         _, L_test, D_f = f_test.shape
 
-        if valid_lens_ctx is None:
-            s = jnp.concat([s_ctx, s_test], axis=1)
-            f = jnp.concat([f_ctx, f_test], axis=1)
-            valid_lens_ctx = jnp.repeat(L_ctx, B)
-        else:
-            s = concatenate_ctx_and_test(s_ctx, s_test, valid_lens_ctx)
-            f = concatenate_ctx_and_test(f_ctx, f_test, valid_lens_ctx)
+        s = concatenate_ctx_and_test(s_ctx, s_test, valid_lens_ctx)
+        f = concatenate_ctx_and_test(f_ctx, f_test, valid_lens_ctx)
 
         def fun(i, log_densities):
             s_test_i = s_test[:, i]
@@ -306,6 +302,7 @@ class AutoregressiveSampler:
 
         return jax.lax.fori_loop(0, L_test, fun, jnp.zeros((B, D_f)))
 
+    @partial(jit, static_argnums=0)
     def _logpdf_random(
         self,
         rng: jax.Array,
@@ -313,7 +310,7 @@ class AutoregressiveSampler:
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
         f_test: jax.Array,  # [B, L_test, D_f]
-        valid_lens_ctx: jax.Array | None,  # [B]
+        valid_lens_ctx: jax.Array,  # [B]
     ):
         _, L_test, _ = s_test.shape
 
@@ -323,14 +320,15 @@ class AutoregressiveSampler:
         f_test = f_test[:, idx]
         return self._logpdf(s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
 
-    def logpdf_random(
+    @partial(jit, static_argnames=["self", "M", "Mb"])
+    def _logpdf_random_estimate(
         self,
         rng: jax.Array,
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
         f_test: jax.Array,  # [B, L_test, D_f]
-        valid_lens_ctx: jax.Array | None,  # [B]
+        valid_lens_ctx: jax.Array,  # [B]
         M: int,  # number of samples for Monte Carlo estimation
         Mb: int | None,  # batch size for the MC estimate
     ):
@@ -367,11 +365,14 @@ class AutoregressiveSampler:
         batching_for_random: int | None,
         # batch the random ll estimation (batch size effectively becomes B*this)
     ):
+        if valid_lens_ctx is None:
+            B, L_ctx, _ = s_ctx.shape
+            valid_lens_ctx = jnp.repeat(L_ctx, B)
         match strategy:
             case "preserve":
                 return self._logpdf(s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
             case "random":
-                return self.logpdf_random(
+                return self._logpdf_random_estimate(
                     rng,
                     s_ctx,
                     f_ctx,
