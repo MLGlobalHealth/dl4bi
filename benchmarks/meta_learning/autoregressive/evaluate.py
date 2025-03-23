@@ -58,8 +58,8 @@ def evaluate(
 
         if save_full_log_every and i % save_full_log_every == 0:
             np.savez(
-                results_file
-                ** {strategy: np.array(nll) for strategy, nll in nlls.items()},
+                results_file,
+                **{strategy: np.array(nll) for strategy, nll in nlls.items()},
             )
 
     np.savez(
