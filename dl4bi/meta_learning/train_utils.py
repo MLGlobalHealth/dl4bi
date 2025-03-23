@@ -218,6 +218,7 @@ def select_steps(
             train_step_with_consistency_loss,
             num_samples=consistency_loss.num_samples,
             gamma=consistency_loss.gamma,
+            order=consistency_loss.get("order", 1),
         )
         valid_step = vanilla_valid_step
         return train_step, valid_step
@@ -283,13 +284,14 @@ def vanilla_train_step(
     return state.apply_gradients(grads=grads), nll
 
 
-@partial(jit, static_argnames=["gamma", "num_samples"])
+@partial(jit, static_argnames=["gamma", "num_samples", "order"])
 def train_step_with_consistency_loss(
     rng: jax.Array,
     state: TrainState,
     batch: tuple,
     gamma: float,
-    num_samples: int = 2,
+    num_samples: int,
+    order: int,
     **kwargs,
 ):
     """Training step for meta regression with diagonal covariances,
@@ -360,9 +362,17 @@ def train_step_with_consistency_loss(
 
         ll_joint_with_f_test_i = jax.lax.map(logpdf_joint_with_f_test_i, I)
         assert ll_joint_with_f_test_i.shape == (num_samples, B, num_samples, Df)
-        consistency_loss = jnp.abs(
-            ll_joint_with_f_test_i - ll_joint_with_f_test_i.swapaxes(0, 2)
-        )
+        diff = ll_joint_with_f_test_i - ll_joint_with_f_test_i.swapaxes(0, 2)
+
+        if order == 1:
+            consistency_loss = jnp.abs(diff)
+        elif order == 2:
+            consistency_loss = jnp.square(diff)
+        else:
+            raise NotImplementedError(
+                f"Consistency Loss order must be 1 or 2, got {order=}"
+            )
+
         consistency_loss = (
             jnp.mean(consistency_loss) * num_samples / (num_samples - 1)
         )  # accounting for the fact the diagonal is null
@@ -760,7 +770,8 @@ def cfg_to_run_name(cfg: DictConfig):
     if cfg.consistency_loss:
         gamma = cfg.consistency_loss.gamma
         num_samples = cfg.consistency_loss.num_samples
-        name += f": ConsistencyLoss {gamma:.2f} {num_samples}"
+        order = cfg.consistency_loss.order
+        name += f": ConsistencyLoss{order} {gamma:.2f} {num_samples}"
     return name
 
 
