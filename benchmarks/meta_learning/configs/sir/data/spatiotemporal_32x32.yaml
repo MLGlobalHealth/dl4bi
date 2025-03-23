@@ -16,4 +16,4 @@ num_ctx_per_t:
 independent_t_masks: False
 num_test: 256 # 25% of single time step
 forecast: True
-batch_size: 1
+batch_size: 2
