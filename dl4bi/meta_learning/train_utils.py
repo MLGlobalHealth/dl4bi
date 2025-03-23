@@ -34,6 +34,8 @@ from sps.sir import LatticeSIR
 from sps.utils import build_grid
 from tqdm import tqdm
 
+from dl4bi.core.utils import update_at_index
+
 # NOTE: needed by `instantiate` function
 from ..core.attention import *
 from ..core.bias import *
@@ -344,9 +346,8 @@ def train_step_with_consistency_loss(
         def logpdf_joint_with_f_test_i(i):
             # log q( . | ctx, i)q(i | ctx)
 
-            batched_update_at_index = jax.vmap(lambda x, update, i: x.at[i].set(update))
-            s_ctx_i = batched_update_at_index(s_ctx, s_test[:, i, :], valid_lens_ctx)
-            f_ctx_i = batched_update_at_index(f_ctx, f_test[:, i, :], valid_lens_ctx)
+            s_ctx_i = update_at_index(s_ctx, s_test[:, i, :], valid_lens_ctx)
+            f_ctx_i = update_at_index(f_ctx, f_test[:, i, :], valid_lens_ctx)
 
             mu_given_i, std_given_i = state.apply_fn(
                 {"params": params, **state.kwargs},

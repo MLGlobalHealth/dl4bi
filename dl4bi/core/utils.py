@@ -99,3 +99,29 @@ def breakpoint_if_nonfinite(x):
         jax.debug.breakpoint()
 
     lax.cond(is_finite, true_fn, false_fn, x)
+
+
+@jit
+@vmap
+def update_at_index(x, update, idx):
+    """
+    Batched update at index i.e. for all b
+    `x[b, idx[b]]` is set to `update[b]`.
+    """
+    return x.at[idx].set(update)
+
+
+@jit
+@vmap
+def concatenate_ctx_and_test(
+    ctx,  # [L_ctx, D]
+    test,  # [L_test, D]
+    valid_lens_ctx,  # []
+):
+    """
+    Concatenates context and test points such that:
+    `result[b] = ctx[b][:valid_lens_ctx[b]] ++ test[b] ++ 0s`
+    """
+    L_test = test.shape[0]
+    s = jnp.pad(ctx, ((0, L_test), (0, 0)))
+    return jax.lax.dynamic_update_slice_in_dim(s, test, valid_lens_ctx, axis=0)

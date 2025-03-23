@@ -11,6 +11,7 @@ import jax.numpy as jnp
 import tqdm
 from jax import jit, random, vmap
 
+from dl4bi.core.utils import concatenate_ctx_and_test
 from dl4bi.meta_learning.train_utils import TrainState
 
 from .permutations import (
@@ -37,24 +38,6 @@ def dump_log_densities(log_densities):
     results_dir = os.environ.get("RESULTS_DIR")
     path = Path(results_dir) / f"log_densities_{datetime.now()}.npy"
     jnp.save(path, log_densities)
-
-
-@jit
-def _concatenate(
-    ctx,  # [L_ctx, D]
-    test,  # [L_test, D]
-    valid_lens_ctx,  # []
-):
-    L_test = test.shape[0]
-    s = jnp.pad(ctx, ((0, L_test), (0, 0)))
-    return jax.lax.dynamic_update_slice_in_dim(s, test, valid_lens_ctx, axis=0)
-
-
-concatenate = jit(vmap(_concatenate))
-"""
-Concatenates context and test points such that:
-`result[b] = ctx[b][:valid_lens_ctx[b]] ++ test[b] ++ 0s`
-"""
 
 
 @dataclass(frozen=True)
@@ -310,8 +293,8 @@ class AutoregressiveSampler:
             f = jnp.concat([f_ctx, f_test], axis=1)
             valid_lens_ctx = jnp.repeat(L_ctx, B)
         else:
-            s = concatenate(s_ctx, s_test, valid_lens_ctx)
-            f = concatenate(f_ctx, f_test, valid_lens_ctx)
+            s = concatenate_ctx_and_test(s_ctx, s_test, valid_lens_ctx)
+            f = concatenate_ctx_and_test(f_ctx, f_test, valid_lens_ctx)
 
         def fun(i, log_densities):
             s_test_i = s_test[:, i]
