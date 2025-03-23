@@ -95,7 +95,6 @@ def dataloader(rng, data, kernel):
 
 
 if __name__ == "__main__":
-    import json
     from argparse import ArgumentParser
 
     parser = ArgumentParser()
@@ -135,7 +134,7 @@ if __name__ == "__main__":
     results_dir.mkdir(parents=True, exist_ok=True)
 
     state, config = load_ckpt(args.model)
-    print(json.dumps(OmegaConf.to_object(config), indent=2))
+    print(OmegaConf.to_yaml(config))
     print(f"Evaluation seed: {args.seed}")
 
     if args.batch_size is not None:
