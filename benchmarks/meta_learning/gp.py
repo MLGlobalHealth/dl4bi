@@ -89,7 +89,7 @@ def main(cfg: DictConfig):
     path = f"results/{cfg.project}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    save_ckpt(state, cfg, path.with_suffix(".ckpt"))
+    save_ckpt(state, cfg, path.with_suffix(path.suffix + ".ckpt"))
 
 
 def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
