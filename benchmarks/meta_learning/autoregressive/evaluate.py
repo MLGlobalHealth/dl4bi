@@ -32,8 +32,8 @@ def evaluate(
 
     pbar = tqdm(dataloader, total=N, desc="Evaluating", dynamic_ncols=True)
 
-    for i, datum in enumerate(pbar):
-        if i >= N:
+    for i, datum in enumerate(pbar, start=1):
+        if i > N:
             break
         (s_ctx, f_ctx, valid_lens_ctx, s_test, f_test) = datum
         for strategy in strategies:
