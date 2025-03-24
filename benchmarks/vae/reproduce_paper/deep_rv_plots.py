@@ -12,6 +12,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import pandas as pd
+import seaborn as sns
 from infer import load_ckpt
 from omegaconf import OmegaConf
 from train import build_spatial_dataloaders
@@ -32,7 +33,7 @@ from dl4bi.vae.train_utils import TrainState
 
 def reproduce_plots(seeds: jax.Array):
     models_cfgs = ["auto_deep_RV", "deep_RV_gMLP", "auto_prior_cvae"]
-    models_n = ["DeepRV_MLP", "DeepRV_gMLP", "PriorCVAE_MLP", "Baseline_GP"]
+    models_n = ["Baseline_GP", "PriorCVAE_MLP", "DeepRV_MLP", "DeepRV_gMLP"]
     spatial_priors = ["rbf", "matern_3_2", "matern_1_2", "matern_5_2", "car"]
     seed = int(seeds[0])
     plot_vae_train_samples(seed, models_cfgs, spatial_priors)
@@ -129,7 +130,6 @@ def plot_vae_train_samples(seed: int, models: list[str], spatial_priors: list[st
                 plot_vae_scatter_comp(
                     rng,
                     state,
-                    model_name,
                     loader,
                     cond_names,
                     "DeepRV" in model_name,
@@ -141,7 +141,6 @@ def plot_vae_train_samples(seed: int, models: list[str], spatial_priors: list[st
 def plot_vae_scatter_comp(
     rng: jax.Array,
     state: TrainState,
-    model: str,
     loader,
     conds_names: list[str],
     is_decoder_only: bool,
@@ -186,7 +185,7 @@ def plot_empirical_bayes_comparison(
                 inf_c = data[f"inf_{compare_var}"]
                 real_c = data[f"real_{compare_var}"]
             ax.scatter(real_c, inf_c, alpha=0.6)
-            ax.set_title(model.replace("_", " "))
+            ax.set_title(model.replace("Baseline_", "").replace("_", " + "))
             abs_min = min(abs_min, min(real_c.min(), inf_c.min()))
             abs_max = max(abs_max, max(real_c.max(), inf_c.max()))
         for ax in fig.axes:
@@ -284,13 +283,16 @@ def summarize_inference_runs(
                 save_dir / f"{model}_{spatial_prior}_infer_summary.png",
                 log=log_plot,
             )
+            trace_vars = ["ls", "var", "beta"]
+            if spatial_prior == "car":
+                trace_vars = ["alpha"]
+            elif exp_name == "UK_LTLA_sim":
+                trace_vars = ["ls", "beta"]
             plot_infer_trace(
                 samples,
                 mcmc,
                 conditionals=None,
-                var_names=["alpha", "tau"]
-                if spatial_prior == "car"
-                else ["ls", "var", "beta"],
+                var_names=trace_vars,
                 save_path=save_dir / f"{model}_{spatial_prior}_infer_trace.png",
             )
             plot_map_predictive(
@@ -301,7 +303,7 @@ def summarize_inference_runs(
                 save_dir / f"{model}_{spatial_prior}_infer_samples.png",
                 log=log_plot,
             )
-        plot_histogram_comparisons(
+        plot_posterior_predictive_comparisons(
             all_samples,
             conditionals,
             priors,
@@ -344,93 +346,66 @@ def summarize_inference_runs(
     return infer_summary
 
 
-def plot_histogram_comparisons(
+def plot_posterior_predictive_comparisons(
     samples: list[dict],
     conditionals: dict,
     priors: dict,
     model_names: list[str],
     save_prefix: Path,
 ):
-    num_models = len(model_names)
     baseline_index = model_names.index("Baseline_GP")
-    for i, (var_name, actual_val) in enumerate(conditionals.items()):
-        fig, axes = plt.subplots(1, num_models - 1, figsize=(12, 4))
-        baseline_samples = samples[baseline_index].get(str(var_name), None)
-        for j, model_name in enumerate(model_names):
-            if model_name == "Baseline_GP":
-                continue
+    for var_name, actual_val in conditionals.items():
+        fig, ax = plt.subplots(figsize=(8, 6))
+        min_val, max_val = 1000, -1000
+        for model_name in model_names:
             model_idx = model_names.index(model_name)
-            ax = axes[j - (1 if j > baseline_index else 0)]
             model_samples = samples[model_idx].get(str(var_name), None)
-            if baseline_samples is not None:
-                ax.hist(
-                    baseline_samples,
-                    bins=20,
-                    density=True,
-                    color="blue",
-                    alpha=0.5,
-                    label="Baseline_GP",
-                    edgecolor="black",
-                )
             if model_samples is not None:
-                ax.hist(
-                    model_samples,
-                    bins=20,
-                    density=True,
-                    color="green",
-                    alpha=0.5,
-                    label=model_name,
-                    edgecolor="black",
-                )
-            prior_dist = priors.get(var_name, None)
-            if prior_dist is not None and baseline_samples is not None:
-                x_vals = jnp.linspace(min(baseline_samples), max(baseline_samples), 100)
+                min_val = min(min_val, model_samples.min())
+                max_val = max(max_val, model_samples.max())
+                model_n = model_name.replace("Baseline_", "").replace("_", " + ")
+                sns.kdeplot(model_samples, label=model_n, linewidth=2, alpha=0.7)
+        prior_dist = priors.get(var_name, None)
+        if prior_dist is not None:
+            baseline_samples = samples[baseline_index].get(str(var_name), None)
+            if baseline_samples is not None:
+                x_vals = jnp.linspace(min_val, max_val, 200)
                 prior_pdf = jnp.exp(prior_dist.log_prob(x_vals))
-                ax_range = ax.get_xlim()[1] - ax.get_xlim()[0]
                 ax.plot(
                     x_vals,
-                    prior_pdf * ax_range / 20,
+                    prior_pdf,
                     color="orange",
                     linestyle="--",
-                    linewidth=1,
+                    linewidth=2,
                     label="Prior",
                 )
-            if actual_val is not None:
-                ax.axvline(
-                    actual_val, color="red", linestyle="--", linewidth=1, label="GT"
-                )
-            model_title_name = model_name.replace("_MLP", "")
-            ax.set_title(f"{model_title_name} vs Baseline")
-            ax.set_xlabel(var_name)
-            ax.legend(loc="upper right", fontsize=6)
+        if actual_val is not None:
+            ax.axvline(actual_val, color="red", linestyle="--", linewidth=2, label="GT")
+        ax.set_title(f"Distribution Comparison for {var_name}")
+        ax.set_xlabel(var_name)
+        ax.legend()
         plt.tight_layout()
         plt.savefig(f"{save_prefix}_histogram_{var_name}.png", dpi=150)
         plt.clf()
         plt.close(fig)
 
 
-def plot_models_predictive_means(
-    f_hats,
-    map_data,
-    models,
-    save_path: Path,
-    log=True,
-):
+def plot_models_predictive_means(f_hats, map_data, models, save_path: Path, log=True):
     if log:
         f_hats = [jnp.log(f_mean + 1) for f_mean in f_hats]
     f_hat_means = [f_hats[0]] + [f_mean.mean(axis=0) for f_mean in f_hats[1:]]
     vmin = jnp.min(jnp.array([f_mean.min() for f_mean in f_hat_means])).item()
     vmax = jnp.max(jnp.array([f_mean.max() for f_mean in f_hat_means])).item()
-    fig, ax = plt.subplots(1, len(f_hat_means), figsize=(6 * len(f_hat_means), 8))
+    fig, ax = plt.subplots(1, len(f_hat_means), figsize=(9 * len(f_hat_means), 12))
     log_str = " (Log scale)" if log else ""
     for i, f_mean in enumerate(f_hat_means):
-        title = "Observed counts" if i == 0 else f"{models[i - 1]}: Mean estimate"
+        model_n = models[i - 1].replace("Baseline_", "").replace("_", " + ")
+        title = "Observed counts" if i == 0 else f"{model_n}: Mean estimate"
         plot_on_map(ax[i], map_data, f_mean, vmin, vmax, f"{title}{log_str}")
-
     for axis in ax:
         axis.set_axis_off()
     plt.tight_layout()
-    fig.savefig(save_path, dpi=125)
+    fig.savefig(save_path, dpi=200)
     plt.clf()
     plt.close(fig)
 
