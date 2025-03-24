@@ -175,6 +175,7 @@ def plot_models_mean_prevalence(
         ax = axes if len(prev_hat_means) == 1 else axes[i]
         plot_on_map(ax, map_data, prev_mean, vmin, vmax, f"{title}{log_str}")
         ax.set_axis_off()
+        ax.set_title(ax.get_title(), fontsize=20)
     plt.tight_layout()
     if save_path is None:
         save_path = f"/tmp/Observed prevalence{datetime.now().isoformat()}.png"

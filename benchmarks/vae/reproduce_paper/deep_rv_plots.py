@@ -224,6 +224,11 @@ def summarize_inference_runs(
     save_dir.mkdir(parents=True, exist_ok=True)
     infer_summary = []
     for spatial_prior in spatial_priors:
+        trace_vars = ["ls", "var", "beta"]
+        if spatial_prior == "car":
+            trace_vars = ["alpha"]
+        elif exp_name == "UK_LTLA_sim":
+            trace_vars = ["ls", "beta"]
         prev_hats, prev_real, f_hats, all_samples = [], None, [None], []
         for i, model in enumerate(models):
             result_dir = Path(
@@ -283,11 +288,6 @@ def summarize_inference_runs(
                 save_dir / f"{model}_{spatial_prior}_infer_summary.png",
                 log=log_plot,
             )
-            trace_vars = ["ls", "var", "beta"]
-            if spatial_prior == "car":
-                trace_vars = ["alpha"]
-            elif exp_name == "UK_LTLA_sim":
-                trace_vars = ["ls", "beta"]
             plot_infer_trace(
                 samples,
                 mcmc,
@@ -308,6 +308,7 @@ def summarize_inference_runs(
             conditionals,
             priors,
             models,
+            trace_vars,
             save_dir / f"{spatial_prior}",
         )
         plot_models_predictive_means(
@@ -351,10 +352,12 @@ def plot_posterior_predictive_comparisons(
     conditionals: dict,
     priors: dict,
     model_names: list[str],
+    var_names: list[str],
     save_prefix: Path,
 ):
     baseline_index = model_names.index("Baseline_GP")
-    for var_name, actual_val in conditionals.items():
+    for var_name in var_names:
+        actual_val = conditionals[var_name]
         fig, ax = plt.subplots(figsize=(8, 6))
         min_val, max_val = 1000, -1000
         for model_name in model_names:
@@ -381,7 +384,6 @@ def plot_posterior_predictive_comparisons(
                 )
         if actual_val is not None:
             ax.axvline(actual_val, color="red", linestyle="--", linewidth=2, label="GT")
-        ax.set_title(f"Distribution Comparison for {var_name}")
         ax.set_xlabel(var_name)
         ax.legend()
         plt.tight_layout()
@@ -403,6 +405,7 @@ def plot_models_predictive_means(f_hats, map_data, models, save_path: Path, log=
         title = "Observed counts" if i == 0 else f"{model_n}: Mean estimate"
         plot_on_map(ax[i], map_data, f_mean, vmin, vmax, f"{title}{log_str}")
     for axis in ax:
+        axis.set_title(axis.get_title(), fontsize=20)
         axis.set_axis_off()
     plt.tight_layout()
     fig.savefig(save_path, dpi=200)
