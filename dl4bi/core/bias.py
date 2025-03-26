@@ -1,3 +1,4 @@
+from dataclasses import field
 from functools import partial
 from typing import Callable, Optional
 
@@ -184,3 +185,27 @@ def scanned_tisa_bias(
 def zero_bias(qs_meta, ks_meta):
     (B, Q, _M), K = qs_meta.shape, ks_meta.shape[1]
     return jnp.zeros((B, 1, Q, K))  # [B, H, Q, K]
+
+
+def init_rbf_network_bias_params(mod: nn.Module, num_heads: int, num_basis: int):
+    a = mod.param("a", init.constant(1), (num_heads, num_basis))
+    b = mod.param("b", init.constant(1), (num_heads, num_basis))
+    return {"a": a, "b": b}
+
+
+class Bias(nn.Module):
+    init_params: Callable = init_rbf_network_bias_params
+    init_kwargs: dict = field(default_factory=lambda: {"num_heads": 4, "num_basis": 5})
+    bias_func: Callable = rbf_network_bias
+    scanned_bias_func: Callable = scanned_rbf_network_bias
+
+    @nn.compact
+    def __call__(
+        self,
+        d: jax.Array,  # [B, Q, K] or [E]
+        mask: Optional[jax.Array] = None,  # [B, Q, K] or [E]
+    ):
+        params = self.init_params_func(**self.init_kwargs)
+        if mask is None:
+            mask = jnp.array([True])
+        return self.bias_func(d, mask, **params)

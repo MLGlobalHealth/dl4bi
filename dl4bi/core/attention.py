@@ -12,7 +12,7 @@ from einops import rearrange
 from jax import jit, lax, random
 from jax.lax import scan
 
-from .bias import scanned_rbf_network_bias, scanned_scalar_bias, scanned_tisa_bias
+from .bias import scanned_rbf_network_bias, scanned_scalar_bias, scanned_tisa_bias, Bias
 from .mlp import MLP
 from .utils import exists
 
@@ -433,9 +433,9 @@ class BiasedScanAttention(nn.Module):
         An `BiasedScanAttention` module.
     """
 
-    x_bias_func: Optional[Callable] = None
-    s_bias_func: Optional[Callable] = None
-    t_bias_func: Optional[Callable] = None
+    x_bias: Optional[Bias] = None
+    s_bias: Optional[Bias] = None
+    t_bias: Optional[Bias] = None
     qs_chunk_size: int = 1024
     ks_chunk_size: int = 1024
 
@@ -457,13 +457,44 @@ class BiasedScanAttention(nn.Module):
             vs: Values of shape [B, H, K, D_v].
             mask: Mask for keys and values of shape [B, K].
             training: Boolean indicating whether currently training.
+            qs_x: Query fixed effects of shape [B, Q, D_x].
+            ks_x: Key fixed effects of shape [B, K, D_x].
             qs_s: Query locations of shape [B, Q, D_s].
             ks_s: Key locations of shape [B, K, D_s].
+            qs_t: Query locations of shape [B, Q, D_t].
+            ks_t: Key locations of shape [B, K, D_t].
 
         Returns:
             `ctx` and `attn`, the updated values and None, respectively,
             since scanned attention never materializes the attention matrix.
         """
+        x_bias_func = x_bias_kwargs = None
+        if self.x_bias is not None:
+            x_bias_func = self.x_bias.scanned_bias_func
+            x_bias_kwargs = self.x_bias.init_params(**self.x_bias.init_kwargs)
+        s_bias_func = s_bias_kwargs = None
+        if self.s_bias is not None:
+            s_bias_func = self.s_bias.scanned_bias_func
+            s_bias_kwargs = self.s_bias.init_params(**self.s_bias.init_kwargs)
+        t_bias_func = t_bias_kwargs = None
+        if self.t_bias is not None:
+            t_bias_func = self.t_bias.scanned_bias_func
+            t_bias_kwargs = self.t_bias.init_params(**self.t_bias.init_kwargs)
+        return biased_scan_attention(
+            qs,
+            ks,
+            vs,
+            mask,
+            x_bias_func=x_bias_func,
+            x_bias_kwargs=x_bias_kwargs,
+            s_bias_func=s_bias_func,
+            s_bias_kwargs=s_bias_kwargs,
+            t_bias_func=t_bias_func,
+            t_bias_kwargs=t_bias_kwargs,
+            qs_chunk_size=self.qs_chunk_size,
+            ks_chunk_size=self.ks_chunk_size,
+            **kwargs,
+        ), None
 
 
 class RBFNetworkBiasedScanAttention(nn.Module):
