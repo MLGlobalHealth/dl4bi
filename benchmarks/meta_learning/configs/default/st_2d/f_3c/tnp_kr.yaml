@@ -19,7 +19,7 @@ t_sim:
   _partial_: true
   causal: True
 t_bias:
-  _target_: dl4bi.bias.ScalarBias
+  _target_: dl4bi.bias.Bias.build_scalar_bias
   num_heads: 4
 blk:
   _target_: dl4bi.transformer.KRBlock
