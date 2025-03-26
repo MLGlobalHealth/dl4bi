@@ -11,6 +11,11 @@ from jax import jit, vmap
 from .sim import l2_dist
 
 
+def init_scalar_bias_params(mod: nn.Module, num_heads: int):
+    a = mod.param("a", init.constant(-1), (num_heads,))
+    return {"a": a}
+
+
 @jit
 def scalar_bias(
     d: jax.Array,  # [B, Q, K] or [E]
@@ -43,43 +48,10 @@ def scanned_scalar_bias(
     return scalar_bias(d, mask, a)
 
 
-class ScalarBias(nn.Module):
-    num_heads: int = 4
-    bias_func: Callable = scalar_bias
-    scanned_bias_func: Callable = scanned_scalar_bias
-
-    @nn.compact
-    def __call__(
-        self,
-        d: jax.Array,  # [B, Q, K] or [E, D]
-        mask: Optional[jax.Array] = None,  # None or [B, Q, K] or [E]
-    ):
-        a = self.param("a", init.constant(-1), (self.num_heads,))
-        if mask is None:
-            mask = jnp.array([True])
-        return self.bias_func(d, mask, a)  # [B, H, Q, K]
-
-    @classmethod
-    def init_params(cls, module: nn.Module, num_heads: int):
-        a = module.param("a", init.constant(-1), (num_heads,))
-        return {"a": a}
-
-
-class RBFNetworkBias(nn.Module):
-    num_heads: int = 4
-    num_basis: int = 5
-
-    @nn.compact
-    def __call__(
-        self,
-        d: jax.Array,  # [B, Q, K] or [E]
-        mask: Optional[jax.Array] = None,  # None or [B, Q, K] or [E]
-    ):
-        a = self.param("a", init.constant(1), (self.num_heads, self.num_basis))
-        b = self.param("b", init.constant(1), (self.num_heads, self.num_basis))
-        if mask is None:
-            mask = jnp.array([True])
-        return rbf_network_bias(d, mask, a, b)  # [B, H, Q, K]
+def init_rbf_network_bias_params(mod: nn.Module, num_heads: int, num_basis: int):
+    a = mod.param("a", init.constant(1), (num_heads, num_basis))
+    b = mod.param("b", init.constant(1), (num_heads, num_basis))
+    return {"a": a, "b": b}
 
 
 @jit
@@ -120,24 +92,11 @@ def scanned_rbf_network_bias(
     return rbf_network_bias(d, mask, a, b)
 
 
-class TISABias(nn.Module):
-    """[Translation-Invariant Self-Attention (TISA)](https://arxiv.org/abs/2106.01950) Bias."""
-
-    num_heads: int = 4
-    num_basis: int = 5
-
-    @nn.compact
-    def __call__(
-        self,
-        d: jax.Array,  # [B, Q, K, D] or [E, D]
-        mask: Optional[jax.Array] = None,  # None or [B, Q, K] or [E]
-    ):
-        a = self.param("a", init.constant(1), (self.num_heads, self.num_basis))
-        b = self.param("b", init.constant(1), (self.num_heads, self.num_basis))
-        c = self.param("c", init.constant(1), (self.num_heads, self.num_basis))
-        if mask is None:
-            mask = jnp.array([True])
-        return tisa_bias(d, mask, a, b, c)  # [B, H, Q, K]
+def init_tisa_bias_params(mod: nn.Module, num_heads: int, num_basis: int):
+    a = mod.param("a", init.constant(1), (num_heads, num_basis))
+    b = mod.param("b", init.constant(1), (num_heads, num_basis))
+    c = mod.param("c", init.constant(0), (num_heads, num_basis))
+    return {"a": a, "b": b, "c": c}
 
 
 @jit
@@ -181,25 +140,6 @@ def scanned_tisa_bias(
     return tisa_bias(d, mask, a, b, c)
 
 
-@jit
-def zero_bias(qs_meta, ks_meta):
-    (B, Q, _M), K = qs_meta.shape, ks_meta.shape[1]
-    return jnp.zeros((B, 1, Q, K))  # [B, H, Q, K]
-
-
-def init_rbf_network_bias_params(mod: nn.Module, num_heads: int, num_basis: int):
-    a = mod.param("a", init.constant(1), (num_heads, num_basis))
-    b = mod.param("b", init.constant(1), (num_heads, num_basis))
-    return {"a": a, "b": b}
-
-
-def init_tisa_bias_params(mod: nn.Module, num_heads: int, num_basis: int):
-    a = mod.param("a", init.constant(1), (num_heads, num_basis))
-    b = mod.param("b", init.constant(1), (num_heads, num_basis))
-    c = mod.param("c", init.constant(1), (num_heads, num_basis))
-    return {"a": a, "b": b, "c": c}
-
-
 class Bias(nn.Module):
     """A generic bias module that is defined through its attribute functions.
 
@@ -229,7 +169,7 @@ class Bias(nn.Module):
     @classmethod
     def build_scalar_bias(cls, num_heads: int = 4):
         return Bias(
-            init_rbf_network_bias_params,
+            init_scalar_bias_params,
             {"num_heads": num_heads},
             bias_func=scalar_bias,
             scanned_bias_func=scanned_scalar_bias,

@@ -4,7 +4,6 @@ from functools import partial
 from typing import Optional
 
 import flax.linen as nn
-import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
 import jraph
@@ -12,7 +11,7 @@ from einops import rearrange
 from jax import jit, lax, random
 from jax.lax import scan
 
-from .bias import scanned_rbf_network_bias, scanned_scalar_bias, scanned_tisa_bias, Bias
+from .bias import Bias, scanned_rbf_network_bias, scanned_scalar_bias
 from .mlp import MLP
 from .utils import exists
 
@@ -421,11 +420,13 @@ def scan_ks(
     return os / row_sums
 
 
-# TODO(danj): finish
 class BiasedScanAttention(nn.Module):
     r"""Performs query-key-value attention with arbitrary bias functions.
 
     Args:
+        x_bias: A bias module for fixed effect inputs.
+        s_bias: A bias module for spatial inputs.
+        t_bias: A bias module for temporal inputs.
         qs_chunk_size: Number of queries to process in each chunk of scan.
         ks_chunk_size: Number of keys to process in each chunk of scan.
 
@@ -494,125 +495,6 @@ class BiasedScanAttention(nn.Module):
             qs_chunk_size=self.qs_chunk_size,
             ks_chunk_size=self.ks_chunk_size,
             **kwargs,
-        ), None
-
-
-class RBFNetworkBiasedScanAttention(nn.Module):
-    r"""Performs query-key-value attention with a scan and an RBF network bias
-        for reduced memory usage.
-
-    Args:
-        qs_chunk_size: Number of queries to process in each chunk of scan.
-        ks_chunk_size: Number of keys to process in each chunk of scan.
-        num_basis: Number of basis functions for TISA bias.
-
-    Returns:
-        An `RBFNetworkBiasedScanAttention` module.
-    """
-
-    qs_chunk_size: int = 1024
-    ks_chunk_size: int = 1024
-    num_basis: int = 5
-
-    @nn.compact
-    def __call__(
-        self,
-        qs: jax.Array,  # [B, H, Q, D_qk]
-        ks: jax.Array,  # [B, H, K, D_qk]
-        vs: jax.Array,  # [B, H, K, D_v]
-        mask: Optional[jax.Array] = None,  # [B, K]
-        training: bool = False,
-        **kwargs,
-    ):
-        r"""Performs forward pass of network.
-
-        Args:
-            qs: Queries of shape [B, H, Q, D_qk].
-            ks: Keys of shape [B, H, Q, D_qk].
-            vs: Values of shape [B, H, K, D_v].
-            mask: Mask for keys and values of shape [B, K].
-            training: Boolean indicating whether currently training.
-            qs_s: Query locations of shape [B, Q, D_s].
-            ks_s: Key locations of shape [B, K, D_s].
-
-        Returns:
-            `ctx` and `attn`, the updated values and None, respectively,
-            since scanned attention never materializes the attention matrix.
-        """
-        H, F = qs.shape[1], self.num_basis
-        a = self.param("a", init.constant(1), (H, F))
-        b = self.param("b", init.constant(1), (H, F))
-        return biased_scan_attention(
-            qs,
-            ks,
-            vs,
-            mask,
-            qs_s=kwargs["qs_s"],  # [B, Q, D_s]
-            ks_s=kwargs["ks_s"],  # [B, Q, D_s]
-            s_bias_func=scanned_rbf_network_bias,
-            s_bias_kwargs={"a": a, "b": b},
-            qs_chunk_size=self.qs_chunk_size,
-            ks_chunk_size=self.ks_chunk_size,
-        ), None
-
-
-class TISABiasedScanAttention(nn.Module):
-    r"""Performs query-key-value attention with a scan and TISA bias for reduced
-        memory usage.
-
-    Args:
-        qs_chunk_size: Number of queries to process in each chunk of scan.
-        ks_chunk_size: Number of keys to process in each chunk of scan.
-        num_basis: Number of basis functions for TISA bias.
-
-    Returns:
-        A `TISABiasedScanAttention` module.
-    """
-
-    qs_chunk_size: int = 1024
-    ks_chunk_size: int = 1024
-    num_basis: int = 5
-
-    @nn.compact
-    def __call__(
-        self,
-        qs: jax.Array,  # [B, H, Q, D_qk]
-        ks: jax.Array,  # [B, H, K, D_qk]
-        vs: jax.Array,  # [B, H, K, D_v]
-        mask: Optional[jax.Array] = None,  # [B, K]
-        training: bool = False,
-        **kwargs,
-    ):
-        r"""Performs forward pass of network.
-
-        Args:
-            qs: Queries of shape [B, H, Q, D_qk].
-            ks: Keys of shape [B, H, K D_qk].
-            vs: Values of shape [B, H, K, D_v].
-            mask: Mask for keys and values of shape [B, K].
-            training: Boolean indicating whether currently training.
-            qs_s: Query locations of shape [B, Q, D_s].
-            ks_s: Key locations of shape [B, K, D_s].
-
-        Returns:
-            `ctx` and `attn`, the updated values and None, respectively,
-            since scanned attention never materializes the attention matrix.
-        """
-        H, F = qs.shape[1], self.num_basis
-        a = self.param("a", init.constant(1), (H, F))
-        b = self.param("b", init.constant(1), (H, F))
-        c = self.param("c", init.constant(0), (H, F))
-        return biased_scan_attention(
-            qs,
-            ks,
-            vs,
-            mask,
-            qs_s=kwargs["qs_s"],  # [B, Q, D_s]
-            ks_s=kwargs["ks_s"],  # [B, Q, D_s]
-            s_bias_func=scanned_tisa_bias,
-            s_bias_kwargs={"a": a, "b": b, "c": c},
-            qs_chunk_size=self.qs_chunk_size,
-            ks_chunk_size=self.ks_chunk_size,
         ), None
 
 

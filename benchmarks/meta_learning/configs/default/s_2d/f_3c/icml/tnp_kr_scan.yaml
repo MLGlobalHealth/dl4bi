@@ -15,10 +15,11 @@ blk:
   attn:
     _target_: dl4bi.attention.MultiHeadAttention
     attn:
-      _target_: dl4bi.attention.TISABiasedScanAttention
-      qs_chunk_size: 1024
-      ks_chunk_size: 1024
-      num_basis: 5
+      _target_: dl4bi.attention.BiasedScanAttention
+      s_bias:
+        _target_: dl4bi.bias.Bias.build_tisa_bias
+        num_heads: 4
+        num_basis: 5
     proj_qs:
       _target_: dl4bi.mlp.MLP
       dims: [128]

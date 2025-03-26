@@ -11,7 +11,7 @@ s_sim:
   _target_: dl4bi.sim.l2_dist
   _partial_: true
 s_bias:
-  _target_: dl4bi.bias.RBFNetworkBias
+  _target_: dl4bi.bias.Bias.build_rbf_network_bias
   num_basis: 5
   num_heads: 4
 blk:
