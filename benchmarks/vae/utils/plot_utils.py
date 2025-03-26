@@ -113,7 +113,8 @@ def plot_prevalence_scatter_comp(
     for i, (ax, model) in enumerate(zip(axes, models)):
         p_hat_i = prev_hat_means[i]
         ax.scatter(prev_real, p_hat_i, alpha=0.6, label="Samples")
-        ax.set_title(f"{val_n} vs. {model.replace('_', ' ')} mean {val_n.lower()}")
+        model_n = model.replace("Baseline_", "").replace("_", " + ")
+        ax.set_title(f"{val_n} vs. {model_n} mean {val_n.lower()}")
         abs_min = min(abs_min, p_hat_i.min())
         abs_max = max(abs_max, p_hat_i.max())
     for ax in axes:
@@ -163,20 +164,27 @@ def plot_models_mean_prevalence(
     vmin = jnp.min(jnp.array([prev_mean.min() for prev_mean in prev_hat_means])).item()
     vmax = jnp.max(jnp.array([prev_mean.max() for prev_mean in prev_hat_means])).item()
     fig, axes = plt.subplots(
-        1, len(prev_hat_means), figsize=(6 * len(prev_hat_means), 8)
+        1,
+        len(prev_hat_means),
+        figsize=(6 * len(prev_hat_means), 7),
+        constrained_layout=True,
     )
     log_str = " (Log scale)" if log else ""
     for i, prev_mean in enumerate(prev_hat_means):
-        title = f"{models[i - 1]}: Mean {val_n.lower()}"
+        model_n = models[i - 1].replace("Baseline_", "").replace("_", " + ")
+        legend = i == len(prev_hat_means) - 1
+        title = f"{model_n}: Mean {val_n.lower()}"
         if i == 0 and use_real:
-            title = f"Observed {val_n.lower()}"
+            title = f"Observed {val_n.lower()}{log_str}"
+        if save_path is not None:
+            title = ""
         ax = axes if len(prev_hat_means) == 1 else axes[i]
-        plot_on_map(ax, map_data, prev_mean, vmin, vmax, f"{title}{log_str}")
+        plot_on_map(ax, map_data, prev_mean, vmin, vmax, title, legend=legend)
         ax.set_axis_off()
-    plt.tight_layout()
+        ax.set_title(ax.get_title(), fontsize=16)
     if save_path is None:
         save_path = f"/tmp/Observed prevalence{datetime.now().isoformat()}.png"
-    fig.savefig(save_path, dpi=125)
+    fig.savefig(save_path, dpi=200)
     plt.clf()
     plt.close(fig)
 
@@ -491,9 +499,14 @@ def plot_vae_reconstruction(
             f_hat_j = f_hat[j].squeeze()
             vmin = min(f_j.min(), f_hat_j.min())
             vmax = max(f_j.max(), f_hat_j.max())
-            plot_on_map(ax[2 * j], map_data, f_j, vmin, vmax, r"$f$", "viridis")
+            plot_on_map(ax[2 * j], map_data, f_j, vmin, vmax, f"Sample {j}: " + r"$f$")
             plot_on_map(
-                ax[2 * j + 1], map_data, f_hat_j, vmin, vmax, r"$\hat{f}$", "viridis"
+                ax[2 * j + 1],
+                map_data,
+                f_hat_j,
+                vmin,
+                vmax,
+                f"Sample {j}: " + r"$\hat{f}$",
             )
         if plot_locations:
             context_points = np.array(
@@ -778,9 +791,7 @@ def plot_locations_map(
 ):
     if plot_blank:
         gdf.plot(ax=ax)
-    ax.set_title(
-        f"{len(locations)} Locations (ctx): {sampling_policy.replace('_', ' ')}"
-    )
+    ax.set_title(f"{len(locations)} {sampling_policy.replace('_', ' ')}")
     ax.scatter(locations[:, 0], locations[:, 1], color="red", marker=".", s=15)
 
 

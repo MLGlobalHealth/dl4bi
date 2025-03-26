@@ -112,13 +112,13 @@ python empirical_bayes.py exp_name=experiment_name data.map_path=user_path/map_p
 
 To reproduce the results, first download the UK LTLA, as well as the England & Wales LAD maps using the following link:  
 
-[Download Maps](https://drive.google.com/file/d/1ktT6BDszL3X9B_e1gaZpQr7F6sJengow/view?usp=drive_link)  
+[Download Maps](https://drive.google.com/file/d/15DAfsL5dtO-lM3ef0saJ-73hMcQx6XVK/view?usp=sharing)  
 
 Once downloaded and unzipped in the DeepRV directory, ensure the directory structure is as follows: 
 ```bash
 benchmarks/vae/
 ├── maps/
-│   ├── England/
+│   ├── UK/
 │   │   └── shapefile_data
 │   ├── female_under_50_cancer_mortality_LAD_2023/
 │   │   └── shapefile_data
