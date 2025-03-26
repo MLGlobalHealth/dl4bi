@@ -14,7 +14,9 @@ blk:
     attn:
       _target_: dl4bi.attention.BiasedScanAttention
       s_bias:
-        _target_: dl4bi.bias.Bias
+        _target_: dl4bi.bias.Bias.build_rbf_network_bias
+        num_heads: 4
+        num_basis: 5
     proj_qs:
       _target_: dl4bi.mlp.MLP
       dims: [128]
@@ -23,7 +25,7 @@ blk:
       dims: [128]
     proj_vs:
       _target_: dl4bi.mlp.MLP
-      dims: [128, 64]
+      dims: [128]
   ffn:
     _target_: dl4bi.mlp.MLP
     dims: [256, 64]

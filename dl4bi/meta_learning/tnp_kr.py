@@ -135,19 +135,25 @@ class TNPKR(nn.Module):
             ks_s=s_ctx,
             ks_t=t_ctx,
         )
+        mask = jit(lambda x: jnp.isfinite(x))
         if self.x_sim is not None:
             x_sim = jit(vmap(self.x_sim))
             x_sim_qk = x_sim(x_test, x_ctx)
             x_sim_kk = x_sim(x_ctx, x_ctx)
+            mask_x_sim_qk = mask(x_sim_qk)
+            mask_x_sim_kk = mask(x_sim_kk)
         if self.s_sim is not None:
             s_sim = jit(vmap(self.s_sim))
             s_sim_qk = s_sim(s_test, s_ctx)
             s_sim_kk = s_sim(s_ctx, s_ctx)
+            mask_s_sim_qk = mask(s_sim_qk)
+            mask_s_sim_kk = mask(s_sim_kk)
         if self.t_sim is not None:
             t_sim = jit(vmap(self.t_sim))
             t_sim_qk = t_sim(t_test, t_ctx)
             t_sim_kk = t_sim(t_ctx, t_ctx)
-        mask = jit(lambda x: jnp.isfinite(x))
+            mask_t_sim_qk = mask(t_sim_qk)
+            mask_t_sim_kk = mask(t_sim_kk)
         for _ in range(self.num_blks):
             blk = self.blk.copy()  # new bias for every blk & rep
             for _ in range(self.num_reps):
@@ -155,16 +161,16 @@ class TNPKR(nn.Module):
                 kk_bias = 0
                 if self.x_bias is not None:
                     x_bias = self.x_bias.copy()
-                    qk_bias += x_bias(x_sim_qk, mask(x_sim_qk))
-                    kk_bias += x_bias(x_sim_kk, mask(x_sim_kk))
+                    qk_bias += x_bias(x_sim_qk, mask_x_sim_qk)
+                    kk_bias += x_bias(x_sim_kk, mask_x_sim_kk)
                 if self.s_bias is not None:
                     s_bias = self.s_bias.copy()
-                    qk_bias += s_bias(s_sim_qk, mask(s_sim_qk))
-                    kk_bias += s_bias(s_sim_kk, mask(s_sim_kk))
+                    qk_bias += s_bias(s_sim_qk, mask_s_sim_qk)
+                    kk_bias += s_bias(s_sim_kk, mask_s_sim_kk)
                 if self.t_bias is not None:
                     t_bias = self.t_bias.copy()
-                    qk_bias += t_bias(t_sim_qk, mask(t_sim_qk))
-                    kk_bias += t_bias(t_sim_kk, mask(t_sim_kk))
+                    qk_bias += t_bias(t_sim_qk, mask_t_sim_qk)
+                    kk_bias += t_bias(t_sim_kk, mask_t_sim_kk)
                 qk_kwargs["bias"] = qk_bias
                 kk_kwargs["bias"] = kk_bias
                 qvs, kvs = blk(qvs, kvs, mask_ctx, training, qk_kwargs, kk_kwargs)
@@ -213,7 +219,6 @@ class ScanTNPKR(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    # TODO(danj): update this through blk
     blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)

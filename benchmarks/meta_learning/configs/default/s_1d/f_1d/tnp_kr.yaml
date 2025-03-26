@@ -11,10 +11,9 @@ s_sim:
   _target_: dl4bi.sim.l2_dist
   _partial_: true
 s_bias:
-  _target_: dl4bi.bias.Bias
-  init_kwargs:
-    num_basis: 5
-    num_heads: 4
+  _target_: dl4bi.bias.Bias.build_rbf_network_bias
+  num_heads: 4
+  num_basis: 5
 blk:
   _target_: dl4bi.transformer.KRBlock
   attn:

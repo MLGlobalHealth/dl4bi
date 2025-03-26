@@ -193,7 +193,23 @@ def init_rbf_network_bias_params(mod: nn.Module, num_heads: int, num_basis: int)
     return {"a": a, "b": b}
 
 
+def init_tisa_bias_params(mod: nn.Module, num_heads: int, num_basis: int):
+    a = mod.param("a", init.constant(1), (num_heads, num_basis))
+    b = mod.param("b", init.constant(1), (num_heads, num_basis))
+    c = mod.param("c", init.constant(1), (num_heads, num_basis))
+    return {"a": a, "b": b, "c": c}
+
+
 class Bias(nn.Module):
+    """A generic bias module that is defined through its attribute functions.
+
+    The reason this class exists instead of separate Bias modules is so that
+    it can be used for both standard and scan attention. For standard attention,
+    recalculating the pairwise similarities each time is redundant, and it can
+    be calculated once outside the bias module and passed in; this results
+    in non-trivial compute savings for large datasets.
+    """
+
     init_params: Callable = init_rbf_network_bias_params
     init_kwargs: dict = field(default_factory=lambda: {"num_heads": 4, "num_basis": 5})
     bias_func: Callable = rbf_network_bias
@@ -209,3 +225,30 @@ class Bias(nn.Module):
         if mask is None:
             mask = jnp.array([True])
         return self.bias_func(d, mask, **params)
+
+    @classmethod
+    def build_scalar_bias(cls, num_heads: int = 4):
+        return Bias(
+            init_rbf_network_bias_params,
+            {"num_heads": num_heads},
+            bias_func=scalar_bias,
+            scanned_bias_func=scanned_scalar_bias,
+        )
+
+    @classmethod
+    def build_rbf_network_bias(cls, num_heads: int = 4, num_basis: int = 5):
+        return Bias(
+            init_rbf_network_bias_params,
+            {"num_heads": num_heads, "num_basis": num_basis},
+            bias_func=rbf_network_bias,
+            scanned_bias_func=scanned_rbf_network_bias,
+        )
+
+    @classmethod
+    def build_tisa_bias(cls, num_heads: int = 4, num_basis: int = 5):
+        return Bias(
+            init_tisa_bias_params,
+            {"num_heads": num_heads, "num_basis": num_basis},
+            bias_func=tisa_bias,
+            scanned_bias_func=scanned_tisa_bias,
+        )
