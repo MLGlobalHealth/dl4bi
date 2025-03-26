@@ -1,5 +1,9 @@
+from enum import StrEnum
+from functools import partial
+
 import jax
 import jax.numpy as jnp
+from jax import jit, vmap
 from sps.kernels import l2_dist_sq
 
 
@@ -87,28 +91,50 @@ def closest_first(
     return jnp.array(order, dtype=jnp.int32)
 
 
-# jitting led to a slowdown
-# @partial(jit, static_argnames=["n", "batch_size"])
-def random_permutations(rng: jax.Array, n: int, batch_size: int):
-    """
-    Returns array of shape [batch_size, n]
-    where each row is a uniformly random permutation of [0, 1, ..., n-1].
-    """
-    idx = jnp.tile(jnp.arange(n), (batch_size, 1))
-    idx = jax.random.permutation(rng, idx, axis=1, independent=False)
-    return idx
-
-
 def left_to_right(
-    s_ctx: jax.Array,  # [L_ctx, D]
+    s: jax.Array,  # [L_ctx, D]
 ):
     """
     Orders such that points are considered left-to-right
     (wrt to the first coordinate if the dimension is >1).
     """
-    idx = jnp.argsort(s_ctx, axis=0)[:, 0]  # sort by the first coordinate
+    idx = jnp.argsort(s, axis=0)[:, 0]  # sort by the first coordinate
     return idx
 
 
 def invert_permutation(p: jax.Array):
     return jnp.empty_like(p).at[p].set(jnp.arange(p.size))
+
+
+class Strategy(StrEnum):
+    ltr = "ltr"
+    random = "random"
+    furthest = "furthest"
+    closest = "closest"
+
+    @partial(jit, static_argnames=["self", "return_inverse"])
+    def get_permutation(self, rng, s_ctx, s_test, return_inverse=False):
+        match self:
+            case "ltr":
+                idx = left_to_right(s_test)
+            case "random":
+                L_test, _ = s_test.shape
+                idx = jax.random.permutation(rng, L_test)
+            case "furthest":
+                idx = furthest_first(s_ctx, s_test)
+            case "closest":
+                idx = closest_first(s_ctx, s_test)
+
+        if return_inverse:
+            return idx, invert_permutation(idx)
+        else:
+            return idx
+
+    @partial(jit, static_argnames=["self", "return_inverse"])
+    def get_batch_permutation(self, rng, s_ctx, s_test, return_inverse=False):
+        B, _, _ = s_ctx.shape
+        rng = jax.random.split(rng, B)
+
+        return vmap(self.get_permutation, in_axes=(0, 0, 0, None))(
+            rng, s_ctx, s_test, return_inverse
+        )

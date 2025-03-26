@@ -1,7 +1,6 @@
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from enum import StrEnum
 from functools import partial
 from pathlib import Path
 from typing import Callable
@@ -9,27 +8,12 @@ from typing import Callable
 import jax
 import jax.numpy as jnp
 import tqdm
-from jax import jit, random, vmap
+from jax import jit, random
 
 from dl4bi.core.utils import concatenate_ctx_and_test
 from dl4bi.meta_learning.train_utils import TrainState
 
-from .permutations import (
-    closest_first,
-    furthest_first,
-    invert_permutation,
-    left_to_right,
-)
-
-
-class Strategy(StrEnum):
-    preserve = "preserve"
-    ltr = "ltr"
-    random = "random"
-    furthest = "furthest"
-    closest = "closest"
-    diagonal = "diagonal"
-
+from .strategy import Strategy
 
 DEBUG = bool(os.environ.get("DEBUG", False))
 
@@ -122,7 +106,7 @@ class AutoregressiveSampler:
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
-        strategy: Strategy,
+        strategy: Strategy | None = None,
     ):
         """
         Autoregressive sampling with a choice of strategy.
@@ -130,7 +114,7 @@ class AutoregressiveSampler:
 
         NOTE: For the "random" strategy the densities will be incorrect.
         """
-        if strategy == "preserve":
+        if strategy is None:
             return self._sample(
                 rng,
                 s_ctx,
@@ -140,20 +124,12 @@ class AutoregressiveSampler:
         else:
             B, L_test, D_s = s_test.shape
             _, _, D_f = f_ctx.shape
-            match strategy:
-                case "closest":
-                    idx = vmap(closest_first)(s_ctx, s_test)
-                case "furthest":
-                    idx = vmap(furthest_first)(s_ctx, s_test)
-                case "ltr":
-                    idx = vmap(left_to_right)(s_test)
-                case "random":
-                    rng, rng_perm = random.split(rng)
-                    idx = vmap(jax.random.permutation, in_axes=(0, None))(
-                        random.split(rng_perm, B), L_test
-                    )
 
-            idx_inv = vmap(invert_permutation)(idx)
+            rng, rng_perm = jax.random.split(rng)
+
+            idx, idx_inv = strategy.get_batch_permutation(
+                rng, s_ctx, s_test, return_inverse=True
+            )
             idx = idx[..., None].repeat(D_s, axis=-1)
             idx_inv = idx_inv[..., None].repeat(D_f, axis=-1)
 
@@ -193,18 +169,15 @@ class AutoregressiveSampler:
         all_densities = []
 
         if strategy != "random":
-            match strategy:
-                case "preserve":
-                    idx = idx_inv = ...
-                case "closest":
-                    idx = closest_first(s_ctx, s_test)
-                    idx_inv = invert_permutation(idx)
-                case "furthest":
-                    idx = furthest_first(s_ctx, s_test)
-                    idx_inv = invert_permutation(idx)
-                case "ltr":
-                    idx = left_to_right(s_test)
-                    idx_inv = invert_permutation(idx)
+            if strategy is None:
+                idx = idx_inv = ...
+            else:
+                idx, idx_inv = strategy.get_permutation(
+                    rng,  # note rng is not used here since the strategies are deterministic
+                    s_ctx,
+                    s_test,
+                    return_inverse=True,
+                )
 
             s_test = s_test[idx]
             s_test = jnp.repeat(s_test[None], batch_size, axis=0)
@@ -359,17 +332,17 @@ class AutoregressiveSampler:
         f_ctx: jax.Array,  # [B, L_ctx, D_f]
         s_test: jax.Array,  # [B, L_test, D_s]
         f_test: jax.Array,  # [B, L_test, D_f]
-        valid_lens_ctx: jax.Array | None,  # [B]
-        strategy: Strategy,
-        num_samples_for_random: int,  # number of samples for Monte Carlo estimation for the random strategy
-        batching_for_random: int | None,
+        valid_lens_ctx: jax.Array | None = None,  # [B]
+        strategy: Strategy | None = None,
+        num_samples_for_random: int = 0,  # number of samples for Monte Carlo estimation for the random strategy
+        batching_for_random: int | None = None,
         # batch the random ll estimation (batch size effectively becomes B*this)
     ):
         if valid_lens_ctx is None:
             B, L_ctx, _ = s_ctx.shape
             valid_lens_ctx = jnp.repeat(L_ctx, B)
         match strategy:
-            case "preserve":
+            case None:
                 return self._logpdf(s_ctx, f_ctx, s_test, f_test, valid_lens_ctx)
             case "random":
                 return self._logpdf_random_estimate(
@@ -382,16 +355,8 @@ class AutoregressiveSampler:
                     num_samples_for_random,
                     batching_for_random,
                 )
-            case "diagonal":
-                return self.logpdf_diagonal(
-                    s_ctx, f_ctx, s_test, f_test, valid_lens_ctx
-                )
-            case "closest":
-                idx = vmap(closest_first)(s_ctx, s_test)
-            case "furthest":
-                idx = vmap(furthest_first)(s_ctx, s_test)
-            case "ltr":
-                idx = vmap(left_to_right)(s_test)
+            case _:
+                idx = strategy.get_batch_permutation(rng, s_ctx, s_test)
 
         D_s = s_test.shape[-1]
         D_f = f_test.shape[-1]
