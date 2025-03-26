@@ -5,11 +5,13 @@ from jax import jit, random
 
 from dl4bi.core.attention import (
     Attention,
+    BiasedScanAttention,
     DeepKernelAttention,
     FastAttention,
     MultiHeadAttention,
 )
-from dl4bi.core.knn import kNN
+from dl4bi.core.bias import Bias
+from dl4bi.core.sim import l2_dist
 from dl4bi.core.train import TrainState, cosine_annealing_lr
 from dl4bi.core.transformer import KRBlock
 from dl4bi.core.utils import mask_from_valid_lens
@@ -36,6 +38,9 @@ def test_models():
     valid_lens = jnp.array([22, 44, 97, 32])
     mask_ctx = mask_from_valid_lens(L, valid_lens)
     f = random.normal(rng_data, s.shape)
+    kr_block = KRBlock(
+        MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
+    )
     for model in [
         NP,
         CNP,
@@ -47,8 +52,8 @@ def test_models():
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
-        ScanTNPKR,
-        lambda: SGNP(),
+        lambda: ScanTNPKR(blk=kr_block),
+        lambda: SGNP(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
     ]:
         m = model()
         print(m.__class__)
@@ -78,12 +83,12 @@ def test_tnp_kr_fast_scale():
     f_init = random.normal(rng_init, (B, L_init, D_f))
     f_ctx = random.normal(rng_ctx, (B, L_ctx, D_f))
     m = TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention())))
-    params = m.init(rng_init, s_init, f_init, s_init)
-    jit_m = jit(lambda *args: m.apply(params, *args))
-    jit_m(s_init, f_init, s_init)  # dummy run to compile
+    params = m.init(rng_init, s_ctx=s_init, f_ctx=f_init, s_test=s_init)
+    jit_m = jit(lambda **kwargs: m.apply(params, **kwargs))
+    jit_m(s_ctx=s_init, f_ctx=f_init, s_test=s_init)  # dummy run to compile
     # to view results: tensorboard --logdir /tmp/tensorboard/
     with jax.profiler.trace("/tmp/tensorboard"):
-        output = jit_m(s_ctx, f_ctx, s_test)
+        output = jit_m(s_ctx=s_ctx, f_ctx=f_ctx, s_test=s_test)
     assert jnp.isfinite(output.mu).all(), "Non-finite values produced!"
     assert jnp.isfinite(output.std).all(), "Non-finite values produced!"
 
@@ -99,6 +104,9 @@ def test_context_data_leaks():
     f = random.normal(rng_f, s.shape)
     # set second half to large value (different from using half the array because of attn)
     f2 = f.at[:, V:, :].set(jnp.full((B, L - V, 1), 10000))
+    kr_block = KRBlock(
+        MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
+    )
     for model in [
         NP,
         CNP,
@@ -106,11 +114,11 @@ def test_context_data_leaks():
         CANP,
         ConvCNP,
         TNPD,
-        ScanTNPKR,
+        lambda: ScanTNPKR(blk=kr_block),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
-        lambda: SGNP(),
+        lambda: SGNP(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
     ]:
         m = model()
         print(m.__class__)
@@ -172,6 +180,9 @@ def test_train_step_loss():
     batch_1 = d.batch(rng_b1, 1, N, L, True)
     batch_2 = d.batch(rng_b2, 1, N, L, True)
     rng_init, rng_drop, rng_extra, rng_step = random.split(rng, 4)
+    kr_block = KRBlock(
+        MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
+    )
     for model in [
         NP,
         CNP,
@@ -180,8 +191,8 @@ def test_train_step_loss():
         TNPD,
         TNPKR,
         ConvCNP,
-        ScanTNPKR,
-        SGNP,
+        lambda: ScanTNPKR(blk=kr_block),
+        lambda: SGNP(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
     ]:
         m = model()
         print(m.__class__)

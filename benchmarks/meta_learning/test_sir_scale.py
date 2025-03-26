@@ -12,14 +12,14 @@ from tqdm import tqdm
 
 from dl4bi.core.train import TrainState, load_ckpt
 
-from .sir import build_dataloader
+from .sir import build_spatial_dataloader
 
 
 @hydra.main("configs/sir", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     results_path = Path(f"results/{cfg.project}/{cfg.seed}")
     rng_data, rng_valid = random.split(random.key(cfg.seed))
-    dataloader = build_dataloader(cfg.data, cfg.sim)
+    dataloader = build_spatial_dataloader(cfg.data, cfg.sim)
     for path in results_path.rglob("*.ckpt"):
         print("=" * 20, path.stem, "=" * 20)
         rng = rng_valid

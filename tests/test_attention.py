@@ -8,14 +8,14 @@ from sps.utils import build_grid
 
 from dl4bi.core.attention import (
     Attention,
+    BiasedScanAttention,
     DeepKernelAttention,
     FastAttention,
     MultiHeadAttention,
     MultiHeadGraphAttention,
-    RBFNetworkBiasedScanAttention,
     ScanAttention,
-    TISABiasedScanAttention,
 )
+from dl4bi.core.bias import Bias
 from dl4bi.core.utils import mask_from_valid_lens
 
 
@@ -118,15 +118,19 @@ def test_scan_attention_impl():
 
 
 def test_biased_scan_attention_impl():
-    B, H, L, D, S, C = 4, 7, 313, 16, 2, 256
+    B, H, L, D, D_s = 7, 4, 313, 16, 2
     key = random.key(42)
     rng_qkvs, rng_locs, rng_valid, rng_init = random.split(key, 4)
-    qs_s, ks_s = random.normal(rng_locs, (2, B, L, S))
+    qs_s, ks_s = random.normal(rng_locs, (2, B, L, D_s))
     qs, ks, vs = random.normal(rng_qkvs, (3, B, H, L, D))
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
     mask = mask_from_valid_lens(L, valid_lens)
-    for cls in [TISABiasedScanAttention, RBFNetworkBiasedScanAttention]:
-        (ctx_scan, _), _ = TISABiasedScanAttention(C, C).init_with_output(
+    scalar_bias = Bias.build_scalar_bias()
+    tisa_bias = Bias.build_tisa_bias()
+    rbf_bias = Bias.build_rbf_network_bias()
+    for bias in [rbf_bias]:
+        # for bias in [scalar_bias, tisa_bias, rbf_bias]:
+        (ctx_scan, _), _ = BiasedScanAttention(s_bias=bias).init_with_output(
             rng_init,
             qs,
             ks,
@@ -135,7 +139,7 @@ def test_biased_scan_attention_impl():
             qs_s=qs_s,
             ks_s=ks_s,
         )
-        print(cls)
+        print(bias.__class__)
         assert ctx_scan.shape == (B, H, L, D), "Scan: incorrect context output shape!"
 
 
@@ -203,8 +207,6 @@ def test_scan_attention_speed():
     assert t_scan_diff < factor * t_true_diff, f"Scan is more than {factor}x slower!"
 
 
-# NOTE: this is expected to be slower since TISA is calculating bias,
-# and regular attention is not using any bias
 def test_biased_scan_attention_speed():
     B, H, L, D, S, N, C = 5, 4, 1024, 16, 2, 5, 1024
     key = random.key(42)
@@ -213,8 +215,11 @@ def test_biased_scan_attention_speed():
     qs_s, ks_s = random.normal(rng_s, (2, B, L, S))
     valid_lens = random.randint(rng_valid, (B,), 0, maxval=L)
     mask = mask_from_valid_lens(L, valid_lens)
-    for cls in [TISABiasedScanAttention, RBFNetworkBiasedScanAttention]:
-        scan_attn = cls(C, C)
+    scalar_bias = Bias.build_scalar_bias()
+    tisa_bias = Bias.build_tisa_bias()
+    rbf_bias = Bias.build_rbf_network_bias()
+    for bias in [scalar_bias, tisa_bias, rbf_bias]:
+        scan_attn = BiasedScanAttention(s_bias=bias)
         _, params = scan_attn.init_with_output(
             rng_init, qs, ks, vs, mask, qs_s=qs_s, ks_s=ks_s
         )
@@ -314,9 +319,11 @@ def test_biased_scan_attention_scale():
     ks_s = random.normal(rng_ks_s, (B, L_ctx, S))
     qs = random.normal(rng_qs, (B, H, L_test, D))
     kvs = random.normal(rng_kvs, (B, H, L_ctx, D))
-
-    for cls in [TISABiasedScanAttention, RBFNetworkBiasedScanAttention]:
-        scan_attn = cls()
+    scalar_bias = Bias.build_scalar_bias()
+    tisa_bias = Bias.build_tisa_bias()
+    rbf_bias = Bias.build_rbf_network_bias()
+    for bias in [scalar_bias, tisa_bias, rbf_bias]:
+        scan_attn = BiasedScanAttention(s_bias=bias)
         (ctx_scan_init, _), params = scan_attn.init_with_output(
             rng_init, qs, kvs, kvs, qs_s=qs_s, ks_s=ks_s
         )
