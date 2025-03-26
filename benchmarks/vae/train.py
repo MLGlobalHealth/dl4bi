@@ -1,3 +1,4 @@
+import shutil
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
@@ -10,18 +11,19 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import optax
+from flax.training import orbax_utils
 from inference_models.inference_models import gen_saptial_prior
 from jax import Array, jit, random
 from jax.scipy.stats import norm
 from numpyro.handlers import seed
 from omegaconf import DictConfig, OmegaConf
+from orbax.checkpoint import PyTreeCheckpointer
 from tqdm import tqdm
 from utils.map_utils import gen_locations
 from utils.obj_utils import build_model, generate_model_name, instantiate
 from utils.plot_utils import log_vae_grid_plots, log_vae_map_plots
 
 import wandb
-from dl4bi.meta_learning.train_utils import cosine_annealing_lr, save_ckpt
 from dl4bi.vae.train_utils import (
     Callback,
     TrainState,
@@ -279,6 +281,34 @@ def gen_valid_step(model_cfg: DictConfig, cond_names: list[str]):
         return {f"{prefix} loss": loss, f"{prefix} norm MSE": norm_mse_score, "ls": ls}
 
     return valid_step
+
+
+def cosine_annealing_lr(
+    num_steps: int = 100000,
+    peak_lr: float = 1e-3,
+    pct_warmup: float = 0.0,
+    num_cycles: int = 1,
+):
+    """Create an n-cycle cosine annealing schedule."""
+    n = num_steps // num_cycles
+    sched = optax.cosine_onecycle_schedule(
+        n,
+        peak_lr,
+        pct_warmup,
+        div_factor=10,
+        final_div_factor=10,
+    )
+    boundaries = n * jnp.arange(1, num_cycles)
+    return optax.join_schedules([sched] * num_cycles, boundaries)
+
+
+def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
+    "Save a checkpoint."
+    shutil.rmtree(path, ignore_errors=True)
+    ckptr = PyTreeCheckpointer()
+    ckpt = {"state": state, "config": OmegaConf.to_container(cfg, resolve=True)}
+    save_args = orbax_utils.save_args_from_target(ckpt)
+    ckptr.save(path.absolute(), ckpt, save_args=save_args)
 
 
 if __name__ == "__main__":

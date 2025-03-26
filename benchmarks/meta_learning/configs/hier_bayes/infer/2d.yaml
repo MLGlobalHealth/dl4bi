@@ -1,6 +1,0 @@
-name: 2d
-mcmc:
-  num_warmup: 5000
-  num_samples: 5000
-  num_chains: 4
-num_ctx: 32

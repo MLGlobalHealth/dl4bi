@@ -1,6 +1,0 @@
-name: bike
-num_ctx:
-  min: 12
-  max: 128
-num_test: 128
-batch_size: 16

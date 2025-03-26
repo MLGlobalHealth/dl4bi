@@ -1,7 +1,0 @@
-defaults:
-  - _self_ # use default global values below
-  - data: openwebtext
-  - model: gpt-2-12x1
-seed: 42
-wandb: True
-project: LLM

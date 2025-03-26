@@ -21,7 +21,6 @@ from utils.obj_utils import generate_model_name, instantiate
 from utils.plot_utils import plot_inference_run
 
 import wandb
-from dl4bi.meta_learning.train_utils import cosine_annealing_lr
 from dl4bi.vae.train_utils import TrainState, generate_surrogate_decoder
 
 
@@ -295,6 +294,25 @@ def get_results_dir(cfg, model_dir, obs_idxs, s, model_name):
     else:
         results_dir = results_dir / "complete_info"
     return results_dir
+
+
+def cosine_annealing_lr(
+    num_steps: int = 100000,
+    peak_lr: float = 1e-3,
+    pct_warmup: float = 0.0,
+    num_cycles: int = 1,
+):
+    """Create an n-cycle cosine annealing schedule."""
+    n = num_steps // num_cycles
+    sched = optax.cosine_onecycle_schedule(
+        n,
+        peak_lr,
+        pct_warmup,
+        div_factor=10,
+        final_div_factor=10,
+    )
+    boundaries = n * jnp.arange(1, num_cycles)
+    return optax.join_schedules([sched] * num_cycles, boundaries)
 
 
 if __name__ == "__main__":
