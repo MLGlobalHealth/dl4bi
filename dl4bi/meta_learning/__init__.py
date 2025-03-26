@@ -10,3 +10,4 @@ from .sgnp import SGNP
 from .tnp_d import TNPD
 from .tnp_kr import TNPKR, ScanTNPKR
 from .tnp_nd import TNPND
+from . import autoregressive

@@ -62,7 +62,9 @@ def main(cfg: DictConfig):
             data=cfg.data,
             kernel=cfg.kernel,
         )
-    train_step, valid_step = select_steps(model)
+    train_step, valid_step = select_steps(
+        model, consistency_loss=cfg.get("consistency_loss")
+    )
     state = train(
         rng_train,
         model,
@@ -87,7 +89,7 @@ def main(cfg: DictConfig):
     path = f"results/{cfg.project}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    save_ckpt(state, cfg, path.with_suffix(".ckpt"))
+    save_ckpt(state, cfg, path.with_suffix(path.suffix + ".ckpt"))
 
 
 def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
@@ -104,15 +106,17 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
 
     def gen_batch(rng: jax.Array):
-        rng_s, rng_gp, rng_v, rng_eps = random.split(rng, 4)
+        rng_s, rng_gp, rng_v, rng_ctx, rng_obs = random.split(rng, 5)
         s_r = random.uniform(rng_s, (Nc_max, S), jnp.float32, s_min, s_max)
         s = jnp.vstack([s_r, s_g])
         f, var, ls, period, *_ = gp.simulate(rng_gp, s, B)
         valid_lens_ctx = random.randint(rng_v, (B,), Nc_min, Nc_max)
         s = batchify(s)
         s_ctx = s[:, :Nc_max, :]
-        f_ctx = f + obs_noise * random.normal(rng_eps, f.shape)
+        f_ctx = f + obs_noise * random.normal(rng_ctx, f.shape)
         f_ctx = f_ctx[:, :Nc_max, :]
+        if data.get("noisy_test", False):
+            f = f + obs_noise * random.normal(rng_obs, f.shape)
         return s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, var, ls, period
 
     def dataloader(rng: jax.Array):
@@ -264,7 +268,9 @@ def plot_posterior_predictives(
             f_mu_i = f_mu[s : s + K].squeeze()
             f_std_i = f_std[s : s + K].squeeze()
         title = f"Sample {i} (var: {var[i]:0.2f}, ls: {ls[i]:0.2f}"
-        title += f", period: {period[i]:0.2f})" if jnp.isfinite(period) else ")"
+        title += (
+            f", period: {period[i]:0.2f})" if period and jnp.isfinite(period) else ")"
+        )
         fig = plot_posterior_predictive(
             s_ctx_i, f_ctx_i, s_test_i, f_test_i, f_mu_i, f_std_i
         )

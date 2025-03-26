@@ -34,6 +34,8 @@ from sps.sir import LatticeSIR
 from sps.utils import build_grid
 from tqdm import tqdm
 
+from dl4bi.core.utils import update_at_index
+
 # NOTE: needed by `instantiate` function
 from ..core.attention import *
 from ..core.bias import *
@@ -128,20 +130,33 @@ def train(
         tx=optimizer,
     )
     losses = []
+    losses_terms = defaultdict(list)
     patience = 0
     best_state = state
     early_stop_patience = early_stop_patience or train_num_steps
-    train_nll, valid_nll, best_metric = float("inf"), float("inf"), float("inf")
+    train_loss, valid_nll, best_metric = float("inf"), float("inf"), float("inf")
     pbar = tqdm(range(1, train_num_steps + 1), unit=" batches", dynamic_ncols=True)
     for i in pbar:
         batch = next(batches)
         rng_train_step, rng_train = random.split(rng_train)
-        state, loss = train_step(rng_train_step, state, batch)
+
+        # train_step may now return an additional dictionary with information about loss terms
+        state, loss, *loss_terms = train_step(rng_train_step, state, batch)
         losses += [loss]
+        if loss_terms:
+            assert len(loss_terms) == 1, (
+                "train_step should return at most one additional data: a dictionary with information about loss terms."
+            )
+            for k, v in loss_terms[0].items():
+                losses_terms[k].append(v)
         if i % log_loss_interval == 0:
-            train_nll = np.mean(losses)
-            losses = []
-            wandb.log({"Train NLL": train_nll})
+            train_loss = np.mean(losses)
+            losses.clear()
+            wandb.log({"Train Loss": train_loss})
+            for k, v in losses_terms.items():
+                mean = np.mean(v)
+                v.clear()
+                wandb.log({f"Train {k}": mean})
         if i % valid_interval == 0:
             rng_valid, rng_train = random.split(rng_train)
             metrics = evaluate(
@@ -165,7 +180,7 @@ def train(
             if i % cbk.interval == 0:
                 cbk.fn(i, rng_train_step, state, batch)
         pbar.set_postfix(
-            {"Train NLL": f"{train_nll:.3f}", "Valid NLL": f"{valid_nll:.3f}"}
+            {"Train Loss": f"{train_loss:.3f}", "Valid NLL": f"{valid_nll:.3f}"}
         )
     return best_state
 
@@ -197,7 +212,18 @@ def evaluate(
     return {k: np.mean(v) for k, v in metrics.items()}
 
 
-def select_steps(model, is_categorical=False):
+def select_steps(
+    model, is_categorical=False, consistency_loss: DictConfig | None = None
+):
+    if consistency_loss is not None:
+        train_step = partial(
+            train_step_with_consistency_loss,
+            num_samples=consistency_loss.num_samples,
+            gamma=consistency_loss.gamma,
+            order=consistency_loss.get("order", 1),
+        )
+        valid_step = vanilla_valid_step
+        return train_step, valid_step
     train_step, valid_step = vanilla_train_step, vanilla_valid_step
     if isinstance(model, (NP, ANP)):
         train_step = npf_elbo_train_step
@@ -258,6 +284,110 @@ def vanilla_train_step(
 
     nll, grads = jax.value_and_grad(loss_fn)(state.params)
     return state.apply_gradients(grads=grads), nll
+
+
+@partial(jit, static_argnames=["gamma", "num_samples", "order"])
+def train_step_with_consistency_loss(
+    rng: jax.Array,
+    state: TrainState,
+    batch: tuple,
+    gamma: float,
+    num_samples: int,
+    order: int,
+    **kwargs,
+):
+    """Training step for meta regression with diagonal covariances,
+    with additional conssitency loss term ensuring that when deployed autoregressively
+    the model is consistent under marginalisation and permutation.
+
+    Args:
+        rng: A PRNG key.
+        state: The current training state.
+        batch: Batch of data.
+        gamma: Constant in front of the consistency loss.
+        how_many: How many test points to use for the consistency loss.
+
+    Returns:
+        `TrainState` with updated parameters.
+    """
+    assert num_samples >= 2
+    rng_consistency, rng_dropout, rng_extra = random.split(rng, 3)
+
+    def loss_fn(params):
+        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
+
+        s_ctx = jnp.pad(s_ctx, [(0, 0), (0, 1), (0, 0)])
+        f_ctx = jnp.pad(f_ctx, [(0, 0), (0, 1), (0, 0)])
+
+        B, L_test, _ = s_test.shape
+        _, _, Df = f_ctx.shape
+        if valid_lens_test is None:
+            valid_lens_test = jnp.repeat(L_test, B)
+        mask_test = mask_from_valid_lens(L_test, valid_lens_test)
+        output = state.apply_fn(
+            {"params": params, **state.kwargs},
+            s_ctx,
+            f_ctx,
+            s_test,
+            valid_lens_ctx,
+            valid_lens_test,
+            training=True,
+            rngs={"dropout": rng_dropout, "extra": rng_extra},
+        )
+
+        f_mu, f_std = output
+        ll = norm.logpdf(f_test, f_mu, f_std)
+        nll = -ll.mean(where=mask_test)
+
+        # calculating the consistency loss term d( q(j | ctx, i)q(i | ctx) , q(i | ctx, j)q(j | ctx) )
+        # here d(x, y) = |log x - log y|
+        I = random.choice(rng_consistency, L_test, (num_samples,), replace=False)
+
+        def logpdf_joint_with_f_test_i(i):
+            # log q( . | ctx, i)q(i | ctx)
+
+            s_ctx_i = update_at_index(s_ctx, s_test[:, i, :], valid_lens_ctx)
+            f_ctx_i = update_at_index(f_ctx, f_test[:, i, :], valid_lens_ctx)
+
+            mu_given_i, std_given_i = state.apply_fn(
+                {"params": params, **state.kwargs},
+                s_ctx_i,
+                f_ctx_i,
+                s_test,
+                valid_lens_ctx + 1,
+                valid_lens_test,
+                training=True,
+                rngs={"dropout": rng_dropout, "extra": rng_extra},
+            )
+            return norm.logpdf(f_test, mu_given_i, std_given_i)[:, I] + ll[:, (i,)]
+
+        ll_joint_with_f_test_i = jax.lax.map(logpdf_joint_with_f_test_i, I)
+        assert ll_joint_with_f_test_i.shape == (num_samples, B, num_samples, Df)
+        diff = ll_joint_with_f_test_i - ll_joint_with_f_test_i.swapaxes(0, 2)
+
+        if order == 1:
+            consistency_loss = jnp.abs(diff)
+        elif order == 2:
+            consistency_loss = jnp.square(diff)
+        else:
+            raise NotImplementedError(
+                f"Consistency Loss order must be 1 or 2, got {order=}"
+            )
+
+        consistency_loss = (
+            jnp.mean(consistency_loss) * num_samples / (num_samples - 1)
+        )  # accounting for the fact the diagonal is null
+
+        return nll + gamma * consistency_loss, {
+            "NLL": nll,
+            "Consistency Loss": consistency_loss,
+        }
+
+    (
+        (loss, loss_terms),
+        grads,
+    ) = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
+    return state.apply_gradients(grads=grads), loss, loss_terms
 
 
 @partial(jit, static_argnames=("is_categorical",))
@@ -638,6 +768,11 @@ def cfg_to_run_name(cfg: DictConfig):
         name = "TNP-D"
     if name == "TNPND":
         name = "TNP-ND"
+    if cfg.consistency_loss:
+        gamma = cfg.consistency_loss.gamma
+        num_samples = cfg.consistency_loss.num_samples
+        order = cfg.consistency_loss.order
+        name += f": ConsistencyLoss{order} {gamma:.2f} {num_samples}"
     return name
 
 
@@ -673,7 +808,20 @@ def load_ckpt(path: Union[str, Path]):
     if not isinstance(path, Path):
         path = Path(path)
     ckptr = PyTreeCheckpointer()
-    ckpt = ckptr.restore(path.absolute())
+    try:
+        ckpt = ckptr.restore(path.absolute())
+    except ValueError:
+        device = str(jax.devices()[0])
+        print(f"Falling back to loading the checkpoint to {device}.")
+        sharding_file = path / "_sharding"
+        sharding = sharding_file.read_text().replace("cuda:0", device)
+        sharding_file_bak = sharding_file.replace(path / "_sharding.bak")
+        sharding_file.write_text(sharding)
+        ckpt = ckptr.restore(path.absolute())
+    finally:
+        # cleanup
+        if "sharding_file_bak" in locals() and sharding_file_bak.exists():
+            sharding_file_bak.replace(sharding_file)
     cfg = OmegaConf.create(ckpt["config"])
     model = instantiate(cfg.model)
     state = TrainState.create(
