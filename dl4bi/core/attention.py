@@ -471,15 +471,15 @@ class BiasedScanAttention(nn.Module):
         x_bias_func = x_bias_kwargs = None
         if self.x_bias is not None:
             x_bias_func = self.x_bias.scanned_bias_func
-            x_bias_kwargs = self.x_bias.init_params(**self.x_bias.init_kwargs)
+            x_bias_kwargs = self.x_bias.init_params(self, **self.x_bias.init_kwargs)
         s_bias_func = s_bias_kwargs = None
         if self.s_bias is not None:
             s_bias_func = self.s_bias.scanned_bias_func
-            s_bias_kwargs = self.s_bias.init_params(**self.s_bias.init_kwargs)
+            s_bias_kwargs = self.s_bias.init_params(self, **self.s_bias.init_kwargs)
         t_bias_func = t_bias_kwargs = None
         if self.t_bias is not None:
             t_bias_func = self.t_bias.scanned_bias_func
-            t_bias_kwargs = self.t_bias.init_params(**self.t_bias.init_kwargs)
+            t_bias_kwargs = self.t_bias.init_params(self, **self.t_bias.init_kwargs)
         return biased_scan_attention(
             qs,
             ks,

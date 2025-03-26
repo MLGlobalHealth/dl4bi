@@ -205,7 +205,7 @@ class Bias(nn.Module):
         d: jax.Array,  # [B, Q, K] or [E]
         mask: Optional[jax.Array] = None,  # [B, Q, K] or [E]
     ):
-        params = self.init_params_func(**self.init_kwargs)
+        params = self.init_params(self, **self.init_kwargs)
         if mask is None:
             mask = jnp.array([True])
         return self.bias_func(d, mask, **params)
