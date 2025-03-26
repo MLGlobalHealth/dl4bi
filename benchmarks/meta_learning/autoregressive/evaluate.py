@@ -9,13 +9,13 @@ from omegaconf import OmegaConf
 from tqdm import tqdm
 
 from benchmarks.meta_learning.gp import build_gp_dataloader
-from dl4bi.meta_learning.autoregressive import AutoregressiveSampler, Strategy
+from dl4bi.meta_learning.autoregressive import ARSampler, Strategy
 from dl4bi.meta_learning.train_utils import load_ckpt
 
 
 def evaluate(
     rng,
-    model: AutoregressiveSampler,
+    model: ARSampler,
     dataloader: Generator,
     N: int,  # how many samples to take from the dataloader
     strategies: list[Strategy],
@@ -142,7 +142,7 @@ if __name__ == "__main__":
         config.data.batch_size = args.batch_size
     print(f"SMC estimate for random logpdf using {args.M} samples.")
 
-    model = AutoregressiveSampler.from_state(state)
+    model = ARSampler.from_state(state)
     rng = jax.random.key(args.seed)
     rng_dataloader, rng_mc = jax.random.split(rng)
     dataloader = dataloader(rng_dataloader, config.data, config.kernel)

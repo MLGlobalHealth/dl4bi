@@ -25,7 +25,7 @@ def dump_log_densities(log_densities):
 
 
 @dataclass(frozen=True)
-class AutoregressiveSampler:
+class ARSampler:
     model: Callable
 
     @classmethod
@@ -154,7 +154,7 @@ class AutoregressiveSampler:
         s_test: jax.Array,  # [L_test, D_s]
         batch_size: int,
         num_paths: int,
-        strategy: Strategy,
+        strategy: Strategy | None,
     ):
         """
         Autoregressively sample `num_paths` from the model using the specified strategy.
@@ -202,7 +202,7 @@ class AutoregressiveSampler:
 
         else:
             # We permute each path independently
-            # so this is effectively a call to `autoregressive_sample` with 'random' strategy
+            # so this is effectively a call to `sample` with 'random' strategy
 
             s_ctx = jnp.repeat(s_ctx[None], batch_size, axis=0)
             f_ctx = jnp.repeat(f_ctx[None], batch_size, axis=0)
@@ -259,8 +259,7 @@ class AutoregressiveSampler:
 
         Assumes the model where samples are taken in the order given by `s_test`, `f_test`.
         """
-        B, L_ctx, _ = s_ctx.shape
-        _, L_test, D_f = f_test.shape
+        B, L_test, D_f = f_test.shape
 
         s = concatenate_ctx_and_test(s_ctx, s_test, valid_lens_ctx)
         f = concatenate_ctx_and_test(f_ctx, f_test, valid_lens_ctx)

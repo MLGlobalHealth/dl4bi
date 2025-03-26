@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from omegaconf import OmegaConf
 
-from dl4bi.meta_learning.autoregressive import AutoregressiveSampler
+from dl4bi.meta_learning.autoregressive import ARSampler
 from dl4bi.meta_learning.autoregressive.analytic import (
     analytic_gp,
 )
@@ -19,8 +19,8 @@ path_trained_on_noisy_test = "results/1d/rbf/42/TNP-KR: Attention noisy test.ckp
 state, config = load_ckpt(path)
 print(dumps(OmegaConf.to_object(config), indent=2))
 
-sampler_1 = AutoregressiveSampler.from_state(state)
-sampler_2 = AutoregressiveSampler.from_state(load_ckpt(path_trained_on_noisy_test)[0])
+sampler_1 = ARSampler.from_state(state)
+sampler_2 = ARSampler.from_state(load_ckpt(path_trained_on_noisy_test)[0])
 # %%
 config.data.batch_size = 1
 config.data.num_ctx = {"min": 1, "max": 3}

@@ -1,1 +1,2 @@
-from .sampler import AutoregressiveSampler, Strategy
+from .sampler import ARSampler, Strategy
+from .distribution import ARDistribution

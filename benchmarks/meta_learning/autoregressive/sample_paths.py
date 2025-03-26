@@ -7,7 +7,7 @@ from jax import random
 from omegaconf import OmegaConf
 
 from benchmarks.meta_learning.gp import build_gp_dataloader
-from dl4bi.meta_learning.autoregressive import AutoregressiveSampler
+from dl4bi.meta_learning.autoregressive import ARSampler
 from dl4bi.meta_learning.train_utils import load_ckpt
 
 device = jax.devices()[0]
@@ -15,7 +15,7 @@ device = jax.devices()[0]
 
 def run(
     *,
-    sampler: AutoregressiveSampler,
+    sampler: ARSampler,
     config: OmegaConf,
     seed: int,
     job_name: str,
@@ -134,7 +134,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     state, config = load_ckpt(args.path)
-    sampler = AutoregressiveSampler.from_state(state)
+    sampler = ARSampler.from_state(state)
 
     print(args)
 
