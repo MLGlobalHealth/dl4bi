@@ -114,9 +114,9 @@ def update_at_index(x, update, idx):
 @jit
 @vmap
 def concatenate_ctx_and_test(
-    ctx,  # [L_ctx, D]
-    test,  # [L_test, D]
-    valid_lens_ctx,  # []
+    ctx,  # [B, L_ctx, D]
+    test,  # [B, L_test, D]
+    valid_lens_ctx,  # [B]
 ):
     """
     Concatenates context and test points such that:
