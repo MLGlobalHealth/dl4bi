@@ -82,7 +82,7 @@ def train(
             train_loss = np.mean(losses)
             losses = []
             wandb.log({"Train Loss": train_loss})
-        postfix["Train Loss"] = f"{train_loss:.3f}"
+        postfix["Train Loss"] = f"{train_loss:.4f}"
         if valid_interval and i % valid_interval == 0:
             rng_valid, rng_train = random.split(rng_train)
             metrics = evaluate(
