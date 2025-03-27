@@ -196,9 +196,10 @@ class ARSampler:
                 all_paths.append(paths)
                 all_densities.append(log_densities)
 
-            all_paths = jnp.concat(all_paths, axis=0)
-            all_densities = jnp.concat(all_densities, axis=0)
-            return all_paths[:, idx_inv], all_densities
+            return (
+                jnp.concat(all_paths, axis=0)[:, idx_inv],
+                jnp.concat(all_densities, axis=0),
+            )
 
         else:
             # We permute each path independently
@@ -220,9 +221,7 @@ class ARSampler:
                 all_paths.append(paths)
                 all_densities.append(log_densities)
 
-            all_paths = jnp.concat(all_paths, axis=0)
-            all_densities = jnp.concatenate(all_densities, axis=0)
-            return all_paths, all_densities
+            return jnp.concat(all_paths, axis=0), jnp.concat(all_densities, axis=0)
 
     @partial(jit, static_argnums=0)
     def logpdf_diagonal(self, s_ctx, f_ctx, s_test, f_test, valid_lens_ctx):
