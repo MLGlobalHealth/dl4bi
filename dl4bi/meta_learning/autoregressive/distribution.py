@@ -1,7 +1,8 @@
 import jax
 import jax.numpy as jnp
 from numpyro.distributions import Distribution
-from sampler import ARSampler
+
+from .sampler import ARSampler
 
 
 class ARDistribution(Distribution):
@@ -32,7 +33,7 @@ class ARDistribution(Distribution):
         self.f_ctx = f_ctx[None].repeat(batch_size)
         self.s_test = s_test[None].repeat(batch_size)
 
-        super.__init__(batch_shape=(batch_size,), event_shape=(L_test, Df))
+        super().__init__(batch_shape=(batch_size,), event_shape=(L_test, Df))
 
     def sample(self, rng, sample_shape=()):
         if sample_shape != ():
@@ -81,7 +82,7 @@ class PresampledDistribution(Distribution):
         self.logprobs = logprobs
         self.batch_size = batch_size
 
-        super.__init__(batch_shape=(batch_size,), event_shape=())
+        super().__init__(batch_shape=(batch_size,), event_shape=())
 
     def sample(self, rng, sample_shape=()):
         if sample_shape != ():
