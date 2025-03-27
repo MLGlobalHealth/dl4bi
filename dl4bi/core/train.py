@@ -72,7 +72,7 @@ def train(
     early_stop_patience = early_stop_patience or train_num_steps
     train_loss, metric, best_metric = float("inf"), float("inf"), float("inf")
     pbar = tqdm(range(1, train_num_steps + 1), unit=" batches", dynamic_ncols=True)
-    postfix = {"Train Loss": f"{train_loss:0.3f}"}
+    postfix = {"Train Loss": f"{train_loss:0.4f}"}
     for i in pbar:
         batch = next(batches)
         rng_train_step, rng_train = random.split(rng_train)
@@ -93,7 +93,7 @@ def train(
                 valid_num_steps,
             )
             metric = metrics[valid_monitor_metric]
-            postfix[f"Valid {valid_monitor_metric}"] = f"{metric:0.3f}"
+            postfix[f"Valid {valid_monitor_metric}"] = f"{metric:0.4f}"
             wandb.log({f"Valid {m}": v for m, v in metrics.items()})
             patience += 1
             if metric < best_metric:
