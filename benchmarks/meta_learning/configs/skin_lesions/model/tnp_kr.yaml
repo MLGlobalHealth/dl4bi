@@ -31,7 +31,10 @@ blk:
       _partial_: true
 head:
   _target_: dl4bi.mlp.MLP
-  dims: [256, 64, 2]
+  dims: [256, 64, 9]
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
+output_fn:
+  _target_: dl4bi.core.model_output.MultinomialOutput.from_activations
+  _partial_: true

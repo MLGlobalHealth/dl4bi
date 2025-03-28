@@ -6,7 +6,7 @@ import jax
 import numpy as np
 import wandb
 from hydra.utils import instantiate
-from jax import random
+from jax import jit, random
 from omegaconf import DictConfig, OmegaConf
 
 from dl4bi.core.train import (
@@ -66,15 +66,17 @@ def build_dataloaders(
     num_test: int = 32,
 ):
     def build_dataloader(name: str):
-        dataset = np.load(f"cache/skin_lesions/{name}.npy", mmap_mode="r")
+        data_x = np.load(f"cache/skin_lesions/{name}_x.npy", mmap_mode="r")
+        data_f = np.load(f"cache/skin_lesions/{name}_y_mid.npy", mmap_mode="r")
+        data_f = jax.nn.one_hot(data_f, 9)
         B, Nc, Nt = batch_size, num_ctx_max, num_test
-        L, N = dataset.shape[0], B * (Nc + Nt)
+        N, T = data_x.shape[0], B * (Nc + Nt)
 
         def dataloader(rng: jax.Array):
             while True:
                 rng_i, rng_b, rng = random.split(rng, 3)
-                idx = random.choice(rng_i, L, (N,), replace=False)
-                x, f = dataset[idx]  # TODO(danj): update
+                idx = random.choice(rng_i, N, (T,))
+                x, f = data_x[idx], data_f[idx]
                 x = x.reshape(B, Nc + Nt, -1)
                 f = f.reshape(B, Nc + Nt, -1)
                 d = TabularData(x, f)
@@ -89,10 +91,6 @@ def build_dataloaders(
         return dataloader
 
     return map(build_dataloader, ["train", "valid", "test"])
-
-
-def load(name: str):
-    return np.load(f"cache/skin_lesions/{name}.npy", mmap_mode="r")
 
 
 if __name__ == "__main__":
