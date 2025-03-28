@@ -19,6 +19,10 @@ def safe_stack(*arrays):
     return jnp.concat([x for x in arrays if x is not None], axis=-1)
 
 
+def identity(x, training=False):
+    return x
+
+
 @jit
 def to_none(x: jax.Array):
     return None

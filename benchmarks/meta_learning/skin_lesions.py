@@ -64,20 +64,22 @@ def build_dataloaders(
     num_ctx_min: int = 16,
     num_ctx_max: int = 64,
     num_test: int = 32,
+    p_dropout: float = 0.9,
 ):
     def build_dataloader(name: str):
         data_x = np.load(f"cache/skin_lesions/{name}_x.npy", mmap_mode="r")
-        data_f = np.load(f"cache/skin_lesions/{name}_y_high.npy", mmap_mode="r")
-        data_f = jax.nn.one_hot(data_f, 3)
+        data_f = np.load(f"cache/skin_lesions/{name}_y_mid.npy", mmap_mode="r")
+        data_f = jax.nn.one_hot(data_f, 9)
         B, Nc, Nt = batch_size, num_ctx_max, num_test
-        N, T = data_x.shape[0], B * (Nc + Nt)
+        (N, D), T = data_x.shape, B * (Nc + Nt)
 
         def dataloader(rng: jax.Array):
             while True:
-                rng_i, rng_b, rng = random.split(rng, 3)
+                rng_i, rng_d, rng_b, rng = random.split(rng, 4)
                 idx = random.choice(rng_i, N, (T,))
+                drop = random.bernoulli(rng_d, 1 - p_dropout, (B, Nc + Nt, D))
                 x, f = data_x[idx], data_f[idx]
-                x = x.reshape(B, Nc + Nt, -1)
+                x = x.reshape(B, Nc + Nt, -1) * drop
                 f = f.reshape(B, Nc + Nt, -1)
                 d = TabularData(x, f)
                 yield d.batch(
