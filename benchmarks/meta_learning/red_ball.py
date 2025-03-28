@@ -1,10 +1,24 @@
 #!/usr/bin/env python3
 from functools import partial
-
+import hydra
+import wandb
+from time import time
+from omegaconf import DictConfig, OmegaConf
+from pathlib import Path
+from hydra.utils import instantiate
+from benchmarks.meta_learning.sir import remap_colors
+from dl4bi.core.train import (
+    Callback,
+    evaluate,
+    load_ckpt,
+    save_ckpt,
+    train,
+)
 import jax
 import jax.numpy as jnp
 from jax import jit, random
 from omegaconf import DictConfig
+from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
 
 
 def build_dataloader(data: DictConfig):
@@ -21,10 +35,10 @@ def build_dataloader(data: DictConfig):
                 data.batch_size,
             )
 
-    return dataloader
+    return dataloader, dataloader, partial(dataloader, is_callback=True)
 
 
-@partial(jit, static_argnums=list(range(1, 6)))
+# @partial(jit, static_argnums=list(range(1, 6)))
 def simulate(
     rng: jax.Array,
     ball_radius: int,
@@ -59,21 +73,29 @@ def simulate(
         for i in range(-R, R + 1):
             for j in range(-R, R + 1):
                 if i**2 + j**2 <= R**2:
-                    if 0 <= y + i < H and 0 <= x + j < W:
-                        frame[y + i, x + j] = 1.0
+                    mask_y = (0 <= y + i) & (y + i < H)
+                    mask_x = (0 <= x + j) & (x + j < W)
+                    mask = mask_x & mask_y
+
+                    if mask.any():
+                        _x = (x + j)[mask]
+                        _y = (y + i)[mask]
+                        frame = frame.at[mask, _y, _x].set(1.0)
+
         # update position
-        x += vx
-        y += vy
+        x += vx.astype(jnp.int8)
+        y += vy.astype(jnp.int8)
 
         # check for collisions with walls
-        if x - R <= 0 or x + R >= W:
-            vx = -vx
-        if y - R <= 0 or y + R >= H:
-            vy = -vy
+        collision_x = (x - R <= 0) | (x + R >= W)
+        collision_y = (y - R <= 0) | (y + R >= H)
+
+        vx = vx.at[collision_x].multiply(-1)
+        vy = vy.at[collision_y].multiply(-1)
 
         frames.append(frame)
 
-    return jnp.concatenate(frames, axis=1)
+    return jnp.array(frames).transpose(1, 0, 2, 3)
 
 
 @jit
@@ -82,3 +104,85 @@ def bw_to_rgb(frames):
     frames = frames[..., None]  # [B, N, H, W, 1]
     zeros = jnp.zeros((*shape, 2))  # [B, N, H, W, 2]
     return jnp.concatenate([frames, zeros], axis=-1)
+
+
+@hydra.main("configs/red_ball", config_name="default", version_base=None)
+def main(cfg: DictConfig):
+    run_name = cfg.get("name", cfg_to_run_name(cfg))
+    wandb.init(
+        config=OmegaConf.to_container(cfg, resolve=True),
+        mode="online" if cfg.wandb else "disabled",
+        name=run_name,
+        project=cfg.project,
+        reinit=True,  # allows reinitialization for multiple runs
+    )
+    path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
+    print(OmegaConf.to_yaml(cfg))
+    rng = random.key(cfg.seed)
+    rng_train, rng_test = random.split(rng)
+
+    train_dataloader, valid_dataloader, clbk_dataloader = build_dataloader(
+        cfg.data
+    )
+    optimizer = instantiate(cfg.optimizer)
+    model = instantiate(cfg.model)
+    if cfg.evaluate_only:
+        state, _ = load_ckpt(path.with_suffix(".ckpt"))
+        # run once to compile
+        evaluate(rng_test, state, model.valid_step, dataloader, num_steps=1)
+        start = time()
+        metrics = evaluate(
+            rng_test,
+            state,
+            model.valid_step,
+            valid_dataloader,
+            cfg.valid_num_steps,
+        )
+        end = time()
+        metrics["time_elapsed_s"] = end - start
+        return print(metrics)
+    clbk = partial(
+        wandb_2d_img_callback,
+        filename_prefix="sir",
+        remap_colors=remap_colors,
+        transform_model_output=lambda x: (x.p, x.std),
+    )
+    state = train(
+        rng_train,
+        model,
+        optimizer,
+        model.train_step,
+        cfg.train_num_steps,
+        train_dataloader,
+        model.valid_step,
+        cfg.valid_interval,
+        cfg.valid_num_steps,
+        valid_dataloader,
+        callbacks=[Callback(clbk, cfg.plot_interval)],
+        callback_dataloader=clbk_dataloader,
+    )
+    metrics = evaluate(
+        rng_test,
+        state,
+        model.valid_step,
+        valid_dataloader,
+        cfg.valid_num_steps,
+    )
+    wandb.log({f"Test {m}": v for m, v in metrics.items()})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    save_ckpt(state, cfg, path.with_suffix(".ckpt"))
+
+
+if __name__ == '__main__':
+    rng = random.PRNGKey(42)
+    rng_gp, rng_noise = random.split(rng)
+    sim = simulate(
+        rng,
+        1,
+        10,
+        (6, 6),
+        (1, 1),
+        3,
+    )
+    print(sim)
+    # main()
