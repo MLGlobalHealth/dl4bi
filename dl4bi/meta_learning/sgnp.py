@@ -7,6 +7,8 @@ import jax.numpy as jnp
 from jax import jit, vmap
 from jraph import GraphsTuple
 
+from dl4bi.core.attention import MultiHeadAttention
+
 from ..core.gnn import GraphAttentionBlock
 from ..core.mlp import MLP
 from ..core.model_output import DiagonalMVNOutput
@@ -43,7 +45,8 @@ class SGNP(nn.Module):
         s_bias: Bias module for spatial similarity values.
         t_bias: Bias module for temporal similarity values.
         norm: A module used for normalization between blocks.
-        blk: A block to use for each layer and each repetition.
+        gblk: A block to use for the graph in each layer.
+        vblk: A block to use for the global virtual node attention.
         head: Transforms the tokens into model output.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
@@ -84,7 +87,8 @@ class SGNP(nn.Module):
     s_bias: Optional[Callable] = None
     t_bias: Optional[Callable] = None
     norm: nn.Module = nn.LayerNorm()
-    blk: nn.Module = GraphAttentionBlock()
+    gblk: nn.Module = GraphAttentionBlock()
+    vblk: nn.Module = MultiHeadAttention()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
     output_fn: Callable = DiagonalMVNOutput.from_activations
     graph: Optional[GraphsTuple] = None
@@ -126,7 +130,7 @@ class SGNP(nn.Module):
         norm = nn.LayerNorm()
         ctx, test = map(lambda x: norm(self.embed_all(x)), (ctx, test))
         # nodes for the graph are all the context nodes followed by all test nodes
-        (B, N_t), N_c = test_shape[:-1], f_ctx.shape[1]
+        (B, N_t, D), N_c = test_shape, f_ctx.shape[1]
         nodes = jnp.vstack([ctx.reshape(B * N_c, -1), test.reshape(B * N_t, -1)])
         g = self.graph  # if a graph is provided, reuse it, updating only nodes
         if g is None:
@@ -149,8 +153,12 @@ class SGNP(nn.Module):
             )
         g = g._replace(nodes=nodes)
         edge_mask = g.globals.get("edge_mask")
+        vnode = self.param("vnode", nn.initializers.constant(1), (D,))
+        vnodes = jnp.tile(vnode, (B, 1, 1))  # [B, L=1, D]
         for _ in range(self.num_blks):
-            blk = self.blk.copy()
+            gblk = self.gblk.copy()
+            vblk_vnodes_to_ctx = self.vblk.copy()
+            vblk_ctx_to_vnodes = self.vblk.copy()
             for _ in range(self.num_reps):
                 bias = 0
                 if self.x_bias is not None:
@@ -159,10 +167,17 @@ class SGNP(nn.Module):
                     bias += self.s_bias.copy()(g.edges["d_s"], edge_mask)
                 if self.t_bias is not None:
                     bias += self.t_bias.copy()(g.edges["d_t"], edge_mask)
+                # graph attention
                 # NOTE: bucket_size is for numerical stability in
                 # jax.ops.segment_* calls; this is typically only needed for
                 # testing implementation correctness
-                g = blk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
+                g = gblk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
+                # global vnode attention (vnodes -> ctx, then ctx -> vnodes)
+                ctx_nodes = g.nodes[: B * N_c].reshape(B, N_c, -1)
+                vnodes, _ = vblk_vnodes_to_ctx(vnodes, ctx_nodes, ctx_nodes, mask_ctx)
+                ctx_nodes, _ = vblk_ctx_to_vnodes(ctx_nodes, vnodes, vnodes)
+                nodes = g.nodes.at[: B * N_c].set(ctx_nodes.reshape(B * N_c, -1))
+                g = g._replace(nodes=nodes)
         nodes_test = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         output = self.head(nodes_test, training)
         return self.output_fn(output)
