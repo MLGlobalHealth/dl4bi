@@ -1,5 +1,5 @@
 _target_: dl4bi.meta_learning.TNPKR
-num_blks: 6
+num_blks: 1
 num_reps: 1
 embed_all:
   _target_: dl4bi.mlp.MLP
@@ -31,7 +31,7 @@ blk:
       _partial_: true
 head:
   _target_: dl4bi.mlp.MLP
-  dims: [256, 64, 9]
+  dims: [256, 64, 3]
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true

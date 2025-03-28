@@ -6,7 +6,7 @@ import jax
 import numpy as np
 import wandb
 from hydra.utils import instantiate
-from jax import jit, random
+from jax import random
 from omegaconf import DictConfig, OmegaConf
 
 from dl4bi.core.train import (
@@ -67,8 +67,8 @@ def build_dataloaders(
 ):
     def build_dataloader(name: str):
         data_x = np.load(f"cache/skin_lesions/{name}_x.npy", mmap_mode="r")
-        data_f = np.load(f"cache/skin_lesions/{name}_y_mid.npy", mmap_mode="r")
-        data_f = jax.nn.one_hot(data_f, 9)
+        data_f = np.load(f"cache/skin_lesions/{name}_y_high.npy", mmap_mode="r")
+        data_f = jax.nn.one_hot(data_f, 3)
         B, Nc, Nt = batch_size, num_ctx_max, num_test
         N, T = data_x.shape[0], B * (Nc + Nt)
 
