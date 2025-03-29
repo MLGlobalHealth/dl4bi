@@ -16,6 +16,8 @@ optimizer:
   _args_:
     - _target_: optax.clip_by_global_norm
       max_norm: 3.0
+    - _target_: optax.add_decayed_weights
+      weight_decay: 1.0e-2
     - _target_: optax.yogi
       learning_rate:
         _target_: optax.cosine_decay_schedule

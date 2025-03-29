@@ -7,6 +7,8 @@ import jax.numpy as jnp
 from jax import jit, vmap
 from jraph import GraphsTuple
 
+from dl4bi.core.attention import MultiHeadAttention
+
 from ..core.gnn import GraphAttentionBlock
 from ..core.mlp import MLP
 from ..core.model_output import DiagonalMVNOutput
@@ -64,9 +66,9 @@ class SGNP(nn.Module):
         $d^2 = (k_x\cdot d_x)^2+(k_s\cdot d_s)^2+(k_t\cdot d_t)^2$
     """
 
-    k: int = 32
-    num_blks: int = 6
-    num_reps: int = 1
+    k: int = 16
+    num_blks: int = 3
+    num_reps: int = 2
     embed_x: Callable = lambda x: x
     embed_s: Callable = lambda x: x
     embed_t: Callable = lambda x: x
@@ -149,6 +151,11 @@ class SGNP(nn.Module):
             )
         g = g._replace(nodes=nodes)
         edge_mask = g.globals.get("edge_mask")
+        D = nodes.shape[-1]
+        vnode_proj = MLP([D, D], nn.gelu)
+        merge = MLP([D * 4, D], nn.gelu)
+        if mask_ctx is not None:
+            mask_ctx = mask_ctx[..., None]
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
@@ -164,6 +171,18 @@ class SGNP(nn.Module):
                 # jax.ops.segment_* calls; this is typically only needed for
                 # testing implementation correctness
                 g = blk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
+                ctx_nodes = g.nodes[: B * N_c].reshape(B, N_c, -1)
+                vnodes = jnp.max(
+                    vnode_proj(ctx_nodes),
+                    axis=1,
+                    where=mask_ctx,
+                    initial=-jnp.inf,
+                    keepdims=True,
+                )
+                vnodes = jnp.repeat(vnodes, N_c, axis=1)
+                ctx_nodes = merge(jnp.concat([ctx_nodes, vnodes], axis=-1))
+                nodes = g.nodes.at[: B * N_c].set(ctx_nodes.reshape(B * N_c, -1))
+                g = g._replace(nodes=nodes)
         nodes_test = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         output = self.head(nodes_test, training)
         return self.output_fn(output)
