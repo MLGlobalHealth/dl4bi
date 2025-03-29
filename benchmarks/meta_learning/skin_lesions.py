@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
+from typing import Callable
 
+import flax.linen as nn
 import hydra
 import jax
 import numpy as np
@@ -9,13 +11,31 @@ from hydra.utils import instantiate
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 
+from dl4bi.core.attention import Attention
+from dl4bi.core.mlp import MLP
+from dl4bi.core.model_output import MultinomialOutput
 from dl4bi.core.train import (
     evaluate,
     save_ckpt,
     train,
 )
 from dl4bi.meta_learning.data.tabular import TabularData
+from dl4bi.meta_learning.steps import likelihood_train_step, likelihood_valid_step
 from dl4bi.meta_learning.utils import cfg_to_run_name
+
+
+class Mixer(nn.Module):
+    proj_out: Callable = MLP([9])
+    output_fn: Callable = MultinomialOutput.from_activations
+    train_step: Callable = likelihood_train_step
+    valid_step: Callable = likelihood_valid_step
+
+    @nn.compact
+    def __call__(self, x_ctx: jax.Array, f_ctx: jax.Array, x_test: jax.Array, **kwargs):
+        qs, ks, vs = map(lambda x: x[:, None], [x_test, x_ctx, f_ctx])  # add attn head
+        f_test, _ = Attention()(qs, ks, vs)
+        output = self.proj_out(f_test)[:, 0, :, :]  # remove attn head
+        return self.output_fn(output)
 
 
 @hydra.main("configs/skin_lesions", config_name="default", version_base=None)
@@ -33,7 +53,8 @@ def main(cfg: DictConfig):
     rng_train, rng_test = random.split(rng)
     train_dataloader, valid_dataloader, test_dataloader = build_dataloaders()
     optimizer = instantiate(cfg.optimizer)
-    model = instantiate(cfg.model)
+    model = Mixer()
+    # model = instantiate(cfg.model)
     state = train(
         rng_train,
         model,
@@ -60,11 +81,11 @@ def main(cfg: DictConfig):
 
 
 def build_dataloaders(
-    batch_size: int = 16,
-    num_ctx_min: int = 16,
-    num_ctx_max: int = 64,
+    batch_size: int = 32,
+    num_ctx_min: int = 128,
+    num_ctx_max: int = 256,
     num_test: int = 32,
-    p_dropout: float = 0.9,
+    p_dropout: float = 0.0,
 ):
     def build_dataloader(name: str):
         data_x = np.load(f"cache/skin_lesions/{name}_x.npy", mmap_mode="r")
