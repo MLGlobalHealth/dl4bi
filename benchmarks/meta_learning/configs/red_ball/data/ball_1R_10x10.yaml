@@ -1,0 +1,21 @@
+name: ball_1R_10x10
+ball_radius: 1
+num_frames: 128
+frame_size: [16, 16]
+velocity_range: [1, 2]
+batch_size: 7
+num_test: 256 
+num_t: 5
+random_t: False
+num_ctx_per_t:
+  min: 256
+  max: 256
+independent_t_masks: False
+forecast: True
+s:
+  - start: 0
+    stop: 1
+    num: 16
+  - start: 0
+    stop: 1
+    num: 16
