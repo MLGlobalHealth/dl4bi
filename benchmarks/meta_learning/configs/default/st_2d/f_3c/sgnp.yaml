@@ -13,7 +13,7 @@ t_sim:
 t_bias:
   _target_: dl4bi.bias.Bias.build_scalar_bias
   num_heads: 4
-blk:
+gblk:
   _target_: dl4bi.gnn.GraphAttentionBlock
   attn:
     _target_: dl4bi.attention.MultiHeadGraphAttention

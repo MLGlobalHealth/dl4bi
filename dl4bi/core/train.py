@@ -7,7 +7,6 @@ from typing import Callable, Optional, Union
 import flax
 import flax.linen as nn
 import jax
-import jax.numpy as jnp
 import numpy as np
 import optax
 import wandb
