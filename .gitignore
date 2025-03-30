@@ -4,6 +4,7 @@ img_align_celeba
 *.npy
 *.nu
 **/outputs/**
+**/multirun/**
 *.pdf
 *.pkl
 *.png
