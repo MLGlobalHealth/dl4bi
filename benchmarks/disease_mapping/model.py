@@ -2,12 +2,22 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
+from jax import jit
 from sps.kernels import rbf
+
+from dl4bi.core.model_output import DiagonalMVNOutput
+from dl4bi.core.train import TrainState
 
 var_dist = dist.Delta(1)
 ls_dist = dist.Beta(3, 7)
 kernel = rbf
+mean = lambda *args, **kwargs: 0
 jitter = 1e-5  # note this is in fact N(0, s2=jitter) noise
+
+
+# TODO @pgrynfelder:
+# perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
+# and a non-0 mean?
 
 
 def model(
@@ -21,11 +31,11 @@ def model(
     var = numpyro.sample("var", var_dist)
     ls = numpyro.sample("ls", ls_dist)
 
-    K = kernel(s, s, var, ls) + jitter * jnp.eye(L)
+    cov = kernel(s, s, var, ls) + jitter * jnp.eye(L)
 
     y = numpyro.sample(
-        "f_s",
-        dist.MultivariateNormal(0, K),
+        "y",
+        dist.MultivariateNormal(0, cov),
     )
 
     s = numpyro.sample("s", dist.HalfNormal(50))
@@ -37,3 +47,55 @@ def model(
     numpyro.sample(
         "Np", dist.BinomialLogits(total_count=Nt, logits=logit_theta), obs=Np
     )
+
+
+@jit
+def conditional_gp(s_c: jax.Array, y_c: jax.Array, s_t: jax.Array, params: dict):
+    """
+    Get a conditional mean, covariance at s_t sample given an observed (context) sample.
+    """
+    B, L_ctx, D = s_c.shape
+    _, L_test, _ = s_t.shape
+
+    mean_c = mean(s_c, **params)
+    mean_t = mean(s_t, **params)
+
+    cov_cc = kernel(s_c, s_c, **params) + jitter * jnp.eye(L_ctx)
+    cov_ct = kernel(s_c, s_t, **params)
+    cov_tc = cov_ct.mT
+    cov_tt = kernel(s_t, s_t, **params) + jitter * jnp.eye(L_test)
+
+    L = jax.scipy.linalg.cho_factor(cov_cc)
+
+    m = mean_t + cov_tc @ jax.scipy.linalg.cho_solve(L, y_c - mean_c)
+    cov = cov_tt - cov_tc @ jax.scipy.linalg.cho_solve(L, cov_ct)
+
+    return m, cov
+
+
+def predict_gp(rng, s_c, y_c, s_t, params):
+    mean, cov = conditional_gp(s_c, y_c, s_t, params)
+
+    return dist.MultivariateNormal(mean, cov).sample(rng)
+
+
+@jit(static_argnames="state")
+def predict_np(state: TrainState, rng, s_c, y_c, s_t):
+    rng, rng_extra = jax.random.split(rng)
+    output = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        s_c,
+        y_c,
+        s_t,
+        None,
+        rngs={"extra": rng_extra},
+    )
+
+    if isinstance(output, tuple):
+        output, _ = output
+
+    match output:
+        case DiagonalMVNOutput(mu, std):
+            return mu + std * jax.random.normal(rng, mu.shape)
+        case _:
+            raise NotImplementedError()
