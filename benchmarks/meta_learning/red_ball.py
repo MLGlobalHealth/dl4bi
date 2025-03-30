@@ -14,10 +14,13 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
+from sps.utils import build_grid
 import jax
 import jax.numpy as jnp
 from jax import jit, random
 from omegaconf import DictConfig
+from dl4bi.meta_learning.data.spatial import SpatialData
+from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData
 from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
 
 
@@ -26,7 +29,11 @@ def build_dataloader(data: DictConfig):
     def dataloader(rng: jax.Array):
         while True:
             rng_i, rng = random.split(rng)
-            yield simulate(
+
+            s = build_grid(data.s)
+            s = jnp.repeat(s[None, ...], data.num_frames, axis=0)
+
+            frames = simulate(
                 rng_i,
                 data.ball_radius,
                 data.num_frames,
@@ -34,6 +41,24 @@ def build_dataloader(data: DictConfig):
                 data.velocity_range,
                 data.batch_size,
             )
+
+            d = SpatiotemporalData(x=None, s=s, f=frames,
+                                   t=jnp.arange(data.num_frames))
+
+            for _ in range(data.num_frames // data.batch_size):
+                rng_b, rng = random.split(rng)
+                rng_b, rng = random.split(rng)
+                yield d.batch(
+                    rng_b,
+                    data.num_t,
+                    data.random_t,
+                    data.num_ctx_per_t.min,
+                    data.num_ctx_per_t.max,
+                    data.independent_t_masks,
+                    data.num_test,
+                    data.forecast,
+                    data.batch_size,
+                )
 
     return dataloader, dataloader, partial(dataloader, is_callback=True)
 
@@ -69,7 +94,7 @@ def simulate(
     vy = random.uniform(rng_vy, (B,), minval=min_v, maxval=max_v)
     frames = []
     for _ in range(num_frames):
-        frame = jnp.zeros((B, H, W), dtype=jnp.uint8)
+        frame = jnp.zeros((B, H, W), dtype=jnp.float32)
         for i in range(-R, R + 1):
             for j in range(-R, R + 1):
                 if i**2 + j**2 <= R**2:
@@ -77,10 +102,14 @@ def simulate(
                     mask_x = (0 <= x + j) & (x + j < W)
                     mask = mask_x & mask_y
 
-                    if mask.any():
-                        _x = (x + j)[mask]
-                        _y = (y + i)[mask]
-                        frame = frame.at[mask, _y, _x].set(1.0)
+                    _x = (x + j)[mask]
+                    _y = (y + i)[mask]
+
+                    frame = jnp.where(
+                        mask.any(),
+                        frame.at[mask, _y, _x].set(1.0),
+                        frame
+                    )
 
         # update position
         x += vx.astype(jnp.int8)
@@ -121,26 +150,15 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
 
-    train_dataloader, valid_dataloader, clbk_dataloader = build_dataloader(
-        cfg.data
-    )
+    (
+        train_dataloader,
+        valid_dataloader,
+        clbk_dataloader
+    ) = build_dataloader(cfg.data)
+
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
-    if cfg.evaluate_only:
-        state, _ = load_ckpt(path.with_suffix(".ckpt"))
-        # run once to compile
-        evaluate(rng_test, state, model.valid_step, dataloader, num_steps=1)
-        start = time()
-        metrics = evaluate(
-            rng_test,
-            state,
-            model.valid_step,
-            valid_dataloader,
-            cfg.valid_num_steps,
-        )
-        end = time()
-        metrics["time_elapsed_s"] = end - start
-        return print(metrics)
+
     clbk = partial(
         wandb_2d_img_callback,
         filename_prefix="sir",
@@ -174,15 +192,15 @@ def main(cfg: DictConfig):
 
 
 if __name__ == '__main__':
-    rng = random.PRNGKey(42)
-    rng_gp, rng_noise = random.split(rng)
-    sim = simulate(
-        rng,
-        1,
-        10,
-        (6, 6),
-        (1, 1),
-        3,
-    )
-    print(sim)
-    # main()
+    # rng = random.PRNGKey(42)
+    # rng_gp, rng_noise = random.split(rng)
+    # sim = simulate(
+    #     rng,
+    #     1,
+    #     10,
+    #     (6, 6),
+    #     (1, 1),
+    #     3,
+    # )
+    # print(sim)
+    main()
