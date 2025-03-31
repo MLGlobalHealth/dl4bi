@@ -8,7 +8,7 @@ project: red_ball
 train_num_steps: 100000
 valid_num_steps: 1000
 valid_interval: 10000
-plot_interval: 100000
+plot_interval: 100
 evaluate_only: False
 optimizer:
   _target_: optax.chain
