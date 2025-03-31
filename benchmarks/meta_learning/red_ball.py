@@ -4,15 +4,12 @@ import math
 import hydra
 import matplotlib as mpl
 import wandb
-from time import time
 from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 from hydra.utils import instantiate
-from benchmarks.meta_learning.sir import remap_colors
 from dl4bi.core.train import (
     Callback,
     evaluate,
-    load_ckpt,
     save_ckpt,
     train,
 )
@@ -21,7 +18,6 @@ import jax
 import jax.numpy as jnp
 from jax import jit, random
 from omegaconf import DictConfig
-from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData
 from dl4bi.meta_learning.utils import cfg_to_run_name, regression_to_rgb, wandb_2d_img_callback
 
