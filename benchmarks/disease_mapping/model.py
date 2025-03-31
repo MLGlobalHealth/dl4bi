@@ -27,7 +27,7 @@ jitter = 1e-5  # note this is in fact N(0, s2=jitter) noise
 def model(
     s: jax.Array,
     Np: jax.Array,
-    Nt: jax.Array,
+    N: jax.Array,
 ):
     B, L, D = s.shape
 
@@ -48,9 +48,7 @@ def model(
     logit_theta = b + s * y
     numpyro.deterministic("theta", jax.nn.sigmoid(logit_theta))
 
-    numpyro.sample(
-        "Np", dist.BinomialLogits(total_count=Nt, logits=logit_theta), obs=Np
-    )
+    numpyro.sample("Np", dist.BinomialLogits(total_count=N, logits=logit_theta), obs=Np)
 
 
 @jit
