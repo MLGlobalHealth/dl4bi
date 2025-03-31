@@ -42,14 +42,11 @@ def build_dataloader(data: DictConfig):
                 data.velocity_range,
                 batch_size=1,
             )
-            # print(s.shape, frames.shape)
-            # assert False
 
             d = SpatiotemporalData(x=None, s=s, f=frames,
                                    t=jnp.arange(data.num_frames))
 
             for _ in range(data.num_frames // data.batch_size):
-                rng_b, rng = random.split(rng)
                 rng_b, rng = random.split(rng)
                 yield d.batch(
                     rng_b,
@@ -105,12 +102,34 @@ def simulate(
                     mask_x = (0 <= x + j) & (x + j < W)
                     mask = mask_x & mask_y
 
-                    _x = (x + j)[mask]
-                    _y = (y + i)[mask]
+                    # replacing None with a guard value
+                    # the idea is to filter out the dims
+                    # where mask is False
+                    # this code is way too complex
+                    # (trying to make _x = (x + j)[mask]
+                    # with jit-compatible operations)
+
+                    # though since we batch separately
+                    # so B = 1 always
+                    _x = jnp.where(mask, x + j, jnp.inf)  # guard value
+                    _x = _x[
+                        jnp.where(jnp.isfinite(_x))[0].astype(jnp.int32)
+                    ].astype(jnp.int32)
+
+                    _y = jnp.where(mask, y + i, jnp.inf)  # guard value
+                    _y = _y[
+                        jnp.where(jnp.isfinite(_y))[0].astype(jnp.int32)
+                    ].astype(jnp.int32)
+
+                    # _x_ = (x + j)[mask]
+                    # _y_ = (y + i)[mask]
+
+                    # assert all(_x == _x_)
+                    # assert all(_y == _y_)
 
                     frame = jnp.where(
                         mask.any(),
-                        frame.at[mask, _y, _x].set(1.0),
+                        frame.at[mask, y + i, x + j].set(1),
                         frame
                     )
 
