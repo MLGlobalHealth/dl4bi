@@ -25,7 +25,7 @@ mean = jit(lambda x, **kwargs: 0)
 jitter = 1e-6  # note this is in fact N(0, s2=jitter) noise
 
 
-def spatial_process(s: jax.Array):
+def spatial_process(s: jax.Array, sample_shape: tuple[int, ...] = ()):
     """
     Definition of the spacial process underlying the observation model.
     """
@@ -39,9 +39,10 @@ def spatial_process(s: jax.Array):
     y = numpyro.sample(
         "y",
         dist.MultivariateNormal(0, cov),
+        sample_shape=sample_shape,
     )
 
-    return y
+    return y[..., None]
 
 
 def model(
