@@ -33,6 +33,7 @@ class SpatialData(MetaLearningData):
         num_test: int,
         test_includes_ctx: bool = False,
         obs_noise: Optional[float] = None,
+        test_includes_noise: bool = False,
         batch_size: Optional[int] = None,
     ):
         return _batch(
@@ -45,6 +46,7 @@ class SpatialData(MetaLearningData):
             num_test,
             test_includes_ctx,
             obs_noise,
+            test_includes_noise,
             batch_size,
         )
 
@@ -57,6 +59,7 @@ class SpatialData(MetaLearningData):
         "num_test",
         "test_includes_ctx",
         "obs_noise",
+        "test_includes_noise",
         "batch_size",
     ),
 )
@@ -70,6 +73,7 @@ def _batch(
     num_test: int,
     test_includes_ctx: bool = False,
     obs_noise: Optional[float] = None,
+    test_includes_noise: bool = False,
     batch_size: Optional[int] = None,
 ):
     rng_i, rng_p, rng_b, rng_eps = random.split(rng, 4)
@@ -100,9 +104,14 @@ def _batch(
         s_ctx, f_ctx, m_ctx, *rest = args
         args = (None, s_ctx, f_ctx, m_ctx, None, *rest)
     if obs_noise:
-        x_ctx, s_ctx, f_ctx, *rest = args
+        if test_includes_noise:
+            rng_eps, rng_test_eps = random.split(rng_eps)
+        x_ctx, s_ctx, f_ctx, m_ctx, x_test, s_test, f_test, *rest = args
         f_ctx += obs_noise * random.normal(rng_eps, f_ctx.shape)
-        args = (x_ctx, s_ctx, f_ctx, *rest)
+        if test_includes_noise:
+            f_test += obs_noise * random.normal(rng_test_eps, f_test.shape)
+        args = (x_ctx, s_ctx, f_ctx, m_ctx, x_test, s_test, f_test, *rest)
+
     return SpatialBatch(*args, inv_permute_idx=inv_permute_idx, s_shape=s_shape)
 
 
@@ -152,7 +161,7 @@ class SpatialBatch(MetaLearningBatch):
                 axs[i].set_title(title, fontsize=16)
             elif i == N - 1:
                 axs[i].set_xlabel("s", fontsize=14)
-            axs[i].set_ylabel(f"Sample {i+1}", fontsize=14, rotation=90)
+            axs[i].set_ylabel(f"Sample {i + 1}", fontsize=14, rotation=90)
             axs[i].scatter(
                 self.s_ctx[i, self.mask_ctx[i], 0],
                 self.f_ctx[i, self.mask_ctx[i], 0],
@@ -208,7 +217,7 @@ class SpatialBatch(MetaLearningBatch):
                 axs[i, 1].set_title("Uncertainty", fontsize=30)
                 axs[i, 2].set_title("Prediction", fontsize=30)
                 axs[i, 3].set_title("Ground Truth", fontsize=30)
-            axs[i, 0].set_ylabel(f"Sample {i+1}", fontsize=30)
+            axs[i, 0].set_ylabel(f"Sample {i + 1}", fontsize=30)
             for j in range(4):
                 axs[i, j].set_xticks([])
                 axs[i, j].set_yticks([])
