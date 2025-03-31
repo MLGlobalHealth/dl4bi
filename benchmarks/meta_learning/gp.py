@@ -95,9 +95,8 @@ def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = F
                 data.num_ctx.min,
                 data.num_ctx.max,
                 num_test=L,
-                test_includes_ctx=data.get("test_includes_ctx", True),
+                test_includes_ctx=True,
                 obs_noise=data.obs_noise,
-                test_includes_noise=data.get("test_includes_noise", False),
             )
             if is_callback:
                 yield b, to_extra({"var": var, "ls": ls, "period": period})
@@ -133,9 +132,8 @@ def build_2d_grid_dataloader(data: DictConfig, kernel: DictConfig):
                 data.num_ctx.min,
                 data.num_ctx.max,
                 num_test=s.shape[1] * s.shape[2],
-                test_includes_ctx=data.get("test_includes_ctx", True),
+                test_includes_ctx=True,
                 obs_noise=data.obs_noise,
-                test_includes_noise=data.get("test_includes_noise", False),
             )
             yield b, to_extra({"var": var, "ls": ls, "period": period})
 
