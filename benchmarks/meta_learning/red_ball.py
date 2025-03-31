@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from functools import partial
+import math
 import hydra
+import matplotlib as mpl
 import wandb
 from time import time
 from omegaconf import DictConfig, OmegaConf
@@ -21,12 +23,15 @@ from jax import jit, random
 from omegaconf import DictConfig
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData
-from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
+from dl4bi.meta_learning.utils import cfg_to_run_name, regression_to_rgb, wandb_2d_img_callback
 
 
 def build_dataloader(data: DictConfig):
+    dims = tuple(axis.num for axis in data.s)
+    L = math.prod(dims)
     # TODO(danj): select frames from each simulation
-    def dataloader(rng: jax.Array):
+
+    def dataloader(rng: jax.Array, is_callback: bool = False):
         while True:
             rng_i, rng = random.split(rng)
 
@@ -39,8 +44,10 @@ def build_dataloader(data: DictConfig):
                 data.num_frames,
                 data.frame_size,
                 data.velocity_range,
-                data.batch_size,
+                batch_size=1,
             )
+            # print(s.shape, frames.shape)
+            # assert False
 
             d = SpatiotemporalData(x=None, s=s, f=frames,
                                    t=jnp.arange(data.num_frames))
@@ -60,7 +67,7 @@ def build_dataloader(data: DictConfig):
                     data.batch_size,
                 )
 
-    return dataloader, dataloader, partial(dataloader, is_callback=True)
+    return dataloader, dataloader, dataloader
 
 
 # @partial(jit, static_argnums=list(range(1, 6)))
@@ -124,7 +131,7 @@ def simulate(
 
         frames.append(frame)
 
-    return jnp.array(frames).transpose(1, 0, 2, 3)
+    return jnp.array(frames).transpose(0, -1, 2, 1)  # .transpose(1, 0, 2, 3)
 
 
 @jit
@@ -159,11 +166,14 @@ def main(cfg: DictConfig):
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
 
+    cmap = mpl.colormaps.get_cmap("grey")
+    cmap.set_bad("blue")
     clbk = partial(
         wandb_2d_img_callback,
-        filename_prefix="sir",
-        remap_colors=remap_colors,
-        transform_model_output=lambda x: (x.p, x.std),
+        cmap=cmap,
+        remap_colors=regression_to_rgb,
+        # transform_model_output=lambda x: x,
+        filename_prefix="mnist"
     )
     state = train(
         rng_train,
