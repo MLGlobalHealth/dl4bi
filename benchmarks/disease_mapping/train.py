@@ -10,11 +10,10 @@ from jax import jit, random
 from numpyro import handlers
 from omegaconf import DictConfig, OmegaConf
 
+from benchmarks.disease_mapping.model import spatial_process
 from dl4bi.core.train import evaluate, save_ckpt, train
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.utils import cfg_to_run_name
-
-from .model import spatial_process
 
 
 @hydra.main("configs", "default", None)
