@@ -2,6 +2,8 @@
 Model for malaria prevalence given pointwise observations.
 """
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import numpyro
@@ -12,16 +14,34 @@ from sps.kernels import rbf
 from dl4bi.core.model_output import DiagonalMVNOutput
 from dl4bi.core.train import TrainState
 
+# TODO @pgrynfelder:
+# perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
+# and a non-0 mean?
+
 var_dist = dist.Delta(1)
 ls_dist = dist.Beta(3, 7)
 kernel = jit(lambda x, y, **kwargs: rbf(x, y, kwargs["ls"], kwargs["var"]))
 mean = jit(lambda x, **kwargs: 0)
-jitter = 1e-5  # note this is in fact N(0, s2=jitter) noise
+jitter = 1e-6  # note this is in fact N(0, s2=jitter) noise
 
 
-# TODO @pgrynfelder:
-# perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
-# and a non-0 mean?
+def spatial_process(s: jax.Array):
+    """
+    Definition of the spacial process underlying the observation model.
+    """
+    L, D = s.shape
+
+    var = numpyro.sample("var", var_dist)
+    ls = numpyro.sample("ls", ls_dist)
+
+    cov = kernel(s, s, var=var, ls=ls) + jitter * jnp.eye(L)
+
+    y = numpyro.sample(
+        "y",
+        dist.MultivariateNormal(0, cov),
+    )
+
+    return y
 
 
 def model(
@@ -29,26 +49,29 @@ def model(
     Np: jax.Array,
     N: jax.Array,
 ):
-    B, L, D = s.shape
+    y = spatial_process(s)
 
-    # isn't it better to account for scale later on in the NP framework? or both?
-    var = numpyro.sample("var", var_dist)
-    ls = numpyro.sample("ls", ls_dist)
-
-    cov = kernel(s, s, var, ls) + jitter * jnp.eye(L)
-
-    y = numpyro.sample(
-        "y",
-        dist.MultivariateNormal(0, cov),
-    )
-
-    s = numpyro.sample("s", dist.HalfNormal(50))
+    scale = numpyro.sample("scale", dist.HalfNormal(50))
     b = numpyro.sample("b", dist.Normal(0, 1))
 
-    logit_theta = b + s * y
+    logit_theta = b + scale * y
     numpyro.deterministic("theta", jax.nn.sigmoid(logit_theta))
 
     numpyro.sample("Np", dist.BinomialLogits(total_count=N, logits=logit_theta), obs=Np)
+
+
+def render():
+    L = 100
+    rng = jax.random.key(0)
+    s = jax.random.normal(rng, (L, 2))
+    N = jax.random.randint(rng, (L,), 0, 100)
+    Np = jax.random.randint(rng, (L,), 0, N)
+    return numpyro.render_model(
+        model,
+        (s, Np, N),
+        render_distributions=True,
+        render_params=True,
+    )
 
 
 @jit
@@ -81,7 +104,7 @@ def predict_gp(rng, s_c, y_c, s_t, **kwargs):
     return dist.MultivariateNormal(mean, cov).sample(rng)
 
 
-@jit(static_argnames="state")
+@partial(jit, static_argnames="state")
 def predict_np(state: TrainState, rng, s_c, y_c, s_t):
     rng, rng_extra = jax.random.split(rng)
     output = state.apply_fn(
