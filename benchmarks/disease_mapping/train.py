@@ -69,7 +69,7 @@ def build_dataloader(data: DictConfig):
     Generates samples from `model.spatial_process`.
     """
 
-    B, L, D = data.batch_size, data.num_test, len(data.s)
+    B, L, D = data.batch_size, data.num_test + data.num_ctx.max, len(data.s)
     s_min = jnp.array([axis["start"] for axis in data.s])
     s_max = jnp.array([axis["stop"] for axis in data.s])
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
@@ -90,7 +90,7 @@ def build_dataloader(data: DictConfig):
                 rng_b,
                 data.num_ctx.min,
                 data.num_ctx.max,
-                num_test=L,
+                num_test=data.num_test,
                 test_includes_ctx=False,
                 obs_noise=None,
             )

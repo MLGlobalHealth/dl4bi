@@ -22,7 +22,7 @@ var_dist = dist.Delta(1)
 ls_dist = dist.Beta(3, 7)
 kernel = jit(lambda x, y, **kwargs: rbf(x, y, kwargs["ls"], kwargs["var"]))
 mean = jit(lambda x, **kwargs: 0)
-jitter = 1e-6  # note this is in fact N(0, s2=jitter) noise
+jitter = 1e-4  # note this is in fact N(0, s2=jitter) noise
 
 
 def spatial_process(s: jax.Array, sample_shape: tuple[int, ...] = ()):
