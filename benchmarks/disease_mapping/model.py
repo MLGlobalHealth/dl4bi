@@ -1,3 +1,7 @@
+"""
+Model for malaria prevalence given pointwise observations.
+"""
+
 import jax
 import jax.numpy as jnp
 import numpyro
@@ -10,8 +14,8 @@ from dl4bi.core.train import TrainState
 
 var_dist = dist.Delta(1)
 ls_dist = dist.Beta(3, 7)
-kernel = rbf
-mean = lambda *args, **kwargs: 0
+kernel = jit(lambda x, y, **kwargs: rbf(x, y, kwargs["ls"], kwargs["var"]))
+mean = jit(lambda x, **kwargs: 0)
 jitter = 1e-5  # note this is in fact N(0, s2=jitter) noise
 
 
@@ -50,20 +54,20 @@ def model(
 
 
 @jit
-def conditional_gp(s_c: jax.Array, y_c: jax.Array, s_t: jax.Array, params: dict):
+def conditional_gp(s_c: jax.Array, y_c: jax.Array, s_t: jax.Array, **kwargs):
     """
     Get a conditional mean, covariance at s_t sample given an observed (context) sample.
     """
     B, L_ctx, D = s_c.shape
     _, L_test, _ = s_t.shape
 
-    mean_c = mean(s_c, **params)
-    mean_t = mean(s_t, **params)
+    mean_c = mean(s_c, **kwargs)
+    mean_t = mean(s_t, **kwargs)
 
-    cov_cc = kernel(s_c, s_c, **params) + jitter * jnp.eye(L_ctx)
-    cov_ct = kernel(s_c, s_t, **params)
+    cov_cc = kernel(s_c, s_c, **kwargs) + jitter * jnp.eye(L_ctx)
+    cov_ct = kernel(s_c, s_t, **kwargs)
     cov_tc = cov_ct.mT
-    cov_tt = kernel(s_t, s_t, **params) + jitter * jnp.eye(L_test)
+    cov_tt = kernel(s_t, s_t, **kwargs) + jitter * jnp.eye(L_test)
 
     L = jax.scipy.linalg.cho_factor(cov_cc)
 
@@ -73,8 +77,8 @@ def conditional_gp(s_c: jax.Array, y_c: jax.Array, s_t: jax.Array, params: dict)
     return m, cov
 
 
-def predict_gp(rng, s_c, y_c, s_t, params):
-    mean, cov = conditional_gp(s_c, y_c, s_t, params)
+def predict_gp(rng, s_c, y_c, s_t, **kwargs):
+    mean, cov = conditional_gp(s_c, y_c, s_t, **kwargs)
 
     return dist.MultivariateNormal(mean, cov).sample(rng)
 
