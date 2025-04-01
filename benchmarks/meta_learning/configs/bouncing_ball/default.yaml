@@ -1,7 +1,7 @@
 defaults:
   - _self_ # use default global values below
   - model: tnp_kr
-  - data: 32x32.yaml
+  - data: 16x16.yaml
 seed: 42
 wandb: True
 project: Bouncing Ball

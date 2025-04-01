@@ -6,7 +6,7 @@ s:
   - start: -2
     stop: 2
     num: 16
-ball_radius: 4
+ball_radius: 2
 num_frames: 128
 frame_size: 16
 velocity_prior:

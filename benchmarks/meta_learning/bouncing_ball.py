@@ -43,6 +43,8 @@ def main(cfg: DictConfig):
     dataloader = build_dataloader(cfg.data)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
+    output_fn = model.output_fn
+    model = model.copy(output_fn=lambda x: output_fn(x, min_std=0.05))
     clbk = partial(
         wandb_2d_img_callback,
         remap_colors=regression_to_rgb,
