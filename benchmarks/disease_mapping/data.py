@@ -4,7 +4,6 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from pyDataverse.api import DataAccessApi
-from pyproj import Transformer
 
 base_url = "https://dataverse.harvard.edu/"
 dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
@@ -71,7 +70,3 @@ def prepare_data(force_redownload: bool = False):
     Np = df.Pf.to_numpy()
 
     return s, Np, N
-
-
-if __name__ == "__main__":
-    prepare_data()
