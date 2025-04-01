@@ -1,0 +1,26 @@
+name: 32x32
+s:
+  - start: -2
+    stop: 2
+    num: 32
+  - start: -2
+    stop: 2
+    num: 32
+ball_radius: 4
+num_frames: 128
+frame_size: 32
+velocity_prior:
+  _target_: sps.priors.Prior
+  dist: uniform
+  kwargs:
+    minval: 1.0
+    maxval: 2.0
+num_t: 5
+random_t: False
+num_ctx_per_t:
+  min: 1024
+  max: 1024
+independent_t_masks: False
+num_test: 1024
+forecast: True
+batch_size: 4
