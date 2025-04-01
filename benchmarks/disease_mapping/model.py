@@ -18,7 +18,7 @@ from dl4bi.core.train import TrainState
 # perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
 # and a non-0 mean?
 
-kernel = jit(lambda x, y, **kwargs: rbf(x, y, kwargs["ls"], kwargs["var"]))
+kernel = jit(lambda x, y, **kwargs: rbf(x, y, kwargs["var"], kwargs["ls"]))
 mean = jit(lambda x, **kwargs: 0)
 jitter = 1e-4  # note this is in fact N(0, s2=jitter) noise
 
