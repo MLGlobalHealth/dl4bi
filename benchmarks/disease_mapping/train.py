@@ -76,7 +76,7 @@ def build_dataloader(data: DictConfig):
     @partial(jit, static_argnames=["B"])
     def sp(rng: jax.Array, s: jax.Array, B: int):
         f = handlers.seed(spatial_process, rng)
-        return f(s, (B,))
+        return f(s, (B,))[..., None]
 
     def dataloader(rng: jax.Array):
         while True:

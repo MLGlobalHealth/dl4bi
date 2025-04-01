@@ -29,18 +29,22 @@ def spatial_process(s: jax.Array, sample_shape: tuple[int, ...] = ()):
     """
     L, D = s.shape
 
-    var = numpyro.deterministic("var", 1)
-    ls = numpyro.sample("ls", dist.Beta(3, 7))
+    # var = numpyro.deterministic("var", 1)
+    # ls = numpyro.sample("ls", dist.InverseGamma(3, 3))
+    ls = numpyro.sample("ls", dist.LogNormal(0.0, 10.0))
+    var = numpyro.sample("var", dist.LogNormal(0.0, 10.0))
+    noise = numpyro.sample("noise", dist.LogNormal(0.0, 10.0))
 
-    cov = kernel(s, s, var=var, ls=ls) + jitter * jnp.eye(L)
+    m = mean(s)
+    cov = kernel(s, s, var=var, ls=ls) + (jitter + noise) * jnp.eye(L)
 
     y = numpyro.sample(
         "y",
-        dist.MultivariateNormal(0, cov),
+        dist.MultivariateNormal(m, cov),
         sample_shape=sample_shape,
     )
 
-    return y[..., None]
+    return y
 
 
 def model(
@@ -50,8 +54,9 @@ def model(
 ):
     y = spatial_process(s)
 
-    scale = numpyro.sample("scale", dist.HalfNormal(50))
-    b = numpyro.sample("b", dist.Normal(0, 1))
+    # scale = numpyro.sample("scale", dist.HalfNormal(50))
+    scale = numpyro.deterministic("scale", 1)
+    b = numpyro.sample("b", dist.Normal(0, 100))
 
     logit_theta = b + scale * y
     numpyro.deterministic("theta", jax.nn.sigmoid(logit_theta))
