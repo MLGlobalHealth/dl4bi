@@ -50,12 +50,15 @@ def main(cfg: DictConfig):
     kwargs = {}
     if "FixedLocationTransfomer" in model_name:
         kwargs = {"s": s}
-    lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps, cfg.lr_peak, cfg.lr_pct_warmup
-    )
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(cfg.clip_max_norm), optax.yogi(lr_schedule)
-    )
+    if cfg.cosine_annealing:
+        lr_schedule = cosine_annealing_lr(
+            cfg.train_num_steps, cfg.lr_peak, cfg.lr_pct_warmup
+        )
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(cfg.clip_max_norm), optax.yogi(lr_schedule)
+        )
+    else:
+        optimizer = optax.yogi(cfg.lr_peak)
     spatial_prior = instantiate(cfg.inference_model.spatial_prior)
     priors = {
         pr: instantiate(pr_dist) for pr, pr_dist in cfg.inference_model.priors.items()
@@ -139,8 +142,9 @@ def build_spatial_dataloaders(
     )
 
     def dataloader(rng_data, bs=cfg.data.batch_size):
-        seeded_model = seed(spatial_model, rng_data)
         while True:
+            rng_data, _ = random.split(rng_data)
+            seeded_model = seed(spatial_model, rng_data)
             yield seeded_model(surrogate_decoder=None, batch_size=bs)
 
     return (

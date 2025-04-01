@@ -314,7 +314,7 @@ def plot_histograms(
     plt.close(fig)
 
 
-def plot_infer_grid_sum(rng, post, hdi_prob=0.95, num_decodings=10):
+def plot_infer_1d_grid_summary(rng, post, hdi_prob=0.95, num_decodings=10):
     s_flat = post["s"].squeeze()
     f, f_hat = post["f"], post["obs"]
     f_hat_mean, f_hat_std = f_hat.mean(axis=0), f_hat.std(axis=0)
@@ -352,7 +352,47 @@ def plot_infer_grid_sum(rng, post, hdi_prob=0.95, num_decodings=10):
     timestamp = datetime.now().isoformat()
     path = f"/tmp/Infer summary {timestamp}.png"
     fig.savefig(path, dpi=125)
-    wandb.log({"Infer summaryT": wandb.Image(path)})
+    wandb.log({"Infer summary": wandb.Image(path)})
+    plt.clf()
+    plt.close(fig)
+    return path
+
+
+def plot_infer_2d_grid_summary(post, x_dim, y_dim, log=True):
+    obs_idxs, f, f_hat = post["obs_idxs"], post["f"], post["obs"]
+    f_2d = f.squeeze().reshape(x_dim, y_dim)
+    f_hat_mean_2d = f_hat.mean(axis=0).reshape(x_dim, y_dim)
+    f_hat_std_2d = f_hat.std(axis=0).reshape(x_dim, y_dim)
+    if log:
+        f_2d, f_hat_mean_2d = jnp.log(f_2d + 1), jnp.log(f_hat_mean_2d + 1)
+    vmin = min(f_2d.min(), f_hat_mean_2d.min())
+    vmax = max(f_2d.max(), f_hat_mean_2d.max())
+    fig, ax = plt.subplots(1, 4, figsize=(20, 7))
+    log_str = " (Log scale)" if log else ""
+    im0 = ax[0].imshow(f_2d, vmin=vmin, vmax=vmax, cmap="viridis", origin="lower")
+    ax[0].set_title(f"y obs{log_str}")
+    fig.colorbar(im0, ax=ax[0])
+    im1 = ax[1].imshow(
+        f_hat_mean_2d, vmin=vmin, vmax=vmax, cmap="viridis", origin="lower"
+    )
+    ax[1].set_title(f"Mean MCMC Samples{log_str}")
+    fig.colorbar(im1, ax=ax[1])
+    im2 = ax[2].imshow(f_hat_std_2d, cmap="plasma", origin="lower")
+    ax[2].set_title("MCMC STD")
+    fig.colorbar(im2, ax=ax[2])
+    mask = jnp.zeros((x_dim, y_dim))
+    mask = mask.at[jnp.unravel_index(jnp.array(obs_idxs), (x_dim, y_dim))].set(1)
+    obs_title = f"Observed Locations ({len(obs_idxs)} locations)"
+    im3 = ax[3].imshow(mask, vmin=0.0, vmax=1.0, cmap="coolwarm", origin="lower")
+    ax[3].set_title(obs_title)
+    fig.colorbar(im3, ax=ax[3])
+    for axis in ax:
+        axis.set_axis_off()
+    plt.tight_layout()
+    timestamp = datetime.now().isoformat()
+    path = f"/tmp/Infer summary 2D {timestamp}.png"
+    fig.savefig(path, dpi=125)
+    wandb.log({"Infer summary 2D": wandb.Image(path)})
     plt.clf()
     plt.close(fig)
     return path
@@ -360,21 +400,25 @@ def plot_infer_grid_sum(rng, post, hdi_prob=0.95, num_decodings=10):
 
 def plot_inference_run(
     rng: jax.Array,
-    inference_model: DictConfig,
+    cfg: DictConfig,
     model_name: str,
     hmc_res: tuple[dict, MCMC, dict],
     f_obs: jax.Array,
     surrogate_conds: dict,
     priors: dict,
     map_data: Optional[gpd.GeoDataFrame],
-    log_scale_plots: bool,
 ):
+    inference_model = cfg.inference_model
+    log_scale_plots = cfg.log_scale_plots
     samples, mcmc, post = hmc_res
     if map_data is not None:
         plot_infer_map_sum(post, map_data, log=log_scale_plots)
         plot_map_predictive(rng, f_obs, post["obs"], map_data, log=log_scale_plots)
     elif post["s"].shape[-1] == 1:
-        plot_infer_grid_sum(rng, post)
+        plot_infer_1d_grid_summary(rng, post)
+    else:
+        x_dim, y_dim = cfg.data.s[0].num, cfg.data.s[1].num
+        plot_infer_2d_grid_summary(post, x_dim, y_dim, log=log_scale_plots)
     # NOTE: in case the chains\samples are very tightly batch (not converged) the plotting will fail
     try:
         plot_infer_trace(samples, mcmc, surrogate_conds)
