@@ -80,14 +80,13 @@ def main(cfg: DictConfig):
     log_inference_run((samples, mcmc, post), conditionals, results_dir)
     plot_inference_run(
         rng_plot,
-        cfg.inference_model,
+        cfg,
         model_name,
         (samples, mcmc, post),
         f_obs,
         conditionals,
         priors,
         map_data,
-        cfg.log_scale_plots,
     )
 
 

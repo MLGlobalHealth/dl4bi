@@ -17,7 +17,8 @@ train_num_steps: 100000
 valid_num_steps: 5000
 valid_interval: 25000
 plot_interval: 100000
-lr_peak: 1.0e-3
+cosine_annealing: True
+lr_peak: 1.0e-2
 lr_pct_warmup: 0.01
 clip_max_norm: 3.0
 emprical_bayes_samples: 100
