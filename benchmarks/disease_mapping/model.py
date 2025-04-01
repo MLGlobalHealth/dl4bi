@@ -18,8 +18,6 @@ from dl4bi.core.train import TrainState
 # perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
 # and a non-0 mean?
 
-var_dist = dist.Delta(1)
-ls_dist = dist.Beta(3, 7)
 kernel = jit(lambda x, y, **kwargs: rbf(x, y, kwargs["ls"], kwargs["var"]))
 mean = jit(lambda x, **kwargs: 0)
 jitter = 1e-4  # note this is in fact N(0, s2=jitter) noise
@@ -31,8 +29,8 @@ def spatial_process(s: jax.Array, sample_shape: tuple[int, ...] = ()):
     """
     L, D = s.shape
 
-    var = numpyro.sample("var", var_dist)
-    ls = numpyro.sample("ls", ls_dist)
+    var = numpyro.deterministic("var", 1)
+    ls = numpyro.sample("ls", dist.Beta(3, 7))
 
     cov = kernel(s, s, var=var, ls=ls) + jitter * jnp.eye(L)
 
@@ -62,7 +60,7 @@ def model(
 
 
 def render():
-    L = 100
+    L = 10
     rng = jax.random.key(0)
     s = jax.random.normal(rng, (L, 2))
     N = jax.random.randint(rng, (L,), 0, 100)
@@ -118,7 +116,7 @@ def predict_np(state: TrainState, rng, s_c, y_c, s_t):
     )
 
     if isinstance(output, tuple):
-        output, _ = output
+        output = output[0]
 
     match output:
         case DiagonalMVNOutput(mu, std):
