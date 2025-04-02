@@ -100,7 +100,8 @@ def train(
                 best_metric = metric
                 best_state = state
             if patience >= early_stop_patience:
-                return best_state, state
+                both = (best_state, state)
+                return {"best": best_state, "last": state, "both": both}[return_state]
         for cbk in callbacks:
             if i % cbk.interval == 0:
                 extra = None
