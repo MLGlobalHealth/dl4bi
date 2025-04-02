@@ -27,19 +27,14 @@ def generate_surrogate_decoder(state: TrainState, model: nn.Module):
     """Wraps a VAE model to issue decoder only calls for sampling
 
     Args:
-        state (TrainState): surrogate model
+        state (TrainState): surrogate model's state
+        model (nn.Module): surrogate model object
 
     Returns: the decoding function
     """
 
     @jax.jit
-    def deep_rv_decoder(z, conditionals, **kwargs):
-        return state.apply_fn(
-            {"params": state.params, **state.kwargs}, z, conditionals, **kwargs
-        )
-
-    @jax.jit
-    def priorCVAE_decoder(z, conditionals, **kwargs):
+    def decoder(z, conditionals, **kwargs):
         return model.apply(
             {"params": state.params, **state.kwargs},
             z,
@@ -48,17 +43,14 @@ def generate_surrogate_decoder(state: TrainState, model: nn.Module):
             method="decode",
         )
 
-    if model.__class__.__name__ == "DeepRV":
-        return deep_rv_decoder
-    return priorCVAE_decoder
+    return decoder
 
 
 @jit
 def elbo_train_step(
     rng: jax.Array,
     state: TrainState,
-    batch: tuple,
-    **kwargs,
+    batch: dict,
 ):
     """Standard VAE training step that uses an ELBO loss.
 
@@ -72,9 +64,9 @@ def elbo_train_step(
     """
 
     def elbo_loss(params):
-        f, _, conditionals = batch
+        f = batch["f"]
         f_hat, z_mu, z_std = state.apply_fn(
-            {"params": params}, f, conditionals, **kwargs, rngs={"extra": rng}
+            {"params": params}, **batch, rngs={"extra": rng}
         )
         kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
         logp = norm.logpdf(f, f_hat, 1.0).mean()
@@ -88,9 +80,8 @@ def elbo_train_step(
 def deep_RV_train_step(
     rng: jax.Array,
     state: TrainState,
-    batch: tuple,
+    batch: dict,
     var_idx: Optional[int] = None,
-    **kwargs,
 ):
     """A VAE decoder-only training step that uses an MSE loss.
     The loss is further normalized by the variance (if exists)
@@ -106,10 +97,8 @@ def deep_RV_train_step(
     """
 
     def deep_RV_loss(params):
-        f, z, conditionals = batch
-        f_hat = state.apply_fn(
-            {"params": params}, z, conditionals, **kwargs, rngs={"extra": rng}
-        )
+        f, conditionals = batch["f"], batch["conditionals"]
+        f_hat = state.apply_fn({"params": params}, **batch, rngs={"extra": rng})
         mse_loss = optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
         if var_idx is not None:
             var = conditionals[var_idx].squeeze()
@@ -124,8 +113,7 @@ def deep_RV_train_step(
 def prior_cvae_train_step(
     rng: jax.Array,
     state: TrainState,
-    batch: tuple,
-    **kwargs,
+    batch: dict,
 ):
     """The original PriorCVAE paper's train step.
 
@@ -139,9 +127,9 @@ def prior_cvae_train_step(
     """
 
     def prior_cvae_loss(params):
-        f, _, conditionals = batch
+        f = batch["f"]
         f_hat, z_mu, z_std = state.apply_fn(
-            {"params": params}, f, conditionals, **kwargs, rngs={"extra": rng}
+            {"params": params}, **batch, rngs={"extra": rng}
         )
         kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
         mse_loss = optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
@@ -152,11 +140,11 @@ def prior_cvae_train_step(
 
 
 @jit
-def pi_vae_train_step(rng, state, batch, **kwargs):
+def pi_vae_train_step(rng: jax.Array, state: TrainState, batch: dict):
     def loss_fn(params):
-        s, f = batch
+        f = batch["f"]
         f_hat_beta, f_hat_beta_hat, z_mu, z_std = state.apply_fn(
-            {"params": params}, s, f, rngs={"extra": rng}
+            {"params": params}, **batch, rngs={"extra": rng}
         )
         loss_1 = optax.squared_error(f_hat_beta, f).mean()
         loss_2 = optax.squared_error(f_hat_beta_hat, f).mean()

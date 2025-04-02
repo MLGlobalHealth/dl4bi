@@ -46,12 +46,9 @@ def main(cfg: DictConfig):
     map_data, s = gen_locations(cfg.data)
     model_dir = Path(f"results/{cfg.exp_name}/{spatial_prior.func}/{cfg.seed}")
     priors, simulation_priors = init_priors(cfg)
-    surrogate_kwargs = {}
-    if "FixedLocationTransfomer" in model_name:
-        surrogate_kwargs = {"s": s}
     # NOTE: the inference model expects to have this exact API
     inference_model, cond_names = gen_inference_model(
-        cfg, s, map_data, priors, surrogate_kwargs
+        cfg, s, map_data, priors, {"s": s}
     )
     # NOTE: Generates a model for creating the simulated data
     sim_model, _ = gen_inference_model(cfg, s, map_data, simulation_priors)
@@ -64,7 +61,7 @@ def main(cfg: DictConfig):
         state, model = load_ckpt((model_dir / model_name).with_suffix(".ckpt"))
         surrogate_decoder = generate_surrogate_decoder(state, model)
     samples, mcmc, post = _hmc(
-        rng_hmc, cfg, inference_model, f_obs, obs_mask, surrogate_decoder
+        rng_hmc, cfg.mcmc, inference_model, f_obs, obs_mask, surrogate_decoder
     )
     post.update(
         {
@@ -92,7 +89,7 @@ def main(cfg: DictConfig):
 
 def _hmc(
     rng: jax.Array,
-    cfg: DictConfig,
+    mcmc_cfg: DictConfig,
     model: Callable,
     f_obs: jax.Array,
     obs_mask: Union[bool, jax.Array],
@@ -101,7 +98,7 @@ def _hmc(
     """runs HMC on given inference model and observed f"""
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
     k1, k2 = jax.random.split(rng)
-    mcmc = MCMC(nuts, **cfg.mcmc)
+    mcmc = MCMC(nuts, **mcmc_cfg)
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=f_obs)
     mcmc.print_summary()
     samples = mcmc.get_samples()
