@@ -1,9 +1,7 @@
-from collections import defaultdict
 from functools import partial
 from pathlib import Path
-from typing import Callable, Generator
+from typing import Callable
 
-import flax.linen as nn
 import geopandas as gpd
 import hydra
 import jax.numpy as jnp
@@ -15,16 +13,13 @@ from jax import Array, jit, random
 from jax.scipy.stats import norm
 from numpyro.handlers import seed
 from omegaconf import DictConfig, OmegaConf
-from tqdm import tqdm
 from utils.map_utils import gen_locations
 from utils.obj_utils import build_model, generate_model_name, instantiate
 from utils.plot_utils import log_vae_grid_plots, log_vae_map_plots
 
 import wandb
-from dl4bi.core.train import cosine_annealing_lr, save_ckpt
+from dl4bi.core.train import Callback, cosine_annealing_lr, evaluate, save_ckpt, train
 from dl4bi.vae.train_utils import (
-    Callback,
-    TrainState,
     deep_RV_train_step,
     elbo_train_step,
     prior_cvae_train_step,
@@ -44,25 +39,17 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    rng_train, rng_test = random.split(rng)
+    rng_train, rng_test, rng_lb, rng_plot = random.split(rng, 4)
     map_data, s = gen_locations(cfg.data)
     model = build_model(cfg.model, s)
-    if cfg.cosine_annealing:
-        lr_schedule = cosine_annealing_lr(
-            cfg.train_num_steps, cfg.lr_peak, cfg.lr_pct_warmup
-        )
-        optimizer = optax.chain(
-            optax.clip_by_global_norm(cfg.clip_max_norm), optax.yogi(lr_schedule)
-        )
-    else:
-        optimizer = optax.yogi(cfg.lr_peak)
+    optimizer = get_optimizer(cfg)
     spatial_prior = instantiate(cfg.inference_model.spatial_prior)
     priors = {
         pr: instantiate(pr_dist) for pr, pr_dist in cfg.inference_model.priors.items()
     }
     # NOTE: large_batch_loader is used to compare the decoder distribution with true data
-    train_loader, test_loader, large_batch_loader, cond_names = (
-        build_spatial_dataloaders(rng, cfg, map_data, s, priors, spatial_prior)
+    loader_gen, cond_names = build_spatial_dataloaders(
+        cfg, map_data, s, priors, spatial_prior
     )
     valid_step = gen_valid_step(cfg.model, cond_names)
     decoder_only = cfg.model.cls == "DeepRV"
@@ -73,12 +60,13 @@ def main(cfg: DictConfig):
         model,
         optimizer,
         gen_train_step(cfg.model, cond_names),
-        valid_step,
-        train_loader,
         cfg.train_num_steps,
-        cfg.valid_num_steps,
+        loader_gen,
+        valid_step,
         cfg.valid_interval,
-        log_every_n=100,
+        cfg.valid_num_steps,
+        loader_gen,
+        valid_monitor_metric="loss",
         callbacks=[
             Callback(
                 callback_fn(
@@ -86,22 +74,17 @@ def main(cfg: DictConfig):
                     s,
                     cond_names,
                     z_dim,
-                    large_batch_loader,
+                    loader_gen(rng_plot),
+                    loader_gen(rng_lb, cfg.data.large_batch_size),
                     decoder_only,
                     cfg.data,
+                    model,
                 ),
                 cfg.plot_interval,
             )
         ],
     )
-    validate(
-        rng_test,
-        state,
-        valid_step,
-        test_loader,
-        cfg.valid_num_steps,
-        name="Test",
-    )
+    log_run(evaluate(rng_test, state, valid_step, loader_gen, cfg.valid_num_steps))
     results_path = Path(
         f"results/{cfg.exp_name}/{spatial_prior.__name__}/{cfg.seed}/{model_name}"
     )
@@ -110,7 +93,6 @@ def main(cfg: DictConfig):
 
 
 def build_spatial_dataloaders(
-    rng: Array,
     cfg: DictConfig,
     map_data: gpd.GeoDataFrame,
     s: Array,
@@ -131,7 +113,6 @@ def build_spatial_dataloaders(
     Returns:
         train loader, test loader, large batch loader, and surrogates models' conditionals names
     """
-    rng_train, rng_test, rng_large_batch = random.split(rng, 3)
     spatial_model, cond_names = gen_saptial_prior(
         cfg, s, spatial_prior, priors, map_data
     )
@@ -143,89 +124,20 @@ def build_spatial_dataloaders(
             f, z, conditionals = seeded_model(surrogate_decoder=None, batch_size=bs)
             yield {"s": s, "f": f, "z": z, "conditionals": conditionals}
 
-    return (
-        dataloader(rng_train),
-        dataloader(rng_test),
-        dataloader(rng_large_batch, bs=cfg.data.large_batch_size),
-        cond_names,
-    )
+    return dataloader, cond_names
 
 
-def train(
-    rng: Array,
-    model: nn.Module,
-    optimizer: optax.GradientTransformation,
-    train_step: Callable,
-    valid_step: Callable,
-    loader: Generator,
-    train_num_steps: int = 100000,
-    valid_num_steps: int = 25000,
-    valid_interval: int = 25000,
-    log_every_n: int = 100,
-    callbacks: list[Callback] = [],
-):
-    """Runs the spatial prior's pre-training"""
-    rng_params, rng_extra, rng_train = random.split(rng, 3)
-    batch = next(loader)
-    rngs = {"params": rng_params, "extra": rng_extra}
-    m_kwargs = model.init(rngs, **batch)
-    params = m_kwargs.pop("params")
-    param_count = nn.tabulate(model, rngs)(**batch)
-    state = TrainState.create(
-        apply_fn=model.apply, params=params, kwargs=m_kwargs, tx=optimizer
-    )
-    print(param_count)
-
-    losses = np.zeros((train_num_steps,))
-    for i in (pbar := tqdm(range(train_num_steps), unit="batch", dynamic_ncols=True)):
-        rng_step, rng_train = random.split(rng_train)
-        batch = next(loader)
-        state, losses[i] = train_step(rng_step, state, batch)
-        if (i + 1) % log_every_n == 0:
-            avg = jnp.mean(losses[i - log_every_n : i])
-            pbar.set_postfix(loss=f"{avg:.3f}")
-            wandb.log({"loss": avg})
-        if (i + 1) % valid_interval == 0:
-            rng_valid, rng_train = random.split(rng_train)
-            validate(
-                rng_valid,
-                state,
-                valid_step,
-                loader,
-                valid_num_steps,
-            )
-        for cbk in callbacks:
-            if (i + 1) % cbk.interval == 0:
-                cbk.fn(i, rng_step, state, model, loader)
-    return state
-
-
-def validate(
-    rng: Array,
-    state: TrainState,
-    valid_step: Callable,
-    loader: Generator,
-    valid_num_steps: int = 5000,
-    name: str = "Validation",
-):
-    """Validation step to store and log metrics"""
-    metrics = defaultdict(list)
-    for _ in (_ := tqdm(range(valid_num_steps), unit="batch", dynamic_ncols=True)):
-        rng_step, rng = random.split(rng)
-        batch = next(loader)
-        m = valid_step(rng_step, state, batch, prefix=name)
-        for k, v in m.items():
-            if v is not None:
-                metrics[k] += [v]
+def log_run(metrics: dict):
+    """log train run"""
     if "ls" in metrics:
         ls = jnp.array(metrics["ls"])
-        norm_mse = jnp.array(metrics[f"{name} norm MSE"])
+        norm_mse = jnp.array(metrics["norm MSE"])
         for ls_r in [[0, 5], [5, 10], [10, 20], [20, 50]]:
-            ls_range_name = f"{name} ls {ls_r[0]}-{ls_r[1]}"
+            ls_range_name = f"ls {ls_r[0]}-{ls_r[1]}"
             low_ls = jnp.logical_and(ls_r[0] < ls, ls < ls_r[1])
             metrics[f"{ls_range_name} norm MSE"] = norm_mse[low_ls]
         del metrics["ls"]
-    metrics = {k: np.mean(v) for k, v in metrics.items()}
+    metrics = {f"Test {k}": np.mean(v) for k, v in metrics.items()}
     wandb.log(metrics)
     print(metrics)
 
@@ -246,7 +158,7 @@ def gen_valid_step(model_cfg: DictConfig, cond_names: list[str]):
     model_name = model_cfg.cls
     decoder_only = model_name == "DeepRV"
 
-    def valid_step(rng, state, batch, prefix: str = ""):
+    def valid_step(rng, state, batch):
         f, conditionals = batch["f"], batch["conditionals"]
         var = 1 if var_idx is None else conditionals[var_idx].squeeze()
         ls = None if ls_idx is None else conditionals[ls_idx].squeeze()
@@ -268,9 +180,21 @@ def gen_valid_step(model_cfg: DictConfig, cond_names: list[str]):
                 else -norm.logpdf(f, f_hat, 1.0).mean()
             )
             loss = logp + kl_div.mean()
-        return {f"{prefix} loss": loss, f"{prefix} norm MSE": norm_mse_score, "ls": ls}
+        return {"loss": loss, "norm MSE": norm_mse_score, "ls": ls}
 
     return valid_step
+
+
+def get_optimizer(cfg: DictConfig):
+    if cfg.cosine_annealing:
+        lr_schedule = cosine_annealing_lr(
+            cfg.train_num_steps, cfg.lr_peak, cfg.lr_pct_warmup
+        )
+        return optax.chain(
+            optax.clip_by_global_norm(cfg.clip_max_norm), optax.yogi(lr_schedule)
+        )
+    else:
+        return optax.yogi(cfg.lr_peak)
 
 
 if __name__ == "__main__":

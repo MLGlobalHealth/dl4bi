@@ -17,7 +17,8 @@ from numpyro.infer import MCMC
 from omegaconf import DictConfig
 
 import wandb
-from dl4bi.vae.train_utils import TrainState, generate_surrogate_decoder
+from dl4bi.core.train import TrainState
+from dl4bi.vae.train_utils import generate_surrogate_decoder
 from utils.map_utils import get_norm_vars
 
 
@@ -744,19 +745,14 @@ def log_vae_map_plots(
     s: jax.Array,
     conds_names: list[str],
     z_dim: int,
+    loader: Generator,
     large_batch_loader: Generator,
     is_decoder_only: bool,
     data: DictConfig,
+    model: nn.Module,
 ):
-    def log_plots(
-        step: int,
-        rng_step: int,
-        state: TrainState,
-        model: nn.Module,
-        loader: Generator,
-    ):
+    def log_plots(step: int, rng_step: int, state: TrainState, batch: dict, extra):
         rng_drop, rng_extra, rng_dec, rng_dist, rng_rcn = jax.random.split(rng_step, 5)
-        batch = next(loader)
         f, conditionals = batch["f"], batch["conditionals"]
         f_hat = state.apply_fn(
             {"params": state.params, **state.kwargs},
@@ -936,19 +932,14 @@ def log_vae_grid_plots(
     s: jax.Array,
     conds_names: list[str],
     z_dim: int,
+    loader: Generator,
     large_batch_loader: Generator,
     is_decoder_only: bool,
     data: DictConfig,
+    model: nn.Module,
 ):
-    def log_plots(
-        step: int,
-        rng_step: int,
-        state: TrainState,
-        model: nn.Module,
-        loader: Generator,
-    ):
+    def log_plots(step: int, rng_step: int, state: TrainState, batch: dict, extra):
         rng_drop, rng_extra, rng_dec, rng_dist, rng_rcn = jax.random.split(rng_step, 5)
-        batch = next(loader)
         f, conditionals = batch["f"], batch["conditionals"]
         f_hat = state.apply_fn(
             {"params": state.params, **state.kwargs},
