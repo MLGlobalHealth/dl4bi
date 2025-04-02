@@ -21,7 +21,7 @@ from utils.obj_utils import generate_model_name, instantiate
 from utils.plot_utils import plot_inference_run
 
 import wandb
-from dl4bi.meta_learning.train_utils import cosine_annealing_lr
+from dl4bi.core.train import cosine_annealing_lr
 from dl4bi.vae.train_utils import TrainState, generate_surrogate_decoder
 
 
@@ -31,7 +31,7 @@ def main(cfg: DictConfig):
     model_name = generate_model_name(cfg)
     spatial_prior = cfg.inference_model.spatial_prior
     if not cfg.inference_model.surrogate_model:
-        model_name = f"Baseline_GP_{spatial_prior.func}"
+        model_name = "Baseline_GP"
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
