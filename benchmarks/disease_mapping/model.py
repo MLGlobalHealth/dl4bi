@@ -20,7 +20,7 @@ from dl4bi.core.train import TrainState
 
 kernel = jit(lambda x, y, **kwargs: rbf(x, y, kwargs["var"], kwargs["ls"]))
 mean = jit(lambda x, **kwargs: 0)
-jitter = 1e-4  # note this is in fact N(0, s2=jitter) noise
+jitter = 1e-2  # note this is in fact N(0, s2=jitter) noise
 
 
 def spatial_process(s: jax.Array, sample_shape: tuple[int, ...] = ()):
@@ -29,11 +29,10 @@ def spatial_process(s: jax.Array, sample_shape: tuple[int, ...] = ()):
     """
     L, D = s.shape
 
-    # var = numpyro.deterministic("var", 1)
-    # ls = numpyro.sample("ls", dist.InverseGamma(3, 3))
-    ls = numpyro.sample("ls", dist.LogNormal(0.0, 10.0))
-    var = numpyro.sample("var", dist.LogNormal(0.0, 10.0))
-    noise = numpyro.sample("noise", dist.LogNormal(0.0, 10.0))
+    ls = numpyro.sample("ls", dist.InverseGamma(3, 3))
+    var = numpyro.sample("var", dist.HalfNormal(0.05))
+    # noise = numpyro.sample("noise", dist.LogNormal(0.0, 10.0))
+    noise = numpyro.deterministic("noise", 0.0)
 
     m = mean(s)
     cov = kernel(s, s, var=var, ls=ls) + (jitter + noise) * jnp.eye(L)
@@ -54,14 +53,17 @@ def model(
 ):
     y = spatial_process(s)
 
-    # scale = numpyro.sample("scale", dist.HalfNormal(50))
     scale = numpyro.deterministic("scale", 1)
-    b = numpyro.sample("b", dist.Normal(0, 100))
+    b0 = numpyro.sample("b0", dist.Normal(0, 1))
 
-    logit_theta = b + scale * y
+    logit_theta = b0 + scale * y
     numpyro.deterministic("theta", jax.nn.sigmoid(logit_theta))
 
-    numpyro.sample("Np", dist.BinomialLogits(total_count=N, logits=logit_theta), obs=Np)
+    numpyro.sample(
+        "Np",
+        dist.BinomialLogits(total_count=N, logits=logit_theta),
+        obs=Np,
+    )
 
 
 def render():

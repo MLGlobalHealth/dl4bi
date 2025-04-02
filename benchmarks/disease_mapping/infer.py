@@ -2,37 +2,39 @@ import arviz as az
 import jax
 import jax.numpy as jnp
 import numpyro
-from numpyro.infer import MCMC, NUTS, init_to_median
+from numpyro.infer import MCMC, NUTS, SA, init_to_median
 
 from benchmarks.disease_mapping.data import prepare_data
-from benchmarks.disease_mapping.model import model, predict_gp, predict_np
+from benchmarks.disease_mapping.model import model
 
 numpyro.set_platform("cpu")
 numpyro.set_host_device_count(4)
 numpyro.enable_x64()
 
+from time import time
+
 
 def main():
     s, Np, N = prepare_data()
 
-    mask = Np / N > 0.5
-    s, Np, N = s[mask], Np[mask], N[mask]
+    # mask = N < 30
+    # s, Np, N = s[mask], Np[mask], N[mask]
 
     # example data
     # s = jnp.array([[0, 0], [1, 1]])
     # Np = jnp.array([0, 0])
     # N = jnp.array([2, 3])
 
-    print(jnp.vstack([s.T, Np, N, Np / N]))
+    # print(jnp.vstack([s.T, Np, N, Np / N]))
 
-    rng = jax.random.key(42)
+    rng = jax.random.key(int(time()))
 
     sampler = NUTS(model, init_strategy=init_to_median())
     mcmc = MCMC(
         sampler,
-        num_warmup=0,
+        num_warmup=100,
         num_samples=1000,
-        num_chains=1,
+        num_chains=4,
     )
 
     mcmc.run(rng, s, Np, N)

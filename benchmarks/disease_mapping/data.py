@@ -56,7 +56,8 @@ def prepare_data(force_redownload: bool = False):
     df = df.query("COUNTRY=='Kenya' & YY==2015")
     print(f"Selected {len(df)} rows.")
 
-    s = coordinate_transform(df.Long, df.Lat)
+    # s = coordinate_transform(df.Long, df.Lat)
+    s = np.stack([df.Long, df.Lat], axis=-1)
     print(f"Transformed locations: shape {s.shape}, range [{s.min()}, {s.max()}]")
 
     # skip time for now
