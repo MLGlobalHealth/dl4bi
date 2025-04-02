@@ -47,9 +47,6 @@ def main(cfg: DictConfig):
     rng_train, rng_test = random.split(rng)
     map_data, s = gen_locations(cfg.data)
     model = build_model(cfg.model, s)
-    kwargs = {}
-    if "FixedLocationTransfomer" in model_name:
-        kwargs = {"s": s}
     if cfg.cosine_annealing:
         lr_schedule = cosine_annealing_lr(
             cfg.train_num_steps, cfg.lr_peak, cfg.lr_pct_warmup
@@ -96,7 +93,6 @@ def main(cfg: DictConfig):
                 cfg.plot_interval,
             )
         ],
-        **kwargs,
     )
     validate(
         rng_test,
@@ -105,7 +101,6 @@ def main(cfg: DictConfig):
         test_loader,
         cfg.valid_num_steps,
         name="Test",
-        **kwargs,
     )
     results_path = Path(
         f"results/{cfg.exp_name}/{spatial_prior.__name__}/{cfg.seed}/{model_name}"
@@ -145,7 +140,8 @@ def build_spatial_dataloaders(
         while True:
             rng_data, _ = random.split(rng_data)
             seeded_model = seed(spatial_model, rng_data)
-            yield seeded_model(surrogate_decoder=None, batch_size=bs)
+            f, z, conditionals = seeded_model(surrogate_decoder=None, batch_size=bs)
+            yield {"s": s, "f": f, "z": z, "conditionals": conditionals}
 
     return (
         dataloader(rng_train),
@@ -167,16 +163,14 @@ def train(
     valid_interval: int = 25000,
     log_every_n: int = 100,
     callbacks: list[Callback] = [],
-    **kwargs,
 ):
     """Runs the spatial prior's pre-training"""
     rng_params, rng_extra, rng_train = random.split(rng, 3)
-    f, z, conditionals = next(loader)
+    batch = next(loader)
     rngs = {"params": rng_params, "extra": rng_extra}
-    x = z if model.__class__.__name__ == "DeepRV" else f
-    m_kwargs = model.init(rngs, x, conditionals, **kwargs)
+    m_kwargs = model.init(rngs, **batch)
     params = m_kwargs.pop("params")
-    param_count = nn.tabulate(model, rngs)(x, conditionals, **kwargs)
+    param_count = nn.tabulate(model, rngs)(**batch)
     state = TrainState.create(
         apply_fn=model.apply, params=params, kwargs=m_kwargs, tx=optimizer
     )
@@ -186,7 +180,7 @@ def train(
     for i in (pbar := tqdm(range(train_num_steps), unit="batch", dynamic_ncols=True)):
         rng_step, rng_train = random.split(rng_train)
         batch = next(loader)
-        state, losses[i] = train_step(rng_step, state, batch, **kwargs)
+        state, losses[i] = train_step(rng_step, state, batch)
         if (i + 1) % log_every_n == 0:
             avg = jnp.mean(losses[i - log_every_n : i])
             pbar.set_postfix(loss=f"{avg:.3f}")
@@ -199,11 +193,10 @@ def train(
                 valid_step,
                 loader,
                 valid_num_steps,
-                **kwargs,
             )
         for cbk in callbacks:
             if (i + 1) % cbk.interval == 0:
-                cbk.fn(i, rng_step, state, model, loader, **kwargs)
+                cbk.fn(i, rng_step, state, model, loader)
     return state
 
 
@@ -214,14 +207,13 @@ def validate(
     loader: Generator,
     valid_num_steps: int = 5000,
     name: str = "Validation",
-    **kwargs,
 ):
     """Validation step to store and log metrics"""
     metrics = defaultdict(list)
     for _ in (_ := tqdm(range(valid_num_steps), unit="batch", dynamic_ncols=True)):
         rng_step, rng = random.split(rng)
         batch = next(loader)
-        m = valid_step(rng_step, state, batch, prefix=name, **kwargs)
+        m = valid_step(rng_step, state, batch, prefix=name)
         for k, v in m.items():
             if v is not None:
                 metrics[k] += [v]
@@ -254,17 +246,13 @@ def gen_valid_step(model_cfg: DictConfig, cond_names: list[str]):
     model_name = model_cfg.cls
     decoder_only = model_name == "DeepRV"
 
-    def valid_step(rng, state, batch, prefix: str = "", **kwargs):
-        f, z, conditionals = batch
+    def valid_step(rng, state, batch, prefix: str = ""):
+        f, conditionals = batch["f"], batch["conditionals"]
         var = 1 if var_idx is None else conditionals[var_idx].squeeze()
         ls = None if ls_idx is None else conditionals[ls_idx].squeeze()
         z_mu, z_std = None, None
         f_hat = jit(state.apply_fn)(
-            {"params": state.params, **state.kwargs},
-            z if decoder_only else f,
-            conditionals,
-            **kwargs,
-            rngs={"extra": rng},
+            {"params": state.params, **state.kwargs}, **batch, rngs={"extra": rng}
         )
         if not decoder_only:
             f_hat, z_mu, z_std = f_hat

@@ -46,3 +46,6 @@ class DeepRV(nn.Module):
             $\hat{\mathbf{f}}$, an approximation of the stochastic process's realizations.
         """
         return self.decoder(self.cond_stack_fn(z, conditionals), **kwargs)
+
+    def decode(self, z: Array, conditionals: Array, **kwargs):
+        return self(z, conditionals, **kwargs)

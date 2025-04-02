@@ -41,8 +41,8 @@ def poisson(
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
         lambda_ = jnp.exp(beta + mu)
         with numpyro.handlers.mask(mask=obs_mask):
-            f_hat = numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
-        return f_hat, mu, jnp.concat([conditionals, jnp.array([beta])])
+            f = numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
+        return f, mu, jnp.concat([conditionals, jnp.array([beta])])
 
     return inference_model, cond_names + ["beta"]
 
@@ -88,8 +88,8 @@ def binomial(
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
         eta = mu + beta
         with numpyro.handlers.mask(mask=obs_mask):
-            f_hat = numpyro.sample("obs", dist.Binomial(population, logits=eta), obs=y)
-        return f_hat, mu, jnp.concat([conditionals, jnp.array([beta])])
+            f = numpyro.sample("obs", dist.Binomial(population, logits=eta), obs=y)
+        return f, mu, jnp.concat([conditionals, jnp.array([beta])])
 
     return inference_model, cond_names + ["beta"]
 
@@ -125,8 +125,8 @@ def noisy_spatial_model(
         )
         sigma = numpyro.sample("sigma", priors["sigma"], sample_shape=())
         with numpyro.handlers.mask(mask=obs_mask):
-            f_hat = numpyro.sample("obs", dist.Normal(loc=mu, scale=sigma), obs=y)
-        return f_hat, mu, jnp.concat([conditionals, jnp.array([sigma])])
+            f = numpyro.sample("obs", dist.Normal(loc=mu, scale=sigma), obs=y)
+        return f, mu, jnp.concat([conditionals, jnp.array([sigma])])
 
     return inference_model, cond_names + ["sigma"]
 

@@ -134,7 +134,6 @@ def plot_vae_train_samples(seed: int, models: list[str], spatial_priors: list[st
                     cond_names,
                     "DeepRV" in model_name,
                     model_save_dir,
-                    **kwargs,
                 )
 
 
@@ -146,15 +145,13 @@ def plot_vae_scatter_comp(
     is_decoder_only: bool,
     save_dir: Path,
     num_samples=5,
-    **kwargs,
 ):
     rng_drop, rng_extra, rng = jax.random.split(rng, 3)
-    f, z, conditionals = next(loader)
+    batch = next(loader)
+    f = batch["f"]
     f_hat = state.apply_fn(
         {"params": state.params, **state.kwargs},
-        z if is_decoder_only else f,
-        conditionals,
-        **kwargs,
+        **batch,
         rngs={"dropout": rng_drop, "extra": rng_extra},
     )
     f_hat = f_hat if is_decoder_only else f_hat[0]
