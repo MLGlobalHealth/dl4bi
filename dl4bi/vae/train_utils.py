@@ -1,5 +1,3 @@
-from collections.abc import Callable
-from dataclasses import dataclass
 from functools import partial
 from typing import Optional
 
@@ -7,20 +5,10 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import optax
-from flax.core import FrozenDict
-from flax.training import train_state
 from jax import jit, value_and_grad
 from jax.scipy.stats import norm
 
-
-class TrainState(train_state.TrainState):
-    kwargs: FrozenDict = FrozenDict({})
-
-
-@dataclass
-class Callback:
-    fn: Callable
-    interval: int  # apply every interval of train_num_steps
+from dl4bi.core.train import TrainState
 
 
 def generate_surrogate_decoder(state: TrainState, model: nn.Module):
