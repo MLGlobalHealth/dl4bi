@@ -16,7 +16,7 @@ class MLP(nn.Module):
     dtype: jnp.dtype = jnp.float32
 
     @nn.compact
-    def __call__(self, x, training: bool = False):
+    def __call__(self, x, training: bool = False, **kwargs):
         for dim in self.dims[:-1]:
             x = nn.Dense(dim, dtype=self.dtype)(x)
             x = self.act_fn(x)
@@ -48,7 +48,7 @@ class MLPMixer(nn.Module):
     conv_dim: int = 128
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, **kwargs):
         s = self.patch_size
         x = nn.Conv(self.conv_dim, (s, s), strides=(s, s))(x)
         x = rearrange(x, "B H W C -> B (H W) C")
@@ -161,7 +161,7 @@ class gMLP(nn.Module):
     output_fn: Callable = lambda x: x
 
     @nn.compact
-    def __call__(self, x: jax.Array):  # x: [B, L, D]
+    def __call__(self, x: jax.Array, **kwargs):  # x: [B, L, D]
         x = self.embed(x)
         for _ in range(self.num_blks):
             x += self.blk.copy()(self.norm.copy()(x))
