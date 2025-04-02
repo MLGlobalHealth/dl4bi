@@ -63,7 +63,7 @@ def run_experiments(
         spatial_priors = ["rbf", "matern_3_2", "matern_1_2", "matern_5_2"]
         models = ["auto_deep_RV", "deep_RV_gMLP", "auto_prior_cvae"]
         miss_overrides = [
-            "exp_name=UK_2d_grid_sim",
+            "exp_name=2d_grid_sim",
             "project=deep_RV_missing_data",
             "data=2d",
         ]

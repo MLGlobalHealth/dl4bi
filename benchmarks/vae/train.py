@@ -21,7 +21,7 @@ from utils.obj_utils import build_model, generate_model_name, instantiate
 from utils.plot_utils import log_vae_grid_plots, log_vae_map_plots
 
 import wandb
-from dl4bi.meta_learning.train_utils import cosine_annealing_lr, save_ckpt
+from dl4bi.core.train import cosine_annealing_lr, save_ckpt
 from dl4bi.vae.train_utils import (
     Callback,
     TrainState,
