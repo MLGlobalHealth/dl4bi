@@ -5,10 +5,71 @@ import numpy as np
 import pandas as pd
 from omegaconf import DictConfig
 from pyDataverse.api import DataAccessApi
+from rpy2.robjects.packages import importr
+from shapely import MultiPolygon, Polygon
 
 base_url = "https://dataverse.harvard.edu/"
 dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
 cache_path = "./tmp/"
+
+ma = importr("malariaAtlas")
+
+
+DEG_TO_SEC = 3600
+
+
+def cartesian_product(*xs):
+    n = len(xs)
+    return np.stack(np.meshgrid(*xs), axis=-1).reshape(-1, n)
+
+
+def round_to_grid(x, res):
+    """Rounds to the nearest multiple of m."""
+    assert res > 0
+    k, rem = divmod(x, res)
+    if rem * 2 < res:
+        return k * res
+    else:
+        return (k + 1) * res
+
+
+def get_grid(
+    iso: str,
+    res: int = 150,
+    exclude_outer: bool = True,
+):
+    """Get locations grid for a country.
+
+    Args:
+        iso: country code
+        resolution: grid resolution in arc-seconds. 30 is ~1km at the equator. Defaults to 150.
+        exclude_outer: whether to exclude points outside the country borders. Defaults to True.
+        sparse: whether to output
+    Returns:
+        N x 2 array of longitude, latitude pairs (in degrees).
+    """
+    # w, s, e, n
+    shape = ma.getShp(ISO=iso)
+    bbox = np.array(ma.getSpBbox(shape))
+
+    bbox *= DEG_TO_SEC
+    w, s = bbox[:, 0] // res  # round down
+    e, n = -((-bbox[:, 1]) // res)  # round up
+
+    longs = np.arange(w, e) * res / DEG_TO_SEC
+    lats = np.arange(s, n) * res / DEG_TO_SEC
+
+    points = cartesian_product(longs, lats)
+    if not exclude_outer:
+        return points
+
+    polygons = [np.array(x).squeeze(0) for x in shape.rx2("geometry")[0]]
+    polygons = [Polygon(x) for x in polygons]
+    multipolygon = MultiPolygon(polygons)
+
+    df = gpd.GeoDataFrame(geometry=gpd.points_from_xy(*points.T))
+    df = df.clip(multipolygon)
+    return np.stack((df.geometry.x, df.geometry.y), axis=-1)
 
 
 def get_survey_data(cfg: DictConfig):
