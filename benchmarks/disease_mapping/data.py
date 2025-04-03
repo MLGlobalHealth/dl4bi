@@ -3,14 +3,15 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from omegaconf import DictConfig
 from pyDataverse.api import DataAccessApi
+import rpy2.robjects as ro
+from rpy2.robjects import StrVector
 from rpy2.robjects.packages import importr
 from shapely import MultiPolygon, Polygon
 
 base_url = "https://dataverse.harvard.edu/"
 dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
-cache_path = "./tmp/"
+cache_dir = "./tmp/"
 
 ma = importr("malariaAtlas")
 
@@ -34,7 +35,8 @@ def round_to_grid(x, res):
 
 
 def get_grid(
-    iso: str,
+    country: str,
+    region: str | None = None,
     res: int = 150,
     exclude_outer: bool = True,
 ):
@@ -49,8 +51,20 @@ def get_grid(
         N x 2 array of longitude, latitude pairs (in degrees).
     """
     # w, s, e, n
-    shape = ma.getShp(ISO=iso)
-    bbox = np.array(ma.getSpBbox(shape))
+    cache_path = (
+        Path(cache_dir)
+        / f"{country}_{region}_{res}{'_inner' if exclude_outer else ''}.npy"
+    )
+    if cache_path.exists():
+        return np.load(cache_path)
+
+    if region is None:
+        df = ma.getShp(country=country)
+    else:
+        df = ma.getShp(country=country, admin_level="admin1")
+        ro.r.assign("df", df)
+        df = ro.r(f"subset(df, name_1=='{region}')")
+    bbox = np.array(ma.getSpBbox(df))
 
     bbox *= DEG_TO_SEC
     w, s = bbox[:, 0] // res  # round down
@@ -61,21 +75,27 @@ def get_grid(
 
     points = cartesian_product(longs, lats)
     if not exclude_outer:
+        np.save(cache_path, points)
         return points
 
-    polygons = [np.array(x).squeeze(0) for x in shape.rx2("geometry")[0]]
+    polygons = [np.array(x).squeeze(0) for x in df.rx2("geometry")[0]]
     polygons = [Polygon(x) for x in polygons]
     multipolygon = MultiPolygon(polygons)
 
     df = gpd.GeoDataFrame(geometry=gpd.points_from_xy(*points.T))
     df = df.clip(multipolygon)
-    return np.stack((df.geometry.x, df.geometry.y), axis=-1)
+
+    points = np.stack((df.geometry.x, df.geometry.y), axis=-1)
+    np.save(cache_path, points)
+    return points
 
 
-def get_survey_data(cfg: DictConfig):
-    file: Path = Path(cache_path) / dataset_id.replace("/", "_")
+def get_survey_data(
+    country: str, year: int | None, month: int | None, force_redownload=False
+):
+    file: Path = Path(cache_dir) / dataset_id.replace("/", "_")
 
-    if file.exists() and cfg.force_redownload is False:
+    if file.exists() and force_redownload is False:
         pass
     else:
         data_api = DataAccessApi(base_url)
@@ -90,9 +110,8 @@ def get_survey_data(cfg: DictConfig):
 
     # only include point surveys by default
     df = df.query("AREATYPE=='Point'")
-    df = df.query("COUNTRY==@cfg.country")
+    df = df.query("COUNTRY==@country")
 
-    month, year = cfg.get("month"), cfg.get("year")
     assert not (year is None and month is not None), (
         "If year is unspecified so must be month."
     )
