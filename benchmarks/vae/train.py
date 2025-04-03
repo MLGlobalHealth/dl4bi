@@ -174,9 +174,7 @@ def gen_valid_step(model_cfg: DictConfig, cond_names: list[str]):
 
 def get_optimizer(cfg: DictConfig):
     if cfg.cosine_annealing:
-        lr_schedule = cosine_annealing_lr(
-            cfg.train_num_steps, cfg.lr_peak, cfg.lr_pct_warmup
-        )
+        lr_schedule = cosine_annealing_lr(cfg.train_num_steps, cfg.lr_peak)
         return optax.chain(
             optax.clip_by_global_norm(cfg.clip_max_norm), optax.yogi(lr_schedule)
         )
