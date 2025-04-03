@@ -19,6 +19,5 @@ valid_interval: 25000
 plot_interval: 100000
 cosine_annealing: True
 lr_peak: 1.0e-2
-lr_pct_warmup: 0.01
 clip_max_norm: 3.0
 emprical_bayes_samples: 100
