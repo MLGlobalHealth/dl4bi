@@ -23,4 +23,4 @@ num_ctx_per_t:
 independent_t_masks: False
 num_test: 1024
 forecast: True
-batch_size: 4
+batch_size: 16

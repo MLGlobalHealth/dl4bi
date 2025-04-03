@@ -15,8 +15,9 @@ optimizer:
     - _target_: optax.clip_by_global_norm
       max_norm: 3.0
     - _target_: optax.yogi
-      learning_rate:
-        _target_: optax.cosine_decay_schedule
-        init_value: 1.0e-3
-        decay_steps: ${train_num_steps}
-        alpha: 1.0e-4
+      learning_rate: 5e-4
+      # learning_rate:
+      #   _target_: optax.cosine_decay_schedule
+      #   init_value: 1.0e-3
+      #   decay_steps: ${train_num_steps}
+      #   alpha: 1.0e-4
