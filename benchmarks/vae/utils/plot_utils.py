@@ -17,6 +17,7 @@ from numpyro.infer import MCMC
 from omegaconf import DictConfig
 
 import wandb
+from dl4bi.core.model_output import VAEOutputs
 from dl4bi.core.train import TrainState
 from dl4bi.vae.train_utils import generate_surrogate_decoder
 from utils.map_utils import get_norm_vars
@@ -511,7 +512,6 @@ def plot_vae_reconstruction(
     model: str,
     loader,
     conds_names: list[str],
-    is_decoder_only: bool,
     save_dir: Optional[Path] = None,
     num_plots: int = 5,
     samples_per_plot: int = 3,
@@ -527,13 +527,12 @@ def plot_vae_reconstruction(
         rng_drop, rng_extra, rng = jax.random.split(rng, 3)
         batch = next(loader)
         f, conditionals = batch["f"], batch["conditionals"]
-        f_hat = state.apply_fn(
+        output: VAEOutputs = state.apply_fn(
             {"params": state.params, **state.kwargs},
             **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
-        # NOTE: full VAEs architectures return additional outputs
-        f_hat = f_hat if is_decoder_only else f_hat[0]
+        f_hat = output.f_hat
         fig, ax = plt.subplots(
             1, samples_per_plot * 2 + int(plot_locations), figsize=(16, 5)
         )
@@ -747,19 +746,18 @@ def log_vae_map_plots(
     z_dim: int,
     loader: Generator,
     large_batch_loader: Generator,
-    is_decoder_only: bool,
     data: DictConfig,
     model: nn.Module,
 ):
     def log_plots(step: int, rng_step: int, state: TrainState, batch: dict, extra):
         rng_drop, rng_extra, rng_dec, rng_dist, rng_rcn = jax.random.split(rng_step, 5)
         f, conditionals = batch["f"], batch["conditionals"]
-        f_hat = state.apply_fn(
+        output: VAEOutputs = state.apply_fn(
             {"params": state.params, **state.kwargs},
             **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
-        f_hat = f_hat if is_decoder_only else f_hat[0]
+        f_hat = output.f_hat
         surrogate_decoder = generate_surrogate_decoder(state, model)
         plot_vae_reconstruction(
             rng_rcn,
@@ -769,7 +767,6 @@ def log_vae_map_plots(
             model.__class__.__name__,
             loader,
             conds_names,
-            is_decoder_only,
             plot_locations=True,
             step=str(step),
         )
@@ -852,7 +849,6 @@ def plot_vae_rec_1d(
     model: str,
     loader,
     conds_names: list[str],
-    is_decoder_only: bool,
     save_dir: Optional[Path] = None,
     num_plots: int = 5,
     samples_per_plot: int = 3,
@@ -865,13 +861,12 @@ def plot_vae_rec_1d(
         rng_drop, rng_extra, rng = jax.random.split(rng, 3)
         batch = next(loader)
         f, conditionals = batch["f"], batch["conditionals"]
-        f_hat = state.apply_fn(
+        output: VAEOutputs = state.apply_fn(
             {"params": state.params, **state.kwargs},
             **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
-        # NOTE: full VAEs architectures return additional outputs
-        f_hat = f_hat if is_decoder_only else f_hat[0]
+        f_hat = output.f_hat
         fig, ax = plt.subplots(1, samples_per_plot, figsize=(16, 5))
         for j in range(samples_per_plot):
             ax[j].plot(s_flat, f[j].squeeze(), color="black", label=r"$f$")
@@ -934,19 +929,18 @@ def log_vae_grid_plots(
     z_dim: int,
     loader: Generator,
     large_batch_loader: Generator,
-    is_decoder_only: bool,
     data: DictConfig,
     model: nn.Module,
 ):
     def log_plots(step: int, rng_step: int, state: TrainState, batch: dict, extra):
         rng_drop, rng_extra, rng_dec, rng_dist, rng_rcn = jax.random.split(rng_step, 5)
         f, conditionals = batch["f"], batch["conditionals"]
-        f_hat = state.apply_fn(
+        output: VAEOutputs = state.apply_fn(
             {"params": state.params, **state.kwargs},
             **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
-        f_hat = f_hat if is_decoder_only else f_hat[0]
+        f_hat = output.f_hat
         surrogate_decoder = generate_surrogate_decoder(state, model)
         if s.shape[-1] == 1:
             plot_vae_rec_1d(
@@ -956,7 +950,6 @@ def log_vae_grid_plots(
                 model.__class__.__name__,
                 loader,
                 conds_names,
-                is_decoder_only,
                 step=str(step),
             )
             plot_vae_decoder_1d(
@@ -976,7 +969,6 @@ def log_vae_grid_plots(
                 model.__class__.__name__,
                 loader,
                 conds_names,
-                is_decoder_only,
                 step=str(step),
             )
             plot_vae_decoder_2d(
@@ -1015,7 +1007,6 @@ def plot_vae_rec_2d(
     model: str,
     loader,
     conds_names: list[str],
-    is_decoder_only: bool,
     save_dir: Optional[Path] = None,
     num_plots: int = 5,
     samples_per_plot: int = 3,
@@ -1027,14 +1018,13 @@ def plot_vae_rec_2d(
         rng_drop, rng_extra, rng = jax.random.split(rng, 3)
         batch = next(loader)
         f, conditionals = batch["f"], batch["conditionals"]
-        f_hat = state.apply_fn(
+        output: VAEOutputs = state.apply_fn(
             {"params": state.params, **state.kwargs},
             **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
         f = f.reshape(-1, grid_shape[0], grid_shape[1])
-        f_hat = f_hat if is_decoder_only else f_hat[0]
-        f_hat = f_hat.reshape(-1, grid_shape[0], grid_shape[1])
+        f_hat = output.f_hat.reshape(-1, grid_shape[0], grid_shape[1])
         fig, ax = plt.subplots(1, samples_per_plot * 2, figsize=(20, 5))
         vmin = min(f.min(), f_hat.min())
         vmax = max(f.max(), f_hat.max())

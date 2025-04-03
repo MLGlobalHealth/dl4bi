@@ -3,6 +3,8 @@ from collections.abc import Callable
 import flax.linen as nn
 from jax import Array
 
+from dl4bi.core.model_output import VAEOutputs
+
 
 class DeepRV(nn.Module):
     r"""`DeepRV` learns to emulate samples from a fixed size stochastic process.
@@ -45,7 +47,7 @@ class DeepRV(nn.Module):
         Returns:
             $\hat{\mathbf{f}}$, an approximation of the stochastic process's realizations.
         """
-        return self.decoder(self.cond_stack_fn(z, conditionals), **kwargs)
+        return VAEOutputs(self.decode(z, conditionals, **kwargs))
 
     def decode(self, z: Array, conditionals: Array, **kwargs):
-        return self(z, conditionals, **kwargs)
+        return self.decoder(self.cond_stack_fn(z, conditionals), **kwargs)
