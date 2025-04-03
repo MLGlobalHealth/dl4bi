@@ -10,7 +10,7 @@ from jax import jit, random
 from numpyro import handlers
 from omegaconf import DictConfig, OmegaConf
 
-from benchmarks.disease_mapping.model import spatial_process
+from benchmarks.disease_mapping.model import spatial_effect
 from dl4bi.core.train import evaluate, save_ckpt, train
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.utils import cfg_to_run_name
@@ -75,7 +75,7 @@ def build_dataloader(data: DictConfig):
 
     @partial(jit, static_argnames=["B"])
     def sp(rng: jax.Array, s: jax.Array, B: int):
-        f = handlers.seed(spatial_process, rng)
+        f = handlers.seed(spatial_effect, rng)
         return f(s, (B,))[..., None]
 
     def dataloader(rng: jax.Array):

@@ -1,68 +1,87 @@
 import arviz as az
+import hydra
 import jax
 import jax.numpy as jnp
-import numpyro
-from numpyro.infer import MCMC, NUTS, SA, init_to_median
+from numpyro.infer import MCMC, NUTS, init_to_median
+from omegaconf import DictConfig
 
 from benchmarks.disease_mapping.data import prepare_data
-from benchmarks.disease_mapping.model import model
+from benchmarks.disease_mapping.model import (
+    get_np_sampler,
+    sample_gp,
+    sample_prevalence,
+    survey_model,
+)
+from benchmarks.disease_mapping.utils import batch, unbatch
+from dl4bi.core.train import load_ckpt
 
-numpyro.set_platform("cpu")
-numpyro.set_host_device_count(4)
-numpyro.enable_x64()
 
-from time import time
-
-
-def main():
-    s, Np, N = prepare_data()
-
-    # mask = N < 30
-    # s, Np, N = s[mask], Np[mask], N[mask]
-
-    # example data
-    # s = jnp.array([[0, 0], [1, 1]])
-    # Np = jnp.array([0, 0])
-    # N = jnp.array([2, 3])
-
-    # print(jnp.vstack([s.T, Np, N, Np / N]))
-
-    rng = jax.random.key(int(time()))
-
-    sampler = NUTS(model, init_strategy=init_to_median())
+def infer(cfg: DictConfig, data: tuple[jax.Array, ...]) -> MCMC:
+    sampler = NUTS(survey_model, init_strategy=init_to_median())
     mcmc = MCMC(
         sampler,
-        num_warmup=100,
-        num_samples=1000,
-        num_chains=4,
+        num_warmup=cfg.num_warmup,
+        num_samples=cfg.num_samples,
+        num_chains=cfg.num_chains,
+        chain_method=jax.vmap if cfg.chain_method == "vmap" else cfg.chain_method,
     )
+    rng = jax.random.key(cfg.seed)
+    mcmc.run(rng, *data)
 
-    mcmc.run(rng, s, Np, N)
-
-    data = az.from_numpyro(mcmc)
-    print(az.summary(data))
-
-    # posterior = az.from_numpyro(mcmc)
-    # print(az.summary(posterior))
-
-    # prior_pred = Predictive(model, num_samples=100)
-    # prior_pred()
-    # print(prior_pred)
+    return mcmc
 
 
-# from numpyro import handlers
+def predict(rng, model: str, s_c, s_t, params, batch_size):
+    """
+    Transforms samples $y_c (+params) | (s, np, n)_c$ into $y_t | s_t, (s, np, n)_c$.
+    """
+    s_c = jnp.repeat(s_c[None], batch_size, axis=0)
+    s_t = jnp.repeat(s_t[None], batch_size, axis=0)
+    params = {k: batch(v, batch_size) for k, v in params.items()}
+    y_c = params.pop("y")
+    num_iters = y_c.shape[0]
+
+    if model.lower() == "gp":
+        print("Using GP for predictions.")
+        sample_conditioned_sp = sample_gp
+    else:
+        state, cfg_model = load_ckpt(model)
+        print(f"Using {cfg_model.name} for predictions.")
+        sample_conditioned_sp = get_np_sampler(state)
+
+    def predict_batch(rng, y_c, params):
+        # Sample (y_t = f(s_t) + noise) | s_t, (s, np, n)_c.
+        rng_y_t, rng_theta_t = jax.random.split(rng)
+        y_t = sample_conditioned_sp(rng_y_t, s_c, y_c, s_t, **params)
+
+        # Sample theta_t | s_t, (s, np, n)_c
+        logit_theta_t = sample_prevalence(rng_theta_t, y_t, **params)
+
+        return logit_theta_t
+
+    logit_theta_t = jax.lax.map(
+        lambda args: predict_batch(args[0], args[1], args[2]),
+        (jax.random.split(rng, num_iters), y_c, params),
+    )
+    logit_theta_t = unbatch(logit_theta_t)
+    return logit_theta_t
 
 
-# def log_likelihood(model, *args, **kwargs):
-#     rng = jax.random.key(int(time()))
-#     model = handlers.seed(model, rng)
-#     model_trace = handlers.trace(model).get_trace(*args, **kwargs)
-#     obs_node = model_trace["Np"]
+@hydra.main("configs", "inference", None)
+def main(cfg: DictConfig):
+    s, np, n = prepare_data(cfg.data)
+    mcmc = infer(cfg.mcmc, (s, np, n))
 
-#     return obs_node["fn"].log_prob(obs_node["value"])
+    inference_data = az.from_numpyro(mcmc)
+    print(az.summary(inference_data))
 
+    params = mcmc.get_samples()
 
-# log_likelihood(model, s, Np, N)
+    rng = jax.random.key(cfg.seed)
+    # TODO: choose different s_t
+    results = predict(rng, cfg.model, s, s, params, cfg.batch_size)
+    print(results)
+    print(results.shape)
 
 
 if __name__ == "__main__":

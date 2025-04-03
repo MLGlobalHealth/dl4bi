@@ -3,6 +3,7 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from omegaconf import DictConfig
 from pyDataverse.api import DataAccessApi
 
 base_url = "https://dataverse.harvard.edu/"
@@ -33,10 +34,10 @@ def coordinate_transform(
     return s
 
 
-def prepare_data(force_redownload: bool = False):
+def prepare_data(cfg: DictConfig):
     file: Path = Path(cache_path) / dataset_id.replace("/", "_")
 
-    if file.exists() and force_redownload is False:
+    if file.exists() and cfg.force_redownload is False:
         pass
     else:
         data_api = DataAccessApi(base_url)
@@ -51,14 +52,22 @@ def prepare_data(force_redownload: bool = False):
 
     # only include point surveys by default
     df = df.query("AREATYPE=='Point'")
+    df = df.query("COUNTRY==@cfg.country")
 
-    # Kenya 2015
-    df = df.query("COUNTRY=='Kenya' & YY==2015")
+    month, year = cfg.get("month"), cfg.get("year")
+    assert not (year is None and month is not None), (
+        "If year is unspecified so must be month."
+    )
+    if year is not None:
+        df = df.query("YY==@year")
+    if month is not None:
+        df = df.query("MM==@month")
     print(f"Selected {len(df)} rows.")
+    assert len(df) > 0, "Number of observations must be >0."
 
     # s = coordinate_transform(df.Long, df.Lat)
     s = np.stack([df.Long, df.Lat], axis=-1)
-    print(f"Transformed locations: shape {s.shape}, range [{s.min()}, {s.max()}]")
+    print(f"Locations: shape {s.shape}, range [{s.min()}, {s.max()}]")
 
     # skip time for now
     # t = (df.YY * 12 + df.MM).to_numpy()
