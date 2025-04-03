@@ -1,5 +1,7 @@
 import sys
 
+from dl4bi.core.model_output import VAEOutputs
+
 sys.path.append("benchmarks/vae")
 import argparse
 import pickle
@@ -124,7 +126,6 @@ def plot_vae_train_samples(seed: int, models: list[str], spatial_priors: list[st
                     state,
                     loader_gn(rng),
                     cond_names,
-                    "DeepRV" in model_name,
                     model_save_dir,
                 )
 
@@ -134,22 +135,24 @@ def plot_vae_scatter_comp(
     state: TrainState,
     loader,
     conds_names: list[str],
-    is_decoder_only: bool,
     save_dir: Path,
     num_samples=5,
 ):
     rng_drop, rng_extra, rng = jax.random.split(rng, 3)
     batch = next(loader)
     f = batch["f"]
-    f_hat = state.apply_fn(
+    output: VAEOutputs = state.apply_fn(
         {"params": state.params, **state.kwargs},
         **batch,
         rngs={"dropout": rng_drop, "extra": rng_extra},
     )
-    f_hat = f_hat if is_decoder_only else f_hat[0]
-
     plot_vae_scatter_plot(
-        f, f_hat, None, conds_names, num_samples=num_samples, save_dir=save_dir
+        f,
+        output.f_hat,
+        None,
+        conds_names,
+        num_samples=num_samples,
+        save_dir=save_dir,
     )
 
 

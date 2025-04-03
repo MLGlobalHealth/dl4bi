@@ -5,6 +5,8 @@ import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
 
+from dl4bi.core.model_output import DiagonalMVNOutput, VAEOutputs
+
 
 class PriorCVAE(nn.Module):
     r"""[PriorCVAE](https://arxiv.org/pdf/2304.04307) approximates a Gaussian Process.
@@ -51,7 +53,7 @@ class PriorCVAE(nn.Module):
         eps = random.normal(self.make_rng("extra"), z_std.shape)
         z = z_mu + z_std * eps
         f_hat = self.decoder(self.cond_stack_fn(z, conditionals), **kwargs)
-        return f_hat.reshape(f.shape), z_mu, z_std
+        return VAEOutputs(f_hat.reshape(f.shape), DiagonalMVNOutput(z_mu, z_std))
 
     def decode(self, z: Array, conditionals: Array, **kwargs):
         return self.decoder(self.cond_stack_fn(z, conditionals), **kwargs)

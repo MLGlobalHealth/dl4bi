@@ -10,7 +10,7 @@ from jax import jit
 from jax.nn import softmax, softplus
 from jax.scipy import stats
 from jax.scipy.special import logsumexp
-from optax.losses import safe_softmax_cross_entropy
+from optax.losses import safe_softmax_cross_entropy, squared_error
 
 
 @dataclass(frozen=True)
@@ -197,3 +197,27 @@ class MDNOutput(DistributionOutput):
 
     def metrics(self, x: jax.Array, **kwargs):
         return {"NLL": self.nll(x)}
+
+
+@dataclass(frozen=True)
+class VAEOutputs(DistributionOutput):
+    f_hat: jax.Array
+    encoder_outputs: Optional[DiagonalMVNOutput] = None
+
+    def nll(self, f: jax.Array, var: Optional[float] = None, **kwargs):
+        std = jnp.sqrt(var) if var is not None else 1.0
+        ll = stats.norm.logpdf(f.squeeze(), self.f_hat.squeeze(), std)
+        return -ll.mean()
+
+    def kl_normal_dist(self, **kwargs):
+        if self.encoder_outputs is not None:
+            mu, std = self.encoder_outputs.mu, self.encoder_outputs.std
+            # NOTE: using mean not sum as above which break for 2d inputs
+            return (-jnp.log(std) + (std**2 + mu**2 - 1) / 2).mean()
+        return 0.0
+
+    def mse(self, f: jax.Array):
+        return squared_error(self.f_hat.squeeze(), f.squeeze()).mean()
+
+    def metrics(self, f: jax.Array, var: Optional[float] = None, **kwargs):
+        return {"NLL": self.nll(f, var), "MSE": self.mse(f)}

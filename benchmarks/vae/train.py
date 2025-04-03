@@ -9,7 +9,6 @@ import numpy as np
 import optax
 from inference_models.inference_models import gen_saptial_prior
 from jax import Array, jit, random
-from jax.scipy.stats import norm
 from numpyro.handlers import seed
 from omegaconf import DictConfig, OmegaConf
 from utils.map_utils import gen_locations
@@ -17,6 +16,7 @@ from utils.obj_utils import build_model, generate_model_name, instantiate
 from utils.plot_utils import log_vae_grid_plots, log_vae_map_plots
 
 import wandb
+from dl4bi.core.model_output import VAEOutputs
 from dl4bi.core.train import Callback, cosine_annealing_lr, evaluate, save_ckpt, train
 from dl4bi.vae.train_utils import (
     deep_RV_train_step,
@@ -70,7 +70,6 @@ def main(cfg: DictConfig):
                     z_dim,
                     loader_gen(rng_plot),
                     loader_gen(rng_lb, cfg.data.large_batch_size),
-                    decoder_only,
                     cfg.data,
                     model,
                 ),
@@ -147,31 +146,28 @@ def gen_valid_step(model_cfg: DictConfig, cond_names: list[str]):
     ls_idx = None if "ls" not in cond_names else cond_names.index("ls")
     var_idx = None if "var" not in cond_names else cond_names.index("var")
     model_name = model_cfg.cls
-    decoder_only = model_name == "DeepRV"
 
+    @jit
     def valid_step(rng, state, batch):
         f, conditionals = batch["f"], batch["conditionals"]
-        var = 1 if var_idx is None else conditionals[var_idx].squeeze()
-        ls = None if ls_idx is None else conditionals[ls_idx].squeeze()
-        z_mu, z_std = None, None
-        f_hat = jit(state.apply_fn)(
+        var = 1.0 if var_idx is None else conditionals[var_idx].squeeze()
+        output: VAEOutputs = state.apply_fn(
             {"params": state.params, **state.kwargs}, **batch, rngs={"extra": rng}
         )
-        if not decoder_only:
-            f_hat, z_mu, z_std = f_hat
-        mse_score = optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
-        # NOTE: Normalizing the mse score with variance, aN(0,K)~N(0, a^2K)
-        norm_mse_score = (1 / var) * mse_score
-        loss = norm_mse_score
-        if not decoder_only:
-            kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
-            logp = (
-                (1 / (2 * 0.9)) * mse_score
-                if model_name == "PriorCVAE"
-                else -norm.logpdf(f, f_hat, 1.0).mean()
-            )
-            loss = logp + kl_div.mean()
-        return {"loss": loss, "norm MSE": norm_mse_score, "ls": ls}
+        metrics = output.metrics(f, var)
+        norm_mse = (1 / var) * metrics["MSE"]
+        # NOTE: kl will be zero for decoder only networks
+        kl_div = output.kl_normal_dist()
+        if model_name == "PriorCVAE":
+            loss = (1 / (2 * 0.9)) * metrics["MSE"] + kl_div
+        elif model_name == "DeepRV":
+            loss = norm_mse
+        else:
+            loss = metrics["NLL"] + kl_div
+        metrics = {"loss": loss, "norm MSE": norm_mse, "NLL": metrics["NLL"]}
+        if ls_idx is not None:
+            metrics["ls"] = conditionals[ls_idx].squeeze()
+        return metrics
 
     return valid_step
 
