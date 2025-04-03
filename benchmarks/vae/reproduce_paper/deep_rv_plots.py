@@ -104,13 +104,9 @@ def plot_vae_train_samples(seed: int, models: list[str], spatial_priors: list[st
                 )
                 map_data, s = gen_locations(cfg.data)
                 state, _ = load_ckpt((model_dir / model_name).with_suffix(".ckpt"))
-                priors = {
-                    pr: instantiate(pr_dist)
-                    for pr, pr_dist in cfg.inference_model.priors.items()
-                }
                 rng = jax.random.key(seed)
                 loader_gn, cond_names = build_spatial_dataloaders(
-                    rng, cfg, map_data, s, priors, spatial_prior
+                    rng, cfg, map_data, s, spatial_prior
                 )
                 plot_vae_reconstruction(
                     rng,

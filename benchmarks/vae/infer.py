@@ -21,8 +21,8 @@ from utils.obj_utils import generate_model_name, instantiate
 from utils.plot_utils import plot_inference_run
 
 import wandb
-from dl4bi.core.train import cosine_annealing_lr
-from dl4bi.vae.train_utils import TrainState, generate_surrogate_decoder
+from dl4bi.core.train import TrainState, cosine_annealing_lr
+from dl4bi.vae.train_utils import generate_surrogate_decoder
 
 
 @hydra.main("configs", config_name="default", version_base=None)
@@ -47,21 +47,17 @@ def main(cfg: DictConfig):
     model_dir = Path(f"results/{cfg.exp_name}/{spatial_prior.func}/{cfg.seed}")
     priors, simulation_priors = init_priors(cfg)
     # NOTE: the inference model expects to have this exact API
-    inference_model, cond_names = gen_inference_model(
-        cfg, s, map_data, priors, {"s": s}
-    )
+    infer_model, cond_names = gen_inference_model(cfg, s, map_data, priors, {"s": s})
     # NOTE: Generates a model for creating the simulated data
     sim_model, _ = gen_inference_model(cfg, s, map_data, simulation_priors)
-    f_obs, spatial_eff, conditionals = gen_obs_data(
-        rng, sim_model, map_data, cond_names
-    )
+    f_obs, spatial_eff, conds = gen_obs_data(rng, sim_model, map_data, cond_names)
     obs_mask, obs_idxs = generate_obs_mask(rng_idxs, f_obs, cfg.inference_model)
     surrogate_decoder = None
     if cfg.inference_model.surrogate_model:
         state, model = load_ckpt((model_dir / model_name).with_suffix(".ckpt"))
         surrogate_decoder = generate_surrogate_decoder(state, model)
     samples, mcmc, post = _hmc(
-        rng_hmc, cfg.mcmc, inference_model, f_obs, obs_mask, surrogate_decoder
+        rng_hmc, cfg.mcmc, infer_model, f_obs, obs_mask, surrogate_decoder
     )
     post.update(
         {
@@ -69,19 +65,19 @@ def main(cfg: DictConfig):
             "f": f_obs,
             "obs_idxs": obs_idxs,
             "spatial_eff": spatial_eff,
-            **conditionals,
+            **conds,
         }
     )
     results_dir = get_results_dir(cfg, model_dir, obs_idxs, s, model_name)
     results_dir.mkdir(parents=True, exist_ok=True)
-    log_inference_run((samples, mcmc, post), conditionals, results_dir)
+    log_inference_run((samples, mcmc, post), conds, results_dir)
     plot_inference_run(
         rng_plot,
         cfg,
         model_name,
         (samples, mcmc, post),
         f_obs,
-        conditionals,
+        conds,
         priors,
         map_data,
     )
@@ -150,7 +146,6 @@ def log_inference_run(
     with open(results_dir / "mcmc.pkl", "wb") as out_file:
         pickle.dump(az.from_numpyro(mcmc), out_file)
     metrics = log_inference_metrics(hmc_res, surrogate_conds)
-    print(metrics)
     with open(results_dir / "hmc_metrics.pkl", "wb") as out_file:
         pickle.dump(metrics, out_file)
 
@@ -175,16 +170,13 @@ def log_inference_metrics(hmc_res: tuple[dict, MCMC, dict], surrogate_conds: dic
 
     def single_mse(x, y, name):
         metrics[f"{name}_MSE"] = jnp.mean((x - y) ** 2).item()
-        if min(x.min(), y.mean()) >= 0:
-            metrics[f"log_{name}_MSE"] = jnp.mean(
-                (jnp.log(x + 1) - jnp.log(y + 1)) ** 2
-            ).item()
 
     single_mse(f_hat, f_obs, "total")
     if len(obs_idx) < f_obs.shape[0]:
         single_mse(f_hat[obs_idx], f_obs[obs_idx], "observed")
         single_mse(f_hat[unobs_idx], f_obs[unobs_idx], "unobserved")
     wandb.log(metrics)
+    print(metrics)
     return metrics
 
 

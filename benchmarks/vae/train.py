@@ -6,7 +6,6 @@ import geopandas as gpd
 import hydra
 import jax.numpy as jnp
 import numpy as np
-import numpyro.distributions as dist
 import optax
 from inference_models.inference_models import gen_saptial_prior
 from jax import Array, jit, random
@@ -44,13 +43,8 @@ def main(cfg: DictConfig):
     model = build_model(cfg.model, s)
     optimizer = get_optimizer(cfg)
     spatial_prior = instantiate(cfg.inference_model.spatial_prior)
-    priors = {
-        pr: instantiate(pr_dist) for pr, pr_dist in cfg.inference_model.priors.items()
-    }
     # NOTE: large_batch_loader is used to compare the decoder distribution with true data
-    loader_gen, cond_names = build_spatial_dataloaders(
-        cfg, map_data, s, priors, spatial_prior
-    )
+    loader_gen, cond_names = build_spatial_dataloaders(cfg, map_data, s, spatial_prior)
     valid_step = gen_valid_step(cfg.model, cond_names)
     decoder_only = cfg.model.cls == "DeepRV"
     z_dim = s.shape[0] if decoder_only else model.z_dim
@@ -93,11 +87,7 @@ def main(cfg: DictConfig):
 
 
 def build_spatial_dataloaders(
-    cfg: DictConfig,
-    map_data: gpd.GeoDataFrame,
-    s: Array,
-    priors: dict[str, dist.Distribution],
-    spatial_prior: Callable,
+    cfg: DictConfig, map_data: gpd.GeoDataFrame, s: Array, spatial_prior: Callable
 ):
     """Generates the spatial prior dataloader for training for
     a specific distance based GP or graph model based kernel
@@ -113,6 +103,7 @@ def build_spatial_dataloaders(
     Returns:
         train loader, test loader, large batch loader, and surrogates models' conditionals names
     """
+    priors = {pr: instantiate(dis) for pr, dis in cfg.inference_model.priors.items()}
     spatial_model, cond_names = gen_saptial_prior(
         cfg, s, spatial_prior, priors, map_data
     )
