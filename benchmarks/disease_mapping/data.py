@@ -11,30 +11,7 @@ dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
 cache_path = "./tmp/"
 
 
-def coordinate_transform(
-    long,
-    lat,
-):
-    """
-    Transform Lat-Long coordinates to local 2D coordinates for Kenya of order O(1).
-    """
-    # read lat-long
-    s = gpd.points_from_xy(long, lat, crs="wgs84")
-    # convert to 2d approximation for Kenya (in meters E, N)
-    # this gives 6m accuracy according to https://epsg.io/21097
-    s = s.to_crs("epsg:21097")
-
-    # rescale to [0,1]
-    l, u = -523492.03, 823852.53  # from https://epsg.io/21097
-    s = np.stack([s.x, s.y], axis=-1)
-    s = (s - l) / (u - l)
-    # rescale to [-1, 1]
-    s = s * 2 - 1
-
-    return s
-
-
-def prepare_data(cfg: DictConfig):
+def get_survey_data(cfg: DictConfig):
     file: Path = Path(cache_path) / dataset_id.replace("/", "_")
 
     if file.exists() and cfg.force_redownload is False:

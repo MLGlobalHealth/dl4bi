@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from numpyro.infer import MCMC, NUTS, init_to_median
 from omegaconf import DictConfig
 
-from benchmarks.disease_mapping.data import prepare_data
+from benchmarks.disease_mapping.data import get_survey_data
 from benchmarks.disease_mapping.model import (
     get_np_sampler,
     sample_gp,
@@ -69,7 +69,7 @@ def predict(rng, model: str, s_c, s_t, params, batch_size):
 
 @hydra.main("configs", "inference", None)
 def main(cfg: DictConfig):
-    s, np, n = prepare_data(cfg.data)
+    s, np, n = get_survey_data(cfg.data)
     mcmc = infer(cfg.mcmc, (s, np, n))
 
     inference_data = az.from_numpyro(mcmc)
