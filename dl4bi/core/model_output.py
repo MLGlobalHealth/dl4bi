@@ -200,20 +200,30 @@ class MDNOutput(DistributionOutput):
 
 
 @dataclass(frozen=True)
-class VAEOutputs(DistributionOutput):
+class VAEOutput(DistributionOutput):
     f_hat: jax.Array
     encoder_outputs: Optional[DiagonalMVNOutput] = None
 
+    @classmethod
+    def from_raw_output(
+        cls, f_hat: jax.Array, latent_mu: jax.Array, latent_std: jax.Array, **kwargs
+    ):
+        latent_mu = jnp.atleast_3d(latent_mu)
+        latent_std = jnp.atleast_3d(latent_std)
+        return VAEOutput(f_hat, DiagonalMVNOutput(latent_mu, latent_std))
+
+    @property
+    def _normal_distribution(self):
+        return DiagonalMVNOutput(jnp.array(0.0), jnp.array(1.0))
+
     def nll(self, f: jax.Array, var: Optional[float] = None, **kwargs):
         std = jnp.sqrt(var) if var is not None else 1.0
-        ll = stats.norm.logpdf(f.squeeze(), self.f_hat.squeeze(), std)
+        ll = stats.norm.logpdf(self.f_hat.squeeze(), f.squeeze(), std)
         return -ll.mean()
 
     def kl_normal_dist(self, **kwargs):
         if self.encoder_outputs is not None:
-            mu, std = self.encoder_outputs.mu, self.encoder_outputs.std
-            # NOTE: using mean not sum as above which break for 2d inputs
-            return (-jnp.log(std) + (std**2 + mu**2 - 1) / 2).mean()
+            return self.encoder_outputs.reverse_kl_div(self._normal_distribution)
         return 0.0
 
     def mse(self, f: jax.Array):
