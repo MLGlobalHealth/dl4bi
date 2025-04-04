@@ -76,14 +76,19 @@ def predict(rng, model: str, s_c, s_t, params, batch_size):
 
 @hydra.main("configs", "inference", None)
 def main(cfg: DictConfig):
-    cache_dir = Path("tmp").resolve()
+    cache_dir = Path(cfg.get("cache_dir", "tmp")).resolve()
     environ["CACHE_DIR"] = str(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
     s, n_pos, n = get_survey_data(**cfg.data)
 
-    mcmc = infer(cfg.mcmc, (s, n_pos, n))
-    with open(cache_dir / "mcmc.pickle", "wb") as f:
-        pickle.dump(mcmc, f)
+    mcmc_file = cache_dir / "mcmc.pickle"
+    if mcmc_file.exists():
+        mcmc = pickle.loads(mcmc_file.read_bytes())
+    else:
+        mcmc = infer(cfg.mcmc, (s, n_pos, n))
+        with open(mcmc_file, "wb") as f:
+            pickle.dump(mcmc, f)
 
     inference_data = az.from_numpyro(mcmc)
     print(az.summary(inference_data))
