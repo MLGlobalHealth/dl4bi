@@ -1,18 +1,15 @@
+from os import environ
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import rpy2.robjects as ro
 from pyDataverse.api import DataAccessApi
-from rpy2.robjects.packages import importr
 from shapely import MultiPolygon, Polygon
 
 base_url = "https://dataverse.harvard.edu/"
 dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
-cache_dir = "./tmp/"
-
-ma = importr("malariaAtlas")
+CACHE_DIR = Path(environ.get("CACHE_DIR", "tmp"))
 
 
 DEG_TO_SEC = 3600
@@ -39,7 +36,7 @@ def round_to_grid(degrees, res):
 
 
 def get_grid(
-    country: str,
+    iso: str,
     region: str | None = None,
     res: int = 150,
     exclude_outer: bool = True,
@@ -47,7 +44,7 @@ def get_grid(
     """Get locations grid for a country.
 
     Args:
-        country: country name
+        iso: iso country code
         region: region name (optional)
         resolution: grid resolution in arc-seconds. 30 is ~1km at the equator. Defaults to 150.
         exclude_outer: whether to exclude points outside the country borders. Defaults to True.
@@ -56,16 +53,22 @@ def get_grid(
     """
     # w, s, e, n
     cache_path = (
-        Path(cache_dir)
-        / f"{country}{'_' + region if region else ''}_{res}{'_inner' if exclude_outer else ''}.npy"
+        CACHE_DIR
+        / f"{iso}{'_' + region if region else ''}_{res}{'_inner' if exclude_outer else ''}.npy"
     )
     if cache_path.exists():
         return np.load(cache_path)
+    else:
+        # loading from malariaAtlas, lazy load R bindings
+        import rpy2.robjects as ro
+        from rpy2.robjects.packages import importr
+
+        ma = importr("malariaAtlas")
 
     if region is None:
-        df = ma.getShp(country=country)
+        df = ma.getShp(ISO=iso)
     else:
-        df = ma.getShp(country=country, admin_level="admin1")
+        df = ma.getShp(ISO=iso, admin_level="admin1")
         ro.r.assign("df", df)
         df = ro.r(f"subset(df, name_1=='{region}')")
     bbox = np.array(ma.getSpBbox(df))
@@ -95,13 +98,13 @@ def get_grid(
 
 
 def get_survey_data(
-    country: str,
+    iso: str,
     year: int | None = None,
     month: int | None = None,
     res: int | None = 150,  # if not None round to grid of given res in seconds
     force_redownload=False,
 ):
-    file: Path = Path(cache_dir) / dataset_id.replace("/", "_")
+    file: Path = CACHE_DIR / (dataset_id.replace("/", "_") + ".csv")
 
     if file.exists() and force_redownload is False:
         pass
@@ -118,7 +121,7 @@ def get_survey_data(
 
     # only include point surveys
     df = df.query("AREATYPE=='Point'")
-    df = df.query("COUNTRY==@country")
+    df = df.query("AFRADMIN2Code.str.startswith(@iso)")
 
     assert not (year is None and month is not None), (
         "If year is unspecified so must be month."
@@ -135,12 +138,16 @@ def get_survey_data(
         df.Lat = round_to_grid(df.Lat, res)
         # merge surveys from points close-by into one
         df = df.groupby(
-            ["Lat", "Long", "YY", "MM"],
+            # since skipping time in s, ignore time for merging
+            ["Lat", "Long"],
+            # ["Lat", "Long", "YY", "MM"],
             as_index=False,
         ).sum()
 
     s = np.stack([df.Long, df.Lat], axis=-1)
-    print(f"Locations: shape {s.shape}, range [{s.min()}, {s.max()}]")
+    print(
+        f"Locations: shape {s.shape}, bbox: ({s[:, 0].min()}, {s[:, 1].min()}), ({s[:, 0].max()}, {s[:, 1].max()})"
+    )
 
     # skip time for now
     # t = (df.YY * 12 + df.MM).to_numpy()
@@ -149,7 +156,7 @@ def get_survey_data(
 
     # s = np.hstack([s, t])
 
-    N = df.Ex.to_numpy()
-    Np = df.Pf.to_numpy()
+    n_pos = df.Pf.to_numpy()
+    n = df.Ex.to_numpy()
 
-    return s, Np, N
+    return s, n_pos, n

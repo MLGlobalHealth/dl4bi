@@ -1,3 +1,7 @@
+import pickle
+from os import environ
+from pathlib import Path
+
 import arviz as az
 import hydra
 import jax
@@ -24,6 +28,8 @@ def infer(cfg: DictConfig, data: tuple[jax.Array, ...]) -> MCMC:
         num_samples=cfg.num_samples,
         num_chains=cfg.num_chains,
         chain_method=jax.vmap if cfg.chain_method == "vmap" else cfg.chain_method,
+        progress_bar=cfg.progress_bar,
+        # jit_model_args=True,
     )
     rng = jax.random.key(cfg.seed)
     mcmc.run(rng, *data)
@@ -49,7 +55,8 @@ def predict(rng, model: str, s_c, s_t, params, batch_size):
         print(f"Using {cfg_model.name} for predictions.")
         sample_conditioned_sp = get_np_sampler(state)
 
-    def predict_batch(rng, y_c, params):
+    def predict_batch(args):
+        rng, y_c, params = args
         # Sample (y_t = f(s_t) + noise) | s_t, (s, np, n)_c.
         rng_y_t, rng_theta_t = jax.random.split(rng)
         y_t = sample_conditioned_sp(rng_y_t, s_c, y_c, s_t, **params)
@@ -60,7 +67,7 @@ def predict(rng, model: str, s_c, s_t, params, batch_size):
         return logit_theta_t
 
     logit_theta_t = jax.lax.map(
-        lambda args: predict_batch(args[0], args[1], args[2]),
+        predict_batch,
         (jax.random.split(rng, num_iters), y_c, params),
     )
     logit_theta_t = unbatch(logit_theta_t)
@@ -69,8 +76,14 @@ def predict(rng, model: str, s_c, s_t, params, batch_size):
 
 @hydra.main("configs", "inference", None)
 def main(cfg: DictConfig):
-    s, np, n = get_survey_data(**cfg.data)
-    mcmc = infer(cfg.mcmc, (s, np, n))
+    cache_dir = Path("tmp").resolve()
+    environ["CACHE_DIR"] = str(cache_dir)
+
+    s, n_pos, n = get_survey_data(**cfg.data)
+
+    mcmc = infer(cfg.mcmc, (s, n_pos, n))
+    with open(cache_dir / "mcmc.pickle", "wb") as f:
+        pickle.dump(mcmc, f)
 
     inference_data = az.from_numpyro(mcmc)
     print(az.summary(inference_data))

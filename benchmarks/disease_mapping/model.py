@@ -29,7 +29,7 @@ def spatial_effect(s: jax.Array, sample_shape: tuple[int, ...] = ()):
     L, D = s.shape
 
     ls = numpyro.sample("ls", dist.InverseGamma(3, 3))
-    var = numpyro.sample("var", dist.HalfNormal(0.05))
+    var = numpyro.sample("var", dist.HalfNormal(1))
     noise = numpyro.deterministic("noise", 0.0)
 
     m = mean(s)
@@ -45,10 +45,9 @@ def spatial_effect(s: jax.Array, sample_shape: tuple[int, ...] = ()):
 
 
 def prevalence(y):
-    scale = numpyro.deterministic("scale", 1)
-    b0 = numpyro.sample("b0", dist.Normal(0, 1))
+    b0 = numpyro.sample("b0", dist.Normal(0, 10))
 
-    logit_theta = b0 + scale * y
+    logit_theta = b0 + y
     numpyro.deterministic("theta", jax.nn.sigmoid(logit_theta))
     return logit_theta
 
@@ -58,7 +57,7 @@ def survey_model(s: jax.Array, np: jax.Array, n: jax.Array):
     logit_theta = prevalence(y)
 
     numpyro.sample(
-        "Np",
+        "np",
         dist.BinomialLogits(total_count=n, logits=logit_theta),
         obs=np,
     )
@@ -68,11 +67,11 @@ def render():
     L = 10
     rng = jax.random.key(0)
     s = jax.random.normal(rng, (L, 2))
-    N = jax.random.randint(rng, (L,), 0, 100)
-    Np = jax.random.randint(rng, (L,), 0, N)
+    n = jax.random.randint(rng, (L,), 0, 100)
+    n_pos = jax.random.randint(rng, (L,), 0, n)
     return numpyro.render_model(
         survey_model,
-        (s, Np, N),
+        (s, n_pos, n),
         render_distributions=True,
         render_params=True,
     )

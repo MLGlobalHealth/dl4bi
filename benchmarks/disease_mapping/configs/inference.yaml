@@ -1,14 +1,15 @@
 mcmc:
   seed: 42
-  num_warmup: 10
-  num_samples: 100
-  num_chains: 4
+  num_warmup: 1000
+  num_samples: 1000
+  num_chains: 2
   # can be parallel, sequential, vectorized (experimental), or vmap
   chain_method: "vectorized"
+  progress_bar: True
 data:
   force_redownload: False
-  country: "Kenya"
-  year: 2015
+  iso: "MOZ"
+  year: 2012
 
 seed: 42
 model: "gp"
