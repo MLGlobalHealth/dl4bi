@@ -65,6 +65,7 @@ def deep_rv_train_step(
     return state.apply_gradients(grads=grads), loss
 
 
+@jit
 def elbo_train_step(rng: jax.Array, state: TrainState, batch: dict):
     """Standard VAE training step that uses an ELBO loss.
 
