@@ -2,23 +2,29 @@
 Model for malaria prevalence given pointwise observations.
 """
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
+import jax.scipy as jsp
 import numpyro
 import numpyro.distributions as dist
 from jax import jit, vmap
+
 from numpyro.handlers import seed, substitute
 from sps.kernels import rbf
 
 from dl4bi.core.model_output import DiagonalMVNOutput
 from dl4bi.core.train import TrainState
+from dl4bi.core.utils import breakpoint_if_nonfinite
 
 # TODO @pgrynfelder:
 # perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
 # and a non-0 mean?
 
+# note these are NOT batched
+mean = jit(lambda x, /, **params: jnp.zeros(x.shape[0]))
 kernel = jit(lambda x, y, /, **params: rbf(x, y, params["var"], params["ls"]))
-mean = jit(lambda x, /, **params: 0)
 jitter = 1e-4  # note this is in fact N(0, s2=jitter) noise
 
 
@@ -29,7 +35,7 @@ def spatial_effect(s: jax.Array, sample_shape: tuple[int, ...] = ()):
     L, D = s.shape
 
     ls = numpyro.sample("ls", dist.InverseGamma(3, 3))
-    var = numpyro.sample("var", dist.HalfNormal(1))
+    var = numpyro.sample("var", dist.HalfNormal(0.05))
     noise = numpyro.deterministic("noise", 0.0)
 
     m = mean(s)
@@ -52,14 +58,14 @@ def prevalence(y):
     return logit_theta
 
 
-def survey_model(s: jax.Array, np: jax.Array, n: jax.Array):
+def survey_model(s: jax.Array, n_pos: jax.Array, n: jax.Array):
     y = spatial_effect(s)
     logit_theta = prevalence(y)
 
     numpyro.sample(
-        "np",
+        "n_pos",
         dist.BinomialLogits(total_count=n, logits=logit_theta),
-        obs=np,
+        obs=n_pos,
     )
 
 
@@ -77,38 +83,6 @@ def render():
     )
 
 
-def conditional_gp(
-    s_c: jax.Array,  # [L_ctx, D]
-    y_c: jax.Array,  # [L_ctx]
-    s_t: jax.Array,  # [L_test, D]
-    **params,
-):
-    """
-    Get a conditional mean, covariance at s_t sample given an observed (context) sample.
-    """
-    print(s_c.shape, y_c.shape, s_t.shape)
-    for k, v in params.items():
-        print(k, v.shape)
-
-    L_ctx, D = s_c.shape
-    L_test, _ = s_t.shape
-
-    mean_c = mean(s_c, **params)
-    mean_t = mean(s_t, **params)
-
-    cov_cc = kernel(s_c, s_c, **params) + jitter * jnp.eye(L_ctx)
-    cov_ct = kernel(s_c, s_t, **params)
-    cov_tc = cov_ct.mT
-    cov_tt = kernel(s_t, s_t, **params) + jitter * jnp.eye(L_test)
-
-    L = jax.scipy.linalg.cho_factor(cov_cc)
-
-    m = mean_t + cov_tc @ jax.scipy.linalg.cho_solve(L, y_c - mean_c)
-    cov = cov_tt - cov_tc @ jax.scipy.linalg.cho_solve(L, cov_ct)
-
-    return m, cov
-
-
 @jit
 def sample_gp(
     rng,
@@ -117,13 +91,26 @@ def sample_gp(
     s_t: jax.Array,  # [B, L_test, D]
     **params,  # passes params to gp mean and kernel, each of dim [B, ...]
 ):
-    """Batched GP conditioning."""
-    mean, cov = vmap(conditional_gp)(s_c, y_c, s_t, **params)
+    """GP conditioning using Matheron's Rule."""
+    B, L_ctx, _ = s_c.shape
+    _, L_test, _ = s_t.shape
+    L = L_ctx + L_test
 
-    L = jnp.linalg.cholesky(cov)
-    z = jax.random.normal(rng, mean.shape)
+    s = jnp.concat([s_c, s_t], axis=1)
+    mu = vmap(mean)(s, **params)
+    cov = vmap(kernel)(s, s, **params) + jitter * jnp.eye(L)
 
-    return mean + jnp.einsum("bij,bj->bi", L, z)
+    L = jax.lax.linalg.cholesky(cov)
+    z = jax.random.normal(rng, shape=mu.shape)
+    y = mu + jnp.einsum("bij,bj->bi", L, z)
+
+    cov_cc = cov[:, :L_ctx, :L_ctx]
+    cov_tc = cov[:, L_ctx:, :L_ctx]
+
+    return y[:, L_ctx:] + (
+        cov_tc
+        @ jsp.linalg.solve(cov_cc, (y_c - y[:, :L_ctx])[..., None], assume_a="pos")
+    ).squeeze(-1)
 
 
 def get_np_sampler(
