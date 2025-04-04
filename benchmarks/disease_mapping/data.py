@@ -42,17 +42,17 @@ def get_grid(
     """Get locations grid for a country.
 
     Args:
-        iso: country code
+        country: country name
+        region: region name (optional)
         resolution: grid resolution in arc-seconds. 30 is ~1km at the equator. Defaults to 150.
         exclude_outer: whether to exclude points outside the country borders. Defaults to True.
-        sparse: whether to output
     Returns:
         N x 2 array of longitude, latitude pairs (in degrees).
     """
     # w, s, e, n
     cache_path = (
         Path(cache_dir)
-        / f"{country}_{region}_{res}{'_inner' if exclude_outer else ''}.npy"
+        / f"{country}{'_' + region if region else ''}_{res}{'_inner' if exclude_outer else ''}.npy"
     )
     if cache_path.exists():
         return np.load(cache_path)
