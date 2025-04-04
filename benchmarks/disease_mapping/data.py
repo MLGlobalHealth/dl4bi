@@ -17,20 +17,25 @@ ma = importr("malariaAtlas")
 
 DEG_TO_SEC = 3600
 
+pd.options.mode.copy_on_write = True
+
 
 def cartesian_product(*xs):
     n = len(xs)
     return np.stack(np.meshgrid(*xs), axis=-1).reshape(-1, n)
 
 
-def round_to_grid(x, res):
-    """Rounds to the nearest multiple of m."""
-    assert res > 0
-    k, rem = divmod(x, res)
-    if rem * 2 < res:
-        return k * res
-    else:
-        return (k + 1) * res
+def round_to_multiple(x, m):
+    """Rounds to the nearest multiple of `m`."""
+    assert m > 0
+    k, rem = divmod(x, m)
+
+    floor = k * m
+    return np.where(rem * 2 < m, floor, floor + m)
+
+
+def round_to_grid(degrees, res):
+    return round_to_multiple(degrees * DEG_TO_SEC, res) / DEG_TO_SEC
 
 
 def get_grid(
@@ -90,7 +95,11 @@ def get_grid(
 
 
 def get_survey_data(
-    country: str, year: int | None, month: int | None, force_redownload=False
+    country: str,
+    year: int | None = None,
+    month: int | None = None,
+    res: int | None = 150,  # if not None round to grid of given res in seconds
+    force_redownload=False,
 ):
     file: Path = Path(cache_dir) / dataset_id.replace("/", "_")
 
@@ -107,7 +116,7 @@ def get_survey_data(
 
     df = pd.read_csv(file, sep="\t")
 
-    # only include point surveys by default
+    # only include point surveys
     df = df.query("AREATYPE=='Point'")
     df = df.query("COUNTRY==@country")
 
@@ -121,7 +130,15 @@ def get_survey_data(
     print(f"Selected {len(df)} rows.")
     assert len(df) > 0, "Number of observations must be >0."
 
-    # s = coordinate_transform(df.Long, df.Lat)
+    if res is not None:
+        df.Long = round_to_grid(df.Long, res)
+        df.Lat = round_to_grid(df.Lat, res)
+        # merge surveys from points close-by into one
+        df = df.groupby(
+            ["Lat", "Long", "YY", "MM"],
+            as_index=False,
+        ).sum()
+
     s = np.stack([df.Long, df.Lat], axis=-1)
     print(f"Locations: shape {s.shape}, range [{s.min()}, {s.max()}]")
 
