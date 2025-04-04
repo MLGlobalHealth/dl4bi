@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
 
-from dl4bi.core.model_output import DiagonalMVNOutput, VAEOutput
+from dl4bi.core.model_output import VAEOutput
 
 
 class PriorCVAE(nn.Module):
