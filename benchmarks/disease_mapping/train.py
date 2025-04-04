@@ -65,7 +65,7 @@ def main(cfg: DictConfig):
 
 def build_dataloader(data: DictConfig):
     """
-    Generates samples from `model.spatial_process`.
+    Generates samples from `model.spatial_effect`.
     """
 
     B, L, D = data.batch_size, data.num_test + data.num_ctx.max, len(data.s)
