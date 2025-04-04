@@ -3,9 +3,8 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from pyDataverse.api import DataAccessApi
 import rpy2.robjects as ro
-from rpy2.robjects import StrVector
+from pyDataverse.api import DataAccessApi
 from rpy2.robjects.packages import importr
 from shapely import MultiPolygon, Polygon
 
