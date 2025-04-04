@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import optax
 from jax import jit, value_and_grad
 
-from dl4bi.core.model_output import VAEOutputs
+from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import TrainState
 
 
@@ -35,7 +35,7 @@ def generate_surrogate_decoder(state: TrainState, model: nn.Module):
 
 
 @partial(jax.jit, static_argnames=["var_idx"])
-def deep_RV_train_step(
+def deep_rv_train_step(
     rng: jax.Array,
     state: TrainState,
     batch: dict,
@@ -56,7 +56,7 @@ def deep_RV_train_step(
     def deep_rv_loss(params):
         f, conditionals = batch["f"], batch["conditionals"]
         var = conditionals[var_idx] if var_idx is not None else 1.0
-        output: VAEOutputs = state.apply_fn(
+        output: VAEOutput = state.apply_fn(
             {"params": params}, **batch, rngs={"extra": rng}
         )
         return (1 / var) * output.mse(f)
@@ -79,7 +79,7 @@ def elbo_train_step(rng: jax.Array, state: TrainState, batch: dict):
 
     def elbo_loss(params):
         f = batch["f"]
-        output: VAEOutputs = state.apply_fn(
+        output: VAEOutput = state.apply_fn(
             {"params": params}, **batch, rngs={"extra": rng}
         )
         kl_div = output.kl_normal_dist()
@@ -95,7 +95,7 @@ def prior_cvae_train_step(
     rng: jax.Array,
     state: TrainState,
     batch: dict,
-    mse_weight: float = 1 / (2 * 0.9),
+    mse_weight: float = 1 / 1.8,
 ):
     """The original PriorCVAE paper's train step.
     mse_weight * mse_loss + kl_divergence.
@@ -113,7 +113,7 @@ def prior_cvae_train_step(
 
     def prior_cvae_loss(params):
         f = batch["f"]
-        output: VAEOutputs = state.apply_fn(
+        output: VAEOutput = state.apply_fn(
             {"params": params}, **batch, rngs={"extra": rng}
         )
         kl_div = output.kl_normal_dist()

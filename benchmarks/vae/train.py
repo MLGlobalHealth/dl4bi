@@ -16,10 +16,10 @@ from utils.obj_utils import build_model, generate_model_name, instantiate
 from utils.plot_utils import log_vae_grid_plots, log_vae_map_plots
 
 import wandb
-from dl4bi.core.model_output import VAEOutputs
+from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import Callback, cosine_annealing_lr, evaluate, save_ckpt, train
 from dl4bi.vae.train_utils import (
-    deep_RV_train_step,
+    deep_rv_train_step,
     elbo_train_step,
     prior_cvae_train_step,
 )
@@ -44,7 +44,7 @@ def main(cfg: DictConfig):
     optimizer = get_optimizer(cfg)
     spatial_prior = instantiate(cfg.inference_model.spatial_prior)
     # NOTE: large_batch_loader is used to compare the decoder distribution with true data
-    loader_gen, cond_names = build_spatial_dataloaders(cfg, map_data, s, spatial_prior)
+    loader, cond_names = build_spatial_dataloaders(cfg, map_data, s, spatial_prior)
     valid_step = gen_valid_step(cfg.model, cond_names)
     decoder_only = cfg.model.cls == "DeepRV"
     z_dim = s.shape[0] if decoder_only else model.z_dim
@@ -55,11 +55,11 @@ def main(cfg: DictConfig):
         optimizer,
         gen_train_step(cfg.model, cond_names),
         cfg.train_num_steps,
-        loader_gen,
+        loader,
         valid_step,
         cfg.valid_interval,
         cfg.valid_num_steps,
-        loader_gen,
+        loader,
         valid_monitor_metric="loss",
         callbacks=[
             Callback(
@@ -68,8 +68,8 @@ def main(cfg: DictConfig):
                     s,
                     cond_names,
                     z_dim,
-                    loader_gen(rng_plot),
-                    loader_gen(rng_lb, cfg.data.large_batch_size),
+                    loader(rng_plot),
+                    loader(rng_lb, cfg.data.large_batch_size),
                     cfg.data,
                     model,
                 ),
@@ -77,7 +77,7 @@ def main(cfg: DictConfig):
             )
         ],
     )
-    log_run(evaluate(rng_test, state, valid_step, loader_gen, cfg.valid_num_steps))
+    log_run(evaluate(rng_test, state, valid_step, loader, cfg.valid_num_steps))
     results_path = Path(
         f"results/{cfg.exp_name}/{spatial_prior.__name__}/{cfg.seed}/{model_name}"
     )
@@ -136,7 +136,7 @@ def gen_train_step(model_cfg: DictConfig, cond_names: list[str]):
     var_idx = None if "var" not in cond_names else cond_names.index("var")
     train_step = elbo_train_step
     if model_cfg.cls == "DeepRV":
-        train_step = partial(deep_RV_train_step, var_idx=var_idx)
+        train_step = partial(deep_rv_train_step, var_idx=var_idx)
     elif model_cfg.cls == "PriorCVAE":
         train_step = prior_cvae_train_step
     return train_step
@@ -151,7 +151,7 @@ def gen_valid_step(model_cfg: DictConfig, cond_names: list[str]):
     def valid_step(rng, state, batch):
         f, conditionals = batch["f"], batch["conditionals"]
         var = 1.0 if var_idx is None else conditionals[var_idx].squeeze()
-        output: VAEOutputs = state.apply_fn(
+        output: VAEOutput = state.apply_fn(
             {"params": state.params, **state.kwargs}, **batch, rngs={"extra": rng}
         )
         metrics = output.metrics(f, var)
@@ -159,7 +159,7 @@ def gen_valid_step(model_cfg: DictConfig, cond_names: list[str]):
         # NOTE: kl will be zero for decoder only networks
         kl_div = output.kl_normal_dist()
         if model_name == "PriorCVAE":
-            loss = (1 / (2 * 0.9)) * metrics["MSE"] + kl_div
+            loss = (1 / 1.8) * metrics["MSE"] + kl_div
         elif model_name == "DeepRV":
             loss = norm_mse
         else:

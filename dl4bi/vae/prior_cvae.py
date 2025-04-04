@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
 
-from dl4bi.core.model_output import DiagonalMVNOutput, VAEOutputs
+from dl4bi.core.model_output import DiagonalMVNOutput, VAEOutput
 
 
 class PriorCVAE(nn.Module):
@@ -53,7 +53,7 @@ class PriorCVAE(nn.Module):
         eps = random.normal(self.make_rng("extra"), z_std.shape)
         z = z_mu + z_std * eps
         f_hat = self.decoder(self.cond_stack_fn(z, conditionals), **kwargs)
-        return VAEOutputs(f_hat.reshape(f.shape), DiagonalMVNOutput(z_mu, z_std))
+        return VAEOutput.from_raw_output(f_hat.reshape(f.shape), z_mu, z_std)
 
     def decode(self, z: Array, conditionals: Array, **kwargs):
         return self.decoder(self.cond_stack_fn(z, conditionals), **kwargs)

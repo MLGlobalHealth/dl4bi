@@ -17,7 +17,7 @@ from numpyro.infer import MCMC
 from omegaconf import DictConfig
 
 import wandb
-from dl4bi.core.model_output import VAEOutputs
+from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import TrainState
 from dl4bi.vae.train_utils import generate_surrogate_decoder
 from utils.map_utils import get_norm_vars
@@ -527,7 +527,7 @@ def plot_vae_reconstruction(
         rng_drop, rng_extra, rng = jax.random.split(rng, 3)
         batch = next(loader)
         f, conditionals = batch["f"], batch["conditionals"]
-        output: VAEOutputs = state.apply_fn(
+        output: VAEOutput = state.apply_fn(
             {"params": state.params, **state.kwargs},
             **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
@@ -752,7 +752,7 @@ def log_vae_map_plots(
     def log_plots(step: int, rng_step: int, state: TrainState, batch: dict, extra):
         rng_drop, rng_extra, rng_dec, rng_dist, rng_rcn = jax.random.split(rng_step, 5)
         f, conditionals = batch["f"], batch["conditionals"]
-        output: VAEOutputs = state.apply_fn(
+        output: VAEOutput = state.apply_fn(
             {"params": state.params, **state.kwargs},
             **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
@@ -861,7 +861,7 @@ def plot_vae_rec_1d(
         rng_drop, rng_extra, rng = jax.random.split(rng, 3)
         batch = next(loader)
         f, conditionals = batch["f"], batch["conditionals"]
-        output: VAEOutputs = state.apply_fn(
+        output: VAEOutput = state.apply_fn(
             {"params": state.params, **state.kwargs},
             **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
@@ -935,7 +935,7 @@ def log_vae_grid_plots(
     def log_plots(step: int, rng_step: int, state: TrainState, batch: dict, extra):
         rng_drop, rng_extra, rng_dec, rng_dist, rng_rcn = jax.random.split(rng_step, 5)
         f, conditionals = batch["f"], batch["conditionals"]
-        output: VAEOutputs = state.apply_fn(
+        output: VAEOutput = state.apply_fn(
             {"params": state.params, **state.kwargs},
             **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
@@ -1018,7 +1018,7 @@ def plot_vae_rec_2d(
         rng_drop, rng_extra, rng = jax.random.split(rng, 3)
         batch = next(loader)
         f, conditionals = batch["f"], batch["conditionals"]
-        output: VAEOutputs = state.apply_fn(
+        output: VAEOutput = state.apply_fn(
             {"params": state.params, **state.kwargs},
             **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},

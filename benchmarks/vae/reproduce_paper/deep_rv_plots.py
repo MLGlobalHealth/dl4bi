@@ -1,7 +1,5 @@
 import sys
 
-from dl4bi.core.model_output import VAEOutputs
-
 sys.path.append("benchmarks/vae")
 import argparse
 import pickle
@@ -30,6 +28,7 @@ from utils.plot_utils import (
     plot_vae_scatter_plot,
 )
 
+from dl4bi.core.model_output import VAEOutput
 from dl4bi.vae.train_utils import TrainState
 
 
@@ -141,7 +140,7 @@ def plot_vae_scatter_comp(
     rng_drop, rng_extra, rng = jax.random.split(rng, 3)
     batch = next(loader)
     f = batch["f"]
-    output: VAEOutputs = state.apply_fn(
+    output: VAEOutput = state.apply_fn(
         {"params": state.params, **state.kwargs},
         **batch,
         rngs={"dropout": rng_drop, "extra": rng_extra},
