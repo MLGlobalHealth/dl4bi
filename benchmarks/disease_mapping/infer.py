@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from numpyro.infer import MCMC, NUTS, init_to_median
 from omegaconf import DictConfig
 
-from benchmarks.disease_mapping.data import get_survey_data
+from benchmarks.disease_mapping.data import get_survey_data, get_grid
 from benchmarks.disease_mapping.model import (
     get_np_sampler,
     sample_gp,
@@ -64,14 +64,13 @@ def predict(rng, model: str, s_c, s_t, params, batch_size):
         # Sample theta_t | s_t, (s, np, n)_c
         logit_theta_t = sample_prevalence(rng_theta_t, y_t, **params)
 
-        return logit_theta_t
+        return jax.nn.sigmoid(logit_theta_t)
 
-    logit_theta_t = jax.lax.map(
+    theta_t = jax.lax.map(
         predict_batch,
         (jax.random.split(rng, num_iters), y_c, params),
     )
-    logit_theta_t = unbatch(logit_theta_t)
-    return logit_theta_t
+    return unbatch(theta_t)
 
 
 @hydra.main("configs", "inference", None)
@@ -96,10 +95,14 @@ def main(cfg: DictConfig):
     params = mcmc.get_samples()
 
     rng = jax.random.key(cfg.seed)
-    # TODO: choose different s_t
-    results = predict(rng, cfg.model, s, s, params, cfg.batch_size)
-    print(results)
+
+    s_t = get_grid("MOZ", "Zambezia")
+    print(s_t.shape)
+    results = predict(rng, cfg.model, s, s_t, params, cfg.batch_size)
+
+    summary = jnp.stack([results.mean(axis=0), results.std(axis=0)], axis=1)
     print(results.shape)
+    print(summary)
 
 
 if __name__ == "__main__":
