@@ -10,13 +10,11 @@ import jax.scipy as jsp
 import numpyro
 import numpyro.distributions as dist
 from jax import jit, vmap
-
 from numpyro.handlers import seed, substitute
 from sps.kernels import rbf
 
 from dl4bi.core.model_output import DiagonalMVNOutput
 from dl4bi.core.train import TrainState
-from dl4bi.core.utils import breakpoint_if_nonfinite
 
 # TODO @pgrynfelder:
 # perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
@@ -91,7 +89,7 @@ def sample_gp(
     s_t: jax.Array,  # [B, L_test, D]
     **params,  # passes params to gp mean and kernel, each of dim [B, ...]
 ):
-    """GP conditioning using Matheron's Rule."""
+    """GP conditional sampling using Matheron's Rule."""
     B, L_ctx, _ = s_c.shape
     _, L_test, _ = s_t.shape
     L = L_ctx + L_test
