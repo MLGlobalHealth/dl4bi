@@ -20,3 +20,4 @@ benchmarks/vae/maps
 .env
 data
 tmp
+.DS_Store
