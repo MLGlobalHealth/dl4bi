@@ -175,7 +175,7 @@ def get_survey_data(
     if month is not None:
         df = df.query("MM==@month")
     print(f"Selected {len(df)} rows.")
-    assert len(df) > 0, "Number of observations must be >0."
+    assert len(df) > 0, "Number of surveys selected must be >0."
 
     if res is not None:
         df.Long = round_to_grid(df.Long, res)
