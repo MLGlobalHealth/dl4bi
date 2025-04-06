@@ -1,4 +1,5 @@
 from itertools import chain
+from operator import mul
 from os import environ
 from pathlib import Path
 
@@ -34,6 +35,32 @@ def round_to_multiple(x, m):
 
 def round_to_grid(degrees, res):
     return round_to_multiple(degrees * DEG_TO_SEC, res) / DEG_TO_SEC
+
+
+def multipolygon_r2py(geometry):
+    geometry = chain.from_iterable(geometry)  # flatten
+    geometry = map(np.array, geometry)
+    geometry = map(Polygon, geometry)
+
+    shape = MultiPolygon(geometry)
+    return shape
+
+
+def get_shape2(iso: str, region: str | None = None):
+    from rpy2.robjects.packages import importr
+
+    ma = importr("malariaAtlas")
+
+    NUM_COLS = 17
+
+    data = ma.getShp(ISO=iso, admin_level=["admin0", "admin1"])
+
+    data = np.array(list(data), dtype=object).reshape(NUM_COLS, -1)
+    data[16] = [multipolygon_r2py(x) for x in data[16]]
+
+    df = pd.DataFrame(data.T)
+
+    return df
 
 
 def get_shape(iso: str, region: str | None = None) -> MultiPolygon:
