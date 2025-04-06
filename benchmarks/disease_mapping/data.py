@@ -14,7 +14,6 @@ from rpy2.rinterface_lib.sexp import (
     NALogicalType,
     NARealType,
 )
-from rpy2.robjects.packages import importr
 from shapely import MultiPolygon, Polygon, from_geojson, to_geojson
 
 R_NA_VALUES = (NACharacterType, NAComplexType, NAIntegerType, NALogicalType, NARealType)
@@ -85,6 +84,8 @@ def get_shape(iso: str, region: str | None = None):
     if cache_path.exists():
         df = gpd.read_feather(cache_path)
     else:
+        from rpy2.robjects.packages import importr
+
         df = r_to_gpd(
             importr("malariaAtlas").getShp(ISO=iso, admin_level=["admin0", "admin1"])
         )
@@ -151,6 +152,7 @@ def get_survey_data(
     file: Path = CACHE_DIR / (dataset_id.replace("/", "_") + ".csv")
 
     if file.exists() and force_redownload is False:
+        print("Reading survey data from cache.")
         pass
     else:
         data_api = DataAccessApi(base_url)
