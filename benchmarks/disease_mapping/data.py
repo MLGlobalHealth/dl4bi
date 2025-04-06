@@ -1,13 +1,24 @@
 from itertools import chain
-from operator import mul
 from os import environ
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import rpy2.robjects as ro
 from pyDataverse.api import DataAccessApi
+from rpy2.rinterface_lib.sexp import (
+    NACharacterType,
+    NAComplexType,
+    NAIntegerType,
+    NALogicalType,
+    NARealType,
+)
+from rpy2.robjects.packages import importr
 from shapely import MultiPolygon, Polygon, from_geojson, to_geojson
+
+R_NA_VALUES = (NACharacterType, NAComplexType, NAIntegerType, NALogicalType, NARealType)
+
 
 base_url = "https://dataverse.harvard.edu/"
 dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
@@ -46,52 +57,50 @@ def multipolygon_r2py(geometry):
     return shape
 
 
-def get_shape2(iso: str, region: str | None = None):
-    from rpy2.robjects.packages import importr
+def r_to_gpd(rdf):
+    df = gpd.GeoDataFrame()
 
-    ma = importr("malariaAtlas")
+    with ro.default_converter.context():
+        convert = ro.conversion.get_conversion().rpy2py
+        for c in rdf.colnames:
+            match c:
+                case "geometry":
+                    geometry = rdf.rx2(c)
+                    geometry = [multipolygon_r2py(x) for x in geometry]
+                    df[c] = geometry
+                    df.set_geometry(c)
+                case _:
+                    series = rdf.rx2(c)
+                    series = [
+                        (pd.NA if isinstance(x, R_NA_VALUES) else convert(x))
+                        for x in series
+                    ]
+                    df[c] = series
+    return df.convert_dtypes()
 
-    NUM_COLS = 17
 
-    data = ma.getShp(ISO=iso, admin_level=["admin0", "admin1"])
-
-    data = np.array(list(data), dtype=object).reshape(NUM_COLS, -1)
-    data[16] = [multipolygon_r2py(x) for x in data[16]]
-
-    df = pd.DataFrame(data.T)
-
-    return df
-
-
-def get_shape(iso: str, region: str | None = None) -> MultiPolygon:
-    cache_path = iso + ("_" + region if region else "") + ".json"
-    cache_path = CACHE_DIR / cache_path
+def get_shape(iso: str, region: str | None = None):
+    cache_path = CACHE_DIR / f"{iso}.feather"
 
     if cache_path.exists():
-        print(f"Reading shape from cache: {cache_path}.")
-        return from_geojson(cache_path.read_text())
-
+        df = gpd.read_feather(cache_path)
     else:
-        import rpy2.robjects as ro
-        from rpy2.robjects.packages import importr
+        df = r_to_gpd(
+            importr("malariaAtlas").getShp(ISO=iso, admin_level=["admin0", "admin1"])
+        )
+        df.to_feather(cache_path)
 
-        ma = importr("malariaAtlas")
-        if region is None:
-            shapes = ma.getShp(ISO=iso)
+    if region is not None:
+        region_df = df.query("name_1==@region")
+        if region_df.empty:
+            available_regions = sorted(df["name_1"].dropna().unique())
+            raise ValueError(
+                f"Region not found. \nAvailiable regions: {available_regions}."
+            )
         else:
-            shapes = ma.getShp(ISO=iso, admin_level="admin1")
-            ro.r.assign("df", shapes)
-            shapes = ro.r(f"subset(df, name_1=='{region}')")
+            df = region_df
 
-        polygons = shapes.rx2("geometry")[0]
-        polygons = chain.from_iterable(polygons)  # flatten
-        polygons = map(np.array, polygons)
-        polygons = map(Polygon, polygons)
-
-        shape = MultiPolygon(polygons)
-        cache_path.write_text(to_geojson(shape))
-
-        return shape
+    return df["geometry"].iloc[0]
 
 
 def get_grid(
