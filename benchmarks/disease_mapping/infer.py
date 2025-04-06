@@ -100,6 +100,8 @@ def main(cfg: DictConfig):
     print(s_t.shape)
     results = predict(rng, cfg.model, s, s_t, params, cfg.batch_size)
 
+    jnp.save("results.npy", results)
+
     summary = jnp.stack([results.mean(axis=0), results.std(axis=0)], axis=1)
     print(results.shape)
     print(summary)
