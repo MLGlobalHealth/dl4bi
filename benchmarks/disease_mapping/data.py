@@ -5,19 +5,8 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import rpy2.robjects as ro
 from pyDataverse.api import DataAccessApi
-from rpy2.rinterface_lib.sexp import (
-    NACharacterType,
-    NAComplexType,
-    NAIntegerType,
-    NALogicalType,
-    NARealType,
-)
 from shapely import MultiPolygon, Polygon, from_geojson, to_geojson
-
-R_NA_VALUES = (NACharacterType, NAComplexType, NAIntegerType, NALogicalType, NARealType)
-
 
 base_url = "https://dataverse.harvard.edu/"
 dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
@@ -57,6 +46,23 @@ def multipolygon_r2py(geometry):
 
 
 def r_to_gpd(rdf):
+    import rpy2.robjects as ro
+    from rpy2.rinterface_lib.sexp import (
+        NACharacterType,
+        NAComplexType,
+        NAIntegerType,
+        NALogicalType,
+        NARealType,
+    )
+
+    NA = (
+        NACharacterType,
+        NAComplexType,
+        NAIntegerType,
+        NALogicalType,
+        NARealType,
+    )
+
     df = gpd.GeoDataFrame()
 
     with ro.default_converter.context():
@@ -71,10 +77,10 @@ def r_to_gpd(rdf):
                 case _:
                     series = rdf.rx2(c)
                     series = [
-                        (pd.NA if isinstance(x, R_NA_VALUES) else convert(x))
-                        for x in series
+                        (pd.NA if isinstance(x, NA) else convert(x)) for x in series
                     ]
                     df[c] = series
+
     return df.convert_dtypes()
 
 
