@@ -13,8 +13,8 @@ velocity_prior:
   _target_: sps.priors.Prior
   dist: uniform
   kwargs:
-    minval: 1.0
-    maxval: 2.0
+    minval: 2.0
+    maxval: 5.0
 num_t: 5
 random_t: False
 num_ctx_per_t:
