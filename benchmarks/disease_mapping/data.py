@@ -1,3 +1,4 @@
+from itertools import chain
 from os import environ
 from pathlib import Path
 
@@ -5,7 +6,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from pyDataverse.api import DataAccessApi
-from shapely import MultiPolygon, Polygon
+from shapely import MultiPolygon, Polygon, from_geojson, to_geojson
 
 base_url = "https://dataverse.harvard.edu/"
 dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
@@ -35,11 +36,42 @@ def round_to_grid(degrees, res):
     return round_to_multiple(degrees * DEG_TO_SEC, res) / DEG_TO_SEC
 
 
+def get_shape(iso: str, region: str | None = None) -> MultiPolygon:
+    cache_path = iso + ("_" + region if region else "") + ".json"
+    cache_path = CACHE_DIR / cache_path
+
+    if cache_path.exists():
+        print(f"Reading shape from cache: {cache_path}.")
+        return from_geojson(cache_path.read_text())
+
+    else:
+        import rpy2.robjects as ro
+        from rpy2.robjects.packages import importr
+
+        ma = importr("malariaAtlas")
+        if region is None:
+            shapes = ma.getShp(ISO=iso)
+        else:
+            shapes = ma.getShp(ISO=iso, admin_level="admin1")
+            ro.r.assign("df", shapes)
+            shapes = ro.r(f"subset(df, name_1=='{region}')")
+
+        polygons = shapes.rx2("geometry")[0]
+        polygons = chain.from_iterable(polygons)  # flatten
+        polygons = map(np.array, polygons)
+        polygons = map(Polygon, polygons)
+
+        shape = MultiPolygon(polygons)
+        cache_path.write_text(to_geojson(shape))
+
+        return shape
+
+
 def get_grid(
     iso: str,
     region: str | None = None,
     res: int = 150,
-    exclude_outer: bool = True,
+    clip: bool = True,
 ):
     """Get locations grid for a country.
 
@@ -47,53 +79,29 @@ def get_grid(
         iso: iso country code
         region: region name (optional)
         resolution: grid resolution in arc-seconds. 30 is ~1km at the equator. Defaults to 150.
-        exclude_outer: whether to exclude points outside the country borders. Defaults to True.
+        clip: whether to clip the grid to within the country borders. Defaults to True.
     Returns:
         N x 2 array of longitude, latitude pairs (in degrees).
     """
     # w, s, e, n
-    cache_path = (
-        CACHE_DIR
-        / f"{iso}{'_' + region if region else ''}_{res}{'_inner' if exclude_outer else ''}.npy"
-    )
-    if cache_path.exists():
-        return np.load(cache_path)
-    else:
-        # loading from malariaAtlas, lazy load R bindings
-        import rpy2.robjects as ro
-        from rpy2.robjects.packages import importr
 
-        ma = importr("malariaAtlas")
+    shape = get_shape(iso, region)
 
-    if region is None:
-        df = ma.getShp(ISO=iso)
-    else:
-        df = ma.getShp(ISO=iso, admin_level="admin1")
-        ro.r.assign("df", df)
-        df = ro.r(f"subset(df, name_1=='{region}')")
-    bbox = np.array(ma.getSpBbox(df))
-
+    bbox = np.array(shape.bounds)
     bbox *= DEG_TO_SEC
-    w, s = bbox[:, 0] // res  # round down
-    e, n = -((-bbox[:, 1]) // res)  # round up
+    w, s = bbox[:2] // res  # round down
+    e, n = -((-bbox[2:]) // res)  # round up
 
     longs = np.arange(w, e) * res / DEG_TO_SEC
     lats = np.arange(s, n) * res / DEG_TO_SEC
 
     points = cartesian_product(longs, lats)
-    if not exclude_outer:
-        np.save(cache_path, points)
-        return points
 
-    polygons = [np.array(x).squeeze(0) for x in df.rx2("geometry")[0]]
-    polygons = [Polygon(x) for x in polygons]
-    multipolygon = MultiPolygon(polygons)
+    if clip:
+        df = gpd.GeoDataFrame(geometry=gpd.points_from_xy(*points.T))
+        df = df.clip(shape)
+        points = np.stack((df.geometry.x, df.geometry.y), axis=-1)
 
-    df = gpd.GeoDataFrame(geometry=gpd.points_from_xy(*points.T))
-    df = df.clip(multipolygon)
-
-    points = np.stack((df.geometry.x, df.geometry.y), axis=-1)
-    np.save(cache_path, points)
     return points
 
 
