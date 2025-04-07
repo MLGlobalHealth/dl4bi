@@ -11,7 +11,7 @@ import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import optax
-from jax import random
+from jax import Array, random
 from numpyro.handlers import seed
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig, OmegaConf
@@ -68,7 +68,14 @@ def main(cfg: DictConfig):
             **conds,
         }
     )
-    results_dir = get_results_dir(cfg, model_dir, obs_idxs, s, model_name)
+    results_dir = get_results_dir(
+        cfg.inference_model.model.func,
+        model_dir,
+        obs_idxs,
+        s,
+        model_name,
+        cfg.inference_model.surrogate_model,
+    )
     results_dir.mkdir(parents=True, exist_ok=True)
     log_inference_run((samples, mcmc, post), conds, results_dir)
     plot_inference_run(
@@ -84,11 +91,11 @@ def main(cfg: DictConfig):
 
 
 def _hmc(
-    rng: jax.Array,
+    rng: Array,
     mcmc_cfg: DictConfig,
     model: Callable,
-    f_obs: jax.Array,
-    obs_mask: Union[bool, jax.Array],
+    f_obs: Array,
+    obs_mask: Union[bool, Array],
     surrogate_decoder: Optional[Callable],
 ):
     """runs HMC on given inference model and observed f"""
@@ -103,7 +110,7 @@ def _hmc(
 
 
 def gen_obs_data(
-    rng: jax.Array,
+    rng: Array,
     sim_model: Callable,
     map_data: Optional[gpd.GeoDataFrame],
     cond_names: list[str],
@@ -113,13 +120,13 @@ def gen_obs_data(
     Otherwise wraps GP or graph based models with an simulation model.
 
     Args:
-        rng (jax.Array)
+        rng (Array)
         sim_model (Callable): simulation model to generate data
         map_data (gpd.GeoDataFrame): original geopandas
         cond_names (list[str]): names (and order) of conditionals
 
     Returns:
-        the inference dataloader
+        the observed data, spatial effects, conditional name to values dict
     """
     spatial_eff, conditionals = None, [None] * len(cond_names)
     if map_data is not None and "data" in map_data.columns:
@@ -132,8 +139,8 @@ def gen_obs_data(
 
 
 def log_inference_run(
-    hmc_res: tuple[dict, MCMC, dict],
-    surrogate_conds: dict,
+    hmc_res: tuple[dict, Optional[MCMC], dict],
+    conds: dict,
     results_dir: Path,
 ):
     samples, mcmc, post = hmc_res
@@ -141,25 +148,26 @@ def log_inference_run(
         pickle.dump(samples, out_file)
     with open(results_dir / "hmc_pp.pkl", "wb") as out_file:
         pickle.dump(post, out_file)
-    with open(results_dir / "hmc_summary.txt", "w") as out_file:
-        out_file.write(capture_print_summary(mcmc))
-    with open(results_dir / "mcmc.pkl", "wb") as out_file:
-        pickle.dump(az.from_numpyro(mcmc), out_file)
-    metrics = log_inference_metrics(hmc_res, surrogate_conds)
+    if mcmc is not None:
+        with open(results_dir / "hmc_summary.txt", "w") as out_file:
+            out_file.write(capture_print_summary(mcmc))
+        with open(results_dir / "mcmc.pkl", "wb") as out_file:
+            pickle.dump(az.from_numpyro(mcmc), out_file)
+    metrics = log_inference_metrics(hmc_res, conds)
     with open(results_dir / "hmc_metrics.pkl", "wb") as out_file:
         pickle.dump(metrics, out_file)
 
 
-def log_inference_metrics(hmc_res: tuple[dict, MCMC, dict], surrogate_conds: dict):
+def log_inference_metrics(hmc_res: tuple[dict, Optional[MCMC], dict], conds: dict):
     samples, _, post = hmc_res
     metrics = {
         f"Real {name}": (val.squeeze().item() if val is not None else val)
-        for name, val in surrogate_conds.items()
+        for name, val in conds.items()
     }
     metrics.update(
         {
             f"Inferred {name}": samples[name].mean(axis=0).squeeze().item()
-            for name in surrogate_conds
+            for name in conds
             if name in samples
         }
     )
@@ -193,19 +201,19 @@ def capture_print_summary(mcmc):
     return output
 
 
-def generate_obs_mask(rng: jax.Array, f_obs: jax.Array, infer_cfg: DictConfig):
+def generate_obs_mask(rng: Array, f_obs: Array, infer_cfg: DictConfig):
     """Creates a mask which indicates to the inference model which locations to
     observe. If 'none's are present in the 'data' column they become unobserved,
     if 'num_obs_locations' argument is used then a subset of all the valid locations
     are randmoly chosen to be observed.
 
     Args:
-        rng (jax.Array)
-        f_obs (jax.Array): The sample to infer from
+        rng (Array)
+        f_obs (Array): The sample to infer from
         infer_cfg (DictConfig): configuration for inference
 
     Returns:
-        (Union[jax.Array, bool], jax.Array): boolean observe mask and
+        (Union[Array, bool], Array): boolean observe mask and
             indices of the observed locations
     """
     obs_idxs, obs_mask = jnp.arange(f_obs.shape[0]), True
@@ -222,14 +230,9 @@ def generate_obs_mask(rng: jax.Array, f_obs: jax.Array, infer_cfg: DictConfig):
 
 def init_priors(cfg: DictConfig):
     """inits the priors for inference and validates them"""
-    priors = {}
-    for pr, pr_dist in cfg.inference_model.priors.items():
-        if pr_dist.numpyro_dist == "Delta":
-            raise ValueError(
-                "Cannot use the Delta distribution within the inference model, "
-                f"please change the distribution of {pr}"
-            )
-        priors[pr] = instantiate(pr_dist)
+    priors = {
+        pr: instantiate(pr_dist) for pr, pr_dist in cfg.inference_model.priors.items()
+    }
     simulation_priors = priors.copy()
     # NOTE: Used to generate simulation data with specific values for experiments, could be partial
     # and is completed by priors' information
@@ -241,7 +244,7 @@ def init_priors(cfg: DictConfig):
 
 def gen_inference_model(
     cfg: DictConfig,
-    s: jax.Array,
+    s: Array,
     map_data: gpd.GeoDataFrame,
     priors: Dict[str, dist.Distribution],
     surrogate_kwargs: dict = {},
@@ -273,10 +276,16 @@ def load_ckpt(path: Union[str, Path]):
     return state, model
 
 
-def get_results_dir(cfg, model_dir, obs_idxs, s, model_name):
+def get_results_dir(
+    infer_likelihood: str,
+    model_dir: Path,
+    obs_idxs: Array,
+    s: Array,
+    model_name: str,
+    approx_infer: bool,
+):
     results_dir = model_dir / (
-        f"{model_name if cfg.inference_model.surrogate_model else 'Baseline_GP'}/"
-        f"{cfg.inference_model.model.func}/"
+        f"{model_name if approx_infer else 'Baseline_GP'}/{infer_likelihood}/"
     )
     if len(obs_idxs) < s.shape[0]:
         results_dir = results_dir / f"partial_obs_{len(obs_idxs)}"

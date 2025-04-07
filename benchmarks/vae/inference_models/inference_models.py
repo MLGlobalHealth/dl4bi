@@ -237,7 +237,7 @@ def car_model(
 
 
 def iid_locations(priors, n, surrogate_decoder=None, surrogate_kwargs={}):
-    var = numpyro.sample("var", priors["var"], sample_shape=())
+    var = numpyro.sample("var", priors["var"], sample_shape=()).squeeze()
     conditionals = jnp.array([var])
     z = numpyro.sample("z", dist.Normal(), sample_shape=(n,))
     if surrogate_decoder is not None:

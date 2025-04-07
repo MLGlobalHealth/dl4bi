@@ -404,9 +404,9 @@ def plot_inference_run(
     rng: jax.Array,
     cfg: DictConfig,
     model_name: str,
-    hmc_res: tuple[dict, MCMC, dict],
+    hmc_res: tuple[dict, Optional[MCMC], dict],
     f_obs: jax.Array,
-    surrogate_conds: dict,
+    conds: dict,
     priors: dict,
     map_data: Optional[gpd.GeoDataFrame],
 ):
@@ -423,15 +423,16 @@ def plot_inference_run(
         plot_infer_2d_grid_summary(post, x_dim, y_dim, log=log_scale_plots)
     # NOTE: in case the chains\samples are very tightly batch (not converged) the plotting will fail
     try:
-        plot_infer_trace(samples, mcmc, surrogate_conds)
-        plot_histograms([samples], surrogate_conds, priors, [model_name])
+        if mcmc is not None:
+            plot_infer_trace(samples, mcmc, conds)
+        plot_histograms([samples], conds, priors, [model_name])
     except ValueError:
         pass
     plot_vae_scatter_plot(
         f_obs[None, ...],
         post["obs"].mean(axis=0)[None, ..., None],
-        [it for _, it in surrogate_conds.items()],
-        list(surrogate_conds.keys()),
+        [it for _, it in conds.items()],
+        list(conds.keys()),
         num_samples=1,
     )
     if inference_model.model.func not in ["poisson", "binomial"]:
