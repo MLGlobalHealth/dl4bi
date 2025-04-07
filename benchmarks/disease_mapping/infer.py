@@ -17,10 +17,11 @@ from benchmarks.disease_mapping.model import (
     survey_model,
 )
 from benchmarks.disease_mapping.utils import batch, unbatch
+from benchmarks.disease_mapping.visualize import plot
 from dl4bi.core.train import load_ckpt
 
 
-def infer(cfg: DictConfig, data: tuple[jax.Array, ...]) -> MCMC:
+def run_mcmc(cfg: DictConfig, data: tuple[jax.Array, ...]) -> MCMC:
     sampler = NUTS(survey_model, init_strategy=init_to_median())
     mcmc = MCMC(
         sampler,
@@ -29,6 +30,7 @@ def infer(cfg: DictConfig, data: tuple[jax.Array, ...]) -> MCMC:
         num_chains=cfg.num_chains,
         chain_method=jax.vmap if cfg.chain_method == "vmap" else cfg.chain_method,
         progress_bar=cfg.progress_bar,
+        thinning=cfg.thinning,
         # jit_model_args=True,
     )
     rng = jax.random.key(cfg.seed)
@@ -37,14 +39,19 @@ def infer(cfg: DictConfig, data: tuple[jax.Array, ...]) -> MCMC:
     return mcmc
 
 
-def predict(rng, model: str, s_c, s_t, params, batch_size):
+def predict(cfg: DictConfig, s_c, samples):
     """
     Transforms samples $y_c (+params) | (s, np, n)_c$ into $y_t | s_t, (s, np, n)_c$.
     """
+    rng = jax.random.key(cfg.seed)
+    model = cfg.model
+    batch_size = cfg.batch_size
+    s_t = get_grid(cfg.iso, cfg.region)
+
     s_c = jnp.repeat(s_c[None], batch_size, axis=0)
     s_t = jnp.repeat(s_t[None], batch_size, axis=0)
-    params = {k: batch(v, batch_size) for k, v in params.items()}
-    y_c = params.pop("y")
+    samples = {k: batch(v, batch_size) for k, v in samples.items()}
+    y_c = samples.pop("y")
     num_iters = y_c.shape[0]
 
     if model.lower() == "gp":
@@ -68,9 +75,9 @@ def predict(rng, model: str, s_c, s_t, params, batch_size):
 
     theta_t = jax.lax.map(
         predict_batch,
-        (jax.random.split(rng, num_iters), y_c, params),
+        (jax.random.split(rng, num_iters), y_c, samples),
     )
-    return unbatch(theta_t)
+    return s_t[0], unbatch(theta_t)
 
 
 @hydra.main("configs", "inference", None)
@@ -82,29 +89,28 @@ def main(cfg: DictConfig):
     s, n_pos, n = get_survey_data(**cfg.data)
 
     mcmc_file = cache_dir / "mcmc.pickle"
-    if mcmc_file.exists():
+    if False and mcmc_file.exists():
         mcmc = pickle.loads(mcmc_file.read_bytes())
     else:
-        mcmc = infer(cfg.mcmc, (s, n_pos, n))
+        mcmc = run_mcmc(cfg.mcmc, (s, n_pos, n))
         with open(mcmc_file, "wb") as f:
             pickle.dump(mcmc, f)
 
     inference_data = az.from_numpyro(mcmc)
     print(az.summary(inference_data))
 
-    params = mcmc.get_samples()
+    samples = mcmc.get_samples()
+    s_t, theta_t_samples = predict(cfg.predict, s, samples)
 
-    rng = jax.random.key(cfg.seed)
+    jnp.savez("results.npz", theta_samples=theta_t_samples, s=s_t)
 
-    s_t = get_grid("MOZ", "Zambezia")
-    print(s_t.shape)
-    results = predict(rng, cfg.model, s, s_t, params, cfg.batch_size)
-
-    jnp.save("results.npy", results)
-
-    summary = jnp.stack([results.mean(axis=0), results.std(axis=0)], axis=1)
-    print(results.shape)
+    summary = jnp.stack(
+        [theta_t_samples.mean(axis=0), theta_t_samples.std(axis=0)], axis=1
+    )
+    print(theta_t_samples.shape)
     print(summary)
+
+    plot(s_t, theta_t_samples)
 
 
 if __name__ == "__main__":

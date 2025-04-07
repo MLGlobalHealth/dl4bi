@@ -1,7 +1,9 @@
 from functools import partial
+from typing import Callable
 
 import jax
-from jax import jit
+from jax import jit, vmap
+import jax.numpy as jnp
 
 
 @partial(jit, static_argnames=["batch_size"])
@@ -22,3 +24,31 @@ def unbatch(x: jax.Array):
     N, B, *dims = x.shape
     x = x.reshape(-1, *dims)
     return x
+
+
+def haversine_distance(x, y):
+    """Haversine distance.
+
+    x, y: two (Long, Lat) pairs in degrees
+    """
+    R = 6371  # average Earth radius in km
+
+    # based on https://scikit-learn.org/stable/modules/generated/sklearn.metrics.pairwise.haversine_distances.html
+    x_long, x_lat = x
+    y_long, y_lat = y
+    x_long, x_lat, y_long, y_lat = map(jnp.deg2rad, (x_long, x_lat, y_long, y_lat))
+
+    return (
+        R
+        * 2
+        * jnp.arcsin(
+            jnp.sqrt(
+                jnp.sin((x_lat - y_lat) / 2) ** 2
+                + jnp.cos(x_lat) * jnp.cos(y_lat) * jnp.sin((x_long - y_long) / 2) ** 2
+            )
+        )
+    )
+
+
+def make_pairwise(fn: Callable):
+    return vmap(vmap(fn, in_axes=(None, 0)), in_axes=(0, None))

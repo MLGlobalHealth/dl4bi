@@ -2,8 +2,6 @@
 Model for malaria prevalence given pointwise observations.
 """
 
-from functools import partial
-
 import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
@@ -11,8 +9,8 @@ import numpyro
 import numpyro.distributions as dist
 from jax import jit, vmap
 from numpyro.handlers import seed, substitute
-from sps.kernels import rbf
 
+from benchmarks.disease_mapping.utils import haversine_distance, make_pairwise
 from dl4bi.core.model_output import DiagonalMVNOutput
 from dl4bi.core.train import TrainState
 
@@ -20,9 +18,17 @@ from dl4bi.core.train import TrainState
 # perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
 # and a non-0 mean?
 
-# note these are NOT batched
-mean = jit(lambda x, /, **params: jnp.zeros(x.shape[0]))
-kernel = jit(lambda x, y, /, **params: rbf(x, y, params["var"], params["ls"]))
+
+# note these are NOT batched, i.e. expect x, y of dims [L, D]
+def mean(x, /, **_):
+    return jnp.zeros(x.shape[0])
+
+
+def kernel(x, y, /, *, var, ls, **_):
+    d2 = make_pairwise(haversine_distance)(x, y)
+    return var * jnp.exp(-d2 / 2 / ls**2)
+
+
 jitter = 1e-4  # note this is in fact N(0, s2=jitter) noise
 
 
