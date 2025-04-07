@@ -206,15 +206,15 @@ class VAEOutput(DistributionOutput):
 
     @classmethod
     def from_raw_output(
-        cls, f_hat: jax.Array, latent_mu: jax.Array, latent_std: jax.Array, **kwargs
+        cls,
+        f_hat: jax.Array,
+        latent_mu: jax.Array,
+        latent_std: jax.Array,
+        **kwargs,
     ):
         latent_mu = jnp.atleast_3d(latent_mu)
         latent_std = jnp.atleast_3d(latent_std)
         return VAEOutput(f_hat, DiagonalMVNOutput(latent_mu, latent_std))
-
-    @property
-    def _normal_distribution(self):
-        return DiagonalMVNOutput(jnp.array(0.0), jnp.array(1.0))
 
     def nll(self, f: jax.Array, var: Optional[float] = None, **kwargs):
         std = jnp.sqrt(var) if var is not None else 1.0
@@ -222,8 +222,9 @@ class VAEOutput(DistributionOutput):
         return -ll.mean()
 
     def kl_normal_dist(self, **kwargs):
+        normal_dist = DiagonalMVNOutput(jnp.array(0.0), jnp.array(1.0))
         if self.encoder_outputs is not None:
-            return self.encoder_outputs.reverse_kl_div(self._normal_distribution)
+            return self.encoder_outputs.reverse_kl_div(normal_dist)
         return 0.0
 
     def mse(self, f: jax.Array):
