@@ -46,7 +46,7 @@ class PriorCVAE(nn.Module):
             along with $\mu$ and $\log(\sigma^2)$, which are often used
             to calculate losses involving KL divergence.
         """
-        latents = self.encoder(self.cond_stack_fn(f, conditionals), **kwargs)
+        latents = self.encoder(self.cond_stack_fn(f, conditionals), **kwargs).squeeze()
         z_mu = nn.Dense(self.z_dim)(latents)
         z_log_var = nn.Dense(self.z_dim)(latents)
         z_std = jnp.exp(z_log_var / 2)

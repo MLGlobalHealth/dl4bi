@@ -47,6 +47,16 @@ def reproduce_plots(seeds: jax.Array):
         "benchmarks/vae/maps/UK",
         "poisson",
     )
+    # NOTE: update with proper 2d plotting funcs
+    # print_simulated_latex_table(pd.DataFrame(infer_summary), models_n)
+    # infer_summary = summarize_inference_runs(
+    #     seed,
+    #     models_n,
+    #     spatial_priors[:-1],
+    #     "2d_grid_sim",
+    #     "benchmarks/vae/maps/UK",
+    #     "poisson",
+    # )
     print_simulated_latex_table(pd.DataFrame(infer_summary), models_n)
     infer_summary = summarize_inference_runs(
         seed,
@@ -106,8 +116,8 @@ def plot_vae_train_samples(seed: int, models: list[str], spatial_priors: list[st
                 map_data, s = gen_locations(cfg.data)
                 state, _ = load_ckpt((model_dir / model_name).with_suffix(".ckpt"))
                 rng = jax.random.key(seed)
-                loader_gn, cond_names = build_spatial_dataloaders(
-                    rng, cfg, map_data, s, spatial_prior
+                loader, cond_names = build_spatial_dataloaders(
+                    cfg, map_data, s, spatial_prior
                 )
                 plot_vae_reconstruction(
                     rng,
@@ -115,15 +125,14 @@ def plot_vae_train_samples(seed: int, models: list[str], spatial_priors: list[st
                     map_data,
                     state,
                     model_name,
-                    loader_gn(rng),
+                    loader(rng),
                     cond_names,
-                    "DeepRV" in model_name,
                     save_dir=model_save_dir,
                 )
                 plot_vae_scatter_comp(
                     rng,
                     state,
-                    loader_gn(rng),
+                    loader(rng),
                     cond_names,
                     model_save_dir,
                 )
@@ -217,13 +226,13 @@ def summarize_inference_runs(
     for spatial_prior in spatial_priors:
         trace_vars = ["ls", "var", "beta"]
         if spatial_prior == "car":
-            trace_vars = ["alpha"]
-        elif exp_name == "UK_LTLA_sim":
+            trace_vars = ["alpha", "beta"]
+        elif exp_name in ["UK_LTLA_sim", "2d_grid_sim"]:
             trace_vars = ["ls", "beta"]
         prev_hats, prev_real, f_hats, all_samples = [], None, [None], []
         for i, model in enumerate(models):
             result_dir = Path(
-                f"results/{exp_name}/{spatial_prior}/{seed}/{model}/{model_type}/complete_info/"
+                f"results/{exp_name}/{spatial_prior}/2/{model}/{model_type}/partial_obs_512/"
             )
             with open(result_dir / "hmc_pp.pkl", "rb") as ff:
                 post = pickle.load(ff)
@@ -265,7 +274,7 @@ def summarize_inference_runs(
                 }
             )
             variance = "tau" if spatial_prior == "car" else "var"
-            if exp_name != "UK_LTLA_sim":
+            if exp_name not in ["UK_LTLA_sim", "2d_grid_sim"]:
                 infer_summary[-1].update(
                     {
                         "Inferred fixed effects": mcmc_sum.at["beta", "mean"].item(),

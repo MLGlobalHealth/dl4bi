@@ -75,14 +75,14 @@ def run_experiments(
         )
         # NOTE: only runs on one seed, comparison to full MCMC is required which
         # takes too long for multiple seeds
-        for num_locs in [100, 512, 820, None]:
+        for num_locs in [512, 100, 820, None]:
             obs_override = []
             if num_locs is not None:
                 obs_override = [f"inference_model.num_obs_locations={num_locs}"]
             run_inference(
                 seeds[1:2],  # Not to repeat the same seed as in LTLA inference
                 spatial_priors,
-                models + ["Baseline_GP"],
+                models,
                 miss_overrides + infer_overrides + obs_override,
             )
     if real_data:
@@ -140,7 +140,8 @@ def run_vae_train(
                             f"inference_model.spatial_prior.func={spatial_prior}",
                             f"seed={seed}",
                             f"model={model}",
-                        ],
+                        ]
+                        + (["lr_peak=1.0e-3"] if model == "auto_prior_cvae" else []),
                     )
                     print("Running vae.py")
                     vae_main(cfg)
