@@ -1,0 +1,15 @@
+name: moz
+s:
+  # nums correspond to a grid with resolution of 150 seconds
+  - start: 30.208
+    stop: 41.833
+    # num: 256
+  - start: -26.875
+    stop: -10.5
+    # num: 394
+num_ctx:
+  min: 12 # ~5%
+  max: 128 # ~50%
+num_test: 256
+batch_size: 16
+# obs_noise: 0.01

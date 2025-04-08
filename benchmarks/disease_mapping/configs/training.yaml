@@ -1,6 +1,6 @@
 defaults:
   - _self_ # use default global values below
-  - data: 2d
+  - data: moz
   - model: anp
   # specified in code
   # - kernel: rbf 

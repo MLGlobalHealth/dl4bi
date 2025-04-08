@@ -115,7 +115,8 @@ def get_grid(
     region: str | None = None,
     res: int = 150,
     clip: bool = True,
-):
+    sparse: bool = False,
+) -> np.ndarray[np.float32] | tuple[np.ndarray[np.float32], np.ndarray[np.float32]]:
     """Get locations grid for a country.
 
     Args:
@@ -123,10 +124,13 @@ def get_grid(
         region: region name (optional)
         resolution: grid resolution in arc-seconds. 30 is ~1km at the equator. Defaults to 150.
         clip: whether to clip the grid to within the country borders. Defaults to True.
+        sparse: whether to return two arrays `longs`, `lats`, defining the grid instead. Default to False. Incompatible with `clip`.
     Returns:
         N x 2 array of longitude, latitude pairs (in degrees).
     """
     # w, s, e, n
+
+    assert (clip and sparse) is False, "clip and sparse are incompatible."
 
     shape = get_shape(iso, region)
 
@@ -137,6 +141,9 @@ def get_grid(
 
     longs = np.arange(w, e) * res / DEG_TO_SEC
     lats = np.arange(s, n) * res / DEG_TO_SEC
+
+    if sparse:
+        return longs, lats
 
     points = cartesian_product(longs, lats)
 

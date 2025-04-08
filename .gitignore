@@ -19,6 +19,5 @@ __pycache__
 benchmarks/vae/maps
 **.vscode/**
 .env
-data
 tmp
 .DS_Store
