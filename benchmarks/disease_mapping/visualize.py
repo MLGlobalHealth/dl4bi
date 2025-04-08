@@ -17,12 +17,20 @@ def infer_resolution(s):
 
 
 def plot(
-    s: np.ndarray,  # [S, 2], assuming from a grid
+    s: np.ndarray,  # [N, S, 2] or [S, 2], assuming from a grid
     samples: np.ndarray,  # [N, S]
     shape: MultiPolygon | None = None,
 ):
-    N, S = samples.shape
-    assert s.shape == (S, 2)
+    match s.shape:
+        case (N, S, 2):
+            s = s[0]  # assuming the locations are repeated
+            assert samples.shape == (N, S)
+        case (S, 2):
+            N, _S = samples.shape
+            assert _S == S
+        case _:
+            raise ValueError(f"Invalid shape {s.shape}. Expected (N, S, 2) or (S, 2).")
+
     lat, lon = s.T
 
     fig, axes = plt.subplots(1, 2, figsize=(20, 10), layout="compressed")

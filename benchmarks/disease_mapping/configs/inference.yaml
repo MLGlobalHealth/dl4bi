@@ -1,3 +1,6 @@
+data:
+  iso: "MOZ"
+  year: 2012
 mcmc:
   seed: 42
   num_warmup: 1000
@@ -7,11 +10,7 @@ mcmc:
   chain_method: "vectorized"
   progress_bar: True
   thinning: 10
-data:
-  force_redownload: False
-  iso: "MOZ"
-  year: 2012
-predict:
+prediction:
   seed: 42
   model: "gp"
   iso: "MOZ"

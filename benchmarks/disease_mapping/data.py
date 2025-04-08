@@ -6,12 +6,12 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from pyDataverse.api import DataAccessApi
-from shapely import MultiPolygon, Polygon, from_geojson, to_geojson
+from shapely import MultiPolygon, Polygon
 
 base_url = "https://dataverse.harvard.edu/"
 dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
 CACHE_DIR = Path(environ.get("CACHE_DIR", "tmp"))
-
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 DEG_TO_SEC = 3600
 
@@ -153,11 +153,10 @@ def get_survey_data(
     year: int | None = None,
     month: int | None = None,
     res: int | None = 150,  # if not None round to grid of given res in seconds
-    force_redownload=False,
 ):
     file: Path = CACHE_DIR / (dataset_id.replace("/", "_") + ".csv")
 
-    if file.exists() and force_redownload is False:
+    if file.exists():
         print("Reading survey data from cache.")
         pass
     else:
@@ -211,4 +210,4 @@ def get_survey_data(
     n_pos = df.Pf.to_numpy()
     n = df.Ex.to_numpy()
 
-    return s, n_pos, n
+    return {"s": s, "n_pos": n_pos, "n": n}

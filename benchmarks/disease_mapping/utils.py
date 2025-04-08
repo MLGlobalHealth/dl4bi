@@ -4,6 +4,9 @@ from typing import Callable
 import jax
 from jax import jit, vmap
 import jax.numpy as jnp
+from numpy import sort
+from omegaconf import DictConfig, OmegaConf
+import hashlib
 
 
 @partial(jit, static_argnames=["batch_size"])
@@ -52,3 +55,8 @@ def haversine_distance(x, y):
 
 def make_pairwise(fn: Callable):
     return vmap(vmap(fn, in_axes=(None, 0)), in_axes=(0, None))
+
+
+def cfg_to_run_name(cfg: DictConfig):
+    cfg_str = OmegaConf.to_yaml(cfg, resolve=True, sort_keys=True)
+    return hashlib.md5(cfg_str.encode()).hexdigest()
