@@ -16,7 +16,7 @@ from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
-@hydra.main("configs", "default", None)
+@hydra.main("configs", "training", None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
     wandb.init(
