@@ -25,7 +25,8 @@ def mean(x, /, **_):
 
 
 def kernel(x, y, /, *, var, ls, **_):
-    d2 = make_pairwise(haversine_distance)(x, y)
+    d = make_pairwise(haversine_distance)(x, y)
+    d2 = d**2
     return var * jnp.exp(-d2 / 2 / ls**2)
 
 
