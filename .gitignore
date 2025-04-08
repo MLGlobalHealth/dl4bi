@@ -2,6 +2,7 @@ cache
 **/ckpts/**
 img_align_celeba
 *.npy
+*.npz
 *.nu
 **/outputs/**
 **/multirun/**

@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from numpyro.infer import MCMC, NUTS, init_to_median
 from omegaconf import DictConfig
 
-from benchmarks.disease_mapping.data import get_grid, get_survey_data
+from benchmarks.disease_mapping.data import get_grid, get_shape, get_survey_data
 from benchmarks.disease_mapping.model import (
     get_np_sampler,
     sample_gp,
@@ -88,6 +88,7 @@ def main(cfg: DictConfig):
 
     s, n_pos, n = get_survey_data(**cfg.data)
 
+    # MCMC
     mcmc_file = cache_dir / "mcmc.pickle"
     if False and mcmc_file.exists():
         mcmc = pickle.loads(mcmc_file.read_bytes())
@@ -99,18 +100,16 @@ def main(cfg: DictConfig):
     inference_data = az.from_numpyro(mcmc)
     print(az.summary(inference_data))
 
+    # Inference at target points
     samples = mcmc.get_samples()
     s_t, theta_t_samples = predict(cfg.predict, s, samples)
 
     jnp.savez("results.npz", theta_samples=theta_t_samples, s=s_t)
 
-    summary = jnp.stack(
-        [theta_t_samples.mean(axis=0), theta_t_samples.std(axis=0)], axis=1
-    )
-    print(theta_t_samples.shape)
-    print(summary)
-
-    plot(s_t, theta_t_samples)
+    # Plotting
+    shape = get_shape(cfg.predict.iso, cfg.predict.region)
+    fig = plot(s_t, theta_t_samples, shape)
+    fig.savefig("predictions.png")
 
 
 if __name__ == "__main__":
