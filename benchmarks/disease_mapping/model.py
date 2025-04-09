@@ -19,12 +19,17 @@ from dl4bi.core.train import TrainState
 # perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
 
 
+# NOTE: RBF is not positive definite on a sphere!
+
+
 def kernel(x, y, /, *, var, ls, **_):
+    """
+    Geodesic Laplace (also Exponential, Matern 1/2) kernel.
+    """
     x, y = _prepare_dims(x, y)
 
     d = make_pairwise(haversine_distance)(x, y)
-    d2 = d**2
-    return var * jnp.exp(-d2 / 2 / ls**2)
+    return var * jnp.exp(-d / ls)
 
 
 jitter = 1e-4  # note this is in fact N(0, s2=jitter) noise

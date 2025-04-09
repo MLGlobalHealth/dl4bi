@@ -40,12 +40,14 @@ def haversine_distance(x, y):
     y_long, y_lat = y
     x_long, x_lat, y_long, y_lat = map(jnp.deg2rad, (x_long, x_lat, y_long, y_lat))
 
-    return 2 * jnp.arcsin(
+    hav = 2 * jnp.arcsin(
         jnp.sqrt(
             jnp.sin((x_lat - y_lat) / 2) ** 2
             + jnp.cos(x_lat) * jnp.cos(y_lat) * jnp.sin((x_long - y_long) / 2) ** 2
         )
     )
+
+    return hav
 
 
 def make_pairwise(fn: Callable):
