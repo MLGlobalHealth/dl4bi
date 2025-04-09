@@ -1,4 +1,3 @@
-from functools import partial
 from pathlib import Path
 
 import hydra
@@ -9,13 +8,13 @@ from hydra.utils import instantiate
 from jax import jit, random
 from numpyro import handlers
 from omegaconf import DictConfig, OmegaConf
+from sps.utils import build_grid
 
 from benchmarks.disease_mapping.model import spatial_effect
 from benchmarks.meta_learning.gp import wandb_2d_plots
 from dl4bi.core.train import Callback, evaluate, save_ckpt, train
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.utils import cfg_to_run_name
-from sps.utils import build_grid
 
 
 @hydra.main("configs", "training", None)
