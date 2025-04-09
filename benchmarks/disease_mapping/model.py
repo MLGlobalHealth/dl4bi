@@ -9,6 +9,7 @@ import numpyro
 import numpyro.distributions as dist
 from jax import jit, vmap
 from numpyro.handlers import seed, substitute
+from sps.kernels import _prepare_dims
 
 from benchmarks.disease_mapping.utils import haversine_distance, make_pairwise
 from dl4bi.core.model_output import DiagonalMVNOutput
@@ -16,15 +17,11 @@ from dl4bi.core.train import TrainState
 
 # TODO @pgrynfelder:
 # perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
-# and a non-0 mean?
-
-
-# note these are NOT batched, i.e. expect x, y of dims [L, D]
-def mean(x, /, **_):
-    return jnp.zeros(x.shape[0])
 
 
 def kernel(x, y, /, *, var, ls, **_):
+    x, y = _prepare_dims(x, y)
+
     d = make_pairwise(haversine_distance)(x, y)
     d2 = d**2
     return var * jnp.exp(-d2 / 2 / ls**2)
@@ -37,18 +34,17 @@ def spatial_effect(s: jax.Array, sample_shape: tuple[int, ...] = ()):
     """
     Definition of the spatial effect underlying the observation model.
     """
-    L, D = s.shape
-
     ls = numpyro.sample("ls", dist.InverseGamma(3, 3))
-    var = numpyro.sample("var", dist.HalfNormal(0.05))
+    var = numpyro.sample("var", dist.HalfNormal(1))
     noise = numpyro.deterministic("noise", 0.0)
 
-    m = mean(s)
-    cov = kernel(s, s, var=var, ls=ls) + (jitter + noise) * jnp.eye(L)
+    cov = kernel(s, s, var=var, ls=ls)
+    L = cov.shape[0]
+    cov = cov + (jitter + noise) * jnp.eye(L)
 
     y = numpyro.sample(
         "y",
-        dist.MultivariateNormal(m, cov),
+        dist.MultivariateNormal(0, cov),
         sample_shape=sample_shape,
     )
 
@@ -97,17 +93,16 @@ def sample_gp(
     **params,  # passes params to gp mean and kernel, each of dim [B, ...]
 ):
     """GP conditional sampling using Matheron's Rule."""
-    B, L_ctx, _ = s_c.shape
+    B, L_ctx, D = y_c.shape
     _, L_test, _ = s_t.shape
     L = L_ctx + L_test
 
     s = jnp.concat([s_c, s_t], axis=1)
-    mu = vmap(mean)(s, **params)
     cov = vmap(kernel)(s, s, **params) + jitter * jnp.eye(L)
 
     L = jax.lax.linalg.cholesky(cov)
-    z = jax.random.normal(rng, shape=mu.shape)
-    y = mu + jnp.einsum("bij,bj->bi", L, z)
+    z = jax.random.normal(rng, shape=(B, L, D))
+    y = jnp.einsum("bij,bj->bi", L, z)
 
     cov_cc = cov[:, :L_ctx, :L_ctx]
     cov_tc = cov[:, L_ctx:, :L_ctx]

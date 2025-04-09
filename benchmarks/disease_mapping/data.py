@@ -8,6 +8,8 @@ import pandas as pd
 from pyDataverse.api import DataAccessApi
 from shapely import MultiPolygon, Polygon
 
+from benchmarks.disease_mapping.utils import cartesian_product
+
 base_url = "https://dataverse.harvard.edu/"
 dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
 CACHE_DIR = Path(environ.get("CACHE_DIR", "tmp"))
@@ -16,11 +18,6 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 DEG_TO_SEC = 3600
 
 pd.options.mode.copy_on_write = True
-
-
-def cartesian_product(*xs):
-    n = len(xs)
-    return np.stack(np.meshgrid(*xs), axis=-1).reshape(-1, n)
 
 
 def round_to_multiple(x, m):

@@ -60,3 +60,8 @@ def make_pairwise(fn: Callable):
 def cfg_to_run_name(cfg: DictConfig):
     cfg_str = OmegaConf.to_yaml(cfg, resolve=True, sort_keys=True)
     return hashlib.md5(cfg_str.encode()).hexdigest()
+
+
+def cartesian_product(*xs):
+    n = len(xs)
+    return jnp.stack(jnp.meshgrid(*xs), axis=-1).reshape(-1, n)
