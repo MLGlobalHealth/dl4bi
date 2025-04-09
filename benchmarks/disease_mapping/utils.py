@@ -34,21 +34,16 @@ def haversine_distance(x, y):
 
     x, y: two (Long, Lat) pairs in degrees
     """
-    R = 6371  # average Earth radius in km
 
     # based on https://scikit-learn.org/stable/modules/generated/sklearn.metrics.pairwise.haversine_distances.html
     x_long, x_lat = x
     y_long, y_lat = y
     x_long, x_lat, y_long, y_lat = map(jnp.deg2rad, (x_long, x_lat, y_long, y_lat))
 
-    return (
-        R
-        * 2
-        * jnp.arcsin(
-            jnp.sqrt(
-                jnp.sin((x_lat - y_lat) / 2) ** 2
-                + jnp.cos(x_lat) * jnp.cos(y_lat) * jnp.sin((x_long - y_long) / 2) ** 2
-            )
+    return 2 * jnp.arcsin(
+        jnp.sqrt(
+            jnp.sin((x_lat - y_lat) / 2) ** 2
+            + jnp.cos(x_lat) * jnp.cos(y_lat) * jnp.sin((x_long - y_long) / 2) ** 2
         )
     )
 
