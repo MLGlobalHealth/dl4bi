@@ -98,7 +98,7 @@ def sample_gp(
     **params,  # passes params to gp mean and kernel, each of dim [B, ...]
 ):
     """GP conditional sampling using Matheron's Rule."""
-    B, L_ctx, D = y_c.shape
+    B, L_ctx = y_c.shape
     _, L_test, _ = s_t.shape
     L = L_ctx + L_test
 
@@ -106,7 +106,7 @@ def sample_gp(
     cov = vmap(kernel)(s, s, **params) + jitter * jnp.eye(L)
 
     L = jax.lax.linalg.cholesky(cov)
-    z = jax.random.normal(rng, shape=(B, L, D))
+    z = jax.random.normal(rng, shape=(B, L))
     y = jnp.einsum("bij,bj->bi", L, z)
 
     cov_cc = cov[:, :L_ctx, :L_ctx]
