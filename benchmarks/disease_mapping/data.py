@@ -194,8 +194,8 @@ def get_survey_data(
     if query:
         df = df.query(query)
 
-    print(f"Selected {len(df)} rows.")
     print(df)
+    print(f"Selected {len(df)} rows.")
     assert len(df) > 0, "Number of surveys selected must be >0."
 
     if res is not None:
@@ -229,9 +229,6 @@ def get_survey_data2(
     query: str | None = None,
     res: int | None = 150,  # if not None round to grid of given res in seconds
 ):
-    if region is not None:
-        raise NotImplementedError("Region filtering not implemented yet.")
-
     from pyDataverse.api import DataAccessApi
 
     base_url = "https://dataverse.harvard.edu/"
@@ -257,8 +254,13 @@ def get_survey_data2(
     df = df.query("AREATYPE=='Point'")
     df = df.query("AFRADMIN2Code.str.startswith(@iso)")
 
+    # region
+    if region is not None:
+        df = df.query("AFRADMIN2Code==@region")
+
     if query:
         df = df.query(query)
+
     print(df)
     print(f"Selected {len(df)} rows.")
     assert len(df) > 0, "Number of surveys selected must be >0."
