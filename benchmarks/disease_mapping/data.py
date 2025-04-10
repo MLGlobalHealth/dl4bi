@@ -221,3 +221,72 @@ def get_survey_data(
     n = df.examined.to_numpy()
 
     return {"s": s, "n_pos": n_pos, "n": n}
+
+
+def get_survey_data2(
+    iso: str,
+    region: str | None = None,
+    query: str | None = None,
+    res: int | None = 150,  # if not None round to grid of given res in seconds
+):
+    if region is not None:
+        raise NotImplementedError("Region filtering not implemented yet.")
+
+    from pyDataverse.api import DataAccessApi
+
+    base_url = "https://dataverse.harvard.edu/"
+    dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
+
+    cache_path: Path = CACHE_DIR / (dataset_id.replace("/", "_") + ".csv")
+
+    if cache_path.exists():
+        print("Reading survey data from cache.")
+        pass
+    else:
+        data_api = DataAccessApi(base_url)
+        response = data_api.get_datafile(dataset_id)
+        assert response.is_success, (
+            f"Download failed, got response {response.status_code} with content {response.content.decode()}"
+        )
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_bytes(response.content)
+
+    df = pd.read_csv(cache_path, sep="\t")
+
+    # only include point surveys
+    df = df.query("AREATYPE=='Point'")
+    df = df.query("AFRADMIN2Code.str.startswith(@iso)")
+
+    if query:
+        df = df.query(query)
+    print(df)
+    print(f"Selected {len(df)} rows.")
+    assert len(df) > 0, "Number of surveys selected must be >0."
+
+    if res is not None:
+        df.Long = round_to_grid(df.Long, res)
+        df.Lat = round_to_grid(df.Lat, res)
+        # merge surveys from points close-by into one
+        df = df.groupby(
+            # since skipping time in s, ignore time for merging
+            ["Lat", "Long"],
+            # ["Lat", "Long", "YY", "MM"],
+            as_index=False,
+        ).sum()
+
+    s = np.stack([df.Long, df.Lat], axis=-1)
+    print(
+        f"Locations: shape {s.shape}, bbox: ({s[:, 0].min()}, {s[:, 1].min()}), ({s[:, 0].max()}, {s[:, 1].max()})"
+    )
+
+    # skip time for now
+    # t = (df.YY * 12 + df.MM).to_numpy()
+    # t -= t.min()
+    # t = t[..., None]
+
+    # s = np.hstack([s, t])
+
+    n_pos = df.Pf.to_numpy()
+    n = df.Ex.to_numpy()
+
+    return {"s": s, "n_pos": n_pos, "n": n}
