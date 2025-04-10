@@ -66,7 +66,7 @@ def r_to_gpd(rdf):
                 case "geometry":
                     geometry = rdf.rx2(c)
                     geometry = [multipolygon_r2py(x) for x in geometry]
-                    df.set_geometry(geometry)
+                    df = df.set_geometry(geometry)
                 case _:
                     series = rdf.rx2(c)
                     series = [
