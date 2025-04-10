@@ -5,8 +5,8 @@ import jax
 import jax.numpy as jnp
 
 from ..core.mlp import MLP
-from ..core.transformer import TransformerEncoder
 from ..core.model_output import DiagonalMVNOutput
+from ..core.transformer import TransformerEncoder
 from .steps import likelihood_train_step, likelihood_valid_step
 
 
