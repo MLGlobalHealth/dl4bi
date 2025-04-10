@@ -6,6 +6,8 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from shapely import MultiPolygon, Polygon
+import requests
+import rasterio
 
 from benchmarks.disease_mapping.utils import cartesian_product
 
@@ -78,6 +80,7 @@ def r_to_gpd(rdf):
 
 
 def get_shape(iso: str, region: str | None = None):
+    iso = iso.upper()
     cache_path = CACHE_DIR / f"{iso}_shape.feather"
 
     if cache_path.exists():
@@ -124,7 +127,7 @@ def get_grid(
     # w, s, e, n
 
     assert (clip and sparse) is False, "clip and sparse are incompatible."
-
+    iso = iso.upper()
     shape = get_shape(iso, region)
 
     bbox = np.array(shape.bounds)
@@ -148,6 +151,34 @@ def get_grid(
     return points
 
 
+def get_population(iso: str, locations: np.array, res: int = 150):
+    """
+    Returns population in grid cells with centers given by locations (Long, Lat)
+    and resolution res in arc-seconds.
+    """
+    m = res / 3600 / 2  # convert to degrees / 2
+    file_path = CACHE_DIR / f"{iso}_population.tif"
+
+    if not file_path.exists():
+        # per-pixel population counts
+        url = f"https://data.worldpop.org/GIS/Population/Global_2000_2020_1km_UNadj/2007/{iso.upper()}/{iso.lower()}_ppp_2007_1km_Aggregated_UNadj.tif"
+        print(f"Downloading population data from {url}")
+        response = requests.get(url)
+        if response.status_code != 200:
+            raise ValueError(f"Failed to download data from {url}")
+        with open(file_path, "wb") as f:
+            f.write(response.content)
+
+    result = []
+    with rasterio.open(file_path) as data:
+        for x, y in locations:
+            window = data.window(x - m, y - m, x + m, y + m)
+            counts = data.read(window=window)
+            # invalid values are set to < 0
+            result.append(counts.sum(where=counts > 0))
+    return np.array(result)
+
+
 def get_survey_data(
     iso: str,
     region: str | None = None,
@@ -169,6 +200,7 @@ def get_survey_data(
             'permissions_info', 'citation1', 'citation2', 'citation3'
         res: if not None, round to grid of given resolution in seconds. Default 150.
     """
+    iso = iso.upper()
     cache_path: Path = CACHE_DIR / f"{iso}_prevalence.feather"
 
     if cache_path.exists():
@@ -234,6 +266,7 @@ def get_survey_data2(
     base_url = "https://dataverse.harvard.edu/"
     dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
 
+    iso = iso.upper()
     cache_path: Path = CACHE_DIR / (dataset_id.replace("/", "_") + ".csv")
 
     if cache_path.exists():
