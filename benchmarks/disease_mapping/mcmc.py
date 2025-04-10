@@ -36,7 +36,7 @@ def main(cfg: DictConfig):
     """
     Run MCMC inference on the survey model.
     """
-    results_path = Path("results") / hash_config(cfg.mcmc)
+    results_path = Path("results")
     results_path.mkdir(parents=True, exist_ok=True)
 
     # Load data

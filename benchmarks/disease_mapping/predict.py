@@ -67,7 +67,7 @@ def predict(cfg: DictConfig, s_c, samples):
 
 @hydra.main("configs", "inference", None)
 def main(cfg: DictConfig):
-    mcmc_results_path = Path("results") / hash_config(cfg.mcmc)
+    mcmc_results_path = Path("results")
 
     # Load data
     data = dict(jnp.load(mcmc_results_path / "data.npz"))
@@ -80,6 +80,7 @@ def main(cfg: DictConfig):
 
     # Save results
     results_path = Path("results") / model_name
+    results_path.mkdir(parents=True, exist_ok=True)
     jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t)
 
     # Plot results
