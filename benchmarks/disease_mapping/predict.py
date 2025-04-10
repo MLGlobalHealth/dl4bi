@@ -79,7 +79,6 @@ def main(cfg: DictConfig):
     model_name, s_t, theta_t = predict(cfg.prediction, data["s"], samples)
 
     # Save results
-
     results_path = Path("results") / model_name
     jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t)
 
