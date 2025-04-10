@@ -106,7 +106,6 @@ def build_grid_dataloader(cfg: DictConfig):
     s = build_grid(cfg.s)
     s = jnp.repeat(s[None, ...], B, axis=0)
     L_test = s.shape[1] * s.shape[2]
-    print("grid", s.shape)
 
     @jit
     def sp(rng: jax.Array):

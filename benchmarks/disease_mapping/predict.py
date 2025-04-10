@@ -14,7 +14,7 @@ from benchmarks.disease_mapping.model import (
     sample_prevalence,
 )
 from benchmarks.disease_mapping.utils import batch, cfg_to_run_name, unbatch
-from benchmarks.disease_mapping.visualize import plot
+from benchmarks.disease_mapping.visualize import plot_predictions
 from dl4bi.core.train import load_ckpt
 
 
@@ -80,7 +80,7 @@ def main(cfg: DictConfig):
     jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t)
 
     # Plot results
-    fig = plot(
+    fig = plot_predictions(
         s_t, theta_t, get_shape(cfg.prediction.iso, cfg.prediction.get("region"))
     )
     fig.savefig(
