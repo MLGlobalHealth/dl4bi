@@ -5,13 +5,10 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from pyDataverse.api import DataAccessApi
 from shapely import MultiPolygon, Polygon
 
 from benchmarks.disease_mapping.utils import cartesian_product
 
-base_url = "https://dataverse.harvard.edu/"
-dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
 CACHE_DIR = Path(environ.get("CACHE_DIR", "tmp"))
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -69,8 +66,7 @@ def r_to_gpd(rdf):
                 case "geometry":
                     geometry = rdf.rx2(c)
                     geometry = [multipolygon_r2py(x) for x in geometry]
-                    df[c] = geometry
-                    df.set_geometry(c)
+                    df.set_geometry(geometry)
                 case _:
                     series = rdf.rx2(c)
                     series = [
@@ -82,7 +78,7 @@ def r_to_gpd(rdf):
 
 
 def get_shape(iso: str, region: str | None = None):
-    cache_path = CACHE_DIR / f"{iso}.feather"
+    cache_path = CACHE_DIR / f"{iso}_shape.feather"
 
     if cache_path.exists():
         df = gpd.read_feather(cache_path)
@@ -145,7 +141,7 @@ def get_grid(
     points = cartesian_product(longs, lats)
 
     if clip:
-        df = gpd.GeoDataFrame(geometry=gpd.points_from_xy(*points.T))
+        df = gpd.GeoDataFrame(geometry=gpd.points_from_xy(*points.T, crs="EPSG:4326"))
         df = df.clip(shape)
         points = np.stack((df.geometry.x, df.geometry.y), axis=-1)
 
@@ -154,64 +150,74 @@ def get_grid(
 
 def get_survey_data(
     iso: str,
-    year: int | None = None,
-    month: int | None = None,
+    region: str | None = None,
+    query: str | None = None,
     res: int | None = 150,  # if not None round to grid of given res in seconds
 ):
-    file: Path = CACHE_DIR / (dataset_id.replace("/", "_") + ".csv")
+    """
+    Loads Pf survey data from malariaAtlas.
 
-    if file.exists():
-        print("Reading survey data from cache.")
-        pass
+    Args:
+        iso: iso country code
+        region: region name (optional)
+        query: query string to filter the data, available columns:
+            'geometry', 'dhs_id', 'site_id', 'site_name', 'latitude', 'longitude',
+            'rural_urban', 'country', 'country_id', 'continent_id', 'month_start',
+            'year_start', 'month_end', 'year_end', 'lower_age', 'upper_age',
+            'examined', 'positive', 'pr', 'species', 'method', 'rdt_type',
+            'pcr_type', 'malaria_metrics_available', 'location_available',
+            'permissions_info', 'citation1', 'citation2', 'citation3'
+        res: if not None, round to grid of given resolution in seconds. Default 150.
+    """
+    cache_path: Path = CACHE_DIR / f"{iso}_prevalence.feather"
+
+    if cache_path.exists():
+        df = gpd.read_feather(cache_path)
     else:
-        data_api = DataAccessApi(base_url)
-        response = data_api.get_datafile(dataset_id)
-        assert response.is_success, (
-            f"Download failed, got response {response.status_code} with content {response.content.decode()}"
+        from rpy2.robjects.packages import importr
+
+        ma = importr("malariaAtlas")
+        # download the data
+        rdf = ma.getPR(ISO=iso, species="Pf")
+        # convert to pandas dataframe
+        df = r_to_gpd(rdf)
+        df = df.dropna(subset=["longitude", "latitude", "positive", "examined"])
+        df = df.set_geometry(
+            gpd.points_from_xy(df.longitude, df.latitude, crs="EPSG:4326")
         )
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_bytes(response.content)
+        df.to_feather(cache_path)
 
-    df = pd.read_csv(file, sep="\t")
+    if region is not None:
+        shape = get_shape(iso, region)
+        df = df.clip(shape)
 
-    # only include point surveys
-    df = df.query("AREATYPE=='Point'")
-    df = df.query("AFRADMIN2Code.str.startswith(@iso)")
+    if query:
+        df = df.query(query)
 
-    assert not (year is None and month is not None), (
-        "If year is unspecified so must be month."
-    )
-    if year is not None:
-        df = df.query("YY==@year")
-    if month is not None:
-        df = df.query("MM==@month")
     print(f"Selected {len(df)} rows.")
+    print(df)
     assert len(df) > 0, "Number of surveys selected must be >0."
 
     if res is not None:
-        df.Long = round_to_grid(df.Long, res)
-        df.Lat = round_to_grid(df.Lat, res)
+        lat = round_to_grid(df.geometry.x, res)
+        lon = round_to_grid(df.geometry.y, res)
+        df = df.set_geometry(gpd.points_from_xy(lon, lat))
         # merge surveys from points close-by into one
         df = df.groupby(
             # since skipping time in s, ignore time for merging
-            ["Lat", "Long"],
-            # ["Lat", "Long", "YY", "MM"],
+            ["geometry"],
             as_index=False,
         ).sum()
-
-    s = np.stack([df.Long, df.Lat], axis=-1)
-    print(
-        f"Locations: shape {s.shape}, bbox: ({s[:, 0].min()}, {s[:, 1].min()}), ({s[:, 0].max()}, {s[:, 1].max()})"
-    )
+        # this is now nonsense except for the positive and examined columns
 
     # skip time for now
     # t = (df.YY * 12 + df.MM).to_numpy()
     # t -= t.min()
     # t = t[..., None]
 
-    # s = np.hstack([s, t])
+    s = np.array([[p.x, p.y] for p in df.geometry])
 
-    n_pos = df.Pf.to_numpy()
-    n = df.Ex.to_numpy()
+    n_pos = df.positive.to_numpy()
+    n = df.examined.to_numpy()
 
     return {"s": s, "n_pos": n_pos, "n": n}
