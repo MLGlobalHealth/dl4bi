@@ -10,7 +10,7 @@ from omegaconf import DictConfig
 
 from benchmarks.disease_mapping.data import get_survey_data
 from benchmarks.disease_mapping.model import survey_model
-from benchmarks.disease_mapping.utils import cfg_to_run_name
+from benchmarks.disease_mapping.utils import hash_config
 
 
 def run_mcmc(cfg: DictConfig, data: dict[str, jax.Array]) -> MCMC:
@@ -36,12 +36,11 @@ def main(cfg: DictConfig):
     """
     Run MCMC inference on the survey model.
     """
-    results_path = Path("results") / cfg_to_run_name(cfg)
+    results_path = Path("results") / hash_config(cfg.mcmc)
     results_path.mkdir(parents=True, exist_ok=True)
 
     # Load data
     data = get_survey_data(**cfg.data)
-    jnp.savez(results_path / "data.npz", **data)
 
     # Run MCMC
     mcmc = run_mcmc(cfg.mcmc, data)
@@ -49,6 +48,8 @@ def main(cfg: DictConfig):
     # Save results
     with open(results_path / "mcmc.pickle", "wb") as f:
         pickle.dump(mcmc, f)
+    # Also save the data used
+    jnp.savez(results_path / "data.npz", **data)
 
     # Show summary
     run = az.from_numpyro(mcmc)

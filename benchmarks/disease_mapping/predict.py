@@ -13,7 +13,7 @@ from benchmarks.disease_mapping.model import (
     sample_gp,
     sample_prevalence,
 )
-from benchmarks.disease_mapping.utils import batch, cfg_to_run_name, unbatch
+from benchmarks.disease_mapping.utils import batch, hash_config, unbatch
 from benchmarks.disease_mapping.visualize import plot_predictions
 from dl4bi.core.train import load_ckpt
 
@@ -40,10 +40,12 @@ def predict(cfg: DictConfig, s_c, samples):
     if model.lower() == "gp":
         print("Using GP for predictions.")
         sample_conditioned_sp = sample_gp
+        model_name = "gp"
     else:
         state, cfg_model = load_ckpt(model)
         print(f"Using {cfg_model.name} for predictions.")
         sample_conditioned_sp = get_np_sampler(state)
+        model_name = cfg_model.name
 
     def predict_batch(args):
         rng, y_c, params = args
@@ -60,23 +62,25 @@ def predict(cfg: DictConfig, s_c, samples):
         predict_batch,
         (jax.random.split(rng, num_iters), y_c, samples),
     )
-    return s_t[0], unbatch(theta_t)
+    return model_name, s_t[0], unbatch(theta_t)
 
 
 @hydra.main("configs", "inference", None)
 def main(cfg: DictConfig):
-    results_path = Path("results") / cfg_to_run_name(cfg)
+    mcmc_results_path = Path("results") / hash_config(cfg.mcmc)
 
     # Load data
-    data = dict(jnp.load(results_path / "data.npz"))
-    with open(results_path / "mcmc.pickle", "rb") as f:
+    data = dict(jnp.load(mcmc_results_path / "data.npz"))
+    with open(mcmc_results_path / "mcmc.pickle", "rb") as f:
         mcmc = pickle.load(f)
     samples = mcmc.get_samples()
 
     # Predict
-    s_t, theta_t = predict(cfg.prediction, data["s"], samples)
+    model_name, s_t, theta_t = predict(cfg.prediction, data["s"], samples)
 
     # Save results
+
+    results_path = Path("results") / model_name
     jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t)
 
     # Plot results
