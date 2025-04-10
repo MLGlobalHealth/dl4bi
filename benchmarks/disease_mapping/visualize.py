@@ -50,6 +50,7 @@ def plot_predictions(
     s: np.ndarray,  # [N, S, 2] or [S, 2], assuming from a grid
     theta: np.ndarray,  # [N, S]
     shape: MultiPolygon | None = None,
+    data: dict[str, np.ndarray] | None = None,
 ):
     match s.shape:
         case (N, S, 2):
@@ -63,10 +64,16 @@ def plot_predictions(
 
     lat, lon = s.T
 
-    fig, axes = plt.subplots(1, 3, figsize=(30, 10), layout="compressed")
+    fig, axes = plt.subplots(
+        1,
+        3 if data is None else 4,
+        figsize=(30, 10),
+        layout="compressed",
+    )
 
-    if shape is not None:
-        for ax in axes:
+    for ax in axes:
+        ax.set_aspect("equal")
+        if shape is not None:
             plot_polygon(
                 shape,
                 ax=ax,
@@ -75,6 +82,19 @@ def plot_predictions(
                 add_points=False,
                 linewidth=0.5,
             )
+
+    if data is not None:
+        ax, *axes = axes
+        scatter = ax.scatter(
+            *data["s"].T,
+            c=data["n_pos"] / data["n"],
+            s=data["n"],
+            edgecolors="black",
+            **scatter_config,
+        )
+        ax.set_title("Survey data")
+        fig.colorbar(scatter, ax=ax)
+        ax.legend(*scatter.legend_elements("sizes", alpha=0.6), title="Survey size")
 
     axes[0].set_title("Mean")
     scatter = axes[0].scatter(lat, lon, c=theta.mean(0), **scatter_config)
@@ -97,8 +117,5 @@ def plot_predictions(
     fig.colorbar(scatter, ax=axes[2])
 
     fig.suptitle("Prevalence predictions")
-
-    for ax in axes:
-        ax.set_aspect("equal")
 
     return fig

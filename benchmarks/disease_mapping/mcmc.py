@@ -8,9 +8,9 @@ import jax.numpy as jnp
 from numpyro.infer import MCMC, NUTS, init_to_median
 from omegaconf import DictConfig
 
-from benchmarks.disease_mapping.data import get_survey_data2
+from benchmarks.disease_mapping.data import get_shape, get_survey_data2
 from benchmarks.disease_mapping.model import survey_model
-from benchmarks.disease_mapping.utils import hash_config
+from benchmarks.disease_mapping.visualize import plot_surveys
 
 
 def run_mcmc(cfg: DictConfig, data: dict[str, jax.Array]) -> MCMC:
@@ -50,6 +50,9 @@ def main(cfg: DictConfig):
         pickle.dump(mcmc, f)
     # Also save the data used
     jnp.savez(results_path / "data.npz", **data)
+    shape = get_shape(cfg.data.iso, cfg.data.get("region"))
+    fig = plot_surveys(**data, shape=shape)
+    fig.savefig(results_path / "data.png", dpi=300)
 
     # Show summary
     run = az.from_numpyro(mcmc)

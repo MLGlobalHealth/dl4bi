@@ -1,5 +1,4 @@
 import pickle
-from os import environ
 from pathlib import Path
 
 import hydra
@@ -13,19 +12,20 @@ from benchmarks.disease_mapping.model import (
     sample_gp,
     sample_prevalence,
 )
-from benchmarks.disease_mapping.utils import batch, hash_config, unbatch
+from benchmarks.disease_mapping.utils import batch, unbatch
 from benchmarks.disease_mapping.visualize import plot_predictions
 from dl4bi.core.train import load_ckpt
+from dl4bi.core.utils import breakpoint_if_nonfinite
 
 
-def predict(cfg: DictConfig, s_c, samples):
+def predict(s_c, samples, seed, model, batch_size, iso, region, res):
     """
     Transforms samples $y_c (+params) | (s, np, n)_c$ into $y_t | s_t, (s, np, n)_c$.
     """
-    rng = jax.random.key(cfg.seed)
-    model = cfg.model
-    batch_size = cfg.batch_size
-    s_t = get_grid(cfg.iso, cfg.region)
+    rng = jax.random.key(seed)
+    model = model
+    batch_size = batch_size
+    s_t = get_grid(iso, region, res)
 
     print("Num samples:", samples["y"].shape[0])
     print("Num context locations:", s_c.shape[0])
@@ -62,6 +62,9 @@ def predict(cfg: DictConfig, s_c, samples):
         predict_batch,
         (jax.random.split(rng, num_iters), y_c, samples),
     )
+
+    breakpoint_if_nonfinite(theta_t)
+
     return model_name, s_t[0], unbatch(theta_t)
 
 
@@ -76,7 +79,7 @@ def main(cfg: DictConfig):
     samples = mcmc.get_samples()
 
     # Predict
-    model_name, s_t, theta_t = predict(cfg.prediction, data["s"], samples)
+    model_name, s_t, theta_t = predict(data["s"], samples, **cfg.prediction)
 
     # Save results
     results_path = Path("results") / model_name
@@ -85,7 +88,10 @@ def main(cfg: DictConfig):
 
     # Plot results
     fig = plot_predictions(
-        s_t, theta_t, get_shape(cfg.prediction.iso, cfg.prediction.get("region"))
+        s_t,
+        theta_t,
+        get_shape(cfg.prediction.iso, cfg.prediction.get("region")),
+        data,
     )
     fig.savefig(
         results_path / "predictions.png",

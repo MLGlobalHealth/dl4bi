@@ -9,7 +9,7 @@ import numpyro
 import numpyro.distributions as dist
 from jax import jit, vmap
 from numpyro.handlers import seed, substitute
-from sps.kernels import _prepare_dims
+from sps.kernels import _prepare_dims, rbf, exponential
 
 from benchmarks.disease_mapping.utils import haversine_distance, make_pairwise
 from dl4bi.core.model_output import DiagonalMVNOutput
@@ -26,6 +26,9 @@ def kernel(x, y, /, *, var, ls, **_):
     """
     Geodesic Laplace (also Exponential, Matern 1/2) kernel.
     """
+    # return rbf(x, y, var=var, ls=ls)
+    return exponential(x, y, var=var, ls=ls)
+
     x, y = _prepare_dims(x, y)
 
     d = make_pairwise(haversine_distance)(x, y)
@@ -40,7 +43,7 @@ def spatial_effect(s: jax.Array, sample_shape: tuple[int, ...] = ()):
     Definition of the spatial effect underlying the observation model.
     """
     ls = numpyro.sample("ls", dist.InverseGamma(3, 3))
-    var = numpyro.sample("var", dist.HalfNormal(1))
+    var = numpyro.sample("var", dist.HalfNormal(0.1))
     noise = numpyro.deterministic("noise", 0.0)
 
     cov = kernel(s, s, var=var, ls=ls)
