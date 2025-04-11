@@ -5,10 +5,9 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import pyDataverse
-from shapely import MultiPolygon, Polygon
-import requests
 import rasterio
+import requests
+from shapely import MultiPolygon, Polygon
 
 from benchmarks.disease_mapping.utils import cartesian_product
 
@@ -257,7 +256,7 @@ def get_survey_data(
 
 
 def get_survey_data2(
-    iso: str,
+    iso: str | None,
     region: str | None = None,
     query: str | None = None,
     res: int | None = 150,  # if not None round to grid of given res in seconds
@@ -265,7 +264,6 @@ def get_survey_data2(
     dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
     url = f"https://dataverse.harvard.edu/api/access/datafile/:persistentId/?persistentId={dataset_id}"
 
-    iso = iso.upper()
     file_path: Path = CACHE_DIR / (dataset_id.replace("/", "_") + ".csv")
 
     if file_path.exists():
@@ -283,7 +281,10 @@ def get_survey_data2(
 
     # only include point surveys
     df = df.query("AREATYPE=='Point'")
-    df = df.query("AFRADMIN2Code.str.startswith(@iso)")
+
+    if iso is not None:
+        iso = iso.upper()
+        df = df.query("AFRADMIN2Code.str.startswith(@iso)")
 
     # region
     if region is not None:
