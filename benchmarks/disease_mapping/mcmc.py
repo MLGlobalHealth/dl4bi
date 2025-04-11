@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from numpyro.infer import MCMC, NUTS, init_to_median
 from omegaconf import DictConfig
 
-from benchmarks.disease_mapping.data import get_shape, get_survey_data2
+from benchmarks.disease_mapping.data import get_shape, get_survey_data
 from benchmarks.disease_mapping.model import survey_model
 from benchmarks.disease_mapping.visualize import plot_surveys
 
@@ -40,7 +40,7 @@ def main(cfg: DictConfig):
     results_path.mkdir(parents=True, exist_ok=True)
 
     # Load data
-    data = get_survey_data2(**cfg.data)
+    data = get_survey_data(**cfg.data)
 
     # Run MCMC
     mcmc = run_mcmc(cfg.mcmc, data)
