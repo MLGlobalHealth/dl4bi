@@ -261,27 +261,24 @@ def get_survey_data2(
     query: str | None = None,
     res: int | None = 150,  # if not None round to grid of given res in seconds
 ):
-    from pyDataverse.api import DataAccessApi
-
     base_url = "https://dataverse.harvard.edu/"
     dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
+    url = f"{base_url}/datafile/:persistentId/?persistentId={dataset_id}"
 
     iso = iso.upper()
-    cache_path: Path = CACHE_DIR / (dataset_id.replace("/", "_") + ".csv")
+    file_path: Path = CACHE_DIR / (dataset_id.replace("/", "_") + ".csv")
 
-    if cache_path.exists():
+    if file_path.exists():
         print("Reading survey data from cache.")
         pass
     else:
-        data_api = DataAccessApi(base_url)
-        response = data_api.get_datafile(dataset_id)
-        assert response.is_success, (
-            f"Download failed, got response {response.status_code} with content {response.content.decode()}"
-        )
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_bytes(response.content)
+        response = requests.get(url)
+        if response.status_code != 200:
+            raise ValueError(f"Failed to download data from {url}")
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(response.content)
 
-    df = pd.read_csv(cache_path, sep="\t")
+    df = pd.read_csv(file_path, sep="\t")
 
     # only include point surveys
     df = df.query("AREATYPE=='Point'")
