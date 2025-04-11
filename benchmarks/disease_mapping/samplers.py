@@ -34,8 +34,10 @@ def sample_gp(
 
     conditional_cov_cholesky = jsp.linalg.cholesky(conditional_cov, lower=True)
     z = jax.random.normal(rng, (B, L_test, 1))
-    y_t = conditional_mean + (conditional_cov_cholesky @ z).squeeze(-1)
-    return y_t
+    y_t = conditional_mean + conditional_cov_cholesky @ z
+
+    # dim of y was expanded so that batched matmul is straightforward
+    return y_t.squeeze(-1)
 
 
 @jit

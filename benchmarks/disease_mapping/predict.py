@@ -9,8 +9,11 @@ from numpyro.infer import MCMC
 from omegaconf import DictConfig
 
 from benchmarks.disease_mapping.data import get_grid, get_population, get_shape
-from benchmarks.disease_mapping.model_utils import get_np_sampler, sample_prevalence
-from benchmarks.disease_mapping.sample_gp import sample_gp
+from benchmarks.disease_mapping.samplers import (
+    get_np_sampler,
+    sample_gp,
+    sample_prevalence,
+)
 from benchmarks.disease_mapping.utils import (
     batch,
     unbatch,
