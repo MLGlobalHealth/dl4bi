@@ -180,7 +180,7 @@ def get_population(iso: str, locations: np.array, res: int = 150):
 
 
 def get_survey_data(
-    iso: str,
+    iso: str | None,
     region: str | None = None,
     query: str | None = None,
     res: int | None = 150,  # if not None round to grid of given res in seconds
@@ -200,8 +200,7 @@ def get_survey_data(
             'permissions_info', 'citation1', 'citation2', 'citation3'
         res: if not None, round to grid of given resolution in seconds. Default 150.
     """
-    iso = iso.upper()
-    cache_path: Path = CACHE_DIR / f"{iso}_prevalence.feather"
+    cache_path: Path = CACHE_DIR / "Africa_prevalence.feather"
 
     if cache_path.exists():
         df = gpd.read_feather(cache_path)
@@ -210,7 +209,7 @@ def get_survey_data(
 
         ma = importr("malariaAtlas")
         # download the data
-        rdf = ma.getPR(ISO=iso, species="Pf")
+        rdf = ma.getPR(continent="Africa", species="Pf")
         # convert to pandas dataframe
         df = r_to_gpd(rdf)
         df = df.dropna(subset=["longitude", "latitude", "positive", "examined"])
@@ -218,6 +217,10 @@ def get_survey_data(
             gpd.points_from_xy(df.longitude, df.latitude, crs="EPSG:4326")
         )
         df.to_feather(cache_path)
+
+    if iso is not None:
+        iso = iso.upper()
+        df = df.query("country_id==@iso")
 
     if region is not None:
         shape = get_shape(iso, region)
