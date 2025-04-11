@@ -1,19 +1,21 @@
 import pickle
 from pathlib import Path
 
+import arviz as az
 import hydra
 import jax
 import jax.numpy as jnp
+from numpyro.infer import MCMC
 from omegaconf import DictConfig
 
-from benchmarks.disease_mapping.data import get_grid, get_shape
+from benchmarks.disease_mapping.data import get_grid, get_population, get_shape
 from benchmarks.disease_mapping.model import (
     get_np_sampler,
     sample_gp,
     sample_prevalence,
 )
 from benchmarks.disease_mapping.utils import batch, unbatch
-from benchmarks.disease_mapping.visualize import plot_predictions
+from benchmarks.disease_mapping.visualize import plot_distribution, plot_predictions
 from dl4bi.core.train import load_ckpt
 from dl4bi.core.utils import breakpoint_if_nonfinite
 
@@ -56,16 +58,23 @@ def predict(s_c, samples, seed, model, batch_size, iso, region, res):
         # Sample theta_t | s_t, (s, np, n)_c
         logit_theta_t = sample_prevalence(rng_theta_t, y_t, **params)
 
-        return jax.nn.sigmoid(logit_theta_t)
+        return y_t, jax.nn.sigmoid(logit_theta_t)
 
-    theta_t = jax.lax.map(
+    y_t, theta_t = jax.lax.map(
         predict_batch,
         (jax.random.split(rng, num_iters), y_c, samples),
     )
 
     breakpoint_if_nonfinite(theta_t)
 
-    return model_name, s_t[0], unbatch(theta_t)
+    return model_name, s_t[0], unbatch(y_t), unbatch(theta_t)
+
+
+def aggregate(
+    samples,  # [..., L],
+    populations,  # [L]
+):
+    return jnp.sum(samples * populations, axis=-1) / jnp.sum(populations)
 
 
 @hydra.main("configs", "inference", None)
@@ -75,11 +84,11 @@ def main(cfg: DictConfig):
     # Load data
     data = dict(jnp.load(mcmc_results_path / "data.npz"))
     with open(mcmc_results_path / "mcmc.pickle", "rb") as f:
-        mcmc = pickle.load(f)
+        mcmc: MCMC = pickle.load(f)
     samples = mcmc.get_samples()
 
     # Predict
-    model_name, s_t, theta_t = predict(data["s"], samples, **cfg.prediction)
+    model_name, s_t, y_t, theta_t = predict(data["s"], samples, **cfg.prediction)
 
     # Save results
     results_path = Path("results") / model_name
@@ -97,6 +106,38 @@ def main(cfg: DictConfig):
         results_path / "predictions.png",
         dpi=300,
     )
+
+    # Aggregate results
+    populations = get_population(cfg.prediction.iso, s_t, cfg.prediction.res)
+    aggregate_samples = aggregate(theta_t, populations)
+
+    jnp.save(results_path / "aggregate_samples.npy", aggregate_samples)
+    fig = plot_distribution(aggregate_samples)
+    fig.savefig(
+        results_path / "aggregate_distribution.png",
+        dpi=300,
+    )
+
+    # Arviz summary
+    def split_chains(samples: jax.Array):
+        return samples.reshape(cfg.mcmc.num_chains, -1, *samples.shape[1:])
+
+    posterior = {
+        "aggregate_theta_t": aggregate_samples,
+        "theta_t": theta_t,
+        "y_t": y_t,
+    }  # | samples
+    # drop mcmc samples here for clarity
+
+    observed_data = {"s_t": s_t} | data
+
+    az_data = az.from_dict(
+        posterior=jax.tree.map(split_chains, posterior),
+        observed_data=observed_data,
+    )
+    summary = az.summary(az_data, hdi_prob=0.95)
+    print(summary)
+    summary.to_csv(results_path / "summary.csv")
 
 
 if __name__ == "__main__":

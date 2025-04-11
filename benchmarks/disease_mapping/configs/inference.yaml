@@ -1,6 +1,7 @@
 data:
   iso: "MOZ"
-  year: 2012
+  query: "YY==2007"
+  res: 150 # this rounds data to the grid of res arc-seconds unless None
 mcmc:
   seed: 42
   num_warmup: 1000
@@ -14,6 +15,6 @@ prediction:
   seed: 42
   model: "gp"
   iso: "MOZ"
-  region: "Zambezia"
+  region: "Gaza"
   batch_size: 4
   res: 150

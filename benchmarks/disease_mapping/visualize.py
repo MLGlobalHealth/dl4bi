@@ -119,3 +119,36 @@ def plot_predictions(
     fig.suptitle("Prevalence predictions")
 
     return fig
+
+
+def plot_distribution(samples):
+    mean = samples.mean(axis=0)
+    std = samples.std(axis=0)
+
+    fig, ax = plt.subplots(layout="compressed")
+    ax.hist(samples, bins="auto")
+
+    custom_preamble = {
+        "text.usetex": True,
+        "text.latex.preamble": r"\usepackage{amsmath}",
+    }
+    plt.rcParams.update(custom_preamble)
+
+    std = f"{std:.2f}"
+    if mean < 0:
+        std = "\phantom{-}" + std
+    mean = f"{mean:.2f}"
+
+    text = rf"\mu &= {mean} \\ \sigma &= {std}"
+    text = r"\begin{align*}" + text + r"\end{align*}"
+
+    ax.text(
+        0.95,
+        0.95,
+        text,
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=14,
+    )
+    return fig
