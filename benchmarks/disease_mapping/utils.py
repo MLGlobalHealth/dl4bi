@@ -4,14 +4,8 @@ from typing import Callable
 
 import jax
 import jax.numpy as jnp
-import jax.scipy as jsp
 from jax import jit, vmap
-from numpyro.handlers import seed, substitute
 from omegaconf import DictConfig, OmegaConf
-
-from benchmarks.disease_mapping.model import jitter, kernel, prevalence
-from dl4bi.core.model_output import DiagonalMVNOutput
-from dl4bi.core.train import TrainState
 
 
 @partial(jit, static_argnames=["batch_size"])
@@ -89,85 +83,3 @@ def hash_config(cfg: DictConfig):
 def cartesian_product(*xs):
     n = len(xs)
     return jnp.stack(jnp.meshgrid(*xs), axis=-1).reshape(-1, n)
-
-
-@jit
-def sample_gp(
-    rng,
-    s_c: jax.Array,  # [B, L_ctx, D]
-    y_c: jax.Array,  # [B, L_ctx]
-    s_t: jax.Array,  # [B, L_test, D]
-    **params,  # passes params to gp mean and kernel, each of dim [B, ...]
-):
-    """GP conditional sampling using Matheron's Rule."""
-    B, L_ctx = y_c.shape
-    _, L_test, _ = s_t.shape
-
-    s = jnp.concat([s_c, s_t], axis=1)
-    cov = vmap(kernel)(s, s, **params)
-    cov += jitter * jnp.eye(L_ctx + L_test)
-
-    L = jax.lax.linalg.cholesky(cov)
-    z = jax.random.normal(rng, shape=(B, L_ctx + L_test))
-    y = jnp.einsum("bij,bj->bi", L, z)
-
-    cov_cc = cov[:, :L_ctx, :L_ctx]
-    cov_tc = cov[:, L_ctx:, :L_ctx]
-
-    return y[:, L_ctx:] + (
-        cov_tc
-        @ jsp.linalg.solve(cov_cc, (y_c - y[:, :L_ctx])[..., None], assume_a="pos")
-    ).squeeze(-1)
-
-
-def get_np_sampler(
-    state: TrainState,
-):
-    @jit
-    def sample_np(
-        rng,
-        s_c: jax.Array,  # [B, L, D]
-        y_c: jax.Array,  # [B, L]
-        s_t: jax.Array,  # [B, L, D]
-        **params,  # ignored
-    ):
-        """Batched Neural Process sampler"""
-        rng, rng_extra = jax.random.split(rng)
-        output = state.apply_fn(
-            {"params": state.params, **state.kwargs},
-            s_c,
-            y_c[:, None],
-            s_t,
-            None,
-            rngs={"extra": rng_extra},
-        )
-
-        if isinstance(output, tuple):
-            output = output[0]
-
-        match output:
-            case DiagonalMVNOutput(mu, std):
-                assert mu.ndim == 2 and std.ndim == 2
-
-                return mu + std * jax.random.normal(rng, mu.shape)
-            case _:
-                raise NotImplementedError()
-
-    return sample_np
-
-
-@jit
-def sample_prevalence(rng, y, **params):
-    """Batched sampling of prevalence given `y` and `params`.
-    Args:
-        rng: jax.random.PRNGKey
-        y: spatial effect
-        params: params to be plugged into the prevalence model.
-
-    Returns:
-        logit(prevalence)
-    """
-    rng = jax.random.split(rng, y.shape[0])
-    return vmap(lambda rng, y, params: seed(substitute(prevalence, params), rng)(y))(
-        rng, y, params
-    )
