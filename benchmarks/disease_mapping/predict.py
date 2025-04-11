@@ -9,12 +9,13 @@ from numpyro.infer import MCMC
 from omegaconf import DictConfig
 
 from benchmarks.disease_mapping.data import get_grid, get_population, get_shape
-from benchmarks.disease_mapping.model import (
+from benchmarks.disease_mapping.utils import (
+    batch,
     get_np_sampler,
     sample_gp,
     sample_prevalence,
+    unbatch,
 )
-from benchmarks.disease_mapping.utils import batch, unbatch
 from benchmarks.disease_mapping.visualize import plot_distribution, plot_predictions
 from dl4bi.core.train import load_ckpt
 from dl4bi.core.utils import breakpoint_if_nonfinite
