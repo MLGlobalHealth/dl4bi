@@ -5,6 +5,7 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyDataverse
 from shapely import MultiPolygon, Polygon
 import requests
 import rasterio
@@ -261,9 +262,8 @@ def get_survey_data2(
     query: str | None = None,
     res: int | None = 150,  # if not None round to grid of given res in seconds
 ):
-    base_url = "https://dataverse.harvard.edu/"
     dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
-    url = f"{base_url}/datafile/:persistentId/?persistentId={dataset_id}"
+    url = f"https://dataverse.harvard.edu/api/access/datafile/:persistentId/?persistentId={dataset_id}"
 
     iso = iso.upper()
     file_path: Path = CACHE_DIR / (dataset_id.replace("/", "_") + ".csv")
@@ -272,7 +272,8 @@ def get_survey_data2(
         print("Reading survey data from cache.")
         pass
     else:
-        response = requests.get(url)
+        print(f"Downloading survey data from {url}.")
+        response = requests.get(url, headers={"User-Agent": "pydataverse"})
         if response.status_code != 200:
             raise ValueError(f"Failed to download data from {url}")
         file_path.parent.mkdir(parents=True, exist_ok=True)
