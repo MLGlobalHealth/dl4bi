@@ -41,6 +41,47 @@ def sample_gp(
 
 
 @jit
+def sample_gp_pointwise(
+    rng,
+    s_c: jax.Array,  # [B, L_ctx, D]
+    y_c: jax.Array,  # [B, L_ctx]
+    s_t: jax.Array,  # [B, L_test, D]
+    **params,  # passes params to gp mean and kernel, each of dim [B, ...]
+):
+    B, L_ctx = y_c.shape
+    _, L_test, _ = s_t.shape
+
+    k = vmap(kernel)
+    cov_cc = k(s_c, s_c, **params) + jitter * jnp.eye(L_ctx)
+    cov_cc_cholesky = jsp.linalg.cho_factor(cov_cc)
+
+    def calculate_single(s_t):
+        s_t = s_t[:, None]
+        cov_ct = k(s_c, s_t, **params)
+        cov_tc = cov_ct.mT
+        cov_tt = k(s_t, s_t, **params) + jitter
+        print(cov_tc.shape)
+
+        conditional_mean = cov_tc @ jsp.linalg.cho_solve(
+            cov_cc_cholesky, y_c[..., None]
+        )  # [B, 1, 1]
+
+        conditional_cov = cov_tt - cov_tc @ jsp.linalg.cho_solve(
+            cov_cc_cholesky, cov_ct
+        )  # [B, 1, 1]
+
+        return conditional_mean.squeeze([1, 2]), conditional_cov.squeeze([1, 2])
+
+    mean, var = jax.lax.map(calculate_single, s_t.swapaxes(0, 1))
+    # [L_test, B]
+    mean, var = mean.swapaxes(0, 1), var.swapaxes(0, 1)
+    # [B, L_test]
+
+    z = jax.random.normal(rng, (B, L_test))
+    return mean + jnp.sqrt(var) * z
+
+
+@jit
 def sample_prevalence(rng, y, **params):
     """Batched sampling of prevalence given `y` and `params`.
     Args:

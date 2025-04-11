@@ -13,6 +13,7 @@ from benchmarks.disease_mapping.samplers import (
     get_np_sampler,
     sample_gp,
     sample_prevalence,
+    sample_gp_pointwise,
 )
 from benchmarks.disease_mapping.utils import (
     batch,
@@ -46,6 +47,10 @@ def predict(s_c, samples, seed, model, batch_size, iso, region, res):
         print("Using GP for predictions.")
         sample_conditioned_sp = sample_gp
         model_name = "gp"
+    elif model.lower() == "gp_pointwise":
+        print("Using GP for pointwise predictions.")
+        sample_conditioned_sp = sample_gp_pointwise
+        model_name = "gp_pointwise"
     else:
         state, cfg_model = load_ckpt(model)
         print(f"Using {cfg_model.name} for predictions.")
