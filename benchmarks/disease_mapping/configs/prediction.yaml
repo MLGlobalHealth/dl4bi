@@ -1,5 +1,5 @@
 seed: 42
-mcmc: null # path to MCMC results
+mcmc: null # path to MCMC results, latest if null
 model: "gp"
 iso: "MOZ"
 region: "Gaza"

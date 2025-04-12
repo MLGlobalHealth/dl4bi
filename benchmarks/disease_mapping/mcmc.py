@@ -38,7 +38,7 @@ def main(cfg: DictConfig):
     Run MCMC inference on the survey model.
     """
     results_path = Path("results") / (
-        "MCMC_" + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        "MCMC " + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     )
     results_path.mkdir(parents=True, exist_ok=True)
 
@@ -55,7 +55,7 @@ def main(cfg: DictConfig):
     shape = get_shape(cfg.iso, cfg.region) if cfg.iso else None
     fig = plot_surveys(**data, shape=shape)
     fig.savefig(results_path / "data.png", dpi=300)
-    (results_path / "model.txt").write_text(getsource(model.survey_model))
+    (results_path / "model.txt").write_text(getsource(model))
 
     # Run MCMC
     mcmc = run_mcmc(cfg, data)

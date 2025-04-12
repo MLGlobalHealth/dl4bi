@@ -22,12 +22,11 @@ from dl4bi.core.train import load_ckpt
 from dl4bi.core.utils import breakpoint_if_nonfinite
 
 
-def predict(s_c, samples, seed, model, batch_size, iso, region, res):
+def predict(seed, model, s_c, samples, s_t, batch_size):
     """
     Transforms samples $y_c (+params) | (s, np, n)_c$ into $y_t | s_t, (s, np, n)_c$.
     """
     rng = jax.random.key(seed)
-    s_t = get_grid(iso, region, res)
 
     y_c = samples.pop("y")
     params = samples
@@ -92,7 +91,7 @@ def main(cfg: DictConfig):
         mcmc_results_path = Path(cfg.mcmc)
     else:
         mcmc_results_path = max(
-            Path("results").glob("MCMC_*"), key=lambda p: p.stat().st_mtime
+            Path("results").glob("MCMC*"), key=lambda p: p.stat().st_mtime
         )
 
     # Load data
@@ -102,7 +101,15 @@ def main(cfg: DictConfig):
     samples = mcmc.get_samples()
 
     # Predict
-    model_name, s_t, y_t, theta_t = predict(data["s"], samples, **cfg)
+    s_t = get_grid(cfg.iso, cfg.region, cfg.res)
+    model_name, s_t, y_t, theta_t = predict(
+        cfg.seed,
+        cfg.model,
+        data["s"],
+        samples,
+        s_t,
+        cfg.batch_size,
+    )
 
     # Save results
     results_path = mcmc_results_path / model_name
