@@ -22,22 +22,25 @@ def scatter_map(
     """
     if ax is None:
         ax = plt.axes()
+
     res = infer_resolution(locations)
-    norm = plt.Normalize(vmin=vmin, vmax=vmax)
-    cm = plt.get_cmap(cmap)
-    sm = plt.cm.ScalarMappable(cmap=cm, norm=norm)
+    lon, lat = locations.T
+    lon_range = np.arange(lon.min() - res / 2, lon.max() + res, res)
+    lat_range = np.arange(lat.min() - res / 2, lat.max() + res, res)
+    M, N = len(lon_range) - 1, len(lat_range) - 1
+    X, Y = np.meshgrid(lon_range, lat_range)
 
-    colors = sm.to_rgba(values)
+    lon_binned = np.digitize(lon, lon_range) - 1
+    lat_binned = np.digitize(lat, lat_range) - 1
 
-    c = PatchCollection(
-        (plt.Rectangle(s, res, res) for s in locations - res / 2),
-        facecolors=colors,
-        linewidths=0,
-    )
-    ax.add_collection(c)
+    data = np.full((N, M), np.nan)
+    for i, j, v in zip(lon_binned, lat_binned, values):
+        data[j, i] = v
+
+    ax.set_xlim(lon.min() - 0.5, lon.max() + 0.5)
+    ax.set_ylim(lat.min() - 0.5, lat.max() + 0.5)
+    sm = ax.pcolormesh(X, Y, data, cmap="viridis", vmin=vmin, vmax=vmax)
     ax.set_aspect("equal")
-    ax.set_xlim(locations[:, 0].min() - 0.5, locations[:, 0].max() + 0.5)
-    ax.set_ylim(locations[:, 1].min() - 0.5, locations[:, 1].max() + 0.5)
     plt.colorbar(sm, ax=ax)
 
     return ax
