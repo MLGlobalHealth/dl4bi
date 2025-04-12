@@ -48,7 +48,7 @@ def predict(seed, model, s_c, samples, s_t, batch_size):
         print("Using GP for predictions.")
         sample_y_t = sample_gp
         model_name = "gp"
-    elif model.lower() == "gp_pointwise":
+    elif model.lower() in ["gp_pointwise", "pointwise", "pointwise_gp"]:
         print("Using GP for pointwise predictions.")
         sample_y_t = sample_gp_pointwise
         model_name = "gp_pointwise"

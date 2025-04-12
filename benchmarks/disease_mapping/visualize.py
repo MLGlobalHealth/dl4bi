@@ -36,29 +36,18 @@ def scatter_map(
     )
     ax.add_collection(c)
     ax.set_aspect("equal")
-    ax.set_xlim(locations[:, 0].min() - 1, locations[:, 0].max() + 1)
-    ax.set_ylim(locations[:, 1].min() - 1, locations[:, 1].max() + 1)
+    ax.set_xlim(locations[:, 0].min() - 0.5, locations[:, 0].max() + 0.5)
+    ax.set_ylim(locations[:, 1].min() - 0.5, locations[:, 1].max() + 0.5)
     plt.colorbar(sm, ax=ax)
 
     return ax
 
 
-def plot_surveys(
-    s,  # [S, 2],
-    n_pos,  # [S],
-    n,  # [S],
-    shape: MultiPolygon | None = None,
-):
-    fig, ax = plt.subplots(figsize=(10, 10), layout="compressed")
-    if shape is not None:
-        plot_polygon(
-            shape,
-            ax=ax,
-            facecolor="none",
-            edgecolor="black",
-            add_points=False,
-            linewidth=0.5,
-        )
+def plot_surveys_ax(data, ax=None):
+    s, n_pos, n = data["s"], data["n_pos"], data["n"]
+
+    if ax is None:
+        ax = plt.Axes()
 
     scatter = ax.scatter(
         *s.T,
@@ -69,10 +58,31 @@ def plot_surveys(
         vmin=0,
         vmax=1,
     )
-    fig.colorbar(scatter, ax=ax, label="Fraction of positive tests")
-    ax.legend(*scatter.legend_elements("sizes", alpha=0.6), title="Survey size")
+    ax.legend(*scatter.legend_elements("sizes", num=1), title="Survey size")
     ax.set_aspect("equal")
-    fig.suptitle("Surveys")
+    ax.set_title("Surveys")
+    plt.colorbar(scatter, ax=ax, label="Fraction of positive tests")
+
+    return ax
+
+
+def plot_surveys(
+    data,
+    shape: MultiPolygon | None = None,
+):
+    fig, ax = plt.subplots(figsize=(10, 10), layout="compressed")
+    ax = plot_surveys_ax(data, shape, ax)
+
+    if shape is not None:
+        plot_polygon(
+            shape,
+            ax=ax,
+            facecolor="none",
+            edgecolor="black",
+            add_points=False,
+            linewidth=0.5,
+        )
+
     return fig
 
 
@@ -80,6 +90,7 @@ def plot_predictions(
     s: np.ndarray,  # [N, S, 2] or [S, 2], assuming from a grid
     theta: np.ndarray,  # [N, S]
     shape: MultiPolygon | None = None,
+    data: np.ndarray | None = None,
 ):
     match s.shape:
         case (N, S, 2):
@@ -93,7 +104,7 @@ def plot_predictions(
 
     fig, axes = plt.subplots(
         1,
-        3,
+        3 if data is None else 4,
         figsize=(30, 10),
         layout="compressed",
     )
@@ -109,6 +120,12 @@ def plot_predictions(
                 add_points=False,
                 linewidth=0.5,
             )
+
+    if data is not None:
+        ax, *axes = axes
+        plot_surveys_ax(data, ax=ax)
+        ax.set_xlim(s[:, 0].min() - 0.5, s[:, 0].max() + 0.5)
+        ax.set_ylim(s[:, 1].min() - 0.5, s[:, 1].max() + 0.5)
 
     scatter_map(s, theta.mean(0), ax=axes[0], vmin=0, vmax=1)
     scatter_map(s, theta.std(0), ax=axes[1], vmin=0, vmax=1)

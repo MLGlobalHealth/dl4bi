@@ -52,7 +52,7 @@ def main(cfg: DictConfig):
     OmegaConf.save(cfg, results_path / "config.yaml", resolve=True)
     jnp.savez(results_path / "data.npz", **data)
     shape = get_shape(cfg.iso, cfg.region) if cfg.iso else None
-    fig = plot_surveys(**data, shape=shape)
+    fig = plot_surveys(data, shape=shape)
     fig.savefig(results_path / "data.png", dpi=300)
     (results_path / "model.txt").write_text(getsource(model))
 
