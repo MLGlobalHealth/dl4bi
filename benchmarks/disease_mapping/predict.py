@@ -54,10 +54,11 @@ def predict(seed, model, s_c, samples, s_t, batch_size):
         sample_y_t = sample_gp_pointwise
         model_name = "gp_pointwise"
     else:
+        model = Path(model)
         state, cfg_model = load_ckpt(model)
-        print(f"Using {cfg_model.name} for predictions.")
+        model_name = model.stem
+        print(f"Using {model_name} for predictions.")
         sample_y_t = get_np_sampler(state)  # already batched
-        model_name = cfg_model.name
 
     rng_y_t, rng_theta_t = jax.random.split(rng)
 

@@ -123,10 +123,9 @@ def get_np_sampler(
         rng, rng_extra = jax.random.split(rng)
         output = state.apply_fn(
             {"params": state.params, **state.kwargs},
-            s_c,
-            y_c[:, None],
-            s_t,
-            None,
+            s_ctx=s_c,
+            f_ctx=y_c[..., None],
+            s_test=s_t,
             rngs={"extra": rng_extra},
         )
 
@@ -135,8 +134,7 @@ def get_np_sampler(
 
         match output:
             case DiagonalMVNOutput(mu, std):
-                assert mu.ndim == 2 and std.ndim == 2
-
+                mu, std = mu.squeeze(-1), std.squeeze(-1)
                 return mu + std * jax.random.normal(rng, mu.shape)
             case _:
                 raise NotImplementedError()
