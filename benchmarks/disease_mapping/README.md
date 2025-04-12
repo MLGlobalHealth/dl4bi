@@ -4,11 +4,7 @@ An example use of Neural Processes for conditioning an MCMC posterior for malari
 
 ## Requirements
 
-Extra Python modules: `rpy2 geopandas arviz rasterio`
-
-*R* is used for some data loading, and requires the package `malariaAtlas` to be installed.
-Should `malariaAtlas` installation fail, first install `Rcpp`,
-and make sure R is configured to compile with C++17.
+Extra Python modules: `geopandas arviz rasterio`
 
 ## Use
 
