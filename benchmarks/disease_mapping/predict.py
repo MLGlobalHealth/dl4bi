@@ -129,7 +129,18 @@ def main(cfg: DictConfig):
 
     jnp.save(results_path / "aggregate_samples.npy", aggregate_samples)
 
-    # Arviz summary
+    # Plotting
+    print("Plotting...")
+
+    shape = get_shape(cfg.iso, cfg.region)
+    fig = plot_predictions(s_t, theta_t, shape, data)
+    fig.savefig(results_path / "predictions.png", dpi=300)
+
+    fig = plot_distribution(aggregate_samples)
+    fig.savefig(results_path / "aggregate_distribution.png", dpi=300)
+
+    # Summary
+    print("Preparing Arviz summary...")
     num_chains = OmegaConf.load(mcmc_results_path / "config.yaml").num_chains
 
     def split_chains(samples: jax.Array):
@@ -151,17 +162,6 @@ def main(cfg: DictConfig):
     summary = az.summary(az_data, hdi_prob=0.95)
     print(summary)
     summary.to_csv(results_path / "summary.csv")
-
-    # Plotting
-    print("Plotting...")
-
-    shape = get_shape(cfg.iso, cfg.region)
-    fig = plot_predictions(s_t, theta_t, shape, data)
-    fig.savefig(results_path / "predictions.png", dpi=300)
-
-    fig = plot_distribution(aggregate_samples)
-    fig.savefig(results_path / "aggregate_distribution.png", dpi=300)
-
     print("Done")
 
 
