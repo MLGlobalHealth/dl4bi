@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import rasterio
 import requests
+from shapely import MultiPolygon
 
 from benchmarks.disease_mapping.utils import cartesian_product
 
@@ -30,7 +31,7 @@ def round_to_grid(degrees, res):
     return round_to_multiple(degrees * DEG_TO_SEC, res) / DEG_TO_SEC
 
 
-def get_shape(iso: str, region: str | None = None):
+def get_shape(iso: str, region: str | None = None) -> MultiPolygon:
     iso = iso.upper()
     url = f"https://geodata.ucdavis.edu/gadm/gadm4.1/gpkg/gadm41_{iso}.gpkg"
     file_path = CACHE_DIR / f"{iso}.gpkg"

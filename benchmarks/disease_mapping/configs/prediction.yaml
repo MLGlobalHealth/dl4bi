@@ -1,7 +1,7 @@
 seed: 42
 mcmc: null # path to MCMC results, latest if null
-model: "gp"
+np: "gp_pointwise" # gp, gp_pointwise or path to a neural process checkpoint path
 iso: "MOZ"
-region: "Gaza"
+region: null
 batch_size: 4
 res: 150

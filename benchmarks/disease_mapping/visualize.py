@@ -1,14 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.collections import PatchCollection
 from shapely import MultiPolygon
 from shapely.plotting import plot_polygon
-
-scatter_config = {
-    # prevalence values are in [0,1]
-    "vmin": 0,
-    "vmax": 1,
-    "cmap": "viridis",
-}
 
 
 def infer_resolution(s):
@@ -18,6 +12,35 @@ def infer_resolution(s):
     lon_diff = np.abs(lon[1:] - lon[:-1])
     lat_diff = np.abs(lat[1:] - lat[:-1])
     return min(lon_diff.min(), lat_diff.min())
+
+
+def scatter_map(
+    locations, values, ax: plt.Axes | None = None, cmap="viridis", vmin=None, vmax=None
+):
+    """
+    Scatter plot with a colorbar.
+    """
+    if ax is None:
+        ax = plt.axes()
+    res = infer_resolution(locations)
+    norm = plt.Normalize(vmin=vmin, vmax=vmax)
+    cm = plt.get_cmap(cmap)
+    sm = plt.cm.ScalarMappable(cmap=cm, norm=norm)
+
+    colors = sm.to_rgba(values)
+
+    c = PatchCollection(
+        (plt.Rectangle(s, res, res) for s in locations - res / 2),
+        facecolors=colors,
+        linewidths=0,
+    )
+    ax.add_collection(c)
+    ax.set_aspect("equal")
+    ax.set_xlim(locations[:, 0].min() - 1, locations[:, 0].max() + 1)
+    ax.set_ylim(locations[:, 1].min() - 1, locations[:, 1].max() + 1)
+    plt.colorbar(sm, ax=ax)
+
+    return ax
 
 
 def plot_surveys(
@@ -37,8 +60,15 @@ def plot_surveys(
             linewidth=0.5,
         )
 
-    lat, lon = s.T
-    scatter = ax.scatter(lat, lon, c=n_pos / n, s=n, **scatter_config)
+    scatter = ax.scatter(
+        *s.T,
+        c=n_pos / n,
+        s=n,
+        edgecolors="black",
+        cmap="viridis",
+        vmin=0,
+        vmax=1,
+    )
     fig.colorbar(scatter, ax=ax, label="Fraction of positive tests")
     ax.legend(*scatter.legend_elements("sizes", alpha=0.6), title="Survey size")
     ax.set_aspect("equal")
@@ -50,7 +80,6 @@ def plot_predictions(
     s: np.ndarray,  # [N, S, 2] or [S, 2], assuming from a grid
     theta: np.ndarray,  # [N, S]
     shape: MultiPolygon | None = None,
-    data: dict[str, np.ndarray] | None = None,
 ):
     match s.shape:
         case (N, S, 2):
@@ -62,16 +91,14 @@ def plot_predictions(
         case _:
             raise ValueError(f"Invalid shape {s.shape}. Expected (N, S, 2) or (S, 2).")
 
-    lat, lon = s.T
-
     fig, axes = plt.subplots(
         1,
-        3 if data is None else 4,
+        3,
         figsize=(30, 10),
         layout="compressed",
     )
 
-    for ax in axes:
+    for ax in axes.flat:
         ax.set_aspect("equal")
         if shape is not None:
             plot_polygon(
@@ -83,39 +110,12 @@ def plot_predictions(
                 linewidth=0.5,
             )
 
-    if data is not None:
-        ax, *axes = axes
-        scatter = ax.scatter(
-            *data["s"].T,
-            c=data["n_pos"] / data["n"],
-            s=data["n"],
-            edgecolors="black",
-            **scatter_config,
-        )
-        ax.set_title("Survey data")
-        fig.colorbar(scatter, ax=ax)
-        ax.legend(*scatter.legend_elements("sizes", alpha=0.6), title="Survey size")
-
+    scatter_map(s, theta.mean(0), ax=axes[0], vmin=0, vmax=1)
+    scatter_map(s, theta.std(0), ax=axes[1], vmin=0, vmax=1)
+    scatter_map(s, theta.std(0) / theta.mean(0), ax=axes[2], vmin=0, vmax=None)
     axes[0].set_title("Mean")
-    scatter = axes[0].scatter(lat, lon, c=theta.mean(0), **scatter_config)
-    fig.colorbar(scatter, ax=axes[0])
-
     axes[1].set_title("SD")
-    scatter = axes[1].scatter(lat, lon, c=theta.std(0), **scatter_config)
-    fig.colorbar(scatter, ax=axes[1])
-
     axes[2].set_title("RSD")
-    scatter = axes[2].scatter(
-        lat,
-        lon,
-        c=theta.std(0) / theta.mean(0),
-        **{
-            **scatter_config,
-            "vmax": None,  # RSD is unbounded
-        },
-    )
-    fig.colorbar(scatter, ax=axes[2])
-
     fig.suptitle("Prevalence predictions")
 
     return fig

@@ -104,7 +104,7 @@ def main(cfg: DictConfig):
     s_t = get_grid(cfg.iso, cfg.region, cfg.res)
     model_name, s_t, y_t, theta_t = predict(
         cfg.seed,
-        cfg.model,
+        cfg.np,
         data["s"],
         samples,
         s_t,
