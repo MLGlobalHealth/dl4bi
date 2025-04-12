@@ -1,16 +1,15 @@
 data:
-  iso: "MOZ"
-  query: "YY==2007"
-  res: 150 # this rounds data to the grid of res arc-seconds unless None
+  iso: "MOZ" # `null` for all of Africa
+  query: "YY==2007" # extra data filtering
+  res: 150 # this rounds data to the grid of res arc-seconds unless `null`
 mcmc:
   seed: 42
-  num_warmup: 1000
-  num_samples: 1000
+  num_warmup: 100
+  num_samples: 100
   num_chains: 4
   # can be parallel, sequential, vectorized (experimental), or vmap
   chain_method: "vectorized"
   progress_bar: True
-  thinning: 10
 prediction:
   seed: 42
   model: "gp"

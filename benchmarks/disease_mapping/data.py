@@ -136,7 +136,7 @@ def get_population(iso: str, locations: np.array, res: int = 150):
 
 
 def get_survey_data(
-    iso: str | None,
+    iso: str | None,  # if None use all countries in Africa
     region: str | None = None,
     query: str | None = None,
     res: int | None = 150,  # if not None round to grid of given res in seconds
@@ -164,11 +164,12 @@ def get_survey_data(
 
     if iso is not None:
         iso = iso.upper()
-        df = df.query("AFRADMIN2Code.str.startswith(@iso)")
+        mask = df.AFRADMIN2Code.str.match(rf"^{iso}\d\d\d$")
+        df = df[mask]
 
     # region
     if region is not None:
-        df = df.query("AFRADMIN2Code==@region")
+        df = df.query("AFRAdminname==@region")
 
     if query:
         df = df.query(query)

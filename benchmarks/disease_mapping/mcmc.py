@@ -22,8 +22,6 @@ def run_mcmc(cfg: DictConfig, data: dict[str, jax.Array]) -> MCMC:
         num_chains=cfg.num_chains,
         chain_method=jax.vmap if cfg.chain_method == "vmap" else cfg.chain_method,
         progress_bar=cfg.progress_bar,
-        thinning=cfg.thinning,
-        # jit_model_args=True,
     )
     rng = jax.random.key(cfg.seed)
     mcmc.run(rng, **data)
