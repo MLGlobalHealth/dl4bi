@@ -58,7 +58,9 @@ def plot_surveys_ax(data, ax=None):
         vmin=0,
         vmax=1,
     )
-    ax.legend(*scatter.legend_elements("sizes", num=1), title="Survey size")
+    ax.legend(
+        *scatter.legend_elements("sizes", num=[10, 100, 1000]), title="Survey size"
+    )
     ax.set_aspect("equal")
     ax.set_title("Surveys")
     plt.colorbar(scatter, ax=ax, label="Fraction of positive tests")
