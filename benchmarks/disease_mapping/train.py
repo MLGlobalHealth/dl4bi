@@ -1,3 +1,4 @@
+from inspect import getsource
 from pathlib import Path
 
 import hydra
@@ -10,6 +11,7 @@ from numpyro import handlers
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
+from benchmarks.disease_mapping import model as numpyro_model
 from benchmarks.disease_mapping.model import spatial_effect
 from benchmarks.meta_learning.gp import wandb_2d_plots
 from dl4bi.core.train import Callback, evaluate, save_ckpt, train
@@ -26,6 +28,7 @@ def main(cfg: DictConfig):
         name=run_name,
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
+        notes=getsource(numpyro_model),
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
