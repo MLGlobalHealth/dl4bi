@@ -1,4 +1,5 @@
 import pickle
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 
@@ -102,6 +103,8 @@ def main(cfg: DictConfig):
 
     # Predict
     s_t = get_grid(cfg.iso, cfg.region, cfg.res)
+
+    t_start = datetime.now()
     model_name, s_t, y_t, theta_t = predict(
         cfg.seed,
         cfg.np,
@@ -110,6 +113,9 @@ def main(cfg: DictConfig):
         s_t,
         cfg.batch_size,
     )
+    theta_t = theta_t.block_until_ready()
+    t_end = datetime.now()
+    print(f"Prediction took {t_end - t_start}.")
 
     # Save results
     results_path = mcmc_results_path / model_name
