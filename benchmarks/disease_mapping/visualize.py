@@ -1,6 +1,5 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.collections import PatchCollection
 from shapely import MultiPolygon
 from shapely.plotting import plot_polygon
 
