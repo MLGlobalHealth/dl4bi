@@ -120,30 +120,14 @@ def main(cfg: DictConfig):
     # Save results
     results_path = mcmc_results_path / model_name
     results_path.mkdir(parents=True, exist_ok=True)
-    jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t)
 
-    # Plot results
-    fig = plot_predictions(
-        s_t,
-        theta_t,
-        get_shape(cfg.iso, cfg.region),
-        data,
-    )
-    fig.savefig(
-        results_path / "predictions.png",
-        dpi=300,
-    )
+    jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t)
 
     # Aggregate results
     populations = get_population(cfg.iso, s_t, cfg.res)
     aggregate_samples = aggregate(theta_t, populations)
 
     jnp.save(results_path / "aggregate_samples.npy", aggregate_samples)
-    fig = plot_distribution(aggregate_samples)
-    fig.savefig(
-        results_path / "aggregate_distribution.png",
-        dpi=300,
-    )
 
     # Arviz summary
     num_chains = OmegaConf.load(mcmc_results_path / "config.yaml").num_chains
@@ -167,6 +151,18 @@ def main(cfg: DictConfig):
     summary = az.summary(az_data, hdi_prob=0.95)
     print(summary)
     summary.to_csv(results_path / "summary.csv")
+
+    # Plotting
+    print("Plotting...")
+
+    shape = get_shape(cfg.iso, cfg.region)
+    fig = plot_predictions(s_t, theta_t, shape, data)
+    fig.savefig(results_path / "predictions.png", dpi=300)
+
+    fig = plot_distribution(aggregate_samples)
+    fig.savefig(results_path / "aggregate_distribution.png", dpi=300)
+
+    print("Done")
 
 
 if __name__ == "__main__":
