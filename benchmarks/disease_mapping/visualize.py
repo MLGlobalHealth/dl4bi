@@ -136,7 +136,7 @@ def plot_distribution(samples):
 
     std = f"{std:.3f}"
     if mean < 0:
-        std = "\phantom{-}" + std
+        std = r"\phantom{-}" + std
     mean = f"{mean:.3f}"
 
     text = rf"\mu &= {mean} \\ \sigma &= {std}"
