@@ -1,4 +1,6 @@
 import pickle
+from hashlib import md5
+from inspect import getsource
 from pathlib import Path
 
 import arviz as az
@@ -6,11 +8,22 @@ import hydra
 import jax
 import jax.numpy as jnp
 from numpyro.infer import MCMC, NUTS, init_to_median
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from benchmarks.disease_mapping.data import get_shape, get_survey_data
 from benchmarks.disease_mapping.model import survey_model
 from benchmarks.disease_mapping.visualize import plot_surveys
+
+
+def compute_mcmc_hash(cfg_mcmc: DictConfig, cfg_data: DictConfig):
+    from benchmarks.disease_mapping import model
+
+    cfg_str = (
+        OmegaConf.to_yaml(cfg_mcmc, resolve=True)
+        + OmegaConf.to_yaml(cfg_data, resolve=True)
+        + getsource(model.survey_model)
+    )
+    return md5(cfg_str.encode()).hexdigest()
 
 
 def run_mcmc(cfg: DictConfig, data: dict[str, jax.Array]) -> MCMC:

@@ -1,11 +1,9 @@
-import hashlib
 from functools import partial, wraps
 from typing import Callable
 
 import jax
 import jax.numpy as jnp
 from jax import jit, vmap
-from omegaconf import DictConfig, OmegaConf
 
 
 @partial(jit, static_argnames=["batch_size"])
@@ -73,11 +71,6 @@ def great_circle_distance(x, y):
 
 def make_pairwise(fn: Callable):
     return vmap(vmap(fn, in_axes=(None, 0)), in_axes=(0, None))
-
-
-def hash_config(cfg: DictConfig):
-    cfg_str = OmegaConf.to_yaml(cfg, resolve=True, sort_keys=True)
-    return hashlib.md5(cfg_str.encode()).hexdigest()
 
 
 def cartesian_product(*xs):
