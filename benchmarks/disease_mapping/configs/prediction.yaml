@@ -1,0 +1,7 @@
+seed: 42
+mcmc: null # path to MCMC results
+model: "gp"
+iso: "MOZ"
+region: "Gaza"
+batch_size: 4
+res: 150

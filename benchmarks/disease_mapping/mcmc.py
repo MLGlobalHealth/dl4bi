@@ -1,5 +1,4 @@
 import pickle
-from hashlib import md5
 from inspect import getsource
 from pathlib import Path
 
@@ -11,23 +10,14 @@ from numpyro.infer import MCMC, NUTS, init_to_median
 from omegaconf import DictConfig, OmegaConf
 
 from benchmarks.disease_mapping.data import get_shape, get_survey_data
-from benchmarks.disease_mapping.model import survey_model
+import benchmarks.disease_mapping.model as model
 from benchmarks.disease_mapping.visualize import plot_surveys
 
-
-def compute_mcmc_hash(cfg_mcmc: DictConfig, cfg_data: DictConfig):
-    from benchmarks.disease_mapping import model
-
-    cfg_str = (
-        OmegaConf.to_yaml(cfg_mcmc, resolve=True)
-        + OmegaConf.to_yaml(cfg_data, resolve=True)
-        + getsource(model.survey_model)
-    )
-    return md5(cfg_str.encode()).hexdigest()
+from datetime import datetime
 
 
 def run_mcmc(cfg: DictConfig, data: dict[str, jax.Array]) -> MCMC:
-    sampler = NUTS(survey_model, init_strategy=init_to_median())
+    sampler = NUTS(model.survey_model, init_strategy=init_to_median())
     mcmc = MCMC(
         sampler,
         num_warmup=cfg.num_warmup,
@@ -42,32 +32,43 @@ def run_mcmc(cfg: DictConfig, data: dict[str, jax.Array]) -> MCMC:
     return mcmc
 
 
-@hydra.main("configs", "inference", None)
+@hydra.main("configs", "mcmc", None)
 def main(cfg: DictConfig):
     """
     Run MCMC inference on the survey model.
     """
-    results_path = Path("results")
+    results_path = Path("results") / (
+        "MCMC_" + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    )
     results_path.mkdir(parents=True, exist_ok=True)
 
     # Load data
-    data = get_survey_data(**cfg.data)
+    data = get_survey_data(
+        cfg.iso,
+        cfg.region,
+        cfg.query,
+        cfg.res,
+    )
+    # Dump config, data, and model
+    OmegaConf.save(cfg, results_path / "config.yaml", resolve=True)
+    jnp.savez(results_path / "data.npz", **data)
+    shape = get_shape(cfg.iso, cfg.region) if cfg.iso else None
+    fig = plot_surveys(**data, shape=shape)
+    fig.savefig(results_path / "data.png", dpi=300)
+    (results_path / "model.txt").write_text(getsource(model.survey_model))
 
     # Run MCMC
-    mcmc = run_mcmc(cfg.mcmc, data)
+    mcmc = run_mcmc(cfg, data)
 
     # Save results
     with open(results_path / "mcmc.pickle", "wb") as f:
         pickle.dump(mcmc, f)
-    # Also save the data used
-    jnp.savez(results_path / "data.npz", **data)
-    shape = get_shape(cfg.data.iso, cfg.data.get("region"))
-    fig = plot_surveys(**data, shape=shape)
-    fig.savefig(results_path / "data.png", dpi=300)
 
-    # Show summary
+    # Summary
     run = az.from_numpyro(mcmc)
-    print(az.summary(run, hdi_prob=0.95))
+    summary = az.summary(run, hdi_prob=0.95)
+    summary.to_csv(results_path / "summary.csv")
+    print(summary)
 
 
 if __name__ == "__main__":

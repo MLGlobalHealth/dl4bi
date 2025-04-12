@@ -7,7 +7,7 @@ import hydra
 import jax
 import jax.numpy as jnp
 from numpyro.infer import MCMC
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from benchmarks.disease_mapping.data import get_grid, get_population, get_shape
 from benchmarks.disease_mapping.samplers import (
@@ -86,9 +86,14 @@ def aggregate(
     return jnp.sum(samples * populations, axis=-1) / jnp.sum(populations)
 
 
-@hydra.main("configs", "inference", None)
+@hydra.main("configs", "prediction", None)
 def main(cfg: DictConfig):
-    mcmc_results_path = Path("results")
+    if cfg.mcmc:
+        mcmc_results_path = Path(cfg.mcmc)
+    else:
+        mcmc_results_path = max(
+            Path("results").glob("MCMC_*"), key=lambda p: p.stat().st_mtime
+        )
 
     # Load data
     data = dict(jnp.load(mcmc_results_path / "data.npz"))
@@ -97,10 +102,10 @@ def main(cfg: DictConfig):
     samples = mcmc.get_samples()
 
     # Predict
-    model_name, s_t, y_t, theta_t = predict(data["s"], samples, **cfg.prediction)
+    model_name, s_t, y_t, theta_t = predict(data["s"], samples, **cfg)
 
     # Save results
-    results_path = Path("results") / model_name
+    results_path = mcmc_results_path / model_name
     results_path.mkdir(parents=True, exist_ok=True)
     jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t)
 
@@ -108,7 +113,7 @@ def main(cfg: DictConfig):
     fig = plot_predictions(
         s_t,
         theta_t,
-        get_shape(cfg.prediction.iso, cfg.prediction.get("region")),
+        get_shape(cfg.iso, cfg.region),
         data,
     )
     fig.savefig(
@@ -117,7 +122,7 @@ def main(cfg: DictConfig):
     )
 
     # Aggregate results
-    populations = get_population(cfg.prediction.iso, s_t, cfg.prediction.res)
+    populations = get_population(cfg.iso, s_t, cfg.res)
     aggregate_samples = aggregate(theta_t, populations)
 
     jnp.save(results_path / "aggregate_samples.npy", aggregate_samples)
@@ -128,8 +133,10 @@ def main(cfg: DictConfig):
     )
 
     # Arviz summary
+    num_chains = OmegaConf.load(mcmc_results_path / "config.yaml").num_chains
+
     def split_chains(samples: jax.Array):
-        return samples.reshape(cfg.mcmc.num_chains, -1, *samples.shape[1:])
+        return samples.reshape(num_chains, -1, *samples.shape[1:])
 
     posterior = {
         "aggregate_theta_t": aggregate_samples,
