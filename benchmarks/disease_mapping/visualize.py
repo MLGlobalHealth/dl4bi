@@ -59,7 +59,8 @@ def plot_surveys_ax(data, ax=None):
         vmax=1,
     )
     ax.legend(
-        *scatter.legend_elements("sizes", num=[10, 100, 1000]), title="Survey size"
+        *scatter.legend_elements("sizes", num=[10, 20, 50, 100, 200]),
+        title="Survey size",
     )
     ax.set_aspect("equal")
     ax.set_title("Surveys")
