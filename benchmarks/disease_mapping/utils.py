@@ -1,5 +1,5 @@
 import hashlib
-from functools import partial
+from functools import partial, wraps
 from typing import Callable
 
 import jax
@@ -83,3 +83,35 @@ def hash_config(cfg: DictConfig):
 def cartesian_product(*xs):
     n = len(xs)
     return jnp.stack(jnp.meshgrid(*xs), axis=-1).reshape(-1, n)
+
+
+def map_fn(fn, batch_size=None):
+    """
+    Like jax.lax.map but a decorator that preserves the function signature.
+    Uses jax.lax.map internally.
+    """
+
+    @wraps(fn)
+    def wrapped_fn(*args, **kwargs):
+        return jax.lax.map(
+            lambda x: fn(*x[0], **x[1]), (args, kwargs), batch_size=batch_size
+        )
+
+    return wrapped_fn
+
+
+def rng_vmap(fn):
+    """vmap which splits the rng key (assumed to be the first argument)"""
+
+    @wraps(fn)
+    def wrapped_fn(rng, *args, **kwargs):
+        if args:
+            B = args[0].shape[0]
+        else:
+            B = kwargs.values().__iter__().__next__().shape[0]
+        # other arg shapes unsupported for now
+
+        rng = jax.random.split(rng, B)
+        return vmap(fn)(rng, *args, **kwargs)
+
+    return wrapped_fn

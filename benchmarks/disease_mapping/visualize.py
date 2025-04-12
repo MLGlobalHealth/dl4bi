@@ -134,10 +134,10 @@ def plot_distribution(samples):
     }
     plt.rcParams.update(custom_preamble)
 
-    std = f"{std:.2f}"
+    std = f"{std:.3f}"
     if mean < 0:
         std = "\phantom{-}" + std
-    mean = f"{mean:.2f}"
+    mean = f"{mean:.3f}"
 
     text = rf"\mu &= {mean} \\ \sigma &= {std}"
     text = r"\begin{align*}" + text + r"\end{align*}"

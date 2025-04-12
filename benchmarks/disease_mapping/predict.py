@@ -1,4 +1,5 @@
 import pickle
+from functools import partial
 from pathlib import Path
 
 import arviz as az
@@ -12,13 +13,10 @@ from benchmarks.disease_mapping.data import get_grid, get_population, get_shape
 from benchmarks.disease_mapping.samplers import (
     get_np_sampler,
     sample_gp,
-    sample_prevalence,
     sample_gp_pointwise,
+    sample_prevalence,
 )
-from benchmarks.disease_mapping.utils import (
-    batch,
-    unbatch,
-)
+from benchmarks.disease_mapping.utils import batch, map_fn, unbatch
 from benchmarks.disease_mapping.visualize import plot_distribution, plot_predictions
 from dl4bi.core.train import load_ckpt
 from dl4bi.core.utils import breakpoint_if_nonfinite
@@ -29,49 +27,52 @@ def predict(s_c, samples, seed, model, batch_size, iso, region, res):
     Transforms samples $y_c (+params) | (s, np, n)_c$ into $y_t | s_t, (s, np, n)_c$.
     """
     rng = jax.random.key(seed)
-    model = model
-    batch_size = batch_size
     s_t = get_grid(iso, region, res)
 
-    print("Num samples:", samples["y"].shape[0])
+    y_c = samples.pop("y")
+    params = samples
+    del samples
+
+    print("Num samples:", y_c.shape[0])
     print("Num context locations:", s_c.shape[0])
     print("Num target locations:", s_t.shape[0])
 
     s_c = jnp.repeat(s_c[None], batch_size, axis=0)
     s_t = jnp.repeat(s_t[None], batch_size, axis=0)
-    samples = {k: batch(v, batch_size) for k, v in samples.items()}
-    y_c = samples.pop("y")
+
+    y_c = batch(y_c, batch_size)
+    params = {k: batch(v, batch_size) for k, v in params.items()}
+
     num_iters = y_c.shape[0]
 
     if model.lower() == "gp":
         print("Using GP for predictions.")
-        sample_conditioned_sp = sample_gp
+        sample_y_t = sample_gp
         model_name = "gp"
     elif model.lower() == "gp_pointwise":
         print("Using GP for pointwise predictions.")
-        sample_conditioned_sp = sample_gp_pointwise
+        sample_y_t = sample_gp_pointwise
         model_name = "gp_pointwise"
     else:
         state, cfg_model = load_ckpt(model)
         print(f"Using {cfg_model.name} for predictions.")
-        sample_conditioned_sp = get_np_sampler(state)
+        sample_y_t = get_np_sampler(state)  # already batched
         model_name = cfg_model.name
 
-    def predict_batch(args):
-        rng, y_c, params = args
-        # Sample (y_t = f(s_t) + noise) | s_t, (s, np, n)_c.
-        rng_y_t, rng_theta_t = jax.random.split(rng)
-        y_t = sample_conditioned_sp(rng_y_t, s_c, y_c, s_t, **params)
+    rng_y_t, rng_theta_t = jax.random.split(rng)
 
-        # Sample theta_t | s_t, (s, np, n)_c
-        logit_theta_t = sample_prevalence(rng_theta_t, y_t, **params)
-
-        return y_t, jax.nn.sigmoid(logit_theta_t)
-
-    y_t, theta_t = jax.lax.map(
-        predict_batch,
-        (jax.random.split(rng, num_iters), y_c, samples),
+    sample_y_t = partial(sample_y_t, s_c=s_c, s_t=s_t)  # locations are fixed
+    y_t = map_fn(sample_y_t)(
+        rng=jax.random.split(rng_y_t, num_iters),
+        y_c=y_c,
+        **params,
     )
+    theta_t = map_fn(sample_prevalence)(
+        rng=jax.random.split(rng_theta_t, num_iters),
+        y=y_t,
+        **params,
+    )
+    theta_t = jax.nn.sigmoid(theta_t)
 
     breakpoint_if_nonfinite(theta_t)
 
