@@ -1,4 +1,5 @@
 import pickle
+from datetime import datetime
 from inspect import getsource
 from pathlib import Path
 
@@ -9,11 +10,9 @@ import jax.numpy as jnp
 from numpyro.infer import MCMC, NUTS, init_to_median
 from omegaconf import DictConfig, OmegaConf
 
-from benchmarks.disease_mapping.data import get_shape, get_survey_data
 import benchmarks.disease_mapping.model as model
+from benchmarks.disease_mapping.data import get_shape, get_survey_data
 from benchmarks.disease_mapping.visualize import plot_surveys
-
-from datetime import datetime
 
 
 def run_mcmc(cfg: DictConfig, data: dict[str, jax.Array]) -> MCMC:
