@@ -119,12 +119,14 @@ def main(cfg: DictConfig):
     print(f"Prediction took {t_end - t_start}.")
 
     # Save results
+    print("Saving results...")
     results_path = mcmc_results_path / model_name
     results_path.mkdir(parents=True, exist_ok=True)
 
     jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t)
 
     # Aggregate results
+    print("Aggregating over the area...")
     populations = get_population(cfg.iso, s_t, cfg.res)
     aggregate_samples = aggregate(theta_t, populations)
 
