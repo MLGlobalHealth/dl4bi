@@ -12,7 +12,7 @@ bias: null
 blk:
   _target_: dl4bi.transformer.KRBlock
   attn:
-    _target_: DeepKernelAttention
+    _target_: dl4bi.attention.DeepKernelAttention
     num_heads: 1
     proj_qks:
       _target_: dl4bi.mlp.MLP
