@@ -3,6 +3,8 @@ import numpy as np
 from shapely import MultiPolygon
 from shapely.plotting import plot_polygon
 
+cmap = plt.get_cmap("viridis")
+
 
 def infer_resolution(s):
     lon, lat = s.T
@@ -38,7 +40,7 @@ def scatter_map(
 
     ax.set_xlim(lon.min() - 0.5, lon.max() + 0.5)
     ax.set_ylim(lat.min() - 0.5, lat.max() + 0.5)
-    sm = ax.pcolormesh(X, Y, data, cmap="viridis", vmin=vmin, vmax=vmax)
+    sm = ax.pcolormesh(X, Y, data, cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set_aspect("equal")
     plt.colorbar(sm, ax=ax)
 
@@ -56,7 +58,7 @@ def plot_surveys_ax(data, ax=None):
         c=n_pos / n,
         s=n,
         edgecolors="black",
-        cmap="viridis",
+        cmap=cmap,
         vmin=0,
         vmax=1,
     )
@@ -92,30 +94,38 @@ def plot_surveys(
 
 
 def plot_predictions(
-    s: np.ndarray,  # [N, S, 2] or [S, 2], assuming from a grid
-    theta: np.ndarray,  # [N, S]
+    s_t: np.ndarray,  # [N, S, 2] or [S, 2], assuming from a grid
+    y_t: np.ndarray,  # [N, S],
+    theta_t: np.ndarray,  # [N, S],
+    data: np.ndarray,
+    y_c: np.ndarray,
     shape: MultiPolygon | None = None,
-    data: np.ndarray | None = None,
 ):
-    match s.shape:
+    match s_t.shape:
         case (N, S, 2):
-            s = s[0]  # assuming the locations are repeated
-            assert theta.shape == (N, S)
+            s_t = s_t[0]  # assuming the locations are repeated
+            assert theta_t.shape == (N, S)
         case (S, 2):
-            N, _S = theta.shape
+            N, _S = theta_t.shape
             assert _S == S
         case _:
-            raise ValueError(f"Invalid shape {s.shape}. Expected (N, S, 2) or (S, 2).")
+            raise ValueError(
+                f"Invalid shape {s_t.shape}. Expected (N, S, 2) or (S, 2)."
+            )
 
+    nrows = 2
+    ncols = 3
     fig, axes = plt.subplots(
-        1,
-        3 if data is None else 4,
-        figsize=(30, 10),
+        nrows=nrows,
+        ncols=ncols,
+        figsize=(ncols * 10, nrows * 10),
         layout="compressed",
     )
 
     for ax in axes.flat:
         ax.set_aspect("equal")
+        ax.set_xlim(s_t[:, 0].min() - 0.5, s_t[:, 0].max() + 0.5)
+        ax.set_ylim(s_t[:, 1].min() - 0.5, s_t[:, 1].max() + 0.5)
         if shape is not None:
             plot_polygon(
                 shape,
@@ -127,18 +137,19 @@ def plot_predictions(
             )
 
     if data is not None:
-        ax, *axes = axes
-        plot_surveys_ax(data, ax=ax)
-        ax.set_xlim(s[:, 0].min() - 0.5, s[:, 0].max() + 0.5)
-        ax.set_ylim(s[:, 1].min() - 0.5, s[:, 1].max() + 0.5)
+        plot_surveys_ax(data, ax=axes[0, 0])
 
-    scatter_map(s, theta.mean(0), ax=axes[0], vmin=0, vmax=1)
-    scatter_map(s, theta.std(0), ax=axes[1], vmin=0, vmax=1)
-    scatter_map(s, theta.std(0) / theta.mean(0), ax=axes[2], vmin=0, vmax=None)
-    axes[0].set_title("Mean")
-    axes[1].set_title("SD")
-    axes[2].set_title("RSD")
-    fig.suptitle("Prevalence predictions")
+    scatter_map(s_t, theta_t.mean(0), ax=axes[0, 1], vmin=0, vmax=1)
+    axes[0, 1].set_title("Predicted mean")
+    scatter_map(s_t, theta_t.std(0), ax=axes[0, 2], vmin=0, vmax=1)
+    axes[0, 2].set_title("Predicted SD")
+
+    axes[1, 0].scatter(*data["s"].T, c=y_c.mean(0), s=1 / y_c.std(0))
+    axes[1, 0].set_title("Inferred spatial effect")
+    scatter_map(s_t, y_t.mean(0), ax=axes[1, 1])
+    axes[1, 1].set_title("Predicted spatial effect mean")
+    scatter_map(s_t, y_t.std(0), ax=axes[1, 2])
+    axes[1, 2].set_title("Predicted spatial effect SD")
 
     return fig
 

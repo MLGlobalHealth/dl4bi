@@ -23,15 +23,11 @@ from dl4bi.core.train import load_ckpt
 from dl4bi.core.utils import breakpoint_if_nonfinite
 
 
-def predict(seed, model, s_c, samples, s_t, batch_size):
+def predict(seed, model, s_c, y_c, params, s_t, batch_size):
     """
     Transforms samples $y_c (+params) | (s, np, n)_c$ into $y_t | s_t, (s, np, n)_c$.
     """
     rng = jax.random.key(seed)
-
-    y_c = samples.pop("y")
-    params = samples
-    del samples
 
     print("Num samples:", y_c.shape[0])
     print("Num context locations:", s_c.shape[0])
@@ -100,8 +96,8 @@ def main(cfg: DictConfig):
     data = dict(jnp.load(mcmc_results_path / "data.npz"))
     with open(mcmc_results_path / "mcmc.pickle", "rb") as f:
         mcmc: MCMC = pickle.load(f)
-    samples = mcmc.get_samples()
-
+    params = mcmc.get_samples()
+    y_c = params.pop("y")
     # Predict
     s_t = get_grid(cfg.iso, cfg.region, cfg.res)
 
@@ -110,7 +106,8 @@ def main(cfg: DictConfig):
         cfg.seed,
         cfg.np,
         data["s"],
-        samples,
+        y_c,
+        params,
         s_t,
         cfg.batch_size,
     )
@@ -123,7 +120,13 @@ def main(cfg: DictConfig):
     results_path = mcmc_results_path / model_name
     results_path.mkdir(parents=True, exist_ok=True)
 
-    jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t)
+    jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t, y=y_t)
+
+    # Plotting
+    print("Plotting...")
+    shape = get_shape(cfg.iso, cfg.region)
+    fig = plot_predictions(s_t, y_t, theta_t, data, y_c, shape)
+    fig.savefig(results_path / "predictions.png", dpi=300)
 
     # Aggregate results
     print("Aggregating over the area...")
@@ -131,14 +134,6 @@ def main(cfg: DictConfig):
     aggregate_samples = aggregate(theta_t, populations)
 
     jnp.save(results_path / "aggregate_samples.npy", aggregate_samples)
-
-    # Plotting
-    print("Plotting...")
-
-    shape = get_shape(cfg.iso, cfg.region)
-    fig = plot_predictions(s_t, theta_t, shape, data)
-    fig.savefig(results_path / "predictions.png", dpi=300)
-
     fig = plot_distribution(aggregate_samples)
     fig.savefig(results_path / "aggregate_distribution.png", dpi=300)
 
