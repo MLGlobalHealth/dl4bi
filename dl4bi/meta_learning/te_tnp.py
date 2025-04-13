@@ -27,6 +27,11 @@ class TETNP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        # preprocess_observations
+        # yt is [[0 1]] for each entry
+        # yc is [[v 0]] for each entry
+        # embed f_ctx, f_test
+        # encode
         pass
 
 
@@ -40,7 +45,3 @@ class TNPDecoder(nn.Module):
     @nn.compact
     def __call__(self):
         pass
-
-
-def preprocess_observations():
-    pass
