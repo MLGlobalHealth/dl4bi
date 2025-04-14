@@ -7,8 +7,6 @@ embed_all:
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
-dist: null
-bias: null
 blk:
   _target_: dl4bi.transformer.KRBlock
   attn:
