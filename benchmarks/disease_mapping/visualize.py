@@ -144,7 +144,11 @@ def plot_predictions(
     scatter_map(s_t, theta_t.std(0), ax=axes[0, 2], vmin=0, vmax=1)
     axes[0, 2].set_title("Predicted SD")
 
-    axes[1, 0].scatter(*data["s"].T, c=y_c.mean(0), s=1 / y_c.std(0))
+    axes[1, 0].scatter(
+        *data["s"].T,
+        c=y_c.mean(0),
+        s=10 / y_c.std(0),  # size ~ 1 / std
+    )
     axes[1, 0].set_title("Inferred spatial effect")
     scatter_map(s_t, y_t.mean(0), ax=axes[1, 1])
     axes[1, 1].set_title("Predicted spatial effect mean")
