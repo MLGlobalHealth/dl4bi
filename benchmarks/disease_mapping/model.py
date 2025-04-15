@@ -54,9 +54,9 @@ def spatial_effect(s: jax.Array, *, sample_shape: tuple[int, ...] = ()):
 def prevalence(y):
     b0 = numpyro.sample("b0", dist.Normal(0, 10))
     scale = numpyro.sample("scale", dist.HalfNormal(1))
-    logit_theta = numpyro.deterministic("logit_theta", b0 + scale * y)
-    numpyro.deterministic("theta", jax.nn.sigmoid(logit_theta))
-    return logit_theta
+    z = numpyro.deterministic("z", b0 + scale * y)
+    numpyro.deterministic("theta", jax.nn.sigmoid(z))
+    return z
 
 
 def survey_model(
@@ -72,11 +72,11 @@ def survey_model(
     Setting `sample_shape` to !=() will produce samples with the same kernel parameters.
     """
     y = spatial_effect(s, sample_shape=sample_shape)
-    logit_theta = prevalence(y)
+    z = prevalence(y)
 
     numpyro.sample(
         "n_pos",
-        dist.BinomialLogits(total_count=n, logits=logit_theta),
+        dist.BinomialLogits(total_count=n, logits=z),
         obs=n_pos,
     )
 
