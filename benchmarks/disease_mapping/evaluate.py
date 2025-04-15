@@ -29,7 +29,11 @@ def mmd(x: jax.Array, y: jax.Array, kernel: Callable):
     assert x.shape == y.shape
     N, *sample_shape = x.shape
 
-    k = make_pairwise(kernel)
+    # k = make_pairwise(kernel)
+    # above doesn't fit in memory with large N_samples and sample_shape. need to sequentially calculate the kernel
+    def k(x, y):
+        return jax.lax.map(lambda xi: jax.lax.map(lambda yi: kernel(xi, yi), y), x)
+
     k_xx: jax.Array = k(x, x)
     k_yy: jax.Array = k(y, y)
     k_xy: jax.Array = k(x, y)
@@ -43,7 +47,7 @@ def mmd(x: jax.Array, y: jax.Array, kernel: Callable):
 
 def mmd_gaussian(x: jax.Array, y: jax.Array):
     def kernel(x1, x2):
-        return jnp.exp(-l2_squared(x1, x2) / 2, axis=-1)
+        return jnp.exp(-l2_squared(x1, x2) / 2)
 
     return mmd(x, y, kernel)
 
@@ -111,7 +115,7 @@ def metrics(true, pred):
     pred = pred.reshape(N, -1)
 
     results = dict(num_samples=N, sample_shape=sample_shape)
-    # results["mmd"] = mmd_gaussian(true, pred)
+    results["mmd"] = mmd_gaussian(true, pred)
     # NOTE: mmd doesn't make sense for the pointwise ground truth,
     # also in high dimensions the current implementation doesn't fit in memory
     results["rmse_pointwise_mean"] = rmse(
@@ -126,7 +130,11 @@ def metrics(true, pred):
     return results
 
 
-def evaluate(mcmc_path: Path | str):
+def thin(tree, factor: int):
+    return jax.tree.map(lambda x: x[::factor], tree)
+
+
+def evaluate(mcmc_path: Path | str, thinning=1):
     if isinstance(mcmc_path, str):
         mcmc_path = Path(mcmc_path)
 
@@ -137,6 +145,7 @@ def evaluate(mcmc_path: Path | str):
         if path.exists():
             print(f"Using {true_model} as ground truth.")
             true_dist = dict(jnp.load(path / "predictions.npz"))
+            true_dist = thin(true_dist, thinning)
             break
     else:
         raise ValueError(
@@ -150,6 +159,7 @@ def evaluate(mcmc_path: Path | str):
 
             print(f"Evaluating {pred_model} against {true_model}.")
             pred_dist = dict(jnp.load(dir / "predictions.npz"))
+            pred_dist = thin(pred_dist, thinning)
 
             keys = true_dist.keys() & pred_dist.keys()
             keys -= {"s"}
@@ -187,6 +197,7 @@ def main():
         default=None,
         nargs="*",
     )
+    parser.add_argument("-t", "--thinning", type=int, default=1)
     args = parser.parse_args()
 
     mcmc_path = args.mcmc_path or max(
@@ -194,7 +205,7 @@ def main():
     )
     print(f"Using MCMC path: {mcmc_path}")
 
-    results = evaluate(mcmc_path)
+    results = evaluate(mcmc_path, args.thinning)
     results.to_csv(mcmc_path / "metrics.csv")
     print(results)
 
