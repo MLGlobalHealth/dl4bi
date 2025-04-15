@@ -10,12 +10,20 @@ from shapely import MultiPolygon
 
 from benchmarks.disease_mapping.utils import cartesian_product
 
+pd.options.mode.copy_on_write = True
+
 CACHE_DIR = Path(environ.get("CACHE_DIR", "tmp"))
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 DEG_TO_SEC = 3600
 
-pd.options.mode.copy_on_write = True
+"""All countries where surveys were conducted."""
+ALL_COUNTRIES = [
+    'AGO', 'BDI', 'BEN', 'BFA', 'BWA', 'CAF', 'CIV', 'CMR', 'COD', 'COG', 'DJI', 
+    'ERI', 'ETH', 'GAB', 'GHA', 'GIN', 'GMB', 'GNB', 'GNQ', 'KEN', 'LBR', 'MDG', 
+    'MLI', 'MOZ', 'MRT', 'MWI', 'NAM', 'NER', 'NGA', 'RWA', 'SDN', 'SEN', 'SLE', 
+    'SOM', 'SSD', 'SWZ', 'TCD', 'TGO', 'TZA', 'UGA', 'ZAF', 'ZMB', 'ZWE'
+]  # fmt: skip
 
 
 def round_to_multiple(x, m):

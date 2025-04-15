@@ -1,9 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from cartopy.crs import PlateCarree
 from shapely import MultiPolygon
-from shapely.plotting import plot_polygon
 
 cmap = plt.get_cmap("viridis")
+projection = PlateCarree()
 
 
 def infer_resolution(s):
@@ -15,15 +16,10 @@ def infer_resolution(s):
     return min(lon_diff.min(), lat_diff.min())
 
 
-def scatter_map(
-    locations, values, ax: plt.Axes | None = None, cmap="viridis", vmin=None, vmax=None
-):
+def scatter_map(locations, values, ax: plt.Axes, cmap="viridis", vmin=None, vmax=None):
     """
     Scatter plot with a colorbar.
     """
-    if ax is None:
-        ax = plt.axes()
-
     res = infer_resolution(locations)
     lon, lat = locations.T
     lon_range = np.arange(lon.min() - res / 2, lon.max() + res, res)
@@ -47,11 +43,8 @@ def scatter_map(
     return ax
 
 
-def plot_surveys_ax(data, ax=None):
+def plot_surveys_ax(data, ax: plt.Axes):
     s, n_pos, n = data["s"], data["n_pos"], data["n"]
-
-    if ax is None:
-        ax = plt.Axes()
 
     scatter = ax.scatter(
         *s.T,
@@ -68,27 +61,18 @@ def plot_surveys_ax(data, ax=None):
     )
     ax.set_aspect("equal")
     ax.set_title("Surveys")
+    ax.gridlines(draw_labels=True, alpha=0.3)
     plt.colorbar(scatter, ax=ax, label="Fraction of positive tests")
-
-    return ax
 
 
 def plot_surveys(
     data,
     shape: MultiPolygon | None = None,
 ):
-    fig, ax = plt.subplots(figsize=(10, 10), layout="compressed")
-    ax = plot_surveys_ax(data, ax)
-
-    if shape is not None:
-        plot_polygon(
-            shape,
-            ax=ax,
-            facecolor="none",
-            edgecolor="black",
-            add_points=False,
-            linewidth=0.5,
-        )
+    fig, ax = plt.subplots(
+        figsize=(10, 10), layout="compressed", subplot_kw=dict(projection=projection)
+    )
+    plot_surveys_ax(data, ax)
 
     return fig
 
@@ -120,21 +104,15 @@ def plot_predictions(
         ncols=ncols,
         figsize=(ncols * 10, nrows * 10),
         layout="compressed",
+        subplot_kw=dict(projection=projection),
     )
 
     for ax in axes.flat:
         ax.set_aspect("equal")
+        ax.coastlines()
+        ax.gridlines(draw_labels=True, alpha=0.3)
         ax.set_xlim(s_t[:, 0].min() - 0.5, s_t[:, 0].max() + 0.5)
         ax.set_ylim(s_t[:, 1].min() - 0.5, s_t[:, 1].max() + 0.5)
-        if shape is not None:
-            plot_polygon(
-                shape,
-                ax=ax,
-                facecolor="none",
-                edgecolor="black",
-                add_points=False,
-                linewidth=0.5,
-            )
 
     if data is not None:
         plot_surveys_ax(data, ax=axes[0, 0])
