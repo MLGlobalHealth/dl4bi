@@ -1,0 +1,15 @@
+# data
+iso: null # `null` for all of Africa
+region: null
+# query: "YY==2007" # extra data filtering
+query: null
+res: 150 # this rounds data to the grid of res arc-seconds unless `null`
+
+# mcmc parameters
+seed: 42
+num_warmup: 100
+num_samples: 100
+num_chains: 4
+chain_method: "sequential" # can be parallel, sequential, vectorized (experimental), or vmap
+progress_bar: True
+ 
