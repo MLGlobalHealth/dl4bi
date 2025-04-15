@@ -10,7 +10,8 @@ enc_lat:
   dims: [128, 128, 128]
 self_attn_det:
   _target_: dl4bi.attention.MultiHeadAttention
-  attn: dl4bi.attention.ScanAttention
+  attn:
+    _target_: dl4bi.attention.ScanAttention
   num_heads: 8
   proj_qs:
     _target_: dl4bi.mlp.MLP
@@ -26,7 +27,8 @@ self_attn_det:
     dims: [128]
 self_attn_lat:
   _target_: dl4bi.attention.MultiHeadAttention
-  attn: dl4bi.attention.ScanAttention
+  attn:
+    _target_: dl4bi.attention.ScanAttention
   num_heads: 8
   proj_qs:
     _target_: dl4bi.mlp.MLP
@@ -45,7 +47,8 @@ z_dist:
   dims: [128, 256]
 cross_attn:
   _target_: dl4bi.attention.MultiHeadAttention
-  attn: dl4bi.attention.ScanAttention
+  attn:
+    _target_: dl4bi.attention.ScanAttention
   num_heads: 8
   proj_qs:
     _target_: dl4bi.mlp.MLP
