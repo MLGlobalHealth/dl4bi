@@ -60,7 +60,11 @@ def prevalence(y):
 
 
 def survey_model(
-    s: jax.Array, n_pos: jax.Array, n: jax.Array, *, sample_shape: tuple[int, ...] = ()
+    s: jax.Array,
+    n: jax.Array,
+    n_pos: jax.Array | None,
+    *,
+    sample_shape: tuple[int, ...] = (),
 ):
     """
     MBG survey model.
@@ -85,7 +89,7 @@ def render():
     n_pos = jax.random.randint(rng, (L,), 0, n)
     return numpyro.render_model(
         survey_model,
-        (s, n_pos, n),
+        (s, n, n_pos),
         render_distributions=True,
         render_params=True,
     )
