@@ -31,7 +31,7 @@ def kernel(x, y, /, *, var, ls, **_):
 jitter = 1e-4  # note this is in fact N(0, s2=jitter) independent noise
 
 
-def spatial_effect(s: jax.Array, sample_shape: tuple[int, ...] = ()):
+def spatial_effect(s: jax.Array, *, sample_shape: tuple[int, ...] = ()):
     """
     Definition of the spatial effect underlying the observation model.
     """
@@ -59,8 +59,15 @@ def prevalence(y):
     return logit_theta
 
 
-def survey_model(s: jax.Array, n_pos: jax.Array, n: jax.Array):
-    y = spatial_effect(s)
+def survey_model(
+    s: jax.Array, n_pos: jax.Array, n: jax.Array, *, sample_shape: tuple[int, ...] = ()
+):
+    """
+    MBG survey model.
+
+    Setting `sample_shape` to !=() will produce samples with the same kernel parameters.
+    """
+    y = spatial_effect(s, sample_shape=sample_shape)
     logit_theta = prevalence(y)
 
     numpyro.sample(

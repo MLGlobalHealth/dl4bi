@@ -80,7 +80,7 @@ def build_dataloader(cfg: DictConfig):
     @jit
     def sp(rng: jax.Array, s: jax.Array):
         f = handlers.seed(spatial_effect, rng)
-        return f(s, (B,))[..., None]
+        return f(s, sample_shape=(B,))[..., None]
 
     def dataloader(rng: jax.Array):
         while True:
@@ -114,7 +114,7 @@ def build_grid_dataloader(cfg: DictConfig):
     def sp(rng: jax.Array):
         f = handlers.seed(spatial_effect, rng)
         # TODO: return kernel params
-        y = f(s[0], (B,))[..., None]
+        y = f(s[0], sample_shape=(B,))[..., None]
         return y
 
     def dataloader(rng: jax.Array):
