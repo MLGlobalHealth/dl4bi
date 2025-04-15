@@ -121,9 +121,9 @@ def metrics(true, pred):
     pred = pred.reshape(N, -1)
 
     results = dict(num_samples=N, sample_shape=sample_shape)
-    results["mmd"] = mmd_gaussian(true, pred)
-    # NOTE: mmd doesn't make sense for the pointwise ground truth,
-    # also in high dimensions the current implementation doesn't fit in memory
+    # results["mmd"] = mmd_gaussian(true, pred)
+    # NOTE: mmd doesn't make sense for the pointwise ground truth
+    # it is also ~0 for some reason in that case?
     results["rmse_pointwise_mean"] = rmse(
         jnp.mean(true, axis=0), jnp.mean(pred, axis=0)
     )
