@@ -1,4 +1,4 @@
-name: moz
+name: 2d
 s:
   # nums correspond to a grid with resolution of 150 seconds
   - start: 30.208
