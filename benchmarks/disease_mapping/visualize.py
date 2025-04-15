@@ -61,6 +61,7 @@ def plot_surveys_ax(data, ax: plt.Axes):
     )
     ax.set_aspect("equal")
     ax.set_title("Surveys")
+    ax.coastlines()
     ax.gridlines(draw_labels=True, alpha=0.3)
     plt.colorbar(scatter, ax=ax, label="Fraction of positive tests")
 
