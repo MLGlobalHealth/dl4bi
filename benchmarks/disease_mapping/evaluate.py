@@ -1,3 +1,4 @@
+from functools import partial
 from itertools import chain
 from pathlib import Path
 from typing import Callable
@@ -20,34 +21,39 @@ def l2_squared(x: jax.Array, y: jax.Array):
     return jnp.sum((x - y) ** 2)
 
 
+@partial(jit, static_argnames=["kernel"])
 def mmd(x: jax.Array, y: jax.Array, kernel: Callable):
     """
-    MMD with Gaussian kernel.
-    Expects `x,y` of shape `[N_samples, sample_shape]`,
+    MMD^2 estimate.
+    Expects `x, y` of shapes `[N, sample_shape]`, `[M, sample_shape]`,
     and kernel taking arguments of shape `[sample_shape]`.
-    """
-    assert x.shape == y.shape
-    N, *sample_shape = x.shape
 
-    # k = make_pairwise(kernel)
-    # above doesn't fit in memory with large N_samples and sample_shape. need to sequentially calculate the kernel
-    def k(x, y):
-        return jax.lax.map(lambda xi: jax.lax.map(lambda yi: kernel(xi, yi), y), x)
+    See https://jmlr.csail.mit.edu/papers/volume13/gretton12a/gretton12a.pdf.
+    """
+    N, *sample_shape_x = x.shape
+    M, *sample_shape_y = y.shape
+    assert sample_shape_x == sample_shape_y
+
+    # vectorized doesn't fit in memory for large sample sizes
+    k = jit(make_pairwise(kernel, method="sequential"))
 
     k_xx: jax.Array = k(x, x)
     k_yy: jax.Array = k(y, y)
     k_xy: jax.Array = k(x, y)
 
-    mask = ~jnp.eye(N, dtype=bool)
+    mask_x = ~jnp.eye(N, dtype=bool)
+    mask_y = ~jnp.eye(M, dtype=bool)
 
-    mmd2 = k_xx.mean(where=mask) - 2 * jnp.mean(k_xy) + jnp.mean(k_yy, where=mask)
-
-    return jnp.sqrt(mmd2)
+    mmd2 = k_xx.mean(where=mask_x) - 2 * jnp.mean(k_xy) + jnp.mean(k_yy, where=mask_y)
+    return mmd2
 
 
 def mmd_gaussian(x: jax.Array, y: jax.Array):
+    """MMD^2 with Gaussian kernel with `ls` = sample dimension."""
+
     def kernel(x1, x2):
-        return jnp.exp(-l2_squared(x1, x2) / 2)
+        ls = x1.size  # normalize by dimension
+        return jnp.exp(-l2_squared(x1, x2) / 2 / ls**2)
 
     return mmd(x, y, kernel)
 
