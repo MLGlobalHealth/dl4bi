@@ -54,7 +54,7 @@ def spatial_effect(s: jax.Array, sample_shape: tuple[int, ...] = ()):
 def prevalence(y):
     b0 = numpyro.sample("b0", dist.Normal(0, 10))
     scale = numpyro.sample("scale", dist.HalfNormal(1))
-    logit_theta = b0 + scale * y
+    logit_theta = numpyro.deterministic("logit_theta", b0 + scale * y)
     numpyro.deterministic("theta", jax.nn.sigmoid(logit_theta))
     return logit_theta
 
