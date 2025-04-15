@@ -12,6 +12,21 @@ from dl4bi.core.train import TrainState
 
 @jit
 @rng_vmap
+def sample_prevalence(rng, y, **params):
+    """Sampling of prevalence given `y` and `params`.
+    Args:
+        rng: jax.random.PRNGKey
+        y: spatial effect of shape `[L_test]`
+        params: params to be plugged into the prevalence model.
+
+    Returns:
+        logit(prevalence) of shape `[L_test]`
+    """
+    return seed(substitute(prevalence, params), rng)(y)
+
+
+@jit
+@rng_vmap
 def sample_gp(
     rng,
     s_c: jax.Array,  # [L_ctx, D]
@@ -91,21 +106,6 @@ def sample_gp_pointwise(
     z = jax.random.normal(rng, (L_test))
 
     return mean + jnp.sqrt(var) * z
-
-
-@jit
-@rng_vmap
-def sample_prevalence(rng, y, **params):
-    """Sampling of prevalence given `y` and `params`.
-    Args:
-        rng: jax.random.PRNGKey
-        y: spatial effect of shape `[L_test]`
-        params: params to be plugged into the prevalence model.
-
-    Returns:
-        logit(prevalence) of shape `[L_test]`
-    """
-    return seed(substitute(prevalence, params), rng)(y)
 
 
 def get_np_sampler(
