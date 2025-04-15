@@ -36,7 +36,7 @@ def spatial_effect(s: jax.Array, sample_shape: tuple[int, ...] = ()):
     Definition of the spatial effect underlying the observation model.
     """
     ls = numpyro.sample("ls", dist.InverseGamma(3, 3))
-    var = numpyro.sample("var", dist.HalfNormal(1))
+    var = numpyro.deterministic("var", 1)
 
     cov = kernel(s, s, var=var, ls=ls)
     L = cov.shape[0]
@@ -53,8 +53,8 @@ def spatial_effect(s: jax.Array, sample_shape: tuple[int, ...] = ()):
 
 def prevalence(y):
     b0 = numpyro.sample("b0", dist.Normal(0, 10))
-
-    logit_theta = b0 + y
+    scale = numpyro.sample("scale", dist.HalfNormal(1))
+    logit_theta = b0 + scale * y
     numpyro.deterministic("theta", jax.nn.sigmoid(logit_theta))
     return logit_theta
 
