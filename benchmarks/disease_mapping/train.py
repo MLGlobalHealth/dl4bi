@@ -35,8 +35,8 @@ def main(cfg: DictConfig):
     rng_train, rng_test = random.split(rng)
     train_dataloader = valid_dataloader = build_dataloader(cfg.data)
     # TODO: fix this for spatiotemportal data
-    clbk = wandb_2d_plots
-    clbk_dataloader = build_grid_dataloader(cfg.data)
+    callbacks = [Callback(wandb_2d_plots, cfg.plot_interval)]
+    callback_dataloader = build_grid_dataloader(cfg.data)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     state = train(
@@ -50,8 +50,8 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         cfg.valid_num_steps,
         valid_dataloader,
-        callbacks=[Callback(clbk, cfg.plot_interval)],
-        callback_dataloader=clbk_dataloader,
+        callbacks=callbacks,
+        callback_dataloader=callback_dataloader,
     )
     metrics = evaluate(
         rng_test,

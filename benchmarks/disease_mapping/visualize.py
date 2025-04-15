@@ -78,7 +78,7 @@ def plot_surveys(
     shape: MultiPolygon | None = None,
 ):
     fig, ax = plt.subplots(figsize=(10, 10), layout="compressed")
-    ax = plot_surveys_ax(data, shape, ax)
+    ax = plot_surveys_ax(data, ax)
 
     if shape is not None:
         plot_polygon(
