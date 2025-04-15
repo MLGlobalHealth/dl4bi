@@ -3,14 +3,14 @@ s:
   # eastings
   - start: -18
     stop: 52
-    num: 71
+    num: 281
   # northings
   - start: -35
     stop: 38
-    num: 74
+    num: 293
 num_ctx:
-  min: 50 # ~5%
-  max: 500 # ~50%
-num_test: 1000
+  min: 500 # ~5%
+  max: 5000 # ~50%
+num_test: 10000
 batch_size: 32
 # obs_noise: 0.01
