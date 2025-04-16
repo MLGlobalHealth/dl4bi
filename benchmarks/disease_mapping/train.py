@@ -72,7 +72,7 @@ def build_dataloader(cfg: DictConfig):
     Generates samples from `model.spatial_effect`.
     """
 
-    B, L, D = cfg.batch_size, cfg.num_test + cfg.num_ctx.max, len(cfg.s)
+    B, L, D = cfg.batch_size, cfg.num_test, len(cfg.s)
     s_min = jnp.array([axis["start"] for axis in cfg.s])
     s_max = jnp.array([axis["stop"] for axis in cfg.s])
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
@@ -94,7 +94,7 @@ def build_dataloader(cfg: DictConfig):
                 cfg.num_ctx.min,
                 cfg.num_ctx.max,
                 num_test=cfg.num_test,
-                test_includes_ctx=False,
+                test_includes_ctx=True,
                 obs_noise=None,
             )
             yield b
