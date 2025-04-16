@@ -22,6 +22,7 @@ def sample_prevalence(rng, y, **params):
     Returns:
         logit(prevalence) of shape `[L_test]`
     """
+    params.pop("z", None)
     return seed(substitute(prevalence, params), rng)(y)
 
 
