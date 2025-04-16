@@ -15,6 +15,7 @@ from benchmarks.disease_mapping.samplers import (
     get_np_sampler,
     sample_gp,
     sample_gp_pointwise,
+    sample_matheron,
     sample_prevalence,
 )
 from benchmarks.disease_mapping.utils import batch, map_fn, unbatch
@@ -49,6 +50,10 @@ def predict(seed, model, s_c, y_c, params, s_t, batch_size):
         print("Using GP for pointwise predictions.")
         sample_y_t = sample_gp_pointwise
         model_name = "gp_pointwise"
+    elif model.lower() == "matheron":
+        print("Using Matheron's rule for predictions.")
+        sample_y_t = sample_matheron
+        model_name = "matheron"
     else:
         model = Path(model)
         state, cfg_model = load_ckpt(model)

@@ -28,6 +28,29 @@ def sample_prevalence(rng, y, **params):
 
 @jit
 @rng_vmap
+def sample_matheron(rng, s_c, y_c, s_t, **params):
+    """Conditional GP sampling using Matheron's rule."""
+    L_ctx, _ = s_c.shape
+    L_test, _ = s_t.shape
+
+    s = jnp.concat([s_c, s_t], axis=0)
+
+    cov = kernel(s, s, **params) + jitter * jnp.eye(L_ctx + L_test)
+
+    cov_cholesky = jax.lax.linalg.cholesky(cov)
+    z = jax.random.normal(rng, shape=(L_ctx + L_test,))
+    y = cov_cholesky @ z
+
+    cov_cc = cov[:L_ctx, :L_ctx]
+    cov_tc = cov[L_ctx:, :L_ctx]
+
+    return y[:, L_ctx:] + (
+        cov_tc @ jsp.linalg.solve(cov_cc, (y_c - y[:, :L_ctx]), assume_a="pos")
+    )
+
+
+@jit
+@rng_vmap
 def sample_gp(
     rng,
     s_c: jax.Array,  # [L_ctx, D]
@@ -104,7 +127,7 @@ def sample_gp_pointwise(
         return conditional_mean.squeeze(), conditional_cov.squeeze()
 
     mean, var = vmap(calculate_single)(s_t)
-    z = jax.random.normal(rng, (L_test))
+    z = jax.random.normal(rng, (L_test,))
 
     return mean + jnp.sqrt(var) * z
 
