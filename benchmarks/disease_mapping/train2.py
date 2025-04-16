@@ -29,6 +29,7 @@ from dl4bi.meta_learning.utils import cfg_to_run_name
 
 @hydra.main("configs", "training", None)
 def main(cfg: DictConfig):
+    cfg.project = "Full Model Learning"
     run_name = cfg.get("name", cfg_to_run_name(cfg))
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
@@ -70,7 +71,7 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path = f"results/Full Regression/{cfg.data.name}/{cfg.seed}/{run_name}"
+    path = f"results/{cfg.project}/{cfg.data.name}/{cfg.seed}/{run_name}"
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
