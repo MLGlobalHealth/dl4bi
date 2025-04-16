@@ -128,8 +128,11 @@ def make_batch(
     )
 
     z_c_obs = jsp.special.logit(n_pos_c / n_c)
+
+    # f_c = z_c_obs
     # f_c = jnp.concat([z_c_obs, n_c], axis=-1)
     f_c = jnp.concat([n_pos_c, n_c], axis=-1)
+    # f_c = jnp.concat([n_pos_c / n_c, n_c], axis=-1)
     f_t = z_t
     return SpatialBatch(
         None,
