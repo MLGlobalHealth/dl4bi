@@ -20,11 +20,12 @@ def kernel(x, y, /, *, var, ls, **_):
     Geodesic Laplace (also Exponential, Matern 1/2) kernel.
     """
     # return rbf(x, y, var=var, ls=ls)
-    return exponential(x, y, var=var, ls=ls)
+    # return exponential(x, y, var=var, ls=ls)
 
     x, y = _prepare_dims(x, y)
 
     d = make_pairwise(haversine_distance)(x, y)
+    d *= jnp.pi / 180.0 * 6371  # convert to km
     return var * jnp.exp(-d / ls)
 
 
@@ -52,7 +53,7 @@ def spatial_effect(s: jax.Array, *, sample_shape: tuple[int, ...] = ()):
 
 
 def prevalence(y):
-    b0 = numpyro.sample("b0", dist.Normal(0, 10))
+    b0 = numpyro.sample("b0", dist.Normal(0, 2))
     scale = numpyro.sample("scale", dist.HalfNormal(1))
     z = numpyro.deterministic("z", b0 + scale * y)
     numpyro.deterministic("theta", jax.nn.sigmoid(z))
