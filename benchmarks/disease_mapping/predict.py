@@ -64,15 +64,14 @@ def predict(seed, model, s_c, y_c, params, s_t, batch_size):
         y_c=y_c,
         **params,
     )
-    theta_t = map_fn(sample_prevalence)(
+    z_t = map_fn(sample_prevalence)(
         rng=jax.random.split(rng_theta_t, num_iters),
         y=y_t,
         **params,
     )
-    theta_t = jax.nn.sigmoid(theta_t)
+    theta_t = jax.nn.sigmoid(z_t)
 
     breakpoint_if_nonfinite(theta_t)
-
     return model_name, s_t[0], unbatch(y_t), unbatch(theta_t)
 
 
