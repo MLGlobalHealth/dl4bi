@@ -21,3 +21,4 @@ benchmarks/vae/maps
 .env
 tmp
 .DS_Store
+*.code-workspace
