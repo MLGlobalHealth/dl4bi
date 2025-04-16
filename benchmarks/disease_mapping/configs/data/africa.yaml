@@ -3,11 +3,11 @@ s:
   # eastings
   - start: -18
     stop: 52
-    num: 281
+    num: 71
   # northings
   - start: -35
     stop: 38
-    num: 293
+    num: 74
 num_ctx:
   min: 500 # ~5%
   max: 5000 # ~50%
