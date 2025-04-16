@@ -70,7 +70,7 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path = f"results/{cfg.project}/{cfg.data.name}/{cfg.seed}/{run_name}"
+    path = f"results/Full Regression/{cfg.data.name}/{cfg.seed}/{run_name}"
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -133,7 +133,7 @@ def make_batch(
     # f_c = jnp.concat([z_c_obs, n_c], axis=-1)
     f_c = jnp.concat([n_pos_c, n_c], axis=-1)
     # f_c = jnp.concat([n_pos_c / n_c, n_c], axis=-1)
-    f_t = z_t
+    f_t = jax.nn.sigmoid(z_t)
     return SpatialBatch(
         None,
         s_c,
