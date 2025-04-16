@@ -3,6 +3,7 @@ from typing import Callable, Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from flax.linen import initializers as init
 
 from ..core.mlp import MLP
 from ..core.model_output import DiagonalMVNOutput
@@ -36,8 +37,15 @@ class TETNP(nn.Module):
 
 
 class TEISTEncoder(nn.Module):
+    embed_dim: int
+    num_latents: int
+
     @nn.compact
-    def __call__(self):
+    def __call__(self, x: jax.Array):
+        Z, E, D = self.num_latents, self.embed_dim, x.shape[-1]
+        latent_tokens = self.param("latent_tokens", init.truncated_normal(), (Z, E))
+        latent_inputs = self.param("latent_inputs", init.truncated_normal(), (Z, D))
+
         pass
 
 

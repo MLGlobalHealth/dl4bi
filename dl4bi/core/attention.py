@@ -834,7 +834,6 @@ class MultiHeadAttention(nn.Module):
 
     Returns:
         A `MultiHeadAttention` module.
-
     """
 
     attn: nn.Module = Attention()
@@ -874,6 +873,64 @@ class MultiHeadAttention(nn.Module):
         ctx, attn = self.attn(qs, ks, vs, mask, training, **kwargs)
         ctx = rearrange(ctx, "B H L D -> B L (H D)")
         return self.proj_out(ctx), attn
+
+
+class TranslationEquivariantMultiHeadAttention(nn.Module):
+    """
+    Translation Equivariant MultiHeadAttention from [Translation Equivariant Neural Processes](https://arxiv.org/abs/2406.12409).
+
+    Args:
+        num_heads: Number of heads for attention module.
+        proj_qs: A module for projecting queries.
+        proj_ks: A module for projecting keys.
+        proj_vs: A module for projecting values.
+        proj_out: A module for projecting output.
+
+    Returns:
+        A `TranslationEquivariantMultiHeadAttention` module.
+    """
+
+    num_heads: int = 4
+    proj_qs: nn.Module = MLP([64])
+    proj_ks: nn.Module = MLP([64])
+    proj_vs: nn.Module = MLP([64])
+    proj_out: nn.Module = MLP([64])
+    kernel: nn.Module = MLP([64, 64, 4])
+    phi: Optional[nn.Module] = None
+    p_dropout: float = 0.0
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, D_q]
+        ks: jax.Array,  # [B, K, D_k]
+        vs: jax.Array,  # [B, K, D_v]
+        mask: Optional[jax.Array] = None,  # [B, K]
+        training: bool = False,
+        **kwargs,
+    ):
+        H = self.num_head
+        drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        qs_s, ks_s = kwargs["qs_s"], kwargs["ks_s"]  # [B, {Q,K}, D_s]
+        qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
+        reshape = jit(lambda x: rearrange(x, "B L (H D) -> B H L D", H=H))
+        qs, ks, vs = map(reshape, (qs, ks, vs))
+        D_qk = qs.shape[-1]
+        qk_s_dist = qs_s[:, :, None, :] - ks_s[:, None, :, :]  # [B, Q, K, D_s]
+        scores = jnp.einsum("B H Q D, B H K D -> B H Q K", qs, ks) / jnp.sqrt(D_qk)
+        scores = rearrange(scores, "B H Q K -> B Q K H")
+        scores = self.kernel(jnp.concat([scores, qk_s_dist], axis=-1))
+        scores = rearrange(scores, "B Q K H -> B H Q K")
+        if mask is not None:
+            scores = jnp.where(mask[:, None, None, :], scores, -jnp.inf)
+        attn = nn.softmax(scores, axis=-1)  # [B, H, Q, K]
+        ctx = jnp.einsum("B H Q K, B H K D -> B H Q D", drop(attn), vs)
+        out = self.proj_out(ctx)
+        qs_s_delta = 0.0
+        if self.phi is not None:  # phi: [..., H] -> [..., D_s]
+            qs_s_scores = self.phi(rearrange(attn, "B H Q K -> B Q K H"))
+            qs_s_delta = (qk_s_dist * qs_s_scores).mean(axis=-2)  # [B, Q, D_s]
+        return out, attn, qs_s + qs_s_delta
 
 
 class MultiHeadGraphAttention(nn.Module):
