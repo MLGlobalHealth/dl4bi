@@ -44,8 +44,8 @@ def sample_matheron(rng, s_c, y_c, s_t, **params):
     cov_cc = cov[:L_ctx, :L_ctx]
     cov_tc = cov[L_ctx:, :L_ctx]
 
-    return y[:, L_ctx:] + (
-        cov_tc @ jsp.linalg.solve(cov_cc, (y_c - y[:, :L_ctx]), assume_a="pos")
+    return y[L_ctx:] + (
+        cov_tc @ jsp.linalg.solve(cov_cc, (y_c - y[:L_ctx]), assume_a="pos")
     )
 
 
