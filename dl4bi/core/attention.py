@@ -925,10 +925,10 @@ class TranslationEquivariantMultiHeadAttention(nn.Module):
         reshape = jit(lambda x: rearrange(x, "B L (H D) -> B H L D", H=H))
         qs, ks, vs = map(reshape, (qs, ks, vs))
         D_qk = qs.shape[-1]
-        qk_s_dist = qs_s[:, :, None, :] - ks_s[:, None, :, :]  # [B, Q, K, D_s]
+        qk_s_diff = qs_s[:, :, None, :] - ks_s[:, None, :, :]  # [B, Q, K, D_s]
         scores = jnp.einsum("B H Q D, B H K D -> B H Q K", qs, ks) / jnp.sqrt(D_qk)
         scores = rearrange(scores, "B H Q K -> B Q K H")
-        scores = self.kernel(jnp.concat([scores, qk_s_dist], axis=-1))
+        scores = self.kernel(jnp.concat([scores, qk_s_diff], axis=-1))
         scores = rearrange(scores, "B Q K H -> B H Q K")
         if mask is not None:
             scores = jnp.where(mask[:, None, None, :], scores, -jnp.inf)
@@ -936,9 +936,9 @@ class TranslationEquivariantMultiHeadAttention(nn.Module):
         ctx = jnp.einsum("B H Q K, B H K D -> B H Q D", drop(attn), vs)
         out = self.proj_out(ctx)
         qs_s_delta = 0.0
-        if self.phi is not None:  # phi: [..., H] -> [..., D_s]
+        if self.phi is not None:  # phi: [..., H] -> [..., {1, D_s}]
             qs_s_scores = self.phi(rearrange(attn, "B H Q K -> B Q K H"))
-            qs_s_delta = (qk_s_dist * qs_s_scores).mean(axis=-2)  # [B, Q, D_s]
+            qs_s_delta = (qk_s_diff * qs_s_scores).mean(axis=-2)  # [B, Q, D_s]
         return out, attn, qs_s + qs_s_delta
 
 

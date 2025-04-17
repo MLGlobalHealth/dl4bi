@@ -12,7 +12,7 @@ from .steps import likelihood_train_step, likelihood_valid_step
 
 class TETNP(nn.Module):
     encoder: Callable = TEISTEncoder()
-    decoder: Callable = TNPDecoder()
+    decoder: Callable = MLP([128, 128, 2])
     embed_f: Callable = MLP([128, 128])
     output_fn: Callable = DiagonalMVNOutput.from_activations
     train_step: Callable = likelihood_train_step
@@ -28,12 +28,14 @@ class TETNP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        # preprocess_observations
-        # yt is [[0 1]] for each entry
-        # yc is [[v 0]] for each entry
-        # embed f_ctx, f_test
-        # encode
-        pass
+        (B, L_ctx, D_f), L_test = f_ctx.shape, s_test.shape[1]
+        obs_ind, unobs_ind = jnp.ones((B, L_ctx, 1)), jnp.zeros((B, L_test, 1))
+        f_ctx = jnp.concat([f_ctx, obs_ind], axis=-1)
+        f_test = jnp.concat([jnp.zeros((B, L_test, D_f)), unobs_ind], axis=-1)
+        f_ctx_embed, f_test_embed = self.embed_f(f_ctx), self.embed_f(f_test)
+        f_test_enc = self.encoder(f_ctx_embed, f_test_embed, s_ctx, s_test)
+        output = self.decoder(f_test_enc)
+        return self.output_fn(output)
 
 
 class TEISTEncoder(nn.Module):
@@ -46,10 +48,4 @@ class TEISTEncoder(nn.Module):
         latent_tokens = self.param("latent_tokens", init.truncated_normal(), (Z, E))
         latent_inputs = self.param("latent_inputs", init.truncated_normal(), (Z, D))
 
-        pass
-
-
-class TNPDecoder(nn.Module):
-    @nn.compact
-    def __call__(self):
         pass
