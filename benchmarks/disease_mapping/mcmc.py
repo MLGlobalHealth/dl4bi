@@ -7,7 +7,8 @@ import arviz as az
 import hydra
 import jax
 import jax.numpy as jnp
-from numpyro.infer import MCMC, NUTS, init_to_median
+import matplotlib.pyplot as plt
+from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig, OmegaConf
 
 import benchmarks.disease_mapping.model as model
@@ -29,6 +30,24 @@ def run_mcmc(cfg: DictConfig, data: dict[str, jax.Array]) -> MCMC:
     mcmc.run(rng, **data)
 
     return mcmc
+
+
+def prior_predictive(data: dict[str, jax.Array]) -> MCMC:
+    rng = jax.random.key(0)
+    s, n, n_pos = data["s"], data["n"], data["n_pos"]
+    n = data["n"].astype(jnp.int32)
+
+    predictive = Predictive(model.survey_model, num_samples=100)
+    samples = predictive(rng, s, n, None)
+    prior_n_pos = samples["n_pos"]
+    mean = prior_n_pos.mean(0)
+    std = prior_n_pos.std(0)
+
+    x = jnp.arange(len(mean))
+    plt.errorbar(x, mean, std, fmt="none", alpha=0.5, label="Prior 68% CI")
+    plt.scatter(x, n_pos, s=1, color="red", label="Observed data")
+    plt.legend()
+    return plt.gcf()
 
 
 @hydra.main("configs", "mcmc", None)
