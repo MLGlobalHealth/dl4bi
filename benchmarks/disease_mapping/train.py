@@ -1,4 +1,4 @@
-from inspect import getsource
+from inspect import getsourcefile
 from pathlib import Path
 
 import hydra
@@ -28,8 +28,8 @@ def main(cfg: DictConfig):
         name=run_name,
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
-        notes=getsource(numpyro_model),
     )
+    wandb.log_artifact(getsourcefile(numpyro_model), "model.py")
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
