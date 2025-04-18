@@ -38,9 +38,11 @@ class TETNP(nn.Module):
         return self.output_fn(output)
 
 
+# ~/scratch/tetnp/tetenp/networks/tetransformer.py
 class TEISTEncoder(nn.Module):
     embed_dim: int
     num_latents: int
+    num_layers: int
 
     @nn.compact
     def __call__(self, x: jax.Array):
