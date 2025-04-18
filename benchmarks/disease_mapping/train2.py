@@ -29,14 +29,14 @@ from dl4bi.meta_learning.utils import cfg_to_run_name
 
 @hydra.main("configs", "training", None)
 def main(cfg: DictConfig):
-    cfg.project = "Full Model Learning"
     run_name = cfg.get("name", cfg_to_run_name(cfg))
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
         name=run_name,
         project=cfg.project,
-        reinit=True,  # allows reinitialization for multiple runs
+        reinit=True,  # allows reinitialization for multiple runs,
+        group="full",
     )
     wandb.log_artifact(getsourcefile(numpyro_model), "model.py")
     print(OmegaConf.to_yaml(cfg))

@@ -28,6 +28,7 @@ def main(cfg: DictConfig):
         name=run_name,
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
+        group="gp",
     )
     wandb.log_artifact(getsourcefile(numpyro_model), "model.py")
     print(OmegaConf.to_yaml(cfg))
