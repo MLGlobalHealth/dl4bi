@@ -1,6 +1,6 @@
 _target_: sps.gp.GP
 kernel:
-  _target_: sps.kernels.matern_1_2
+  _target_: sps.kernels.matern_3_2
   _partial_: true
 var:
   _target_: sps.priors.Prior

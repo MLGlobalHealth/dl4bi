@@ -79,7 +79,7 @@ def _batch(
     S_to_L = jit(lambda v: v.reshape(v.shape[0], -1, v.shape[-1]))
     batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
     if batch_size is not None:
-        idx = random.choice(rng_i, f.shape[0], (batch_size,), replace=False)
+        idx = random.choice(rng_i, f.shape[0], (batch_size,))
         x, s, f = x[idx] if has_x else None, s[idx], f[idx]
     s_shape = s.shape
     if full_x:
@@ -152,7 +152,7 @@ class SpatialBatch(MetaLearningBatch):
                 axs[i].set_title(title, fontsize=16)
             elif i == N - 1:
                 axs[i].set_xlabel("s", fontsize=14)
-            axs[i].set_ylabel(f"Sample {i+1}", fontsize=14, rotation=90)
+            axs[i].set_ylabel(f"Sample {i + 1}", fontsize=14, rotation=90)
             axs[i].scatter(
                 self.s_ctx[i, self.mask_ctx[i], 0],
                 self.f_ctx[i, self.mask_ctx[i], 0],
@@ -194,9 +194,9 @@ class SpatialBatch(MetaLearningBatch):
             f_std = f_std.mean(axis=-1, keepdims=True)
         if self.mask_test is not None:
             f_test = jnp.where(self.mask_test[..., None], self.f_test, jnp.nan)
-        reshape = jit(lambda v: v.reshape(*self.s_shape[:-1], v.shape[-1]).squeeze())
         arrays = unbatch_BLD([f_ctx, f_test, f_pred, f_std], L)
         arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
+        reshape = jit(lambda v: v.reshape(*self.s_shape[:-1], v.shape[-1]).squeeze())
         f_ctx, f_test, f_pred, f_std = map(reshape, arrays)
         f_ctx, f_test, f_pred = map(remap_colors, [f_ctx, f_test, f_pred])
         _, axs = plt.subplots(N, 4, figsize=(20, N * 5))
@@ -208,7 +208,7 @@ class SpatialBatch(MetaLearningBatch):
                 axs[i, 1].set_title("Uncertainty", fontsize=30)
                 axs[i, 2].set_title("Prediction", fontsize=30)
                 axs[i, 3].set_title("Ground Truth", fontsize=30)
-            axs[i, 0].set_ylabel(f"Sample {i+1}", fontsize=30)
+            axs[i, 0].set_ylabel(f"Sample {i + 1}", fontsize=30)
             for j in range(4):
                 axs[i, j].set_xticks([])
                 axs[i, j].set_yticks([])
