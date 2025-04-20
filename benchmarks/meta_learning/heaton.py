@@ -60,7 +60,6 @@ def main(cfg: DictConfig):
     train_num_steps = cfg.train_num_steps
     if finetune_path:
         state, _ = load_ckpt(Path(finetune_path))
-        optimizer = optax.yogi(cfg.lr_finetune)
         train_num_steps = cfg.finetune_num_steps
         if cfg.finetune_on_real:
             train_dataloader = valid_dataloader
