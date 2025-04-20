@@ -11,7 +11,7 @@ train_num_steps: 100000
 valid_num_steps: 100
 valid_interval: 10000
 plot_interval: 100000
-finetune_num_steps: 100
+finetune_num_steps: 1000
 finetune_on_real: False
 optimizer:
   _target_: optax.chain
