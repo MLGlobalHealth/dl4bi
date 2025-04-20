@@ -8,5 +8,5 @@ s: # each image i s ~1% the size of the original 300x500
     num: 150
 batch_size: 4
 ctx_pct: 0.6 # on average
-min_axes_pct: 0.05 # used for subsampling grid
+min_axes_pct: 0.15 # used for subsampling grid
 max_axes_pct: 1.0

@@ -55,11 +55,13 @@ def main(cfg: DictConfig):
         partial(wandb_2d_img_callback, cmap=cmap),
         cfg.plot_interval,
     )
-    state = None
+    state, return_state = None, "best"
     finetune_path = cfg.get("finetune_path", None)
     train_num_steps = cfg.train_num_steps
     if finetune_path:
         state, _ = load_ckpt(Path(finetune_path))
+        return_state = "last"
+        optimizer = optax.chain(optax.zero_nans(), optax.yogi(cfg.lr_finetune))
         train_num_steps = cfg.finetune_num_steps
         if cfg.finetune_on_real:
             train_dataloader = valid_dataloader
@@ -76,6 +78,8 @@ def main(cfg: DictConfig):
         valid_dataloader,
         callbacks=[clbk],
         callback_dataloader=train_dataloader,
+        state=state,
+        return_state=return_state,
     )
     metrics = evaluate(
         rng_test,

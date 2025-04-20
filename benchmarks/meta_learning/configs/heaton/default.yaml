@@ -13,9 +13,11 @@ valid_interval: 10000
 plot_interval: 100000
 finetune_num_steps: 1000
 finetune_on_real: False
+lr_finetune: 2.0e-5
 optimizer:
   _target_: optax.chain
   _args_:
+    - _target_: optax.zero_nans
     - _target_: optax.clip_by_global_norm
       max_norm: 1.0
     - _target_: optax.yogi
