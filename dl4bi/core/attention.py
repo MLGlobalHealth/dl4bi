@@ -899,12 +899,12 @@ class TranslationEquivariantMultiHeadAttention(nn.Module):
         A `TranslationEquivariantMultiHeadAttention` module.
     """
 
-    num_heads: int = 4
-    proj_qs: nn.Module = MLP([64])
-    proj_ks: nn.Module = MLP([64])
-    proj_vs: nn.Module = MLP([64])
-    proj_out: nn.Module = MLP([64])
-    kernel: nn.Module = MLP([64, 64, 4])
+    num_heads: int = 8
+    proj_qs: nn.Module = MLP([128])
+    proj_ks: nn.Module = MLP([128])
+    proj_vs: nn.Module = MLP([128])
+    proj_out: nn.Module = MLP([128])
+    kernel: nn.Module = MLP([128, 128, 8])
     phi: Optional[nn.Module] = None
     p_dropout: float = 0.0
 
@@ -918,7 +918,7 @@ class TranslationEquivariantMultiHeadAttention(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        H = self.num_head
+        H = self.num_heads
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         qs_s, ks_s = kwargs["qs_s"], kwargs["ks_s"]  # [B, {Q,K}, D_s]
         qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
@@ -934,12 +934,12 @@ class TranslationEquivariantMultiHeadAttention(nn.Module):
             scores = jnp.where(mask[:, None, None, :], scores, -jnp.inf)
         attn = nn.softmax(scores, axis=-1)  # [B, H, Q, K]
         ctx = jnp.einsum("B H Q K, B H K D -> B H Q D", drop(attn), vs)
-        out = self.proj_out(ctx)
+        out = self.proj_out(rearrange(ctx, "B H Q D -> B Q (H D)"))
         qs_s_delta = 0.0
-        if self.phi is not None:  # phi: [..., H] -> [..., {1, D_s}]
+        if self.phi is not None:  # phi: [..., H] -> [..., {1 or D_s}]
             qs_s_scores = self.phi(rearrange(attn, "B H Q K -> B Q K H"))
             qs_s_delta = (qk_s_diff * qs_s_scores).mean(axis=-2)  # [B, Q, D_s]
-        return out, attn, qs_s + qs_s_delta
+        return out, qs_s + qs_s_delta, attn
 
 
 class MultiHeadGraphAttention(nn.Module):

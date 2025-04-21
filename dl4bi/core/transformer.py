@@ -1,13 +1,12 @@
-"""
-Transformer architecture inspired by [d2l](https://d2l.ai/chapter_attention-mechanisms-and-transformers/transformer.html)'s version.
-"""
-
 from typing import Optional
 
 import flax.linen as nn
 import jax
+import jax.numpy as jnp
+from flax.linen import initializers as init
+from jax import jit
 
-from .attention import MultiHeadAttention
+from .attention import MultiHeadAttention, TranslationEquivariantMultiHeadAttention
 from .mlp import MLP
 
 
@@ -190,6 +189,41 @@ class TransformerDecoder(nn.Module):
                 **kwargs,
             )
         return nn.LayerNorm()(x_dec)
+
+
+class TEISTEncoder(nn.Module):
+    """TEISTEncoder from [Translation Equivariant Transformer Netural Processes](https://arxiv.org/abs/2406.12409)."""
+
+    num_blks: int = 6
+    num_latents: int = 128
+    embed_dim: int = 128
+    ps_to_ks_attn: nn.Module = TranslationEquivariantMultiHeadAttention()
+    ks_to_ps_attn: nn.Module = TranslationEquivariantMultiHeadAttention()
+    qs_to_ps_attn: nn.Module = TranslationEquivariantMultiHeadAttention()
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, D_q]
+        ks: jax.Array,  # [B, K, D_k]
+        qs_s: jax.Array,  # [B, Q, D_s]
+        ks_s: jax.Array,  # [B, K, D_s]
+        mask: Optional[jax.Array] = None,
+        **kwargs,
+    ):
+        (B, _L, D_s), Z, E = qs_s.shape, self.num_latents, self.embed_dim
+        batchify = jit(lambda v: jnp.repeat(v, B, axis=0))
+        ps = self.param("pseudo_tokens", init.truncated_normal(), (1, Z, E))
+        ps_s = self.param("pseudo_locs", init.truncated_normal(), (1, Z, D_s))
+        ps, ps_s = batchify(ps), batchify(ps_s)
+        ps_s += ks_s.mean(axis=1, keepdims=True)  # shift to mean key location
+        for _ in range(self.num_blks):
+            ps, ps_s, _ = self.ps_to_ks_attn.copy()(
+                ps, ks, ks, mask, qs_s=ps_s, ks_s=ks_s
+            )
+            ks, ks_s, _ = self.ks_to_ps_attn.copy()(ks, ps, ps, qs_s=ks_s, ks_s=ps_s)
+            qs, qs_s, _ = self.qs_to_ps_attn.copy()(qs, ps, ps, qs_s=qs_s, ks_s=ps_s)
+        return qs
 
 
 class KRBlock(nn.Module):

@@ -1,0 +1,69 @@
+_target_: dl4bi.meta_learning.TETNP
+encoder:
+  _target_: dl4bi.transformer.TEISTEncoder
+  num_blks: 6
+  num_latents: 128
+  embed_dim: 128
+  ps_to_ks_attn:
+    _target_: dl4bi.attention.TranslationEquivariantMultiHeadAttention
+    num_heads: 8
+    proj_qs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_ks:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_vs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_out:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    kernel:
+      _target_: dl4bi.mlp.MLP
+      dims: [128, 128, 8]
+  ks_to_ps_attn:
+    _target_: dl4bi.attention.TranslationEquivariantMultiHeadAttention
+    num_heads: 8
+    proj_qs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_ks:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_vs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_out:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    kernel:
+      _target_: dl4bi.mlp.MLP
+      dims: [128, 128, 8]
+  qs_to_ps_attn:
+    _target_: dl4bi.attention.TranslationEquivariantMultiHeadAttention
+    num_heads: 8
+    proj_qs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_ks:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_vs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_out:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    kernel:
+      _target_: dl4bi.mlp.MLP
+      dims: [128, 128, 8]
+decoder:
+  _target_: dl4bi.mlp.MLP
+  dims: [128, 128, 2]
+embed_f:
+  _target_: dl4bi.mlp.MLP
+  dims: [128, 128]
+output_fn:
+  _target_: dl4bi.model_output.DiagonalMVNOutput.from_activations
+  _partial_: true
