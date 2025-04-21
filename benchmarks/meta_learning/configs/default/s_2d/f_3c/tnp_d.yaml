@@ -1,7 +1,7 @@
 _target_: dl4bi.meta_learning.TNPD
 embed_s_f:
   _target_: dl4bi.mlp.MLP
-  dims: [64, 64, 64, 64]
+  dims: [256, 128, 64]
 enc:
   _target_: dl4bi.transformer.TransformerEncoder
   num_blks: 6
@@ -12,22 +12,22 @@ enc:
       _target_: dl4bi.attention.MultiHeadAttention
       proj_qs:
         _target_: dl4bi.mlp.MLP
-        dims: [64]
+        dims: [128]
       proj_ks:
         _target_: dl4bi.mlp.MLP
-        dims: [64]
+        dims: [128]
       proj_vs:
         _target_: dl4bi.mlp.MLP
-        dims: [64]
+        dims: [128]
       proj_out:
         _target_: dl4bi.mlp.MLP
         dims: [64]
     ffn:
       _target_: dl4bi.mlp.MLP
-      dims: [128, 64]
+      dims: [256, 64]
 head:
   _target_: dl4bi.mlp.MLP
-  dims: [128, 3]
+  dims: [256, 64, 3]
 output_fn:
   _target_: dl4bi.core.model_output.MultinomialOutput.from_activations
   _partial_: true

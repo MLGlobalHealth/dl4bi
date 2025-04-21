@@ -351,6 +351,7 @@ def scan_ks(
     D_v = vs.shape[-1]
     K_c = min(K, ks_chunk_size)
     qs_chunk /= jnp.sqrt(D)
+    epsilon = 1.0e-10
 
     @jit
     def ks_scanner(carry: tuple, _):
@@ -381,10 +382,10 @@ def scan_ks(
     def update(qs_chunk, ks_chunk, vs_chunk, mask_chunk, os, row_maxs, row_sums):
         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
         scores = jnp.where(mask_chunk, scores, -jnp.inf)
-        row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
+        row_maxs_chunk = jax.lax.stop_gradient(jnp.max(scores, axis=-1, keepdims=True))
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
         exp_scores = jnp.exp(scores - new_row_maxs)
-        row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
+        row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True) + epsilon
         os_chunk = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs_chunk)
         exp_row_maxs_diff = jnp.exp(row_maxs - new_row_maxs)
         new_row_sums = exp_row_maxs_diff * row_sums + row_sums_chunk
@@ -394,7 +395,7 @@ def scan_ks(
 
     os = jnp.zeros((Q_c, B, H, D_v))
     row_sums = jnp.zeros((Q_c, B, H, 1))
-    row_maxs = jnp.full((Q_c, B, H, 1), -jnp.inf)
+    row_maxs = jnp.full((Q_c, B, H, 1), -1.0e-6)
 
     (i, os, row_maxs, row_sums), _ = scan(
         ks_scanner,
@@ -649,6 +650,7 @@ def biased_scan_ks(
     K_c = min(K, ks_chunk_size)
     D_v = vs.shape[-1]
     qs_chunk /= jnp.sqrt(D)
+    epsilon = 1.0e-10
 
     @jit
     def ks_scanner(carry: tuple, _):
@@ -732,10 +734,10 @@ def biased_scan_ks(
             bias += to_QBHK(t_bias)
         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk) + bias
         scores = jnp.where(mask_chunk, scores, -jnp.inf)
-        row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
+        row_maxs_chunk = jax.lax.stop_gradient(jnp.max(scores, axis=-1, keepdims=True))
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
         exp_scores = jnp.exp(scores - new_row_maxs)
-        row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
+        row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True) + epsilon
         os_chunk = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs_chunk)
         exp_row_maxs_diff = jnp.exp(row_maxs - new_row_maxs)
         new_row_sums = exp_row_maxs_diff * row_sums + row_sums_chunk
@@ -745,7 +747,7 @@ def biased_scan_ks(
 
     os = jnp.zeros((Q_c, B, H, D_v))
     row_sums = jnp.zeros((Q_c, B, H, 1))
-    row_maxs = jnp.full((Q_c, B, H, 1), -jnp.inf)
+    row_maxs = jnp.full((Q_c, B, H, 1), -1.0e-6)
 
     (i, os, row_maxs, row_sums), _ = scan(
         ks_scanner,

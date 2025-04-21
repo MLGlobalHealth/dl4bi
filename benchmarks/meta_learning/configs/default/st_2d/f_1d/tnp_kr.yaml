@@ -37,6 +37,9 @@ blk:
     proj_vs:
       _target_: dl4bi.mlp.MLP
       dims: [128]
+    proj_out:
+      _target_: dl4bi.mlp.MLP
+      dims: [64]
   ffn:
     _target_: dl4bi.mlp.MLP
     dims: [256, 64]
