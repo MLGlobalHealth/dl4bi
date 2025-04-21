@@ -13,6 +13,7 @@ valid_interval: 5000
 plot_interval: 50000
 finetune_num_steps: 1000
 finetune_on_real: True
+lr_finetune: 2.0e-4
 optimizer:
   _target_: optax.chain
   _args_:

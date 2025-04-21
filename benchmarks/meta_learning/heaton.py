@@ -59,6 +59,8 @@ def main(cfg: DictConfig):
     if finetune_path:
         state, _ = load_ckpt(Path(finetune_path))
         return_state = "last"
+        cfg.optimizer._args_[1].learning_rate = cfg.lr_finetune
+        optimizer = instantiate(cfg.optimizer)
         train_num_steps = cfg.finetune_num_steps
         if cfg.finetune_on_real:
             train_dataloader = valid_dataloader
