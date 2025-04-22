@@ -107,7 +107,7 @@ def plot_1d_gp_samples(
                     short_name = shortened_run_name(run_name)
                     axs[row_idx, col_idx].set_ylabel(short_name, fontsize=36)
         fig.tight_layout()
-        fig.savefig(results_dir / f"comparison_sample_{i+1}.png", dpi=150)
+        fig.savefig(results_dir / f"comparison_sample_{i + 1}.png", dpi=150)
         plt.clf()
 
 
@@ -220,12 +220,13 @@ def plot_2d_img_samples(
             short_name = shortened_run_name(run_name)
             axs[row_idx, 0].set_ylabel(f"{short_name}", fontsize=36)
         fig.tight_layout()
-        fig.savefig(results_dir / f"comparison_sample_{i+1}.png", dpi=150)
+        fig.savefig(results_dir / f"comparison_sample_{i + 1}.png", dpi=150)
         plt.clf()
 
 
 def project_parameters(cfg: DictConfig):
-    cmap = cmap_std = mpl.colormaps.get_cmap("Spectral_r")
+    cmap = mpl.colormaps.get_cmap("Spectral_r")
+    cmap_std = mpl.colormaps.get_cmap("plasma")
     cmap.set_bad("grey")
     shape = (32, 32, 3)
     # example project names include "TNP-KR - MNIST", "MNIST", etc, so match

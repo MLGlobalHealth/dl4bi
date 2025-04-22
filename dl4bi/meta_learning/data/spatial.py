@@ -176,7 +176,7 @@ class SpatialBatch(MetaLearningBatch):
         f_pred: jax.Array,  # [B, L_test, D_f]
         f_std: jax.Array,  # [B, L_test, D_f]
         cmap=mpl.colormaps.get_cmap("Spectral_r"),
-        cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
+        cmap_std=mpl.colormaps.get_cmap("plasma"),
         norm=None,
         norm_std=None,
         remap_colors: Callable = lambda x: x,
