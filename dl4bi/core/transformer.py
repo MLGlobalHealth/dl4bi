@@ -214,7 +214,7 @@ class TEISTEncoder(nn.Module):
         (B, _L, D_s), Z, E = qs_s.shape, self.num_latents, self.embed_dim
         batchify = jit(lambda v: jnp.repeat(v, B, axis=0))
         ps = self.param("pseudo_tokens", init.truncated_normal(), (1, Z, E))
-        ps_s = self.param("pseudo_locs", init.truncated_normal(), (1, Z, D_s))
+        ps_s = self.param("pseudo_locs", init.normal(stddev=1.0), (1, Z, D_s))
         ps, ps_s = batchify(ps), batchify(ps_s)
         ps_s += ks_s.mean(axis=1, keepdims=True)  # shift to mean key location
         for _ in range(self.num_blks):
