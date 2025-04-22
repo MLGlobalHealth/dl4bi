@@ -884,7 +884,7 @@ class MultiHeadAttention(nn.Module):
         return self.proj_out(ctx), attn
 
 
-class TranslationEquivariantMultiHeadAttention(nn.Module):
+class TEMultiHeadAttention(nn.Module):
     """
     Translation Equivariant MultiHeadAttention from [Translation Equivariant Neural Processes](https://arxiv.org/abs/2406.12409).
 
@@ -914,13 +914,14 @@ class TranslationEquivariantMultiHeadAttention(nn.Module):
         qs: jax.Array,  # [B, Q, D_q]
         ks: jax.Array,  # [B, K, D_k]
         vs: jax.Array,  # [B, K, D_v]
+        qs_s: jax.Array,  # [B, Q, D_s],
+        ks_s: jax.Array,  # [B, K, D_s],
         mask: Optional[jax.Array] = None,  # [B, K]
         training: bool = False,
         **kwargs,
     ):
         H = self.num_heads
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        qs_s, ks_s = kwargs["qs_s"], kwargs["ks_s"]  # [B, {Q,K}, D_s]
         qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
         reshape = jit(lambda x: rearrange(x, "B L (H D) -> B H L D", H=H))
         qs, ks, vs = map(reshape, (qs, ks, vs))
