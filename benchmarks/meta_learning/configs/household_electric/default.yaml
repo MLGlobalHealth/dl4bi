@@ -3,7 +3,7 @@ defaults:
   - model: tnp_kr_scan
 seed: 42
 wandb: True
-project: House Electric
+project: Household Electric
 train_num_steps: 100000
 valid_num_steps: null # exhaust
 valid_interval: 10000
