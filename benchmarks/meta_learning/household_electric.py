@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import pandas as pd
 import wandb
 from hydra.utils import instantiate
-from jax import random
+from jax import random, vmap
 from omegaconf import DictConfig, OmegaConf
 from sklearn.preprocessing import StandardScaler
 
@@ -70,31 +70,25 @@ def build_dataloaders(
 ):
     (f_train, X_train), (f_valid, X_valid), (f_test, X_test) = load_data(rng)
 
-    def train_dataloader(rng: jax.Array):
-        while True:
-            rng_i, rng = random.split(rng)
-            yield TabularData(x=X_train, f=f_train).batch(
-                rng_i,
-                num_ctx_min,
-                num_ctx_max,
-                num_test,
-                obs_noise=None,
-                test_includes_ctx=False,
-                batch_size=batch_size,
-            )
+    def build_dataloader(f, X):
+        N, L = X.shape[0], num_ctx_max + num_test
 
-    def valid_dataloader(rng: jax.Array):
-        while True:
-            rng_i, rng = random.split(rng)
-            yield TabularData(x=X_valid, f=f_valid).batch(
-                rng_i,
-                num_ctx_min,
-                num_ctx_max,
-                num_test,
-                obs_noise=None,
-                test_includes_ctx=False,
-                batch_size=batch_size,
-            )
+        def dataloader(rng: jax.Array):
+            while True:
+                rng_b, rng_i, rng = random.split(rng, 3)
+                rng_bs = random.split(rng_b, batch_size)
+                idx = vmap(lambda rng: random.choice(rng, N, (L,), replace=False))(
+                    rng_bs
+                )
+                yield TabularData(x=X[idx], f=f[idx]).batch(
+                    rng_i,
+                    num_ctx_min,
+                    num_ctx_max,
+                    num_test,
+                    test_includes_ctx=False,
+                )
+
+        return dataloader
 
     # NOTE: uncomment to use _entire_ valid set, similar to test set (much slower)
     # def valid_dataloader(rng: jax.Array):
@@ -116,7 +110,11 @@ def build_dataloaders(
             f_test=f_test[None, ...],
         )
 
-    return train_dataloader, valid_dataloader, test_dataloader
+    return (
+        build_dataloader(f_train, X_train),
+        build_dataloader(f_valid, X_valid),
+        test_dataloader,
+    )
 
 
 def load_data(rng: jax.Array):

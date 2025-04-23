@@ -13,10 +13,10 @@ from dl4bi.meta_learning.data.temporal import TemporalData
 
 def test_tabular_data():
     rng = random.key(42)
-    B, N, D_x, D_f = 4, 37, 8, 1
+    B, L, D_x, D_f = 4, 37, 8, 1
     num_ctx_min, num_ctx_max, num_test = 3, 10, 20
-    x_shape = (N, D_x)
-    f_shape = (N, D_f)
+    x_shape = (B, L, D_x)
+    f_shape = (B, L, D_f)
     x_ctx_shape = (B, num_ctx_max, D_x)
     f_ctx_shape = (B, num_ctx_max, D_f)
     mask_ctx_shape = (B, num_ctx_max)
@@ -31,15 +31,7 @@ def test_tabular_data():
     assert d.f.shape == f_shape
     # test batching where test includes context
     test_includes_ctx = True
-    b = d.batch(
-        rng,
-        num_ctx_min,
-        num_ctx_max,
-        num_test,
-        None,
-        test_includes_ctx,
-        batch_size=B,
-    )
+    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
     assert b.x_ctx.shape == x_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
     assert b.mask_ctx.shape == mask_ctx_shape
@@ -50,15 +42,7 @@ def test_tabular_data():
     assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
     # test batching where test does not include context
     test_includes_ctx = False
-    b = d.batch(
-        rng,
-        num_ctx_min,
-        num_ctx_max,
-        num_test,
-        None,
-        test_includes_ctx,
-        batch_size=B,
-    )
+    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
     assert b.x_ctx.shape == x_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
     assert b.mask_ctx.shape == mask_ctx_shape

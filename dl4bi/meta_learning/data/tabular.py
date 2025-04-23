@@ -3,17 +3,22 @@ from functools import partial
 from typing import Optional
 
 import jax
-from jax import jit, random, vmap
+from jax import jit, random
 
-from .utils import MetaLearningBatch, MetaLearningData, batch_BLD
+from .utils import (
+    MetaLearningBatch,
+    MetaLearningData,
+    batch_BLD,
+    permute_L_in_BLD,
+)
 
 
 @dataclass(frozen=True, eq=False)
 class TabularData(MetaLearningData):
     """A simple `TabularData` container."""
 
-    x: jax.Array  # [N, D_x]
-    f: jax.Array  # [N, D_f]
+    x: jax.Array  # [B, L, D_x]
+    f: jax.Array  # [B, L, D_f]
 
     def batch(
         self,
@@ -21,9 +26,7 @@ class TabularData(MetaLearningData):
         num_ctx_min: int,
         num_ctx_max: int,
         num_test: int,
-        obs_noise: Optional[float] = None,
         test_includes_ctx: bool = False,
-        batch_size: int = 64,
     ):
         return _batch(
             rng,
@@ -32,9 +35,7 @@ class TabularData(MetaLearningData):
             num_ctx_min,
             num_ctx_max,
             num_test,
-            obs_noise,
             test_includes_ctx,
-            batch_size,
         )
 
 
@@ -45,37 +46,22 @@ class TabularData(MetaLearningData):
         "num_ctx_max",
         "num_test",
         "test_includes_ctx",
-        "obs_noise",
-        "batch_size",
     ),
 )
 def _batch(
     rng: jax.Array,
-    x: jax.Array,  # [N, D_x]
-    f: jax.Array,  # [N, D_f]
+    x: jax.Array,
+    f: jax.Array,
     num_ctx_min: int,
     num_ctx_max: int,
     num_test: int,
-    obs_noise: Optional[float] = None,
-    test_includes_ctx: bool = False,
-    batch_size: int = 64,
+    test_includes_ctx: bool,
 ):
-    N, B, L = x.shape[0], batch_size, num_ctx_max + num_test
-    rng_i, rng_eps, rng_b = random.split(rng, 3)
-    rng_bs = random.split(rng_b, B)
-    idx = vmap(lambda rng: random.choice(rng, N, (L,), replace=False))(rng_bs)
-    x_batch, f_batch = x[idx], f[idx]  # [B, L, D_{x,f}]
-    x_ctx, f_ctx, mask_ctx, x_test, f_test, mask_test = batch_BLD(
-        rng_b,
-        [x_batch, f_batch],
-        num_ctx_min,
-        num_ctx_max,
-        num_test,
-        test_includes_ctx,
-    )
-    if obs_noise:
-        f_ctx += obs_noise * random.normal(rng_eps, f_ctx.shape)
-    return TabularBatch(x_ctx, f_ctx, mask_ctx, x_test, f_test, mask_test)
+    rng_p, rng_b = random.split(rng)
+    x, f, inv_permute_idx = permute_L_in_BLD(rng, [x, f])
+    batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    args = batch_BLD(rng_b, [x, f], *batch_args)
+    return TabularBatch(*args, inv_permute_idx=inv_permute_idx)
 
 
 # register to use in jitted functions
@@ -94,6 +80,7 @@ class TabularBatch(MetaLearningBatch):
     x_test: jax.Array
     f_test: jax.Array
     mask_test: Optional[jax.Array] = None
+    inv_permute_idx: Optional[jax.Array] = None
 
 
 # register to use in jitted functions
@@ -107,6 +94,7 @@ jax.tree_util.register_pytree_node(
             d.x_test,
             d.f_test,
             d.mask_test,
+            d.inv_permute_idx,
         ),
         None,
     ),
