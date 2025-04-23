@@ -85,7 +85,7 @@ def build_dataloaders(
                 rng_i, rng_b, rng = random.split(rng, 3)
                 batch_idx = random.choice(rng_i, N, (B,), replace=False)
                 f = dataset[batch_idx]
-                d = SpatialData(x=None, s=s, f=f)
+                d = SpatiotemporalData(x=None, s=s, f=f)
                 yield d.batch(
                     rng_b,
                     num_ctx_min,
