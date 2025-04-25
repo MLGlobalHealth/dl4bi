@@ -45,7 +45,7 @@ def main(seed=42):
     save_dir = Path("results/Zimbabwe_exp/")
     save_dir.mkdir(parents=True, exist_ok=True)
     map_data = gpd.read_file("benchmarks/vae/maps/zwe2016phia_fixed.geojson")
-    map_data, s = normalize_geometry(map_data)
+    s = gen_spatial_structure(map_data)
     L = s.shape[0]
     models = {
         "Baseline_GP": None,
@@ -66,27 +66,16 @@ def main(seed=42):
         train_time, eval_mse, surrogate_decoder = None, None, None
         if model_name != "Baseline_GP":
             train_time, eval_mse, surrogate_decoder = surrogate_model_train(
-                rng_train,
-                rng_test,
-                loader,
-                model_name,
-                model,
+                rng_train, rng_test, loader, model_name, model
             )
         samples, mcmc, post, infer_time = _hmc(
-            rng_infer,
-            binom_infer_model,
-            y_obs,
-            surrogate_decoder,
+            rng_infer, binom_infer_model, y_obs, surrogate_decoder
         )
         y_hats.append(post["obs"])
         all_samples.append(samples)
         ess = az.ess(mcmc, method="mean")
         plot_infer_trace(
-            samples,
-            mcmc,
-            conditionals=None,
-            var_names=cond_names,
-            save_path=save_dir / f"{model_name}_infer_trace.png",
+            samples, mcmc, None, cond_names, save_dir / f"{model_name}_infer_trace.png"
         )
         result.append(
             {
@@ -105,12 +94,7 @@ def main(seed=42):
             }
         )
     plot_posterior_predictive_comparisons(
-        all_samples,
-        {n: None for n in cond_names},
-        priors,
-        list(models.keys()),
-        cond_names,
-        save_prefix=save_dir / "comp",
+        all_samples, {}, priors, list(models.keys()), cond_names, save_dir / "comp"
     )
     plot_models_predictive_means(y_hats, map_data, save_dir / "obs_means.png")
     pd.DataFrame(result).to_csv(save_dir / "res.csv")
@@ -174,16 +158,14 @@ def gen_train_dataloader(s: Array, priors: dict, batch_size=32):
 
 def inferece_model(s: Array, priors: dict, population: Array):
     """
-    Builds a Binomial inference model for either actual spatial prior or a surrogate.
-    NOTE: The Binomial model expects a 'population' column in the dataframe
-        for it to be able to sample from the binomial distribution
+    Builds a Binomial inference model for either actual GP or a surrogate.
 
     Args:
         s: Locations (n, dim_s).
         population: array of population per location N
 
     Returns:
-        A NumPyro model function.
+        A NumPyro model function, and the parameter names
     """
 
     def binomial(surrogate_decoder=None, obs_mask=True, y=None):
@@ -216,16 +198,8 @@ def valid_step(rng, state, batch):
     return {"norm MSE": (1 / var) * metrics["MSE"]}
 
 
-def normalize_geometry(map_data: gpd.GeoDataFrame, s_max=100):
-    """Normalizes gdf geometry to 0-s_max range, used to extract
-    location centroids for learning
-
-    Args:
-        gdf (gpd.GeoDataFrame): geopandas data frame
-
-    Returns:
-        (gpd.GeoDataFrame): normalized geopandas data frame
-    """
+def gen_spatial_structure(map_data: gpd.GeoDataFrame, s_max=100):
+    """generates a 0-s_max range locations from the geo-locations centroids"""
     centroids = map_data.geometry.centroid
     minx, maxx = centroids.x.min(), centroids.x.max()
     miny, maxy = centroids.y.min(), centroids.y.max()
@@ -242,7 +216,7 @@ def normalize_geometry(map_data: gpd.GeoDataFrame, s_max=100):
     norm_map = map_data.copy()
     norm_map["geometry"] = norm_map.geometry.apply(norm_geom)
     centroids = norm_map.geometry.centroid
-    return map_data, jnp.stack([centroids.x.values, centroids.y.values], axis=-1)
+    return jnp.stack([centroids.x.values, centroids.y.values], axis=-1)
 
 
 if __name__ == "__main__":
