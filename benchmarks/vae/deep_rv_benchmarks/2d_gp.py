@@ -51,8 +51,8 @@ def main(seed=42):
     }
     y_obs = gen_y_obs(rng_obs, s)
     priors = {
-        "var": dist.Gamma(1.5, 1.5),
-        "ls": dist.Uniform(0.0, 50.0),
+        "var": dist.Delta(1.0),
+        "ls": dist.Uniform(0.0, 100.0),
         "beta": dist.Normal(),
     }
     poisson_infer_model, cond_names = inferece_model(s, priors)
@@ -180,8 +180,7 @@ def inferece_model(s: Array, priors: dict):
             mu = numpyro.sample("mu", dist.MultivariateNormal(0.0, K))
         lambda_ = jnp.exp(beta + mu)
         with numpyro.handlers.mask(mask=obs_mask):
-            f = numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
-        return f, mu, jnp.array([var, ls, beta])
+            numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
 
     return poisson, ["var", "ls", "beta"]
 
