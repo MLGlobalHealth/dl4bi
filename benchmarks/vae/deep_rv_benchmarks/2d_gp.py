@@ -63,28 +63,16 @@ def main(seed=42):
         train_time, eval_mse, surrogate_decoder = None, None, None
         if model_name != "Baseline_GP":
             train_time, eval_mse, surrogate_decoder = surrogate_model_train(
-                rng_train,
-                rng_test,
-                loader,
-                model_name,
-                model,
+                rng_train, rng_test, loader, model_name, model
             )
         samples, mcmc, post, infer_time = _hmc(
-            rng_infer,
-            poisson_infer_model,
-            y_obs,
-            obs_mask,
-            surrogate_decoder,
+            rng_infer, poisson_infer_model, y_obs, obs_mask, surrogate_decoder
         )
         y_hats.append(post["obs"])
         all_samples.append(samples)
         ess = az.ess(mcmc, method="mean")
         plot_infer_trace(
-            samples,
-            mcmc,
-            conditionals=None,
-            var_names=cond_names,
-            save_path=save_dir / f"{model_name}_infer_trace.png",
+            samples, mcmc, None, cond_names, save_dir / f"{model_name}_infer_trace.png"
         )
         result.append(
             {
@@ -103,12 +91,7 @@ def main(seed=42):
             }
         )
     plot_posterior_predictive_comparisons(
-        all_samples,
-        {n: None for n in cond_names},
-        priors,
-        list(models.keys()),
-        cond_names,
-        save_prefix=save_dir / "comp",
+        all_samples, {}, priors, list(models.keys()), cond_names, save_dir / "comp"
     )
     plot_models_predictive_means(y_hats, obs_mask, save_dir / "obs_means.png")
     pd.DataFrame(result).to_csv(save_dir / "res.csv")
@@ -226,18 +209,7 @@ def gen_y_obs(rng: Array, s: Array):
 
 def generate_obs_mask(rng: Array, y_obs: Array, obs_ratio: float = 0.2):
     """Creates a mask which indicates to the inference model which locations to
-    observe. Randomly chooses a subset of all the valid locations
-    are randmoly chosen to be observed.
-
-    Args:
-        rng (Array)
-        f_obs (Array): The sample to infer from
-        obs_ratio (float): ratio of location to take
-
-    Returns:
-        (Union[Array, bool], Array): boolean observe mask and
-            indices of the observed locations
-    """
+    observe. Randomly chooses a subset of location to be observed."""
     L = y_obs.shape[0]
     num_obs_locations = int(obs_ratio * L)
     obs_idxs = random.choice(rng, jnp.arange(L), (num_obs_locations,), replace=False)
