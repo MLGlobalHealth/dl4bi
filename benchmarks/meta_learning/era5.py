@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 import os
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 
 import cdsapi
 import hydra
 import jax
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 import pandas as pd
 import wandb
 import xarray as xr
@@ -15,11 +18,15 @@ from omegaconf import DictConfig, OmegaConf
 
 from dl4bi.core.train import (
     Callback,
+    TrainState,
     evaluate,
     save_ckpt,
     train,
 )
-from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData
+from dl4bi.meta_learning.data.spatiotemporal import (
+    SpatiotemporalBatch,
+    SpatiotemporalData,
+)
 from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
 
 
@@ -35,13 +42,15 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    rng_data, rng_train, rng_test = random.split(rng, 3)
-    dataloader, test_dataloader = build_dataloaders(rng_data)
+    rng_train, rng_test = random.split(rng)
+    dataloader, test_dataloader = build_dataloaders()
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
-    clbk = partial(
-        wandb_2d_img_callback,
-        filename_prefix="era5",
+    cmap = mpl.colormaps.get_cmap("GnBu")
+    cmap.set_bad("grey")
+    clbk = Callback(
+        partial(wandb_2d_img_callback, cmap=cmap),
+        cfg.plot_interval,
     )
     state = train(
         rng_train,
@@ -54,7 +63,7 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         cfg.valid_num_steps,
         dataloader,
-        callbacks=[Callback(clbk, cfg.plot_interval)],
+        callbacks=[clbk],
         callback_dataloader=dataloader,
     )
     metrics = evaluate(
@@ -118,7 +127,7 @@ def build_dataloaders(
                 # 5. Create a number of batches from this filtered subset
                 for _ in range(num_batches_per_subset):
                     rng_b, rng = random.split(rng)
-                    yield subset.batch(
+                    batch = subset.batch(
                         rng=rng_b,
                         num_t=T_hrs // T_hrs_delta,
                         random_t=False,
@@ -129,6 +138,7 @@ def build_dataloaders(
                         forecast=True,
                         batch_size=batch_size,
                     )
+                    yield (batch, dft) if is_callback else batch
 
         return dataloader
 
@@ -219,6 +229,31 @@ def standardize_using_train(df_train: pd.DataFrame, df_test: pd.DataFrame):
         return df.drop(columns=["z", "hour"]).reset_index(drop=True)
 
     return standardize(df_train), standardize(df_test)
+
+
+def plot(
+    step: int,
+    rng_step: int,
+    state: TrainState,
+    batch: SpatiotemporalBatch,
+    extra: dict,
+    **kwargs,
+):
+    """Logs `num_plots` from the given batch for 2D GPs."""
+    rng_dropout, rng_extra = random.split(rng_step)
+    output = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        **batch,
+        rngs={"dropout": rng_dropout, "extra": rng_extra},
+    )
+    if isinstance(output, tuple):
+        output, _ = output  # throw away latent samples
+    path = f"/tmp/era5_{step}_{datetime.now().isoformat()}.png"
+    fig = batch.plot_2d(output.f_mu, output.f_std, **kwargs)
+    # TODO(danj): fix axes and labels
+    fig.savefig(path)
+    plt.close(fig)
+    wandb.log({f"Step {step}": wandb.Image(path)})
 
 
 if __name__ == "__main__":
