@@ -41,7 +41,7 @@ class SpatiotemporalData(MetaLearningData):
         independent_t_masks: bool,
         num_test: int,
         forecast: bool,
-        batch_size: int = 4,
+        batch_size: int,
     ):
         """
         Args:
@@ -108,7 +108,7 @@ def _batch(
     independent_t_masks: bool,
     num_test: int,
     forecast: bool,
-    batch_size: int = 4,
+    batch_size: int,
 ):
     B, T, T_b = batch_size, t.shape[0], num_t
     rng_t, rng_p, rng_b, rng_v = random.split(rng, 4)

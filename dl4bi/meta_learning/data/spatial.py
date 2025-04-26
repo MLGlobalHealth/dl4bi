@@ -61,7 +61,7 @@ class SpatialData(MetaLearningData):
     ),
 )
 def _batch(
-    rng,
+    rng: jax.Array,
     x: Optional[jax.Array],
     s: jax.Array,
     f: jax.Array,

@@ -48,7 +48,7 @@ def train(
     callbacks: list[Callback] = [],
     callback_dataloader: Optional[Callable] = None,
     log_loss_interval: int = 100,
-    return_state: str = "best",  # best, last, both
+    return_state: str = "last",  # best, last, both
     state: Optional[TrainState] = None,
 ):
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
