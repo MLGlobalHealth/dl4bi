@@ -19,10 +19,6 @@ optimizer:
         transition_steps: ${train_num_steps}
         peak_value: 1.0e-3
         pct_start: 0.3
-        # _target_: optax.cosine_decay_schedule
-        # init_value: 1.0e-3
-        # decay_steps: ${train_num_steps}
-        # alpha: 5.0e-5
       b1: 0.9
       b2: 0.999
       weight_decay: 1.0e-4
