@@ -36,7 +36,7 @@ def main(cfg: DictConfig):
         name=run_name,
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs,
-        group="full",
+        group="gnp",
     )
     wandb.log_artifact(getsourcefile(numpyro_model), "model.py")
     print(OmegaConf.to_yaml(cfg))
@@ -99,6 +99,7 @@ def make_batch(
     rng,
     s: jax.Array,
     n: jax.Array,
+    x: jax.Array | None,
     z: jax.Array,
     n_pos: jax.Array,
     *,
@@ -116,17 +117,30 @@ def make_batch(
     S_to_L = jit(lambda v: v.reshape(v.shape[0], -1, v.shape[-1]))
     batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
 
-    n, z, n_pos = n[..., None], z[..., None], n_pos[..., None]
-
     s_shape = s.shape
-    s, n, z, n_pos = map(S_to_L, [s, n, z, n_pos])
-    s, n, z, n_pos = map(jnp.float32, [s, n, z, n_pos])
-    assert s.ndim == n.ndim == z.ndim == n_pos.ndim == 3, "Expected 3D arrays"
+    s, n, z, n_pos = n[..., None], z[..., None], n_pos[..., None]
+    if x is None:
+        s, n, z, n_pos = map(S_to_L, [s, n, z, n_pos])
+        s, n, z, n_pos = map(jnp.float32, [s, n, z, n_pos])
+        assert s.ndim == n.ndim == z.ndim == n_pos.ndim == 3, "Expected 3D arrays"
 
-    s, n, z, n_pos, inv_permute_idx = permute_L_in_BLD(rng_p, [s, n, z, n_pos])
-    s_c, n_c, z_c, n_pos_c, mask_c, s_t, n_t, z_t, n_pos_t, mask_t = batch_BLD(
-        rng_b, [s, n, z, n_pos], *batch_args
-    )
+        s, n, z, n_pos, inv_permute_idx = permute_L_in_BLD(rng_p, [s, n, z, n_pos])
+        s_c, n_c, z_c, n_pos_c, mask_c, s_t, n_t, z_t, n_pos_t, mask_t = batch_BLD(
+            rng_b, [s, n, z, n_pos], *batch_args
+        )
+        x_c, x_t = None, None
+    else:
+        s, x, n, z, n_pos = map(S_to_L, [s, x, n, z, n_pos])
+        s, x, n, z, n_pos = map(jnp.float32, [s, x, n, z, n_pos])
+        assert s.ndim == x.ndim == n.ndim == z.ndim == n_pos.ndim == 3, (
+            "Expected 3D arrays"
+        )
+        s, x, n, z, n_pos, inv_permute_idx = permute_L_in_BLD(
+            rng_p, [s, x, n, z, n_pos]
+        )
+        s_c, x_c, n_c, z_c, n_pos_c, mask_c, s_t, x_t, n_t, z_t, n_pos_t, mask_t = (
+            batch_BLD(rng_b, [s, x, n, z, n_pos], *batch_args)
+        )
 
     z_c_obs = jsp.special.logit(n_pos_c / n_c)
 
@@ -136,11 +150,11 @@ def make_batch(
     # f_c = jnp.concat([n_pos_c / n_c, n_c], axis=-1)
     f_t = jax.nn.sigmoid(z_t)
     return SpatialBatch(
-        None,
+        x_c,
         s_c,
         f_c,
         mask_c,
-        None,
+        x_t,
         s_t,
         f_t,
         mask_t,
