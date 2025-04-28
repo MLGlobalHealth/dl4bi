@@ -720,15 +720,15 @@ def biased_scan_ks(
         to_BLM = lambda x: rearrange(x, "L B M -> B L M")
         to_QBHK = lambda x: rearrange(x, "B H Q K -> Q B H K")
         bias = jnp.array(0.0)
-        if qs_x_chunk is not None:
+        if x_bias_func is not None:
             qs_x_chunk_, ks_x_chunk_ = map(to_BLM, (qs_x_chunk, ks_x_chunk))
             x_bias = x_bias_func(qs_x_chunk_, ks_x_chunk_, **x_bias_kwargs)
             bias += to_QBHK(x_bias)
-        if qs_s_chunk is not None:
+        if s_bias_func is not None:
             qs_s_chunk_, ks_s_chunk_ = map(to_BLM, (qs_s_chunk, ks_s_chunk))
             s_bias = s_bias_func(qs_s_chunk_, ks_s_chunk_, **s_bias_kwargs)
             bias += to_QBHK(s_bias)
-        if qs_t_chunk is not None:
+        if t_bias_func is not None:
             qs_t_chunk_, ks_t_chunk_ = map(to_BLM, (qs_t_chunk, ks_t_chunk))
             t_bias = t_bias_func(qs_t_chunk_, ks_t_chunk_, **t_bias_kwargs)
             bias += to_QBHK(t_bias)
