@@ -63,7 +63,7 @@ def main(gender="female", seed=42):
         "ls": dist.Uniform(0.0, 50.0),
         "beta": dist.Normal(),
     }
-    binom_infer_model, cond_names = inferece_model(s, priors, population)
+    binom_infer_model, cond_names = inference_model(s, priors, population)
     loader = gen_train_dataloader(s, priors)
     y_hats, all_samples, result = [y_obs], [], []
     for model_name, model in models.items():
@@ -72,7 +72,7 @@ def main(gender="female", seed=42):
             train_time, eval_mse, surrogate_decoder = surrogate_model_train(
                 rng_train, rng_test, loader, model_name, model
             )
-        samples, mcmc, post, infer_time = _hmc(
+        samples, mcmc, post, infer_time = hmc(
             rng_infer, binom_infer_model, y_obs, surrogate_decoder
         )
         y_hats.append(post["obs"])
@@ -91,10 +91,10 @@ def main(gender="female", seed=42):
                 "inferred fixed effects": samples["beta"].mean(axis=0),
                 "inferred variance": samples["var"].mean(axis=0),
                 "MSE(y, y_hat)": ((y_obs - post["obs"].mean(axis=0)) ** 2).mean(),
-                "ESS spatial effects": ess["mu"],
-                "ESS lengthscale": ess["ls"],
-                "ESS variance": ess["mu"],
-                "ESS fixed effects": ess["beta"],
+                "ESS spatial effects": ess["mu"].mean().item(),
+                "ESS lengthscale": ess["ls"].item(),
+                "ESS variance": ess["var"].item(),
+                "ESS fixed effects": ess["beta"].item(),
             }
         )
     plot_posterior_predictive_comparisons(
@@ -104,7 +104,7 @@ def main(gender="female", seed=42):
     pd.DataFrame(result).to_csv(save_dir / "res.csv")
 
 
-def _hmc(
+def hmc(
     rng: Array,
     model: Callable,
     y_obs: Array,
@@ -130,17 +130,31 @@ def surrogate_model_train(
     model_name: str,
     model: nn.Module,
     train_num_steps: int = 100_000,
+    valid_interval: int = 25_000,
+    valid_steps: int = 5_000,
 ):
     train_step = prior_cvae_train_step
     lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-3)
     if model_name != "PriorCVAE":
-        train_step = partial(deep_rv_train_step, var_idx=0)
+        train_step = deep_rv_train_step
         lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-2)
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
     start = datetime.now()
-    state = train(rng_train, model, optimizer, train_step, train_num_steps, loader)
+    state = train(
+        rng_train,
+        model,
+        optimizer,
+        train_step,
+        train_num_steps,
+        loader,
+        valid_step,
+        valid_interval,
+        valid_steps,
+        loader,
+        valid_monitor_metric="norm MSE",
+    )
     train_time = (datetime.now() - start).total_seconds()
-    eval_mse = evaluate(rng_test, state, valid_step, loader, 5_000)["norm MSE"]
+    eval_mse = evaluate(rng_test, state, valid_step, loader, valid_steps)["norm MSE"]
     surrogate_decoder = generate_surrogate_decoder(state, model)
     return train_time, eval_mse, surrogate_decoder
 
@@ -160,7 +174,7 @@ def gen_train_dataloader(s: Array, priors: dict, batch_size=32):
     return dataloader
 
 
-def inferece_model(s: Array, priors: dict, population: Array):
+def inference_model(s: Array, priors: dict, population: Array):
     """
     Builds a Binomial inference model for either actual spatial prior or a surrogate.
     NOTE: The Binomial model expects a 'population' column in the dataframe

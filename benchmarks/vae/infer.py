@@ -56,7 +56,7 @@ def main(cfg: DictConfig):
     if cfg.inference_model.surrogate_model:
         state, model = load_ckpt((model_dir / model_name).with_suffix(".ckpt"))
         surrogate_decoder = generate_surrogate_decoder(state, model)
-    samples, mcmc, post = _hmc(
+    samples, mcmc, post = hmc(
         rng_hmc, cfg.mcmc, infer_model, f_obs, obs_mask, surrogate_decoder
     )
     post.update(
@@ -90,7 +90,7 @@ def main(cfg: DictConfig):
     )
 
 
-def _hmc(
+def hmc(
     rng: Array,
     mcmc_cfg: DictConfig,
     model: Callable,
