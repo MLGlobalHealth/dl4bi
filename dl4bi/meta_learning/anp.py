@@ -5,9 +5,9 @@ import jax
 import jax.numpy as jnp
 from jax import random
 
-from ..core.attention import MLP, MultiHeadAttention
-from ..core.model_output import DiagonalMVNOutput
-from .steps import elbo_train_step, likelihood_valid_step
+from dl4bi.core.attention import MLP, MultiHeadAttention
+from dl4bi.core.model_output import DiagonalMVNOutput
+from dl4bi.meta_learning.steps import elbo_train_step, likelihood_valid_step
 
 
 class ANP(nn.Module):
@@ -80,6 +80,7 @@ class ANP(nn.Module):
     output_fn: Callable = DiagonalMVNOutput.from_latent_activations
     train_step: Callable = elbo_train_step
     valid_step: Callable = likelihood_valid_step
+    norm: nn.Module = nn.LayerNorm()
 
     @nn.compact
     def __call__(
@@ -108,6 +109,7 @@ class ANP(nn.Module):
     ):
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_det(s_f_ctx, training)
+        s_f_ctx_embed = self.norm.copy()(s_f_ctx_embed)
         r_ctx, _ = self.self_attn_det(
             s_f_ctx_embed,
             s_f_ctx_embed,
@@ -127,6 +129,7 @@ class ANP(nn.Module):
         (B, L, _) = s_ctx.shape
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_lat(s_f_ctx, training)
+        s_f_ctx_embed = self.norm.copy()(s_f_ctx_embed)
         s_f_ctx_enc, _ = self.self_attn_lat(
             s_f_ctx_embed,
             s_f_ctx_embed,
