@@ -144,11 +144,15 @@ def make_batch(
 
     z_c_obs = jsp.special.logit(n_pos_c / n_c)
 
+    # Various options for feeding the context
     # f_c = z_c_obs
     # f_c = jnp.concat([z_c_obs, n_c], axis=-1)
     f_c = jnp.concat([n_pos_c, n_c], axis=-1)
     # f_c = jnp.concat([n_pos_c / n_c, n_c], axis=-1)
+
+    # Target theta
     f_t = jax.nn.sigmoid(z_t)
+
     return SpatialBatch(
         x_c,
         s_c,
@@ -184,6 +188,7 @@ def build_dataloader(cfg: DictConfig):
                 rng_b,
                 s,
                 n,
+                None,
                 z,
                 n_pos,
                 num_ctx_min=cfg.num_ctx.min,

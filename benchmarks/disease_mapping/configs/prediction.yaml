@@ -3,5 +3,5 @@ mcmc: null # path to MCMC results, latest if null
 np: "gp_pointwise" # gp, gp_pointwise or path to a neural process checkpoint path
 iso: "MOZ"
 region: null
-batch_size: 4
+batch_size: 32
 res: 150

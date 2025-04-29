@@ -70,12 +70,29 @@ def plot_surveys(
     data,
     shape: MultiPolygon | None = None,
 ):
-    fig, ax = plt.subplots(
-        figsize=(10, 10), layout="compressed", subplot_kw=dict(projection=projection)
-    )
+    fig, ax = map_grid(data["s"], 1)
     plot_surveys_ax(data, ax)
 
     return fig
+
+
+def map_grid(s, nrows, ncols, **kwargs):
+    default_kwargs = dict(
+        subplot_kw=dict(projection=projection),
+        squeeze=False,
+        layout="compressed",
+        figsize=(ncols * 10, nrows * 10),
+        sharex=True,
+        sharey=True,
+    )
+    fig, axes = plt.subplots(nrows, ncols, **(default_kwargs | kwargs))
+    for ax in axes.flat:
+        ax.set_aspect("equal")
+        ax.coastlines()
+        ax.gridlines(draw_labels=True, alpha=0.3)
+        ax.set_xlim(s[:, 0].min() - 0.5, s[:, 0].max() + 0.5)
+        ax.set_ylim(s[:, 1].min() - 0.5, s[:, 1].max() + 0.5)
+    return fig, axes
 
 
 def plot_predictions(
@@ -83,7 +100,7 @@ def plot_predictions(
     y_t: np.ndarray,  # [N, S],
     theta_t: np.ndarray,  # [N, S],
     data: np.ndarray,
-    y_c: np.ndarray,
+    y_c: np.ndarray | None = None,
     shape: MultiPolygon | None = None,
 ):
     match s_t.shape:
@@ -98,22 +115,9 @@ def plot_predictions(
                 f"Invalid shape {s_t.shape}. Expected (N, S, 2) or (S, 2)."
             )
 
-    nrows = 2
+    nrows = 2 if y_c is not None else 1
     ncols = 3
-    fig, axes = plt.subplots(
-        nrows=nrows,
-        ncols=ncols,
-        figsize=(ncols * 10, nrows * 10),
-        layout="compressed",
-        subplot_kw=dict(projection=projection),
-    )
-
-    for ax in axes.flat:
-        ax.set_aspect("equal")
-        ax.coastlines()
-        ax.gridlines(draw_labels=True, alpha=0.3)
-        ax.set_xlim(s_t[:, 0].min() - 0.5, s_t[:, 0].max() + 0.5)
-        ax.set_ylim(s_t[:, 1].min() - 0.5, s_t[:, 1].max() + 0.5)
+    fig, axes = map_grid(s_t, nrows, ncols)
 
     if data is not None:
         plot_surveys_ax(data, ax=axes[0, 0])
@@ -123,16 +127,18 @@ def plot_predictions(
     scatter_map(s_t, theta_t.std(0), ax=axes[0, 2])
     axes[0, 2].set_title("Predicted SD")
 
-    axes[1, 0].scatter(
-        *data["s"].T,
-        c=y_c.mean(0),
-        s=10 / y_c.std(0),  # size ~ 1 / std
-    )
-    axes[1, 0].set_title("Inferred spatial effect")
-    scatter_map(s_t, y_t.mean(0), ax=axes[1, 1])
-    axes[1, 1].set_title("Predicted spatial effect mean")
-    scatter_map(s_t, y_t.std(0), ax=axes[1, 2])
-    axes[1, 2].set_title("Predicted spatial effect SD")
+    if y_c is not None:
+        sm = axes[1, 0].scatter(
+            *data["s"].T,
+            c=y_c.mean(0),
+            s=10 / y_c.std(0),  # size ~ 1 / std
+        )
+        plt.colorbar(sm, ax=axes[1, 0])
+        axes[1, 0].set_title("Inferred spatial effect")
+        scatter_map(s_t, y_t.mean(0), ax=axes[1, 1])
+        axes[1, 1].set_title("Predicted spatial effect mean")
+        scatter_map(s_t, y_t.std(0), ax=axes[1, 2])
+        axes[1, 2].set_title("Predicted spatial effect SD")
 
     return fig
 
