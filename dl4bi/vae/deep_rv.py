@@ -1,9 +1,16 @@
 from collections.abc import Callable
 
 import flax.linen as nn
+import jax.numpy as jnp
 from jax import Array
+from sps.kernels import l2_dist
 
-from dl4bi.core.model_output import VAEOutput
+from ..core.attention import MultiHeadAttention
+from ..core.bias import Bias
+from ..core.mlp import MLP, gMLP
+from ..core.model_output import VAEOutput
+from ..core.transformer import TransformerEncoderBlock
+from ..vae.train_utils import cond_as_feats, cond_as_locs
 
 
 class DeepRV(nn.Module):
@@ -51,3 +58,66 @@ class DeepRV(nn.Module):
 
     def decode(self, z: Array, conditionals: Array, **kwargs):
         return self.decoder(self.cond_stack_fn(z, conditionals), **kwargs)
+
+
+# NOTE: Explicit decoder definitions for DeepRV
+class gMLPDeepRV(nn.Module):
+    num_blks: int = 2
+
+    @nn.compact
+    def __call__(self, z: Array, conditionals: Array, **kwargs):
+        x = cond_as_feats(z, conditionals)
+        return gMLP(self.num_blks)(x)
+
+    def decode(self, z: Array, conditionals: Array, **kwargs):
+        return self(z, conditionals, **kwargs)
+
+
+class MLPDeepRV(nn.Module):
+    dims: list[int]
+
+    @nn.compact
+    def __call__(self, z: Array, conditionals: Array, **kwargs):
+        x = cond_as_locs(z, conditionals)
+        return MLP(self.dims)(x)
+
+    def decode(self, z: Array, conditionals: Array, **kwargs):
+        return self(z, conditionals, **kwargs)
+
+
+class TransformerDeepRV(nn.Module):
+    dim: int = 64
+    num_blks: int = 2
+    cache_dist: bool = True
+
+    @nn.compact
+    def __call__(self, z: Array, conditionals: Array, s: Array, **kwargs):
+        (B, L), D, C = z.shape, self.dim, conditionals.shape[0]
+        ids = jnp.repeat(jnp.arange(L, dtype=int)[None, :], B, axis=0)
+        ids_embed = nn.Embed(L, features=(D * 2) - (C + 1))(ids)
+        x = cond_as_feats(z, conditionals)
+        x = jnp.concat([ids_embed, x], axis=-1)
+        x = MLP([D * 4, D], nn.gelu)(x)
+        if self.cache_dist:
+            d_var = self.variable(
+                "cache",
+                "l2_dist",
+                lambda: jnp.repeat(l2_dist(s, s)[None, ...], B, axis=0),
+            )
+            d = d_var.value
+        else:
+            d = jnp.repeat(l2_dist(s, s)[None, ...], B, axis=0)
+        for _ in range(self.num_blks):
+            attn = MultiHeadAttention(
+                proj_qs=MLP([D * 2]),
+                proj_ks=MLP([D * 2]),
+                proj_vs=MLP([D * 2]),
+                proj_out=MLP([D]),
+            )
+            ffn = MLP([D * 4, D])
+            bias = Bias.build_rbf_network_bias()(d)
+            x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(x, bias=bias)
+        return MLP([D * 4, D, 1])(x)
+
+    def decode(self, z: Array, conditionals: Array, **kwargs):
+        return self(z, conditionals, **kwargs)
