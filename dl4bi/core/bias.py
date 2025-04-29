@@ -168,7 +168,7 @@ class Bias(nn.Module):
     ):
         params = self.init_params(self, "bias", **self.init_kwargs)
         if mask is None:
-            mask = jnp.array([True])
+            mask = jnp.ones((1,) * d.ndim, dtype=bool)  # broadcast True
         return self.bias_func(d, mask, **params)
 
     @classmethod
