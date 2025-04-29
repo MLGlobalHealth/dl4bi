@@ -12,9 +12,9 @@ import sys
 from collections.abc import Callable
 
 import jax
-from bayes_opt import main as bayes_opt_main
 from celeba import main as celeba_main
 from cifar_10 import main as cifar_10_main
+from era5 import main as era5_main
 from gp import main as gp_main
 from hydra import compose, initialize
 from jax import random
@@ -33,42 +33,15 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
             "valid_num_steps=50",
             "plot_interval=50",
         ]
-    overrides = [overrides]  # expects list[list[str]]
-    gp_kernels_1d = ["periodic", "rbf", "matern_3_2"]
     gp_kernels_2d = ["rbf"]
     models = [
-        "tnp_d",
         "tnp_kr_scan",
-        "tnp_kr_dka",
-        "tnp_kr_performer",
+        "tnp_d",
+        "te_tnp",
         "convcnp",
-        "np",
-        "cnp",
-        "anp",
-        "canp",
     ]
-    models = [f"icml/{m}" for m in models]
-    gp_benchmark(
-        seeds,
-        "1d",
-        gp_kernels_1d,
-        [f"1d/{m}" for m in models],
-        gp_main,
-        overrides,
-        "ICML TNP-KR - Gaussian Processes",
-        dry_run=dry_run,
-    )
-    gp_benchmark(
-        seeds,
-        "1d",
-        gp_kernels_1d,
-        [f"1d/{m}" for m in models],
-        bayes_opt_main,
-        overrides,
-        "ICML TNP-KR - Bayesian Optimization",
-        "ICML TNP-KR - Gaussian Processes",
-        dry_run=dry_run,
-    )
+
+    # TRANSLATION INVARIANCE
     gp_benchmark(
         seeds,
         "2d",
@@ -76,34 +49,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         [f"2d/{m}" for m in models],
         gp_main,
         overrides,
-        "ICML TNP-KR - Gaussian Processes",
-        dry_run=dry_run,
-    )
-    img_benchmark(
-        seeds,
-        "configs/mnist",
-        models,
-        mnist_main,
-        overrides,
-        "ICML TNP-KR - MNIST",
-        dry_run=dry_run,
-    )
-    img_benchmark(
-        seeds,
-        "configs/celeba",
-        models,
-        celeba_main,
-        overrides,
-        "ICML TNP-KR - CelebA",
-        dry_run=dry_run,
-    )
-    img_benchmark(
-        seeds,
-        "configs/cifar_10",
-        models,
-        cifar_10_main,
-        overrides,
-        "ICML TNP-KR - Cifar 10",
+        "NeurIPS TNP-KR - Gaussian Processes",
         dry_run=dry_run,
     )
     img_benchmark(
@@ -112,68 +58,72 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         models,
         sir_main,
         overrides,
-        "ICML TNP-KR - SIR",
+        "NeurIPS TNP-KR - SIR",
         dry_run=dry_run,
     )
+    # TODO(danj): look in plot_samples
+    # test_translation(...)
+    # test_multiresolution(...)
 
-
-def lore_paper(seeds: jax.Array, dry_run: bool = False):
-    """Reproduces the LoRe: Local Refinement with Tranformers paper."""
-    if dry_run:
-        seeds = seeds[:2]  # no need for more than 2 runs each in dry run
-    gp_kernels_1d = ["rbf", "periodic", "matern_3_2"]
-    gp_kernels_2d = ["rbf"]
-    models = ["tnp_kr"]
-    overrides = []
-    nums = [1, 2, 3, 6]
-    for num_blks, num_reps in it.product(nums, nums):
-        blk_str = f"model.kwargs.dec.kwargs.num_blks={num_blks}"
-        rep_str = f"model.kwargs.dec.kwargs.num_reps={num_reps}"
-        override = [blk_str, rep_str]
-        if dry_run:
-            override += [
-                "wandb=False",
-                "train_num_steps=100",
-                "valid_num_steps=50",
-                "plot_interval=50",
-            ]
-        overrides += [override]
-    gp_benchmark(
-        seeds,
-        "1d",
-        gp_kernels_1d,
-        models,
-        gp_main,
-        overrides,
-        "LoRe - Gaussian Processes",
-        dry_run=dry_run,
-    )
-    gp_benchmark(
-        seeds,
-        "2d",
-        gp_kernels_2d,
-        models,
-        gp_main,
-        overrides,
-        "LoRe - Gaussian Processes",
-        dry_run=dry_run,
-    )
+    # SPACE & TIME & GENERALIZATION
+    era5_overrides = [
+        "data.valid_region=northern_europe",
+        "data.test_region=western_europe",
+    ]
     img_benchmark(
         seeds,
-        "configs/mnist",
+        "configs/era5",
         models,
-        mnist_main,
-        overrides,
-        "LoRe - MNIST",
+        era5_main,
+        overrides + era5_overrides,
+        "NeurIPS TNP-KR - ERA5",
         dry_run=dry_run,
     )
+    era5_overrides = [
+        "data.valid_region=western_europe",
+        "data.test_region=northern_europe",
+    ]
+    img_benchmark(
+        seeds,
+        "configs/era5",
+        models,
+        era5_main,
+        overrides + era5_overrides,
+        "NeurIPS TNP-KR - ERA5",
+        dry_run=dry_run,
+    )
+
+    # HIGH DIMENSIONAL
+    # TODO(danj):
+    # fixed + spatial effects:
+    #
+    # tabular_benchmark(
+    #     seeds,
+    #     "configs/household_electric",
+    #     models,
+    #     era5_main,
+    #     overrides,
+    #     "NeurIPS TNP-KR - Household Electric",
+    #     dry_run=dry_run,
+    # )
+
+    # NON-STATIONARY DISTRIBUTIONS
     img_benchmark(
         seeds,
         "configs/celeba",
         models,
         celeba_main,
         overrides,
-        "LoRe - CelebA",
+        "NeurIPS TNP-KR - CelebA",
+        dry_run=dry_run,
+    )
+    img_benchmark(
+        seeds,
+        "configs/cifar_10",
+        models,
+        cifar_10_main,
+        overrides,
+        "NeurIPS TNP-KR - Cifar 10",
         dry_run=dry_run,
     )
 
@@ -184,7 +134,7 @@ def gp_benchmark(
     kernels: list[str] = ["rbf", "periodic", "tnp_kr"],
     models: list[str] = ["1d/tnp_kr_scan"],
     main_fn: Callable = gp_main,
-    overrides: list[list[str]] = [[]],
+    overrides: list = [],
     project: str = "",
     project_parent: str = "None",
     dry_run: bool = False,
@@ -195,30 +145,29 @@ def gp_benchmark(
     for kernel in kernels:
         for seed in seeds:
             for model in models:
-                for overrides_i in overrides:
-                    with initialize(config_path="configs/gp", version_base=None):
-                        cfg = compose(
-                            "default",
-                            overrides=[
-                                f"project={project}",
-                                f"data={data}",
-                                f"model={model}",
-                                f"kernel={kernel}",
-                                f"seed={seed}",
-                                f"+project_parent={project_parent}",
-                            ]
-                            + overrides_i,
-                        )
-                        print("=" * 100)
-                        main_fn(cfg)
+                with initialize(config_path="configs/gp", version_base=None):
+                    cfg = compose(
+                        "default",
+                        overrides=[
+                            f"project={project}",
+                            f"data={data}",
+                            f"model={model}",
+                            f"kernel={kernel}",
+                            f"seed={seed}",
+                            f"+project_parent={project_parent}",
+                        ]
+                        + overrides,
+                    )
+                    print("=" * 100)
+                    main_fn(cfg)
 
 
 def img_benchmark(
     seeds: jax.Array,
-    cfg_dir: str = "configs/mnist",
-    models: list[str] = ["tnp_kr_fast"],
+    cfg_dir: str = "configs/celeba",
+    models: list[str] = ["tnp_kr_scan"],
     main_fn: Callable = mnist_main,
-    overrides: list[list[str]] = [[]],
+    overrides: list = [],
     project: str = "",
     dry_run: bool = False,
 ):
@@ -226,19 +175,18 @@ def img_benchmark(
         project = "__DRY RUN__ " + project
     for seed in seeds:
         for model in models:
-            for overrides_i in overrides:
-                with initialize(config_path=cfg_dir, version_base=None):
-                    cfg = compose(
-                        "default",
-                        overrides=[
-                            f"project={project}",
-                            f"model={model}",
-                            f"seed={seed}",
-                        ]
-                        + overrides_i,
-                    )
-                    print("=" * 100)
-                    main_fn(cfg)
+            with initialize(config_path=cfg_dir, version_base=None):
+                cfg = compose(
+                    "default",
+                    overrides=[
+                        f"project={project}",
+                        f"model={model}",
+                        f"seed={seed}",
+                    ]
+                    + overrides,
+                )
+                print("=" * 100)
+                main_fn(cfg)
 
 
 def parse_args(argv):
