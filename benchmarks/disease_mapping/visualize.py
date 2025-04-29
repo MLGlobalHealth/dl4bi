@@ -120,7 +120,7 @@ def plot_predictions(
 
     scatter_map(s_t, theta_t.mean(0), ax=axes[0, 1], vmin=0, vmax=1)
     axes[0, 1].set_title("Predicted mean")
-    scatter_map(s_t, theta_t.std(0), ax=axes[0, 2], vmin=0, vmax=1)
+    scatter_map(s_t, theta_t.std(0), ax=axes[0, 2])
     axes[0, 2].set_title("Predicted SD")
 
     axes[1, 0].scatter(
