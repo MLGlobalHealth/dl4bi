@@ -63,7 +63,6 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         cfg.valid_num_steps,
         valid_dataloader,
-        return_state="best",
         callbacks=[clbk],
         callback_dataloader=callback_dataloader,
         return_state="best",
@@ -96,7 +95,11 @@ def build_dataloaders(
     df_train, df_valid, df_test, revert = load_data(
         train_region, valid_region, test_region
     )
-    data_cols = ["hour_std", "lat_std", "lng_std", "elev_std", "temp_std"]
+    x_cols = ["elev_std", "hour_of_day_norm"]
+    s_cols = ["lat_std", "lng_std"]
+    t_cols = ["hour_std"]
+    f_cols = ["temp_std"]
+    data_cols = x_cols + s_cols + t_cols + f_cols
 
     def build_dataloader(df: pd.DataFrame, is_callback: bool = False):
         lat_uniq, lng_uniq = df.latitude.unique(), df.longitude.unique()
@@ -123,10 +126,10 @@ def build_dataloaders(
                 values = dft[data_cols].values.reshape(shape)
                 # 4. Separate out x, s, t, and f
                 subset = SpatiotemporalData(
-                    x=values[..., [3]],  # [T, H, W, 1]
-                    s=values[..., 1:3],  # [T, H, W, 2]
-                    t=values[:, 0, 0, 0],  # [T]
-                    f=values[..., [-1]],  # [T, H, W, 1]
+                    x=values[..., :2],  # [T, H, W, 2]
+                    s=values[..., 2:4],  # [T, H, W, 2]
+                    t=values[:, 0, 0, 4],  # [T]
+                    f=values[..., [5]],  # [T, H, W, 1]
                 )
                 # 5. Create a number of batches from this filtered subset
                 for _ in range(num_batches_per_subset):
@@ -230,6 +233,7 @@ def standardize_using_train(
     temp_mu, temp_std = df_train.t2m.mean(), df_train.t2m.std()
 
     def standardize(df: pd.DataFrame):
+        df["hour_of_day_norm"] = df.valid_time.dt.hour / 23.0
         df["hour"] = (df.valid_time - t_min) / pd.Timedelta(hours=1)
         df["hour_std"] = (df.hour - hour_mu) / hour_std
         df["lat_std"] = (df.latitude - lat_mu) / lat_std
