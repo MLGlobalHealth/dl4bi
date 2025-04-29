@@ -25,7 +25,7 @@ def kernel(x, y, /, *, var, ls, **_):
     x, y = _prepare_dims(x, y)
 
     d = make_pairwise(haversine_distance)(x, y)
-    # d *= jnp.pi / 180.0 * 6371  # convert to km
+    d *= jnp.pi / 180.0 * 6371  # convert to km
     return var * jnp.exp(-d / ls)
 
 

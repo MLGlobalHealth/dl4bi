@@ -70,8 +70,8 @@ def plot_surveys(
     data,
     shape: MultiPolygon | None = None,
 ):
-    fig, ax = map_grid(data["s"], 1)
-    plot_surveys_ax(data, ax)
+    fig, ax = map_grid(data["s"], 1, 1)
+    plot_surveys_ax(data, ax[0, 0])
 
     return fig
 

@@ -118,7 +118,7 @@ def make_batch(
     batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
 
     s_shape = s.shape
-    s, n, z, n_pos = n[..., None], z[..., None], n_pos[..., None]
+    n, z, n_pos = n[..., None], z[..., None], n_pos[..., None]
     if x is None:
         s, n, z, n_pos = map(S_to_L, [s, n, z, n_pos])
         s, n, z, n_pos = map(jnp.float32, [s, n, z, n_pos])
