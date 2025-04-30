@@ -142,6 +142,9 @@ def evaluate(mcmc_path: Path, gnp_path: Path):
     # pointwise-averaged metrics
     results["rmse mean"] = rmse(true_mean, predicted_mean)
     results["rmse std"] = rmse(true_std, predicted_std)
+    results["MAP L2 loss"] = (
+        (true_samples - predicted_mean) ** 2
+    ).mean()  # L2 loss averaged over samples and locations
     results["average coverage"] = jnp.mean((lo <= true_samples) & (true_samples <= up))
 
     # global metrics
@@ -173,8 +176,10 @@ def main():
     )
     args = parser.parse_args()
 
-    mcmc_path = args.mcmc_path[0] or max(
-        Path("results").glob("MCMC*"), key=lambda p: p.stat().st_mtime
+    mcmc_path = (
+        args.mcmc_path[0]
+        if args.mcmc_path
+        else max(Path("results").glob("MCMC*"), key=lambda p: p.stat().st_mtime)
     )
     print(f"Using MCMC path: {mcmc_path}")
 
