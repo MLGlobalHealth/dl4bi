@@ -25,12 +25,11 @@ from sps.utils import build_grid
 from utils.plot_utils import plot_infer_trace
 
 import wandb
-from dl4bi.core.mlp import MLP, gMLP
+from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, train
-from dl4bi.vae import DeepRV, PriorCVAE
+from dl4bi.vae import PriorCVAE, TransformerDeepRV, gMLPDeepRV
 from dl4bi.vae.train_utils import (
-    cond_as_feats,
     cond_as_locs,
     deep_rv_train_step,
     generate_surrogate_decoder,
@@ -49,7 +48,8 @@ def main(seed=42, logged_priors=True):
     models = {
         "Baseline_GP": None,
         "PriorCVAE": PriorCVAE(MLP(dims=[L, L]), MLP(dims=[L, L]), cond_as_locs, L),
-        "DeepRV": DeepRV(gMLP(num_blks=2), cond_as_feats),
+        "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
+        "DeepRV + Transfomer": TransformerDeepRV(num_blks=2, dim=64),
         "ADVI": None,
         "Inducing Points": None,
     }
@@ -61,8 +61,6 @@ def main(seed=42, logged_priors=True):
         "log_ls": dist.Beta(4.0, 1.0),
         "beta": dist.Normal(),
     }
-    if logged_priors:
-        del priors["ls"]
     poisson_llk, cond_names = inference_model(s, priors, logged_priors)
     poisson_inducing_llk = inference_model_inducing_points(
         s, priors, obs_mask, logged_priors, 64
@@ -166,7 +164,6 @@ def surrogate_model_train(
     lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-3)
     if model_name != "PriorCVAE":
         train_step = deep_rv_train_step
-        lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-2)
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
     start = datetime.now()
     state = train(
@@ -180,6 +177,7 @@ def surrogate_model_train(
         valid_interval,
         valid_steps,
         loader,
+        return_state="best",
         valid_monitor_metric="norm MSE",
     )
     train_time = (datetime.now() - start).total_seconds()
@@ -210,6 +208,7 @@ def inference_model(s: Array, priors: dict, logged_priors: bool):
     """
     Builds a poisson likelihood inference model for GP and surrogate models
     """
+    surrogate_kwargs = {"s": s}
 
     def poisson(surrogate_decoder=None, obs_mask=True, y=None):
         var = 1.0
@@ -222,7 +221,8 @@ def inference_model(s: Array, priors: dict, logged_priors: bool):
         z = numpyro.sample("z", dist.Normal(), sample_shape=(1, s.shape[0]))
         if surrogate_decoder:  # NOTE: whether to use a replacment for the GP
             mu = numpyro.deterministic(
-                "mu", surrogate_decoder(z, jnp.array([ls])).squeeze()
+                "mu",
+                surrogate_decoder(z, jnp.array([ls]), **surrogate_kwargs).squeeze(),
             )
         else:
             K = matern_5_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])

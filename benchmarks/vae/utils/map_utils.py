@@ -82,7 +82,7 @@ def get_norm_vars(gdf: gpd.GeoDataFrame, s_max=100):
     return (minx, (maxx - minx) / s_max), (miny, (maxy - miny) / s_max)
 
 
-def generate_adjacency_matrix(gdf: gpd.GeoDataFrame, graph_construction: DictConfig):
+def generate_adjacency_matrix(gdf: gpd.GeoDataFrame, self_loops: bool = False):
     """
     Constructs an undirected adjacency matrix for a GeoDataFrame, where each (i, j) is 1
     if geometry i is adjacent to geometry j, and 0 otherwise. For isolated geoms
@@ -113,7 +113,7 @@ def generate_adjacency_matrix(gdf: gpd.GeoDataFrame, graph_construction: DictCon
         closest_neighbor = jnp.argmin(distances[i])
         adjacency_matrix = adjacency_matrix.at[i, closest_neighbor].set(1.0)
         adjacency_matrix = adjacency_matrix.at[closest_neighbor, i].set(1.0)
-    if graph_construction.self_loops:
+    if self_loops:
         adjacency_matrix += jnp.eye(N=num_geoms, dtype=adjacency_matrix.dtype)
     return adjacency_matrix
 

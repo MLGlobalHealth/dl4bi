@@ -25,12 +25,11 @@ from sps.kernels import matern_1_2
 from utils.plot_utils import plot_infer_trace
 
 import wandb
-from dl4bi.core.mlp import MLP, gMLP
+from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, train
-from dl4bi.vae import DeepRV, PriorCVAE
+from dl4bi.vae import PriorCVAE, gMLPDeepRV
 from dl4bi.vae.train_utils import (
-    cond_as_feats,
     cond_as_locs,
     deep_rv_train_step,
     generate_surrogate_decoder,
@@ -52,7 +51,7 @@ def main(gender="female", seed=42):
     models = {
         "Baseline_GP": None,
         "PriorCVAE": PriorCVAE(MLP(dims=[L, L]), MLP(dims=[L, L]), cond_as_locs, L),
-        "DeepRV": DeepRV(gMLP(num_blks=2), cond_as_feats),
+        "DeepRV": gMLPDeepRV(num_blks=2),
     }
     y_obs = jnp.array(map_data.data, dtype=jnp.float32)
     population = (
@@ -136,8 +135,7 @@ def surrogate_model_train(
     train_step = prior_cvae_train_step
     lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-3)
     if model_name != "PriorCVAE":
-        train_step = deep_rv_train_step
-        lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-2)
+        train_step = partial(deep_rv_train_step, var_idx=0)
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
     start = datetime.now()
     state = train(
@@ -151,6 +149,7 @@ def surrogate_model_train(
         valid_interval,
         valid_steps,
         loader,
+        return_state="best",
         valid_monitor_metric="norm MSE",
     )
     train_time = (datetime.now() - start).total_seconds()

@@ -67,10 +67,10 @@ class gMLPDeepRV(nn.Module):
     @nn.compact
     def __call__(self, z: Array, conditionals: Array, **kwargs):
         x = cond_as_feats(z, conditionals)
-        return gMLP(self.num_blks)(x)
+        return VAEOutput(gMLP(self.num_blks)(x))
 
     def decode(self, z: Array, conditionals: Array, **kwargs):
-        return self(z, conditionals, **kwargs)
+        return self(z, conditionals, **kwargs).f_hat
 
 
 class MLPDeepRV(nn.Module):
@@ -79,16 +79,15 @@ class MLPDeepRV(nn.Module):
     @nn.compact
     def __call__(self, z: Array, conditionals: Array, **kwargs):
         x = cond_as_locs(z, conditionals)
-        return MLP(self.dims)(x)
+        return VAEOutput(MLP(self.dims)(x))
 
     def decode(self, z: Array, conditionals: Array, **kwargs):
-        return self(z, conditionals, **kwargs)
+        return self(z, conditionals, **kwargs).f_hat
 
 
 class TransformerDeepRV(nn.Module):
     dim: int = 64
     num_blks: int = 2
-    cache_dist: bool = True
 
     @nn.compact
     def __call__(self, z: Array, conditionals: Array, s: Array, **kwargs):
@@ -98,15 +97,8 @@ class TransformerDeepRV(nn.Module):
         x = cond_as_feats(z, conditionals)
         x = jnp.concat([ids_embed, x], axis=-1)
         x = MLP([D * 4, D], nn.gelu)(x)
-        if self.cache_dist:
-            d_var = self.variable(
-                "cache",
-                "l2_dist",
-                lambda: jnp.repeat(l2_dist(s, s)[None, ...], B, axis=0),
-            )
-            d = d_var.value
-        else:
-            d = jnp.repeat(l2_dist(s, s)[None, ...], B, axis=0)
+        # TODO(jhonathan): cache d
+        d = jnp.repeat(l2_dist(s, s)[None, ...], B, axis=0)
         for _ in range(self.num_blks):
             attn = MultiHeadAttention(
                 proj_qs=MLP([D * 2]),
@@ -117,7 +109,7 @@ class TransformerDeepRV(nn.Module):
             ffn = MLP([D * 4, D])
             bias = Bias.build_rbf_network_bias()(d)
             x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(x, bias=bias)
-        return MLP([D * 4, D, 1])(x)
+        return VAEOutput(MLP([D * 4, D, 1])(x))
 
     def decode(self, z: Array, conditionals: Array, **kwargs):
-        return self(z, conditionals, **kwargs)
+        return self(z, conditionals, **kwargs).f_hat
