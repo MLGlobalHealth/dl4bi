@@ -107,10 +107,10 @@ def evaluate(mcmc_path: Path, gnp_path: Path):
         jax.random.key(0), s_c, jnp.stack([n_pos, n], axis=-1), s_t
     )
     print("Saving predictions...")
-    results = mcmc_path / model_name
-    results.mkdir(parents=True, exist_ok=True)
+    results_path = mcmc_path / model_name
+    results_path.mkdir(parents=True, exist_ok=True)
     jnp.savez(
-        results / "predictions.npz",
+        results_path / "predictions.npz",
         s=s_t,
         mean=predicted_mean,
         std=predicted_std,
@@ -123,7 +123,7 @@ def evaluate(mcmc_path: Path, gnp_path: Path):
         predicted_mean,
         predicted_std,
     )
-    fig.savefig(results / "predictions.png", dpi=300)
+    fig.savefig(results_path / "predictions.png", dpi=300)
 
     # ---
     # Benchmarks
@@ -152,7 +152,7 @@ def evaluate(mcmc_path: Path, gnp_path: Path):
     results["coverage"] = mvn_hdi(predicted_mean, predicted_std, true_samples)
 
     df = pd.DataFrame(results.items(), columns=["metric", "value"])
-    df.to_csv(results / "metrics.csv", index=False)
+    df.to_csv(results_path / "metrics.csv", index=False)
     return results
 
 
@@ -173,7 +173,7 @@ def main():
     )
     args = parser.parse_args()
 
-    mcmc_path = args.mcmc_path or max(
+    mcmc_path = args.mcmc_path[0] or max(
         Path("results").glob("MCMC*"), key=lambda p: p.stat().st_mtime
     )
     print(f"Using MCMC path: {mcmc_path}")
