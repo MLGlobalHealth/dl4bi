@@ -1,0 +1,84 @@
+_target_: dl4bi.meta_learning.TETNP
+encoder:
+  _target_: dl4bi.transformer.TEISTEncoder
+  num_blks: 5
+  num_latents: 32
+  embed_dim: 128
+  ps_to_ks_blk:
+    _target_: dl4bi.transformer.TEBlock
+    attn:
+      _target_: dl4bi.attention.TEMultiHeadAttention
+      num_heads: 8
+      proj_qs:
+        _target_: dl4bi.mlp.MLP
+        dims: [128]
+      proj_ks:
+        _target_: dl4bi.mlp.MLP
+        dims: [128]
+      proj_vs:
+        _target_: dl4bi.mlp.MLP
+        dims: [128]
+      proj_out:
+        _target_: dl4bi.mlp.MLP
+        dims: [128]
+      kernel:
+        _target_: dl4bi.mlp.MLP
+        dims: [128, 128, 8]
+    ffn:
+      _target_: dl4bi.mlp.MLP
+      dims: [128, 128]
+  ks_to_ps_blk:
+    _target_: dl4bi.transformer.TEBlock
+    attn:
+      _target_: dl4bi.attention.TEMultiHeadAttention
+      num_heads: 8
+      proj_qs:
+        _target_: dl4bi.mlp.MLP
+        dims: [128]
+      proj_ks:
+        _target_: dl4bi.mlp.MLP
+        dims: [128]
+      proj_vs:
+        _target_: dl4bi.mlp.MLP
+        dims: [128]
+      proj_out:
+        _target_: dl4bi.mlp.MLP
+        dims: [128]
+      kernel:
+        _target_: dl4bi.mlp.MLP
+        dims: [128, 128, 8]
+    ffn:
+      _target_: dl4bi.mlp.MLP
+      dims: [128, 128]
+  qs_to_ps_blk:
+    _target_: dl4bi.transformer.TEBlock
+    attn:
+      _target_: dl4bi.attention.TEMultiHeadAttention
+      num_heads: 8
+      proj_qs:
+        _target_: dl4bi.mlp.MLP
+        dims: [128]
+      proj_ks:
+        _target_: dl4bi.mlp.MLP
+        dims: [128]
+      proj_vs:
+        _target_: dl4bi.mlp.MLP
+        dims: [128]
+      proj_out:
+        _target_: dl4bi.mlp.MLP
+        dims: [128]
+      kernel:
+        _target_: dl4bi.mlp.MLP
+        dims: [128, 128, 8]
+    ffn:
+      _target_: dl4bi.mlp.MLP
+      dims: [128, 128]
+decoder:
+  _target_: dl4bi.mlp.MLP
+  dims: [128, 128, 3]
+embed_f:
+  _target_: dl4bi.mlp.MLP
+  dims: [128, 128]
+output_fn:
+  _target_: dl4bi.model_output.DiagonalMVNOutput.from_activations
+  _partial_: true

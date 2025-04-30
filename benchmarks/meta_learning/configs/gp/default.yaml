@@ -14,11 +14,11 @@ optimizer:
   _target_: optax.chain
   _args_:
     - _target_: optax.clip_by_global_norm
-      max_norm: 1.0
+      max_norm: 0.5
     - _target_: optax.adamw
       learning_rate:
         _target_: optax.cosine_decay_schedule
-        init_value: 1.0e-3
+        init_value: 1.0e-4
         decay_steps: ${train_num_steps}
         alpha: 2.0e-5
       b1: 0.9

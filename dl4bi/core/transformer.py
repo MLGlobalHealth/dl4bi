@@ -82,7 +82,7 @@ class TransformerEncoder(nn.Module):
         **kwargs,
     ):
         for _ in range(self.num_blks):
-            x, _ = self.blk.copy()(x, mask, training, **kwargs)
+            x, *_ = self.blk.copy()(x, mask, training, **kwargs)
         if self.blk.pre_norm:
             x = self.norm(x)
         return x

@@ -58,6 +58,7 @@ def main(cfg: DictConfig):
         valid_dataloader,
         callbacks=[Callback(clbk, cfg.plot_interval)],
         callback_dataloader=clbk_dataloader,
+        return_state="last",
     )
     metrics = evaluate(
         rng_test,
@@ -77,7 +78,7 @@ def main(cfg: DictConfig):
 def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = False):
     """Generates batches of GP samples."""
     gp = instantiate(kernel)
-    B, L, D_s = data.batch_size, data.num_test, len(data.s)
+    B, L, D_s = data.batch_size, data.num_ctx.max + data.num_test, len(data.s)
     s_min = jnp.array([axis["start"] for axis in data.s])
     s_max = jnp.array([axis["stop"] for axis in data.s])
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
@@ -94,8 +95,8 @@ def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = F
                 rng_b,
                 data.num_ctx.min,
                 data.num_ctx.max,
-                num_test=L,
-                test_includes_ctx=True,
+                num_test=data.num_test,
+                test_includes_ctx=False,
                 obs_noise=data.obs_noise,
             )
             if is_callback:

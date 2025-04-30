@@ -42,16 +42,16 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     ]
 
     # TRANSLATION INVARIANCE
-    gp_benchmark(
-        seeds,
-        "2d",
-        gp_kernels_2d,
-        [f"2d/{m}" for m in models],
-        gp_main,
-        overrides,
-        "NeurIPS TNP-KR - Gaussian Processes",
-        dry_run=dry_run,
-    )
+    # gp_benchmark(
+    #     seeds,
+    #     "2d",
+    #     gp_kernels_2d,
+    #     [f"2d/{m}" for m in models],
+    #     gp_main,
+    #     overrides,
+    #     "NeurIPS TNP-KR - Gaussian Processes",
+    #     dry_run=dry_run,
+    # )
     img_benchmark(
         seeds,
         "configs/sir",
@@ -66,32 +66,32 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     # test_multiresolution(...)
 
     # SPACE & TIME & GENERALIZATION
-    era5_overrides = [
-        "data.valid_region=northern_europe",
-        "data.test_region=western_europe",
-    ]
-    img_benchmark(
-        seeds,
-        "configs/era5",
-        models,
-        era5_main,
-        overrides + era5_overrides,
-        "NeurIPS TNP-KR - ERA5",
-        dry_run=dry_run,
-    )
-    era5_overrides = [
-        "data.valid_region=western_europe",
-        "data.test_region=northern_europe",
-    ]
-    img_benchmark(
-        seeds,
-        "configs/era5",
-        models,
-        era5_main,
-        overrides + era5_overrides,
-        "NeurIPS TNP-KR - ERA5",
-        dry_run=dry_run,
-    )
+    # era5_overrides = [
+    #     "data.valid_region=northern_europe",
+    #     "data.test_region=western_europe",
+    # ]
+    # img_benchmark(
+    #     seeds,
+    #     "configs/era5",
+    #     models,
+    #     era5_main,
+    #     overrides + era5_overrides,
+    #     "NeurIPS TNP-KR - ERA5",
+    #     dry_run=dry_run,
+    # )
+    # era5_overrides = [
+    #     "data.valid_region=western_europe",
+    #     "data.test_region=northern_europe",
+    # ]
+    # img_benchmark(
+    #     seeds,
+    #     "configs/era5",
+    #     models,
+    #     era5_main,
+    #     overrides + era5_overrides,
+    #     "NeurIPS TNP-KR - ERA5",
+    #     dry_run=dry_run,
+    # )
 
     # HIGH DIMENSIONAL
     # TODO(danj):
@@ -108,24 +108,24 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     # )
 
     # NON-STATIONARY DISTRIBUTIONS
-    img_benchmark(
-        seeds,
-        "configs/celeba",
-        models,
-        celeba_main,
-        overrides,
-        "NeurIPS TNP-KR - CelebA",
-        dry_run=dry_run,
-    )
-    img_benchmark(
-        seeds,
-        "configs/cifar_10",
-        models,
-        cifar_10_main,
-        overrides,
-        "NeurIPS TNP-KR - Cifar 10",
-        dry_run=dry_run,
-    )
+    # img_benchmark(
+    #     seeds,
+    #     "configs/celeba",
+    #     models,
+    #     celeba_main,
+    #     overrides,
+    #     "NeurIPS TNP-KR - CelebA",
+    #     dry_run=dry_run,
+    # )
+    # img_benchmark(
+    #     seeds,
+    #     "configs/cifar_10",
+    #     models,
+    #     cifar_10_main,
+    #     overrides,
+    #     "NeurIPS TNP-KR - Cifar 10",
+    #     dry_run=dry_run,
+    # )
 
 
 def gp_benchmark(
