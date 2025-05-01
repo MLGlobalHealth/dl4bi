@@ -13,105 +13,122 @@ import numpy as np
 import numpyro
 import optax
 import pandas as pd
-from jax import Array, jit, random
+from jax import Array, default_device, devices, jit, random, tree_util
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, SVI, Predictive, Trace_ELBO, init_to_median
 from numpyro.infer.autoguide import AutoMultivariateNormal
 from numpyro.optim import Adam
 from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
 from sklearn.cluster import KMeans
-from sps.kernels import matern_5_2
+from sps.kernels import matern_1_2
 from sps.utils import build_grid
 from utils.plot_utils import plot_infer_trace
 
 import wandb
-from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, train
-from dl4bi.vae import PriorCVAE, TransformerDeepRV, gMLPDeepRV
-from dl4bi.vae.train_utils import (
-    cond_as_locs,
-    deep_rv_train_step,
-    generate_surrogate_decoder,
-    prior_cvae_train_step,
-)
+from dl4bi.vae import DKADeepRV, ScanTransformerDeepRV, gMLPDeepRV
+from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
 
 
 def main(seed=42, logged_priors=True):
     wandb.init(mode="disabled")  # NOTE: downstream function assumes active wandb
     rng = random.key(seed)
-    rng_train, rng_test, rng_infer, rng_idxs, rng_obs = random.split(rng, 5)
-    save_dir = Path(f"results/2d_gp{'_log_priors' if logged_priors else ''}/")
+    save_dir = Path(f"results/scalability{'_log_priors' if logged_priors else ''}/")
     save_dir.mkdir(parents=True, exist_ok=True)
-    s = build_grid([{"start": 0.0, "stop": 100.0, "num": 32}] * 2).reshape(-1, 2)
-    L = s.shape[0]
+    grids = [
+        build_grid([{"start": 0.0, "stop": 100.0, "num": n}])
+        for n in [256, 1024, 2048, 4096]
+    ]
     models = {
         "Baseline_GP": None,
-        "PriorCVAE": PriorCVAE(MLP(dims=[L, L]), MLP(dims=[L, L]), cond_as_locs, L),
         "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
-        "DeepRV + Transfomer": TransformerDeepRV(num_blks=2, dim=64),
+        "DeepRV + ScanTransfomer": ScanTransformerDeepRV(num_blks=2, dim=64),
+        "DeepRV + DKA": DKADeepRV(num_blks=2, dim=64),
         "ADVI": None,
         "Inducing Points": None,
     }
-    y_obs = gen_y_obs(rng_obs, s)
-    obs_mask = generate_obs_mask(rng_idxs, y_obs)
     priors = {
         "ls": dist.Uniform(1.0, 100.0),
         "log_ls": dist.Beta(4.0, 1.0),
         "beta": dist.Normal(),
     }
-    poisson_llk, cond_names = inference_model(s, priors, logged_priors)
-    poisson_inducing_llk = inference_model_inducing_points(
-        s, priors, obs_mask, logged_priors, 64
-    )
-    loader = gen_train_dataloader(s, priors, logged_priors)
-    y_hats, all_samples, result = [], [], []
-    for model_name, nn_model in models.items():
-        infer_model = (
-            poisson_inducing_llk if model_name == "Inducing Points" else poisson_llk
+    result = []
+    for s in grids:
+        rng_train, rng_test, rng_infer, rng_idxs, rng_obs, rng = random.split(rng, 6)
+        L = s.shape[0]
+        (save_dir / f"grid_{L}").mkdir(parents=True, exist_ok=True)
+        y_obs = gen_y_obs(rng_obs, s)
+        obs_mask = generate_obs_mask(rng_idxs, y_obs)
+        poisson_llk, cond_names = inference_model(s, priors, logged_priors)
+        num_pts = min(int(2 * jnp.sqrt(L).item()), sum(obs_mask))
+        poisson_inducing_llk = inference_model_inducing_points(
+            s, priors, obs_mask, logged_priors, num_pts
         )
-        train_time, eval_mse, surrogate_decoder, ess = None, None, None, {}
-        if nn_model is not None:
-            train_time, eval_mse, surrogate_decoder = surrogate_model_train(
-                rng_train, rng_test, loader, model_name, nn_model
+        loader = gen_train_dataloader(s, priors, logged_priors)
+        y_hats, all_samples = [], []
+        for model_name, nn_model in models.items():
+            infer_model = (
+                poisson_inducing_llk if model_name == "Inducing Points" else poisson_llk
             )
-        if model_name != "ADVI":
-            samples, mcmc, post, infer_time = hmc(
-                rng_infer, infer_model, y_obs, obs_mask, surrogate_decoder
+            train_time, eval_mse, surrogate_decoder, ess = None, None, None, {}
+            flops, parameters = None, None
+            if nn_model is not None:
+                train_time, eval_mse, surrogate_decoder = surrogate_model_train(
+                    rng_train, rng_test, loader, nn_model
+                )
+                flops, parameters = analyze_nn_model(
+                    rng, nn_model, loader, surrogate_decoder
+                )
+            if model_name != "ADVI":
+                samples, mcmc, post, infer_time = hmc(
+                    rng_infer, infer_model, y_obs, obs_mask, surrogate_decoder
+                )
+                ess = az.ess(mcmc, method="mean")
+                plot_infer_trace(
+                    samples,
+                    mcmc,
+                    None,
+                    cond_names,
+                    (save_dir / f"grid_{L}") / f"{model_name}_infer_trace.png",
+                )
+            else:
+                samples, post, infer_time = advi(rng_infer, infer_model, y_obs)
+            y_hats.append(post["obs"])
+            all_samples.append(samples)
+            result.append(
+                {
+                    "model_name": model_name,
+                    "train_time": train_time,
+                    "Test Norm MSE": eval_mse,
+                    "infer_time": infer_time,
+                    "inferred lengthscale mean": samples["ls"].mean(axis=0),
+                    "inferred fixed effects": samples["beta"].mean(axis=0),
+                    "MSE(y, y_hat)": ((y_obs - post["obs"].mean(axis=0)) ** 2).mean(),
+                    "ESS spatial effects": ess["mu"].mean().item() if ess else None,
+                    "ESS lengthscale": ess["ls"].item() if ess else None,
+                    "ESS fixed effects": ess["beta"].item() if ess else None,
+                    "grid size": L,
+                    "flops": flops,
+                    "parameters": parameters,
+                }
             )
-            ess = az.ess(mcmc, method="mean")
-            plot_infer_trace(
-                samples,
-                mcmc,
-                None,
-                cond_names,
-                save_dir / f"{model_name}_infer_trace.png",
-            )
-        else:
-            samples, post, infer_time = advi(rng_infer, infer_model, y_obs)
-        y_hats.append(post["obs"])
-        all_samples.append(samples)
-        result.append(
-            {
-                "model_name": model_name,
-                "train_time": train_time,
-                "Test Norm MSE": eval_mse,
-                "infer_time": infer_time,
-                "inferred lengthscale mean": samples["ls"].mean(axis=0),
-                "inferred fixed effects": samples["beta"].mean(axis=0),
-                "MSE(y, y_hat)": ((y_obs - post["obs"].mean(axis=0)) ** 2).mean(),
-                "ESS spatial effects": ess["mu"].mean().item() if ess else None,
-                "ESS lengthscale": ess["ls"].item() if ess else None,
-                "ESS fixed effects": ess["beta"].item() if ess else None,
-            }
+        plot_posterior_predictive_comparisons(
+            all_samples,
+            {},
+            priors,
+            list(models.keys()),
+            cond_names,
+            (save_dir / f"grid_{L}") / "comp",
         )
-    plot_posterior_predictive_comparisons(
-        all_samples, {}, priors, list(models.keys()), cond_names, save_dir / "comp"
-    )
-    plot_models_predictive_means(
-        y_obs, y_hats, obs_mask, list(models.keys()), save_dir / "obs_means.png"
-    )
-    pd.DataFrame(result).to_csv(save_dir / "res.csv")
+        plot_models_predictive_means(
+            y_obs,
+            y_hats,
+            obs_mask,
+            list(models.keys()),
+            (save_dir / f"grid_{L}") / "obs_means.png",
+        )
+        pd.DataFrame(result).to_csv((save_dir / f"grid_{L}") / "res.csv")
 
 
 def hmc(
@@ -125,7 +142,7 @@ def hmc(
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
     k1, k2 = random.split(rng)
     # mcmc = MCMC(nuts, num_chains=1, num_samples=1_000, num_warmup=4_00)
-    mcmc = MCMC(nuts, num_chains=4, num_samples=10_000, num_warmup=4_000)
+    mcmc = MCMC(nuts, num_chains=1, num_samples=10_000, num_warmup=4_000)
     start = datetime.now()
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=y_obs)
     infer_time = (datetime.now() - start).total_seconds()
@@ -153,16 +170,13 @@ def surrogate_model_train(
     rng_train: Array,
     rng_test: Array,
     loader: Callable,
-    model_name: str,
     model: nn.Module,
     train_num_steps: int = 100_000,
     valid_interval: int = 25_000,
     valid_steps: int = 5_000,
 ):
-    train_step = prior_cvae_train_step
-    lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-3)
-    if model_name != "PriorCVAE":
-        train_step = deep_rv_train_step
+    train_step = deep_rv_train_step
+    lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-2, 1e-5)
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
     start = datetime.now()
     state = train(
@@ -195,7 +209,7 @@ def gen_train_dataloader(s: Array, priors: dict, logged_priors: bool, batch_size
             else:
                 ls = priors["ls"].sample(rng_ls)
             z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s.shape[0]))
-            K = matern_5_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
+            K = matern_1_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
             chol = jnp.linalg.cholesky(K)
             f = jnp.einsum("ij,bj->bi", chol, z)
             yield {"s": s, "f": f, "z": z, "conditionals": jnp.array([ls])}
@@ -224,7 +238,7 @@ def inference_model(s: Array, priors: dict, logged_priors: bool):
                 surrogate_decoder(z, jnp.array([ls]), **surrogate_kwargs).squeeze(),
             )
         else:
-            K = matern_5_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
+            K = matern_1_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
             L_chol = jnp.linalg.cholesky(K)
             mu = numpyro.deterministic("mu", jnp.matmul(L_chol, z[0]))
         lambda_ = jnp.exp(beta + mu)
@@ -249,8 +263,8 @@ def inference_model_inducing_points(
         else:
             ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
-        K_uu = matern_5_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
-        K_su = matern_5_2(s, u, var, ls)
+        K_uu = matern_1_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
+        K_su = matern_1_2(s, u, var, ls)
         f_u = numpyro.sample("mu", dist.MultivariateNormal(0.0, K_uu))
         f = K_su @ jnp.linalg.solve(K_uu, f_u)
         # NOTE: uncomment to perform FITC correction for marginal variances
@@ -263,6 +277,18 @@ def inference_model_inducing_points(
             numpyro.sample("obs", dist.Poisson(lambda_), obs=y)
 
     return poisson_inducing
+
+
+def analyze_nn_model(rng: Array, nn_model: nn.Module, loader, surrogate_decoder):
+    k1, k2, k3 = random.split(rng, 3)
+    rngs = {"params": k1, "extra": k2}
+    batch = loader(k3).__next__()
+    params = nn_model.init(rngs, **batch)["params"]
+    with default_device(devices("cpu")[0]):
+        lowered = jit(lambda batch: surrogate_decoder(**batch)).lower(batch)
+        flops = lowered.cost_analysis()["flops"]
+    params_count = sum(x.size for x in tree_util.tree_leaves(params))
+    return params_count, int(flops)
 
 
 @jit
@@ -278,7 +304,7 @@ def gen_y_obs(rng: Array, s: Array):
     """generates a poisson observed data sample for inference"""
     rng_mu, rng_poiss = random.split(rng)
     var, ls, beta = 1.0, 10.0, 1.0
-    K = matern_5_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
+    K = matern_1_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
     mu = dist.MultivariateNormal(0.0, K).sample(rng_mu)
     lambda_ = jnp.exp(beta + mu)
     return dist.Poisson(rate=lambda_).sample(rng_poiss)
