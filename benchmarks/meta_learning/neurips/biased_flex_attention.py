@@ -9,6 +9,9 @@ from torch.nn.attention.flex_attention import flex_attention
 
 torch.set_default_device("cuda:0")
 
+# NOTE: cannot get this to scale past ~L=1600
+# issue: https://github.com/pytorch/pytorch/issues/152593
+
 
 def main(seed: int, N: int, B: int, H: int, L: int, D: int, D_s: int):
     torch.manual_seed(seed)
