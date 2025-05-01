@@ -66,6 +66,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     # test_multiresolution(...)
 
     # SPACE & TIME & GENERALIZATION
+    # era5_models = ["tnp_d", "te_tnp", "tnp_kr_scan"]
     # era5_overrides = [
     #     "data.valid_region=northern_europe",
     #     "data.test_region=western_europe",
@@ -73,7 +74,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     # img_benchmark(
     #     seeds,
     #     "configs/era5",
-    #     models,
+    #     era5_models,
     #     era5_main,
     #     overrides + era5_overrides,
     #     "NeurIPS TNP-KR - ERA5 - CNW",
@@ -86,7 +87,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     # img_benchmark(
     #     seeds,
     #     "configs/era5",
-    #     models,
+    #     era5_models,
     #     era5_main,
     #     overrides + era5_overrides,
     #     "NeurIPS TNP-KR - ERA5 - CWN",
