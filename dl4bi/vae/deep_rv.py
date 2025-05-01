@@ -5,7 +5,11 @@ import jax.numpy as jnp
 from jax import Array
 from sps.kernels import l2_dist
 
-from ..core.attention import MultiHeadAttention
+from ..core.attention import (
+    BiasedScanAttention,
+    DeepKernelAttention,
+    MultiHeadAttention,
+)
 from ..core.bias import Bias
 from ..core.mlp import MLP, gMLP
 from ..core.model_output import VAEOutput
@@ -109,6 +113,68 @@ class TransformerDeepRV(nn.Module):
             ffn = MLP([D * 4, D])
             bias = Bias.build_rbf_network_bias()(d)
             x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(x, bias=bias)
+        return VAEOutput(MLP([D * 4, D, 1])(x))
+
+    def decode(self, z: Array, conditionals: Array, **kwargs):
+        return self(z, conditionals, **kwargs).f_hat
+
+
+class ScanTransformerDeepRV(nn.Module):
+    dim: int = 64
+    num_blks: int = 2
+
+    @nn.compact
+    def __call__(self, z: Array, conditionals: Array, s: Array, **kwargs):
+        (B, L), D, C = z.shape, self.dim, conditionals.shape[0]
+        s_batched = jnp.repeat(s[None, :], B, axis=0)
+        ids = jnp.repeat(jnp.arange(L, dtype=int)[None, :], B, axis=0)
+        ids_embed = nn.Embed(L, features=(D * 2) - (C + 1))(ids)
+        x = cond_as_feats(z, conditionals)
+        x = jnp.concat([ids_embed, x], axis=-1)
+        x = MLP([D * 4, D], nn.gelu)(x)
+        kwargs = {"qs_s": s_batched, "ks_s": s_batched}
+        for _ in range(self.num_blks):
+            attn = MultiHeadAttention(
+                proj_qs=MLP([D * 2]),
+                proj_ks=MLP([D * 2]),
+                proj_vs=MLP([D * 2]),
+                proj_out=MLP([D]),
+                attn=BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()),
+            )
+            ffn = MLP([D * 4, D])
+            x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(
+                x, mask=None, training=False, **kwargs
+            )
+        return VAEOutput(MLP([D * 4, D, 1])(x))
+
+    def decode(self, z: Array, conditionals: Array, **kwargs):
+        return self(z, conditionals, **kwargs).f_hat
+
+
+class DKADeepRV(nn.Module):
+    dim: int = 64
+    num_blks: int = 2
+
+    @nn.compact
+    def __call__(self, z: Array, conditionals: Array, s: Array, **kwargs):
+        (B, L), D, C = z.shape, self.dim, conditionals.shape[0]
+        s_batched = jnp.repeat(s[None, :], B, axis=0)
+        ids = jnp.repeat(jnp.arange(L, dtype=int)[None, :], B, axis=0)
+        ids_embed = nn.Embed(L, features=(D * 2) - (C + 1))(ids)
+        x = cond_as_feats(z, conditionals)
+        x = jnp.concat([ids_embed, x], axis=-1)
+        x = MLP([D * 4, D], nn.gelu)(x)
+        kwargs = {"qs_s": s_batched, "ks_s": s_batched}
+        for _ in range(self.num_blks):
+            attn = DeepKernelAttention(
+                num_heads=4,
+                proj_qks=MLP([D * 2, D * 2]),
+                proj_vs=MLP([D * 2, D]),
+            )
+            ffn = MLP([D * 4, D])
+            x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(
+                x, mask=None, training=False, **kwargs
+            )
         return VAEOutput(MLP([D * 4, D, 1])(x))
 
     def decode(self, z: Array, conditionals: Array, **kwargs):
