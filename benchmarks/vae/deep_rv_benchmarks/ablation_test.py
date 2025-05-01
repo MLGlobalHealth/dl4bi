@@ -98,7 +98,7 @@ def surrogate_model_train(
     valid_steps: int = 5_000,
 ):
     train_step = prior_cvae_train_step
-    lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-3)
+    lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-3, 1.0e-5)
     if model_name != "PriorCVAE":
         train_step = deep_rv_train_step
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
@@ -123,15 +123,18 @@ def surrogate_model_train(
 
 
 def gen_gp_dataloader(s: Array, priors: dict, kernel: Callable, batch_size=32):
+    jitter = 5e-4 * jnp.eye(s.shape[0])
+    kernel_jit = jit(lambda s, var, ls: kernel(s, s, var, ls) + jitter)
+    f_jit = jit(lambda K, z: jnp.einsum("ij,bj->bi", jnp.linalg.cholesky(K), z))
+
     def dataloader(rng_data):
         while True:
             rng_data, rng_ls, rng_z = random.split(rng_data, 3)
             var = 1.0
             ls = priors["ls"].sample(rng_ls)
             z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s.shape[0]))
-            K = kernel(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
-            chol = jnp.linalg.cholesky(K)
-            f = jnp.einsum("ij,bj->bi", chol, z)
+            K = kernel_jit(s, var, ls)
+            f = f_jit(K, z)
             yield {"s": s, "f": f, "z": z, "conditionals": jnp.array([ls])}
 
     return dataloader
@@ -142,16 +145,18 @@ def gen_car_dataloader(
 ):
     adj_mat = generate_adjacency_matrix(map_data, self_loops=False)
     D = jnp.diag(adj_mat.sum(axis=1))
+    kernel_jit = jit(lambda tau, alpha: tau * (D - (alpha * adj_mat)))
+    f_jit = jit(lambda K_inv, z: jnp.einsum("ij,bj->bi", cholesky_of_inverse(K_inv), z))
 
+    @jit
     def dataloader(rng_data):
         while True:
             rng_data, rng_alpha, rng_z = random.split(rng_data, 3)
             tau = 1.0
             alpha = priors["alpha"].sample(rng_alpha)
             z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s.shape[0]))
-            precision_mat = tau * (D - (alpha * adj_mat))
-            L = cholesky_of_inverse(precision_mat)
-            f = jnp.einsum("ij,bj->bi", L, z).squeeze()
+            precision_mat = kernel_jit(tau, alpha)
+            f = f_jit(precision_mat, z)
             yield {"s": s, "f": f, "z": z, "conditionals": jnp.array([alpha])}
 
     return dataloader

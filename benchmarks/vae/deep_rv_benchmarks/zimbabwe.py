@@ -155,15 +155,18 @@ def surrogate_model_train(
 
 
 def gen_train_dataloader(s: Array, priors: dict, batch_size=32):
+    jitter = 5e-4 * jnp.eye(s.shape[0])
+    kernel_jit = jit(lambda s, var, ls: matern_1_2(s, s, var, ls) + jitter)
+    f_jit = jit(lambda K, z: jnp.einsum("ij,bj->bi", jnp.linalg.cholesky(K), z))
+
     def dataloader(rng_data):
         while True:
             rng_data, rng_var, rng_ls, rng_z = random.split(rng_data, 4)
             var = priors["var"].sample(rng_var)
             ls = priors["ls"].sample(rng_ls)
             z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s.shape[0]))
-            K = matern_1_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
-            L = jnp.linalg.cholesky(K)
-            f = jnp.einsum("ij,bj->bi", L, z)
+            K = kernel_jit(s, var, ls)
+            f = f_jit(K, z)
             yield {"s": s, "f": f, "z": z, "conditionals": jnp.array([var, ls])}
 
     return dataloader
