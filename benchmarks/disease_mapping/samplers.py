@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 from jax import jit, vmap
-from numpyro.handlers import seed, substitute
+from numpyro.handlers import condition, seed
 
 from benchmarks.disease_mapping.model import jitter, kernel, prevalence
 from benchmarks.disease_mapping.utils import rng_vmap
@@ -10,23 +10,22 @@ from dl4bi.core.model_output import DiagonalMVNOutput
 from dl4bi.core.train import TrainState
 
 
-@jit
 @rng_vmap
-def sample_prevalence(rng, y, **params):
-    """Sampling of prevalence given `y` and `params`.
+def sample_prevalence(rng, y, x=None, **params):
+    """Sampling of prevalence given `y`, covariates `x` and `params`.
     Args:
         rng: jax.random.PRNGKey
         y: spatial effect of shape `[L_test]`
-        params: params to be plugged into the prevalence model.
+        x: covariates of shape `[L_test, D]`
+        params: params to be plugged into the prevalence model sample sites.
 
     Returns:
         logit(prevalence) of shape `[L_test]`
     """
-    params.pop("z", None)
-    return seed(substitute(prevalence, params), rng)(y)
+    # condition excludes deterministic sites
+    return seed(condition(prevalence, params), rng)(y, x)
 
 
-@jit
 @rng_vmap
 def sample_matheron(rng, s_c, y_c, s_t, **params):
     """Conditional GP sampling using Matheron's rule."""
@@ -49,7 +48,6 @@ def sample_matheron(rng, s_c, y_c, s_t, **params):
     )
 
 
-@jit
 @rng_vmap
 def sample_gp(
     rng,
@@ -87,7 +85,6 @@ def sample_gp(
     return y_t.squeeze(-1)
 
 
-@jit
 @rng_vmap
 def sample_gp_pointwise(
     rng,

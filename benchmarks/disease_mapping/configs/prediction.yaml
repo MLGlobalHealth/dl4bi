@@ -5,3 +5,4 @@ iso: "MOZ"
 region: null
 batch_size: 32
 res: 150
+year: 2007 # required for loading urban/rural target covariates
