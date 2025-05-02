@@ -77,7 +77,6 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-@partial(jit, static_argnames="B")
 def sample_prior(rng, s: jax.Array, n: jax.Array, x: jax.Array | None, B: int):
     trace = handlers.trace(handlers.seed(numpyro_model.survey_model, rng)).get_trace(
         s, n, None, x, sample_shape=(B,)
@@ -87,7 +86,6 @@ def sample_prior(rng, s: jax.Array, n: jax.Array, x: jax.Array | None, B: int):
     return z, n_pos
 
 
-@partial(jit, static_argnames="sample_shape")
 def sample_n(rng, sample_shape):
     scale = 100
     shape = 3
@@ -95,7 +93,6 @@ def sample_n(rng, sample_shape):
     return jnp.ceil(scale / random.gamma(rng, shape, sample_shape)).astype(jnp.int32)
 
 
-@partial(jit, static_argnames="sample_shape")
 def sample_x(rng, sample_shape):
     p = 0.1
     urban = random.bernoulli(rng, p, sample_shape).astype(jnp.float32)
@@ -103,9 +100,6 @@ def sample_x(rng, sample_shape):
     return jnp.stack([urban, rural], axis=-1)
 
 
-@partial(
-    jit, static_argnames=["num_ctx_min", "num_ctx_max", "num_test", "test_includes_ctx"]
-)
 def make_batch(
     rng,
     s: jax.Array,
@@ -121,7 +115,7 @@ def make_batch(
 ):
     """
     Adapted from `meta_learning.data.spatial._batch`,
-    but accomodates the idea of observing `n_pos` but predicting `z = logit(theta)`.
+    but accomodates the idea of observing `n_pos` but predicting `theta`.
     """
 
     rng_p, rng_b = random.split(rng)
@@ -178,6 +172,7 @@ def make_batch(
     )
 
 
+# TODO something is broken here now in the case urban_rural=False
 def build_dataloader(cfg: DictConfig):
     """
     Generates samples from `model.spatial_effect`.
@@ -187,31 +182,36 @@ def build_dataloader(cfg: DictConfig):
     s_min = jnp.array([axis["start"] for axis in cfg.s])
     s_max = jnp.array([axis["stop"] for axis in cfg.s])
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
-    urban_rural = cfg.data.urban_rural
+    urban_rural = cfg.urban_rural
+
+    @jit
+    def sample_batch(rng):
+        rng_s, rng_n, rng_x, rng_sp, rng_b = random.split(rng, 5)
+        s = random.uniform(rng_s, (L, D), jnp.float32, s_min, s_max)
+        n = sample_n(rng_n, (L,))
+        if urban_rural:
+            x = sample_x(rng_x, (L,))
+        else:
+            x = None
+        z, n_pos = sample_prior(rng_sp, s, n, x, B)
+        s, n, x = batchify(s), batchify(n), batchify(x) if x is not None else None
+        return make_batch(
+            rng_b,
+            s,
+            n,
+            x,
+            z,
+            n_pos,
+            num_ctx_min=cfg.num_ctx.min,
+            num_ctx_max=cfg.num_ctx.max,
+            num_test=cfg.num_test,
+            test_includes_ctx=True,
+        )
 
     def dataloader(rng: jax.Array):
         while True:
-            rng_s, rng_n, rng_sp, rng_b, rng = random.split(rng, 5)
-            s = random.uniform(rng_s, (L, D), jnp.float32, s_min, s_max)
-            n = sample_n(rng_n, (L,))
-            if urban_rural:
-                x = sample_x(rng_n, (L,))
-            else:
-                x = None
-            z, n_pos = sample_prior(rng_sp, s, n, x, B)
-            s, n, x = batchify(s), batchify(n), batchify(x) if x is not None else None
-            yield make_batch(
-                rng_b,
-                s,
-                n,
-                None,
-                z,
-                n_pos,
-                num_ctx_min=cfg.num_ctx.min,
-                num_ctx_max=cfg.num_ctx.max,
-                num_test=cfg.num_test,
-                test_includes_ctx=True,
-            )
+            rng, rng_i = random.split(rng)
+            yield sample_batch(rng_i)
 
     return dataloader
 

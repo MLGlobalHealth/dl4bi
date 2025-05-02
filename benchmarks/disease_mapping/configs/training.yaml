@@ -1,7 +1,7 @@
 defaults:
   - _self_ # use default global values below
   - data: moz
-  - model: anp
+  - model: spatial/tnp_kr_scan 
   # specified in code
   # - kernel: rbf 
 seed: 42
