@@ -121,8 +121,10 @@ def get_population(iso: str, locations: np.array, year=2007, res: int = 150):
     Returns population in grid cells with centers given by locations (Long, Lat)
     and resolution res in arc-seconds.
     """
+    year = int(year)
     iso = iso.upper()
-    file_path = CACHE_DIR / f"{iso}_population.tif"
+    file_path = CACHE_DIR / f"{iso}_{year}_population.tif"
+    assert 2000 <= year <= 2020
 
     if not file_path.exists():
         # per-pixel population counts
@@ -149,8 +151,11 @@ def get_population_density(iso: str, locations: np.array, year=2007):
     """
     Returns population density at given points
     """
+    year = int(year)
     iso = iso.upper()
-    file_path = CACHE_DIR / f"{iso}_population_density.tif"
+    file_path = CACHE_DIR / f"{iso}_{year}_population_density.tif"
+    assert 2000 <= year <= 2020
+
     if not file_path.exists():
         url = f"https://data.worldpop.org/GIS/Population_Density/Global_2000_2020_1km_UNadj/{year}/{iso}/{iso.lower()}_pd_{year}_1km_UNadj.tif"
         response = requests.get(url)
@@ -176,7 +181,7 @@ def get_survey_data(
     iso: str | None,  # if None use all countries in Africa
     region: str | None = None,
     query: str | None = None,
-    res: int | None = 150,  # if not None round to grid of given res in seconds
+    res: int | None = None,  # if not None round to grid of given res in seconds
 ):
     dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
     url = f"https://dataverse.harvard.edu/api/access/datafile/:persistentId/?persistentId={dataset_id}"
@@ -198,11 +203,11 @@ def get_survey_data(
 
     # only include point surveys
     df = df.query("AREATYPE=='Point'")
+    df["ISO"] = df["AFRADMIN2Code"].str[:3]
 
     if iso is not None:
         iso = iso.upper()
-        mask = df.AFRADMIN2Code.str.match(rf"^{iso}\d\d\d$")
-        df = df[mask]
+        df = df.query("ISO==@iso")
 
     # region
     if region is not None:
@@ -231,6 +236,15 @@ def get_survey_data(
         f"Locations: shape {s.shape}, bbox: ({s[:, 0].min()}, {s[:, 1].min()}), ({s[:, 0].max()}, {s[:, 1].max()})"
     )
 
+    x = np.zeros((s.shape[0], 2))
+    for country in ALL_COUNTRIES:
+        for year in df.YY.unique():
+            mask = (df.ISO == country) & (df.YY == year)
+            if mask.any():
+                print(f"Getting urban/rural for {country} in {year}")
+                urban_rural = get_urban_rural(country, s[mask], year)
+                x[mask] = urban_rural
+
     # skip time for now
     # t = (df.YY * 12 + df.MM).to_numpy()
     # t -= t.min()
@@ -241,4 +255,4 @@ def get_survey_data(
     n_pos = df.Pf.to_numpy()
     n = df.Ex.to_numpy()
 
-    return {"s": s, "n_pos": n_pos, "n": n}
+    return {"s": s, "n_pos": n_pos, "n": n, "x": x}
