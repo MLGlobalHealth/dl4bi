@@ -116,17 +116,17 @@ def get_grid(
     return points
 
 
-def get_population(iso: str, locations: np.array, res: int = 150):
+def get_population(iso: str, locations: np.array, year=2007, res: int = 150):
     """
     Returns population in grid cells with centers given by locations (Long, Lat)
     and resolution res in arc-seconds.
     """
-    m = res / 3600 / 2  # convert to degrees / 2
+    iso = iso.upper()
     file_path = CACHE_DIR / f"{iso}_population.tif"
 
     if not file_path.exists():
         # per-pixel population counts
-        url = f"https://data.worldpop.org/GIS/Population/Global_2000_2020_1km_UNadj/2007/{iso.upper()}/{iso.lower()}_ppp_2007_1km_Aggregated_UNadj.tif"
+        url = f"https://data.worldpop.org/GIS/Population/Global_2000_2020_1km_UNadj/{year}/{iso}/{iso.lower()}_ppp_{year}_1km_Aggregated_UNadj.tif"
         print(f"Downloading population data from {url}")
         response = requests.get(url)
         if response.status_code != 200:
@@ -135,6 +135,7 @@ def get_population(iso: str, locations: np.array, res: int = 150):
             f.write(response.content)
 
     result = []
+    m = res / 3600 / 2  # offset from square's midpoint
     with rasterio.open(file_path) as data:
         for x, y in locations:
             window = data.window(x - m, y - m, x + m, y + m)
@@ -142,6 +143,33 @@ def get_population(iso: str, locations: np.array, res: int = 150):
             # invalid values are set to < 0
             result.append(counts.sum(where=counts > 0))
     return np.array(result)
+
+
+def get_population_density(iso: str, locations: np.array, year=2007):
+    """
+    Returns population density at given points
+    """
+    iso = iso.upper()
+    file_path = CACHE_DIR / f"{iso}_population_density.tif"
+    if not file_path.exists():
+        url = f"https://data.worldpop.org/GIS/Population_Density/Global_2000_2020_1km_UNadj/{year}/{iso}/{iso.lower()}_pd_{year}_1km_UNadj.tif"
+        response = requests.get(url)
+        if response.status_code != 200:
+            raise ValueError(f"Failed to download data from {url}")
+        with open(file_path, "wb") as f:
+            f.write(response.content)
+
+    data: rasterio.DatasetReader
+    with rasterio.open(file_path) as data:
+        densities = list(data.sample(locations))
+    return np.array(densities).squeeze(axis=-1)
+
+
+def get_urban_rural(iso: str, locations: np.array, year=2007):
+    densities = get_population_density(iso, locations, year)
+    urban = densities >= 300
+    rural = ~urban
+    return np.stack([urban, rural], axis=-1).astype(np.float32)
 
 
 def get_survey_data(
