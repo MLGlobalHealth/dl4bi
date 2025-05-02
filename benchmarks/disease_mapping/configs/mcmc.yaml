@@ -2,7 +2,7 @@
 iso: "moz" # `null` for all of Africa
 region: null
 query: "YY==2007" # extra data filtering
-res: 150 # this rounds data to the grid of res arc-seconds unless `null`
+res: null # this rounds data to the grid of res arc-seconds unless `null`
 
 # mcmc parameters
 seed: 42
