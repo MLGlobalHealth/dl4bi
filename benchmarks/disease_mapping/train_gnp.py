@@ -172,7 +172,6 @@ def make_batch(
     )
 
 
-# TODO something is broken in TNP-KR-Scan when urban_rural is True
 def build_dataloader(cfg: DictConfig):
     """
     Generates samples from `model.spatial_effect`.
