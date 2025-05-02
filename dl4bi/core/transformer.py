@@ -323,7 +323,6 @@ class KRBlock(nn.Module):
 # TODO(danj): add latent locations??
 class DistillBlock(nn.Module):
     num_latents: int
-    num_reps: int = 1
     attn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64])
@@ -332,31 +331,23 @@ class DistillBlock(nn.Module):
     @nn.compact
     def __call__(
         self,
-        ks: jax.Array,  # [B, L, D]
+        qs: jax.Array,  # [B, Q, D]
+        ks: jax.Array,  # [B, K, D]
         mask: Optional[jax.Array] = None,
         training: bool = False,
         **kwargs,
     ):
-        (B, _L, D), Z = ks.shape, self.num_latents
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        qs = self.param("latents", init.truncated_normal(), (1, Z, D))
-        qs = jnp.repeat(qs, B, axis=0)
-        # TODO(danj): share or create these params per repeat?
-        cross_attn, self_attn = self.attn.copy(), self.attn.copy()
-        cross_ffn, self_ffn = self.ffn.copy(), self.ffn.copy()
-        cross_norm, self_norm = self.norm.copy(), self.norm.copy()
-        for _ in range(self.num_reps):
-            qs_1, *_ = cross_attn(qs, ks, ks, mask, training)
-            qs_2 = qs + drop(qs_1)
-            qs_3 = qs_2 + drop(cross_ffn(cross_norm(qs_2), training))
-            qs_4, *_ = self_attn(qs_3, qs_3, qs_3, None, training)
-            qs_5 = qs_3 + drop(qs_4)
-            qs = qs_5 + drop(self_ffn(self_norm(qs_3), training))
+        qs_1, *_ = self.attn(qs, ks, ks, mask, training)
+        qs_2 = qs + drop(qs_1)
+        qs_3 = qs_2 + drop(self.attn(self.norm(qs_2), training))
+        qs_4, *_ = self.attn.copy()(qs_3, qs_3, qs_3, None, training)
+        qs_5 = qs_3 + drop(qs_4)
+        qs = qs_5 + drop(self.ffn.copy()(self.norm.copy()(qs_3), training))
         return qs
 
 
 class InformBlock(nn.Module):
-    num_reps: int = 1
     attn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64])
@@ -365,16 +356,15 @@ class InformBlock(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,  # [B, L, D]
-        ks: jax.Array,  # [B, Z, D]
+        qs: jax.Array,  # [B, Q, D]
+        ks: jax.Array,  # [B, K, D]
         mask: Optional[jax.Array] = None,
         training: bool = False,
         qk_kwargs: dict = {},
         **kwargs,
     ):
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        for _ in range(self.num_reps):
-            qs_1, *_ = self.attn(qs, ks, ks, mask, training, **qk_kwargs)
-            qs_2 = qs + drop(qs_1)
-            qs = qs_2 + drop(self.ffn(self.norm(qs_2)))
+        qs_1, *_ = self.attn(qs, ks, ks, mask, training, **qk_kwargs)
+        qs_2 = qs + drop(qs_1)
+        qs = qs_2 + drop(self.ffn(self.norm(qs_2)))
         return qs

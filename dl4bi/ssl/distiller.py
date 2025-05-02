@@ -6,14 +6,14 @@ import jax.numpy as jnp
 
 from ..core.mlp import MLP
 from ..core.model_output import DiagonalMVNOutput
-from ..core.transformer import DistillBlock, InformBlock
+from ..core.transformer import DistillBlock
 from ..core.utils import safe_stack
 from .steps import likelihood_train_step, likelihood_valid_step
 from .utils import first_shape
 
 
-class HLNP(nn.Module):
-    """Hierarchical Latent Neural Process (HLNP).
+class SPDistiller(nn.Module):
+    """A Stochastic Process distiller for self-supervised learning.
 
     Args:
         norm: A module used for normalization between blocks.
@@ -27,9 +27,6 @@ class HLNP(nn.Module):
         An instance of the `HLNP` model.
     """
 
-    s_lower: List[float] = field(default_factory=lambda: [-2.5])
-    s_upper: List[float] = field(default_factory=lambda: [2.5])
-    points_per_unit: int = 128
     embed_x: Callable = lambda x: x
     embed_s: Callable = lambda x: x
     embed_t: Callable = lambda x: x
@@ -107,10 +104,6 @@ class HLNP(nn.Module):
         ks_1 = DistillBlock(64)(ks_0, mask_ctx, training)
         ks_2 = DistillBlock(16)(ks_1, None, training)
         ks_3 = DistillBlock(4)(ks_2, None, training)
-        qs = InformBlock()(qs, ks_3, None, training)
-        qs = InformBlock()(qs, ks_2, None, training)
-        qs = InformBlock()(qs, ks_1, None, training)
-        qs = InformBlock()(qs, ks_0, mask_ctx)  # TODO(danj): local only?
         qs = self.norm(qs)
         output = self.head(qs, training)
         return self.output_fn(output)
