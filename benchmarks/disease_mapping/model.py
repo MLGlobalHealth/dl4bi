@@ -35,6 +35,8 @@ jitter = 1e-4  # note this is in fact N(0, s2=jitter) independent noise
 def spatial_effect(s: jax.Array, *, sample_shape: tuple[int, ...] = ()):
     """
     Definition of the spatial effect underlying the observation model.
+
+    If sample_shape is not (), the kernel parameters are shared across samples.
     """
     ls = numpyro.sample("ls", dist.InverseGamma(3, 3))
     var = numpyro.sample("var", dist.InverseGamma(3, 3))
@@ -52,27 +54,44 @@ def spatial_effect(s: jax.Array, *, sample_shape: tuple[int, ...] = ()):
     return y
 
 
-def prevalence(y):
-    b0 = numpyro.sample("b0", dist.Normal(-1, 5))
-    z = numpyro.deterministic("z", b0 + y)
+def prevalence(y, x=None):
+    *sample_shape, L = y.shape
+
+    b0 = numpyro.sample("b0", dist.Normal(-1, 5), sample_shape=(*sample_shape, 1))
+
+    if x is not None:
+        D = x.shape[-1]
+        assert x.shape == (L, D)
+
+        b = numpyro.sample("b", dist.Normal(0, 5), sample_shape=(*sample_shape, D))
+        bx = jnp.einsum("...d, ...ld-> ...l", b, x)
+        assert bx.shape == (*sample_shape, L)
+
+        z = numpyro.deterministic("z", y + b0 + bx)
+    else:
+        z = numpyro.deterministic("z", y + b0)
+
     numpyro.deterministic("theta", jax.nn.sigmoid(z))
     return z
 
 
 def survey_model(
-    s: jax.Array,
-    n: jax.Array,
-    n_pos: jax.Array | None,
+    s: jax.Array,  # [L, Ds]
+    n: jax.Array,  # [L]
+    n_pos: jax.Array | None,  # [L]
+    x: jax.Array | None = None,  # [L, Dx]
     *,
     sample_shape: tuple[int, ...] = (),
 ):
     """
     MBG survey model.
 
-    Setting `sample_shape` to !=() will produce samples with the same kernel parameters.
+    Setting `sample_shape` to !=() will produce samples with the same kernel
+    parameters in the spatial effect, so that they are not iid but only iid
+    given the kernel parameters.
     """
     y = spatial_effect(s, sample_shape=sample_shape)
-    z = prevalence(y)
+    z = prevalence(y, x)
 
     numpyro.sample(
         "n_pos",
@@ -85,11 +104,13 @@ def render():
     L = 10
     rng = jax.random.key(0)
     s = jax.random.normal(rng, (L, 2))
+    x = jax.random.normal(rng, (L, 3))
     n = jax.random.randint(rng, (L,), 0, 100)
     n_pos = jax.random.randint(rng, (L,), 0, n)
     return numpyro.render_model(
         survey_model,
-        (s, n, n_pos),
+        (s, n, n_pos, x),
+        model_kwargs=dict(sample_shape=(16,)),
         render_distributions=True,
         render_params=True,
     )
