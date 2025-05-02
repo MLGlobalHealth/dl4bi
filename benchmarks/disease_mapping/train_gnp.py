@@ -78,21 +78,29 @@ def main(cfg: DictConfig):
 
 
 @partial(jit, static_argnames="B")
-def sample_prior(rng, s: jax.Array, n: jax.Array, B: jax.Array):
+def sample_prior(rng, s: jax.Array, n: jax.Array, x: jax.Array | None, B: int):
     trace = handlers.trace(handlers.seed(numpyro_model.survey_model, rng)).get_trace(
-        s, n, None, sample_shape=(B,)
+        s, n, None, x, sample_shape=(B,)
     )
     z = trace["z"]["value"]
     n_pos = trace["n_pos"]["value"]
     return z, n_pos
 
 
-@partial(jit, static_argnames="shape")
+@partial(jit, static_argnames="sample_shape")
 def sample_n(rng, sample_shape):
     scale = 100
     shape = 3
     # floor ( InverseGamma(scale, shape) )
     return jnp.ceil(scale / random.gamma(rng, shape, sample_shape)).astype(jnp.int32)
+
+
+@partial(jit, static_argnames="sample_shape")
+def sample_x(rng, sample_shape):
+    p = 0.1
+    urban = random.bernoulli(rng, p, sample_shape).astype(jnp.float32)
+    rural = 1 - urban
+    return jnp.stack([urban, rural], axis=-1)
 
 
 @partial(
@@ -179,14 +187,19 @@ def build_dataloader(cfg: DictConfig):
     s_min = jnp.array([axis["start"] for axis in cfg.s])
     s_max = jnp.array([axis["stop"] for axis in cfg.s])
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
+    urban_rural = cfg.data.urban_rural
 
     def dataloader(rng: jax.Array):
         while True:
             rng_s, rng_n, rng_sp, rng_b, rng = random.split(rng, 5)
             s = random.uniform(rng_s, (L, D), jnp.float32, s_min, s_max)
             n = sample_n(rng_n, (L,))
-            z, n_pos = sample_prior(rng_sp, s, n, B)
-            s, n = batchify(s), batchify(n)
+            if urban_rural:
+                x = sample_x(rng_n, (L,))
+            else:
+                x = None
+            z, n_pos = sample_prior(rng_sp, s, n, x, B)
+            s, n, x = batchify(s), batchify(n), batchify(x) if x is not None else None
             yield make_batch(
                 rng_b,
                 s,
