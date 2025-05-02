@@ -1,10 +1,15 @@
-from collections.abc import Callable
+from typing import Callable, Optional
 
 import flax.linen as nn
+import jax
+import jax.numpy as jnp
 
 from ..core.mlp import MLP
 from ..core.model_output import DiagonalMVNOutput
+from ..core.transformer import DistillBlock, InformBlock
+from ..core.utils import safe_stack
 from .steps import likelihood_train_step, likelihood_valid_step
+from .utils import first_shape
 
 
 class HLNP(nn.Module):
@@ -22,6 +27,12 @@ class HLNP(nn.Module):
         An instance of the `HLNP` model.
     """
 
+    embed_x: Callable = lambda x: x
+    embed_s: Callable = lambda x: x
+    embed_t: Callable = lambda x: x
+    embed_f: Callable = lambda x: x
+    embed_obs: nn.Module = nn.Embed(2, 4)
+    embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
     output_fn: Callable = DiagonalMVNOutput.from_activations
@@ -29,5 +40,66 @@ class HLNP(nn.Module):
     valid_step: Callable = likelihood_valid_step
 
     @nn.compact
-    def __call__(self):
-        pass
+    def __call__(
+        self,
+        x_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_x]
+        s_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_s]
+        t_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_t]
+        f_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_f]
+        mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
+        x_test: Optional[jax.Array] = None,  # [B, L_test, D_x]
+        s_test: Optional[jax.Array] = None,  # [B, L_test, D_s]
+        t_test: Optional[jax.Array] = None,  # [B, L_test, D_t]
+        training: bool = False,
+        **kwargs,
+    ):
+        r"""Run module forward.
+
+        Args:
+            rng: A psuedo-random number generator.
+            x_ctx: Optional fixed effects for context points.
+            t_ctx: Optional temporal values for context points.
+            s_ctx: Optional spatial values for context points.
+            f_ctx: Function values for context points.
+            mask_ctx: A mask for context points.
+            x_test: Optional fixed effects for test points.
+            t_test: Optional temporal values for test points.
+            s_test: Optional spatial values for test points.
+            f_test: Function values for test points.
+            training: A boolean indicating whether this call is performed during
+                training.
+
+        Returns:
+            `ModelOutput`.
+        """
+        test_shape = first_shape([x_test, s_test, t_test])
+        f_test = jnp.zeros((*test_shape[:-1], f_ctx.shape[-1]))
+        obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
+        unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
+        ctx = safe_stack(
+            self.embed_obs(obs),
+            self.embed_x(x_ctx),
+            self.embed_s(s_ctx),
+            self.embed_t(t_ctx),
+            self.embed_f(f_ctx),
+        )
+        test = safe_stack(
+            self.embed_obs(unobs),
+            self.embed_x(x_test),
+            self.embed_s(s_test),
+            self.embed_t(t_test),
+            self.embed_f(f_test),
+        )
+        norm = nn.LayerNorm()
+        qs, ks_0 = map(lambda x: norm(self.embed_all(x)), (test, ctx))
+        # TODO(danj): add positional embeddings to distill blocks
+        ks_1 = DistillBlock(128)(ks_0, mask_ctx, training)
+        ks_2 = DistillBlock(32)(ks_1, None, training)
+        ks_3 = DistillBlock(8)(ks_2, None, training)
+        qs = InformBlock()(qs, ks_3, None, training)
+        qs = InformBlock()(qs, ks_2, None, training)
+        qs = InformBlock()(qs, ks_1, None, training)
+        qs = InformBlock()(qs, ks_0, mask_ctx)  # TODO(danj): local only?
+        qs = self.norm(qs)
+        output = self.head(qs, training)
+        return self.output_fn(output)

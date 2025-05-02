@@ -323,64 +323,58 @@ class KRBlock(nn.Module):
 # TODO(danj): add latent locations??
 class DistillBlock(nn.Module):
     num_latents: int
-    num_reps: int = 2
+    num_reps: int = 1
     attn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64])
     p_dropout: float = 0.0
 
     @nn.compact
-    def __init__(
+    def __call__(
         self,
-        x: jax.Array,  # [B, L, D]
+        ks: jax.Array,  # [B, L, D]
         mask: Optional[jax.Array] = None,
         training: bool = False,
-        zx_kwargs: dict = {},
-        zz_kwargs: dict = {},
         **kwargs,
     ):
-        (B, _L, D), Z = x.shape, self.num_latents
+        (B, _L, D), Z = ks.shape, self.num_latents
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        z = self.param("latents", init.truncated_normal(), (1, Z, D))
-        z = jnp.repeat(z, B, axis=0)
+        qs = self.param("latents", init.truncated_normal(), (1, Z, D))
+        qs = jnp.repeat(qs, B, axis=0)
         # TODO(danj): share or create these params per repeat?
         cross_attn, self_attn = self.attn.copy(), self.attn.copy()
         cross_ffn, self_ffn = self.ffn.copy(), self.ffn.copy()
         cross_norm, self_norm = self.norm.copy(), self.norm.copy()
         for _ in range(self.num_reps):
-            # z->x cross attend "previous" layer x
-            z_1, *_ = cross_attn(z, x, x, mask, training, **zx_kwargs)
-            z_2 = z + drop(z_1)
-            z_3 = z_2 + drop(cross_ffn(cross_norm(z_2), training))
-            # z->s self attend to current layer z
-            z_4, *_ = self_attn(z_3, z_3, z_3, None, training, **zz_kwargs)
-            z_5 = z_3 + drop(z_4)
-            z = z_5 + drop(self_ffn(self_norm(z_3), training))
-        return z
+            qs_1, *_ = cross_attn(qs, ks, ks, mask, training)
+            qs_2 = qs + drop(qs_1)
+            qs_3 = qs_2 + drop(cross_ffn(cross_norm(qs_2), training))
+            qs_4, *_ = self_attn(qs_3, qs_3, qs_3, None, training)
+            qs_5 = qs_3 + drop(qs_4)
+            qs = qs_5 + drop(self_ffn(self_norm(qs_3), training))
+        return qs
 
 
 class InformBlock(nn.Module):
-    num_reps: int = 2
+    num_reps: int = 1
     attn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64])
     p_dropout: float = 0.0
 
     @nn.compact
-    def __init__(
+    def __call__(
         self,
-        x: jax.Array,  # [B, L, D]
-        z: jax.Array,  # [B, Z, D]
+        qs: jax.Array,  # [B, L, D]
+        ks: jax.Array,  # [B, Z, D]
         mask: Optional[jax.Array] = None,
         training: bool = False,
-        xz_kwargs: dict = {},
-        zz_kwargs: dict = {},
+        qk_kwargs: dict = {},
         **kwargs,
     ):
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         for _ in range(self.num_reps):
-            # x->z cross attend to latent layer z
-            x_1, *_ = self.attn(x, z, z, mask, training, **xz_kwargs)
-            x_2 = x + drop(x_1)
-            x = x_2 + drop(self.ffn(self.norm(x_2)))
-        return x
+            qs_1, *_ = self.attn(qs, ks, ks, mask, training, **qk_kwargs)
+            qs_2 = qs + drop(qs_1)
+            qs = qs_2 + drop(self.ffn(self.norm(qs_2)))
+        return qs
