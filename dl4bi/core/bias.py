@@ -11,8 +11,8 @@ from jax import jit, vmap
 from .sim import l2_dist
 
 
-def init_scalar_bias_params(mod: nn.Module, num_heads: int):
-    a = mod.param("a", init.constant(-1), (num_heads,))
+def init_scalar_bias_params(mod: nn.Module, name: str, num_heads: int):
+    a = mod.param(f"{name}_a", init.constant(-1), (num_heads,))
     return {"a": a}
 
 
@@ -48,9 +48,14 @@ def scanned_scalar_bias(
     return scalar_bias(d, mask, a)
 
 
-def init_rbf_network_bias_params(mod: nn.Module, num_heads: int, num_basis: int):
-    a = mod.param("a", init.constant(1), (num_heads, num_basis))
-    b = mod.param("b", init.constant(1), (num_heads, num_basis))
+def init_rbf_network_bias_params(
+    mod: nn.Module,
+    name: str,
+    num_heads: int,
+    num_basis: int,
+):
+    a = mod.param(f"{name}_a", init.constant(1), (num_heads, num_basis))
+    b = mod.param(f"{name}_b", init.constant(1), (num_heads, num_basis))
     return {"a": a, "b": b}
 
 
@@ -92,10 +97,10 @@ def scanned_rbf_network_bias(
     return rbf_network_bias(d, mask, a, b)
 
 
-def init_tisa_bias_params(mod: nn.Module, num_heads: int, num_basis: int):
-    a = mod.param("a", init.constant(1), (num_heads, num_basis))
-    b = mod.param("b", init.constant(1), (num_heads, num_basis))
-    c = mod.param("c", init.constant(0), (num_heads, num_basis))
+def init_tisa_bias_params(mod: nn.Module, name: str, num_heads: int, num_basis: int):
+    a = mod.param(f"{name}_a", init.constant(1), (num_heads, num_basis))
+    b = mod.param(f"{name}_b", init.constant(1), (num_heads, num_basis))
+    c = mod.param(f"{name}_c", init.constant(0), (num_heads, num_basis))
     return {"a": a, "b": b, "c": c}
 
 
@@ -161,9 +166,9 @@ class Bias(nn.Module):
         d: jax.Array,  # [B, Q, K] or [E]
         mask: Optional[jax.Array] = None,  # [B, Q, K] or [E]
     ):
-        params = self.init_params(self, **self.init_kwargs)
+        params = self.init_params(self, "bias", **self.init_kwargs)
         if mask is None:
-            mask = jnp.array([True])
+            mask = jnp.ones((1,) * d.ndim, dtype=bool)  # broadcast True
         return self.bias_func(d, mask, **params)
 
     @classmethod

@@ -1,0 +1,16 @@
+_target_: sps.gp.GP
+kernel:
+  _target_: sps.kernels.matern_3_2
+  _partial_: true
+var:
+  _target_: sps.priors.Prior
+  dist: normal
+  kwargs:
+    mu: 1.0
+    sigma: 0.1
+ls:
+  _target_: sps.priors.Prior
+  dist: normal
+  kwargs:
+    mu: 1.0
+    sigma: 0.15

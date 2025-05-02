@@ -1,7 +1,7 @@
 _target_: dl4bi.meta_learning.TNPD
 embed_s_f:
   _target_: dl4bi.mlp.MLP
-  dims: [256, 127, 64]
+  dims: [256, 128, 64]
 enc:
   _target_: dl4bi.transformer.TransformerEncoder
   num_blks: 6

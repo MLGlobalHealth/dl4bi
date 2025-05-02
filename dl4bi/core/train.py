@@ -7,7 +7,6 @@ from typing import Callable, Optional, Union
 import flax
 import flax.linen as nn
 import jax
-import jax.numpy as jnp
 import numpy as np
 import optax
 import wandb
@@ -49,7 +48,7 @@ def train(
     callbacks: list[Callback] = [],
     callback_dataloader: Optional[Callable] = None,
     log_loss_interval: int = 100,
-    return_state: str = "best",  # best, last, both
+    return_state: str = "last",  # best, last, both
     state: Optional[TrainState] = None,
 ):
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
@@ -71,7 +70,7 @@ def train(
     best_state = state
     early_stop_patience = early_stop_patience or train_num_steps
     train_loss, metric, best_metric = float("inf"), float("inf"), float("inf")
-    pbar = tqdm(range(1, train_num_steps + 1), unit=" batches", dynamic_ncols=True)
+    pbar = tqdm(range(1, train_num_steps + 1), unit="batch", dynamic_ncols=True)
     postfix = {"Train Loss": f"{train_loss:0.4f}"}
     for i in pbar:
         batch = next(batches)
@@ -101,7 +100,8 @@ def train(
                 best_metric = metric
                 best_state = state
             if patience >= early_stop_patience:
-                return best_state, state
+                both = (best_state, state)
+                return {"best": best_state, "last": state, "both": both}[return_state]
         for cbk in callbacks:
             if i % cbk.interval == 0:
                 extra = None

@@ -1,0 +1,26 @@
+name: 16x16
+s:
+  - start: -2
+    stop: 2
+    num: 16
+  - start: -2
+    stop: 2
+    num: 16
+ball_radius: 2
+num_frames: 128
+frame_size: 16
+velocity_prior:
+  _target_: sps.priors.Prior
+  dist: uniform
+  kwargs:
+    minval: 1.0
+    maxval: 2.0
+num_t: 5
+random_t: False
+num_ctx_per_t:
+  min: 256
+  max: 256
+independent_t_masks: False
+num_test: 256
+forecast: True
+batch_size: 4

@@ -1,5 +1,3 @@
-from collections.abc import Callable
-from dataclasses import dataclass
 from functools import partial
 from typing import Optional
 
@@ -7,39 +5,24 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import optax
-from flax.core import FrozenDict
-from flax.training import train_state
 from jax import jit, value_and_grad
-from jax.scipy.stats import norm
 
-
-class TrainState(train_state.TrainState):
-    kwargs: FrozenDict = FrozenDict({})
-
-
-@dataclass
-class Callback:
-    fn: Callable
-    interval: int  # apply every interval of train_num_steps
+from dl4bi.core.model_output import VAEOutput
+from dl4bi.core.train import TrainState
 
 
 def generate_surrogate_decoder(state: TrainState, model: nn.Module):
     """Wraps a VAE model to issue decoder only calls for sampling
 
     Args:
-        state (TrainState): surrogate model
+        state (TrainState): surrogate model's state
+        model (nn.Module): surrogate model object
 
     Returns: the decoding function
     """
 
     @jax.jit
-    def deep_rv_decoder(z, conditionals, **kwargs):
-        return state.apply_fn(
-            {"params": state.params, **state.kwargs}, z, conditionals, **kwargs
-        )
-
-    @jax.jit
-    def priorCVAE_decoder(z, conditionals, **kwargs):
+    def decoder(z, conditionals, **kwargs):
         return model.apply(
             {"params": state.params, **state.kwargs},
             z,
@@ -48,18 +31,42 @@ def generate_surrogate_decoder(state: TrainState, model: nn.Module):
             method="decode",
         )
 
-    if model.__class__.__name__ == "DeepRV":
-        return deep_rv_decoder
-    return priorCVAE_decoder
+    return decoder
+
+
+@partial(jax.jit, static_argnames=["var_idx"])
+def deep_rv_train_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: dict,
+    var_idx: Optional[int] = None,
+):
+    """Standard VAE training step that uses an ELBO loss.
+
+    Args:
+        rng: A PRNG key.
+        state: The current training state.
+        batch: Batch of data.
+        var_idx: the variance conditional index (if exists)
+
+    Returns:
+        `TrainState` with updated parameters, and the loss
+    """
+
+    def deep_rv_loss(params):
+        f, conditionals = batch["f"], batch["conditionals"]
+        var = conditionals[var_idx] if var_idx is not None else 1.0
+        output: VAEOutput = state.apply_fn(
+            {"params": params}, **batch, rngs={"extra": rng}
+        )
+        return (1 / var) * output.mse(f)
+
+    loss, grads = value_and_grad(deep_rv_loss)(state.params)
+    return state.apply_gradients(grads=grads), loss
 
 
 @jit
-def elbo_train_step(
-    rng: jax.Array,
-    state: TrainState,
-    batch: tuple,
-    **kwargs,
-):
+def elbo_train_step(rng: jax.Array, state: TrainState, batch: dict):
     """Standard VAE training step that uses an ELBO loss.
 
     Args:
@@ -68,55 +75,19 @@ def elbo_train_step(
         batch: Batch of data.
 
     Returns:
-        `TrainState` with updated parameters.
+        `TrainState` with updated parameters, and the loss
     """
 
     def elbo_loss(params):
-        f, _, conditionals = batch
-        f_hat, z_mu, z_std = state.apply_fn(
-            {"params": params}, f, conditionals, **kwargs, rngs={"extra": rng}
+        f = batch["f"]
+        output: VAEOutput = state.apply_fn(
+            {"params": params}, **batch, rngs={"extra": rng}
         )
-        kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
-        logp = norm.logpdf(f, f_hat, 1.0).mean()
-        return -logp + kl_div.mean()
+        kl_div = output.kl_normal_dist()
+        nll = output.nll(f)
+        return nll + kl_div
 
     loss, grads = value_and_grad(elbo_loss)(state.params)
-    return state.apply_gradients(grads=grads), loss
-
-
-@partial(jax.jit, static_argnames=["var_idx"])
-def deep_RV_train_step(
-    rng: jax.Array,
-    state: TrainState,
-    batch: tuple,
-    var_idx: Optional[int] = None,
-    **kwargs,
-):
-    """A VAE decoder-only training step that uses an MSE loss.
-    The loss is further normalized by the variance (if exists)
-    to prevent the model to focus on examples with larger variance.
-
-    Args:
-        rng: A PRNG key.
-        state: The current training state.
-        batch: Batch of data.
-
-    Returns:
-        `TrainState` with updated parameters.
-    """
-
-    def deep_RV_loss(params):
-        f, z, conditionals = batch
-        f_hat = state.apply_fn(
-            {"params": params}, z, conditionals, **kwargs, rngs={"extra": rng}
-        )
-        mse_loss = optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
-        if var_idx is not None:
-            var = conditionals[var_idx].squeeze()
-            mse_loss = (1 / var) * mse_loss
-        return mse_loss
-
-    loss, grads = value_and_grad(deep_RV_loss)(state.params)
     return state.apply_gradients(grads=grads), loss
 
 
@@ -124,39 +95,42 @@ def deep_RV_train_step(
 def prior_cvae_train_step(
     rng: jax.Array,
     state: TrainState,
-    batch: tuple,
-    **kwargs,
+    batch: dict,
+    mse_weight: float = 1 / 1.8,
 ):
     """The original PriorCVAE paper's train step.
+    mse_weight * mse_loss + kl_divergence.
 
     Args:
         rng: A PRNG key.
         state: The current training state.
         batch: Batch of data.
+        mse_weight: weight of mse loss. Defaults to the PriorCVAE
+            paper's used value.
 
     Returns:
-        `TrainState` with updated parameters.
+        `TrainState` with updated parameters, and the loss
     """
 
     def prior_cvae_loss(params):
-        f, _, conditionals = batch
-        f_hat, z_mu, z_std = state.apply_fn(
-            {"params": params}, f, conditionals, **kwargs, rngs={"extra": rng}
+        f = batch["f"]
+        output: VAEOutput = state.apply_fn(
+            {"params": params}, **batch, rngs={"extra": rng}
         )
-        kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
-        mse_loss = optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
-        return (1 / (2 * 0.9)) * mse_loss + kl_div.mean()
+        kl_div = output.kl_normal_dist()
+        mse = output.mse(f)
+        return mse_weight * mse + kl_div
 
     loss, grads = value_and_grad(prior_cvae_loss)(state.params)
     return state.apply_gradients(grads=grads), loss
 
 
 @jit
-def pi_vae_train_step(rng, state, batch, **kwargs):
+def pi_vae_train_step(rng: jax.Array, state: TrainState, batch: dict):
     def loss_fn(params):
-        s, f = batch
+        f = batch["f"]
         f_hat_beta, f_hat_beta_hat, z_mu, z_std = state.apply_fn(
-            {"params": params}, s, f, rngs={"extra": rng}
+            {"params": params}, **batch, rngs={"extra": rng}
         )
         loss_1 = optax.squared_error(f_hat_beta, f).mean()
         loss_2 = optax.squared_error(f_hat_beta_hat, f).mean()

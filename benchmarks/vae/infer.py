@@ -11,7 +11,7 @@ import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import optax
-from jax import random
+from jax import Array, random
 from numpyro.handlers import seed
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig, OmegaConf
@@ -21,8 +21,8 @@ from utils.obj_utils import generate_model_name, instantiate
 from utils.plot_utils import plot_inference_run
 
 import wandb
-from dl4bi.meta_learning.train_utils import cosine_annealing_lr
-from dl4bi.vae.train_utils import TrainState, generate_surrogate_decoder
+from dl4bi.core.train import TrainState, cosine_annealing_lr
+from dl4bi.vae.train_utils import generate_surrogate_decoder
 
 
 @hydra.main("configs", config_name="default", version_base=None)
@@ -31,7 +31,7 @@ def main(cfg: DictConfig):
     model_name = generate_model_name(cfg)
     spatial_prior = cfg.inference_model.spatial_prior
     if not cfg.inference_model.surrogate_model:
-        model_name = f"Baseline_GP_{spatial_prior.func}"
+        model_name = "Baseline_GP"
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
@@ -46,25 +46,18 @@ def main(cfg: DictConfig):
     map_data, s = gen_locations(cfg.data)
     model_dir = Path(f"results/{cfg.exp_name}/{spatial_prior.func}/{cfg.seed}")
     priors, simulation_priors = init_priors(cfg)
-    surrogate_kwargs = {}
-    if "FixedLocationTransfomer" in model_name:
-        surrogate_kwargs = {"s": s}
     # NOTE: the inference model expects to have this exact API
-    inference_model, cond_names = gen_inference_model(
-        cfg, s, map_data, priors, surrogate_kwargs
-    )
+    infer_model, cond_names = gen_inference_model(cfg, s, map_data, priors, {"s": s})
     # NOTE: Generates a model for creating the simulated data
     sim_model, _ = gen_inference_model(cfg, s, map_data, simulation_priors)
-    f_obs, spatial_eff, conditionals = gen_obs_data(
-        rng, sim_model, map_data, cond_names
-    )
+    f_obs, spatial_eff, conds = gen_obs_data(rng, sim_model, map_data, cond_names)
     obs_mask, obs_idxs = generate_obs_mask(rng_idxs, f_obs, cfg.inference_model)
     surrogate_decoder = None
     if cfg.inference_model.surrogate_model:
         state, model = load_ckpt((model_dir / model_name).with_suffix(".ckpt"))
         surrogate_decoder = generate_surrogate_decoder(state, model)
     samples, mcmc, post = _hmc(
-        rng_hmc, cfg, inference_model, f_obs, obs_mask, surrogate_decoder
+        rng_hmc, cfg.mcmc, infer_model, f_obs, obs_mask, surrogate_decoder
     )
     post.update(
         {
@@ -72,37 +65,43 @@ def main(cfg: DictConfig):
             "f": f_obs,
             "obs_idxs": obs_idxs,
             "spatial_eff": spatial_eff,
-            **conditionals,
+            **conds,
         }
     )
-    results_dir = get_results_dir(cfg, model_dir, obs_idxs, s, model_name)
+    results_dir = get_results_dir(
+        cfg.inference_model.model.func,
+        model_dir,
+        obs_idxs,
+        s,
+        model_name,
+        cfg.inference_model.surrogate_model,
+    )
     results_dir.mkdir(parents=True, exist_ok=True)
-    log_inference_run((samples, mcmc, post), conditionals, results_dir)
+    log_inference_run((samples, mcmc, post), conds, results_dir)
     plot_inference_run(
         rng_plot,
-        cfg.inference_model,
+        cfg,
         model_name,
         (samples, mcmc, post),
         f_obs,
-        conditionals,
+        conds,
         priors,
         map_data,
-        cfg.log_scale_plots,
     )
 
 
 def _hmc(
-    rng: jax.Array,
-    cfg: DictConfig,
+    rng: Array,
+    mcmc_cfg: DictConfig,
     model: Callable,
-    f_obs: jax.Array,
-    obs_mask: Union[bool, jax.Array],
+    f_obs: Array,
+    obs_mask: Union[bool, Array],
     surrogate_decoder: Optional[Callable],
 ):
     """runs HMC on given inference model and observed f"""
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
     k1, k2 = jax.random.split(rng)
-    mcmc = MCMC(nuts, **cfg.mcmc)
+    mcmc = MCMC(nuts, **mcmc_cfg)
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=f_obs)
     mcmc.print_summary()
     samples = mcmc.get_samples()
@@ -111,7 +110,7 @@ def _hmc(
 
 
 def gen_obs_data(
-    rng: jax.Array,
+    rng: Array,
     sim_model: Callable,
     map_data: Optional[gpd.GeoDataFrame],
     cond_names: list[str],
@@ -121,13 +120,13 @@ def gen_obs_data(
     Otherwise wraps GP or graph based models with an simulation model.
 
     Args:
-        rng (jax.Array)
+        rng (Array)
         sim_model (Callable): simulation model to generate data
         map_data (gpd.GeoDataFrame): original geopandas
         cond_names (list[str]): names (and order) of conditionals
 
     Returns:
-        the inference dataloader
+        the observed data, spatial effects, conditional name to values dict
     """
     spatial_eff, conditionals = None, [None] * len(cond_names)
     if map_data is not None and "data" in map_data.columns:
@@ -140,8 +139,8 @@ def gen_obs_data(
 
 
 def log_inference_run(
-    hmc_res: tuple[dict, MCMC, dict],
-    surrogate_conds: dict,
+    hmc_res: tuple[dict, Optional[MCMC], dict],
+    conds: dict,
     results_dir: Path,
 ):
     samples, mcmc, post = hmc_res
@@ -149,26 +148,26 @@ def log_inference_run(
         pickle.dump(samples, out_file)
     with open(results_dir / "hmc_pp.pkl", "wb") as out_file:
         pickle.dump(post, out_file)
-    with open(results_dir / "hmc_summary.txt", "w") as out_file:
-        out_file.write(capture_print_summary(mcmc))
-    with open(results_dir / "mcmc.pkl", "wb") as out_file:
-        pickle.dump(az.from_numpyro(mcmc), out_file)
-    metrics = log_inference_metrics(hmc_res, surrogate_conds)
-    print(metrics)
+    if mcmc is not None:
+        with open(results_dir / "hmc_summary.txt", "w") as out_file:
+            out_file.write(capture_print_summary(mcmc))
+        with open(results_dir / "mcmc.pkl", "wb") as out_file:
+            pickle.dump(az.from_numpyro(mcmc), out_file)
+    metrics = log_inference_metrics(hmc_res, conds)
     with open(results_dir / "hmc_metrics.pkl", "wb") as out_file:
         pickle.dump(metrics, out_file)
 
 
-def log_inference_metrics(hmc_res: tuple[dict, MCMC, dict], surrogate_conds: dict):
+def log_inference_metrics(hmc_res: tuple[dict, Optional[MCMC], dict], conds: dict):
     samples, _, post = hmc_res
     metrics = {
         f"Real {name}": (val.squeeze().item() if val is not None else val)
-        for name, val in surrogate_conds.items()
+        for name, val in conds.items()
     }
     metrics.update(
         {
             f"Inferred {name}": samples[name].mean(axis=0).squeeze().item()
-            for name in surrogate_conds
+            for name in conds
             if name in samples
         }
     )
@@ -179,16 +178,13 @@ def log_inference_metrics(hmc_res: tuple[dict, MCMC, dict], surrogate_conds: dic
 
     def single_mse(x, y, name):
         metrics[f"{name}_MSE"] = jnp.mean((x - y) ** 2).item()
-        if min(x.min(), y.mean()) >= 0:
-            metrics[f"log_{name}_MSE"] = jnp.mean(
-                (jnp.log(x + 1) - jnp.log(y + 1)) ** 2
-            ).item()
 
     single_mse(f_hat, f_obs, "total")
     if len(obs_idx) < f_obs.shape[0]:
         single_mse(f_hat[obs_idx], f_obs[obs_idx], "observed")
         single_mse(f_hat[unobs_idx], f_obs[unobs_idx], "unobserved")
     wandb.log(metrics)
+    print(metrics)
     return metrics
 
 
@@ -205,19 +201,19 @@ def capture_print_summary(mcmc):
     return output
 
 
-def generate_obs_mask(rng: jax.Array, f_obs: jax.Array, infer_cfg: DictConfig):
+def generate_obs_mask(rng: Array, f_obs: Array, infer_cfg: DictConfig):
     """Creates a mask which indicates to the inference model which locations to
     observe. If 'none's are present in the 'data' column they become unobserved,
     if 'num_obs_locations' argument is used then a subset of all the valid locations
     are randmoly chosen to be observed.
 
     Args:
-        rng (jax.Array)
-        f_obs (jax.Array): The sample to infer from
+        rng (Array)
+        f_obs (Array): The sample to infer from
         infer_cfg (DictConfig): configuration for inference
 
     Returns:
-        (Union[jax.Array, bool], jax.Array): boolean observe mask and
+        (Union[Array, bool], Array): boolean observe mask and
             indices of the observed locations
     """
     obs_idxs, obs_mask = jnp.arange(f_obs.shape[0]), True
@@ -234,14 +230,9 @@ def generate_obs_mask(rng: jax.Array, f_obs: jax.Array, infer_cfg: DictConfig):
 
 def init_priors(cfg: DictConfig):
     """inits the priors for inference and validates them"""
-    priors = {}
-    for pr, pr_dist in cfg.inference_model.priors.items():
-        if pr_dist.numpyro_dist == "Delta":
-            raise ValueError(
-                "Cannot use the Delta distribution within the inference model, "
-                f"please change the distribution of {pr}"
-            )
-        priors[pr] = instantiate(pr_dist)
+    priors = {
+        pr: instantiate(pr_dist) for pr, pr_dist in cfg.inference_model.priors.items()
+    }
     simulation_priors = priors.copy()
     # NOTE: Used to generate simulation data with specific values for experiments, could be partial
     # and is completed by priors' information
@@ -253,7 +244,7 @@ def init_priors(cfg: DictConfig):
 
 def gen_inference_model(
     cfg: DictConfig,
-    s: jax.Array,
+    s: Array,
     map_data: gpd.GeoDataFrame,
     priors: Dict[str, dist.Distribution],
     surrogate_kwargs: dict = {},
@@ -285,10 +276,16 @@ def load_ckpt(path: Union[str, Path]):
     return state, model
 
 
-def get_results_dir(cfg, model_dir, obs_idxs, s, model_name):
+def get_results_dir(
+    infer_likelihood: str,
+    model_dir: Path,
+    obs_idxs: Array,
+    s: Array,
+    model_name: str,
+    approx_infer: bool,
+):
     results_dir = model_dir / (
-        f"{model_name if cfg.inference_model.surrogate_model else 'Baseline_GP'}/"
-        f"{cfg.inference_model.model.func}/"
+        f"{model_name if approx_infer else 'Baseline_GP'}/{infer_likelihood}/"
     )
     if len(obs_idxs) < s.shape[0]:
         results_dir = results_dir / f"partial_obs_{len(obs_idxs)}"

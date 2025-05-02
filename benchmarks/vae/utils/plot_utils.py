@@ -17,7 +17,9 @@ from numpyro.infer import MCMC
 from omegaconf import DictConfig
 
 import wandb
-from dl4bi.vae.train_utils import TrainState, generate_surrogate_decoder
+from dl4bi.core.model_output import VAEOutput
+from dl4bi.core.train import TrainState
+from dl4bi.vae.train_utils import generate_surrogate_decoder
 from utils.map_utils import get_norm_vars
 
 
@@ -314,7 +316,7 @@ def plot_histograms(
     plt.close(fig)
 
 
-def plot_infer_grid_sum(rng, post, hdi_prob=0.95, num_decodings=10):
+def plot_infer_1d_grid_summary(rng, post, hdi_prob=0.95, num_decodings=10):
     s_flat = post["s"].squeeze()
     f, f_hat = post["f"], post["obs"]
     f_hat_mean, f_hat_std = f_hat.mean(axis=0), f_hat.std(axis=0)
@@ -352,7 +354,47 @@ def plot_infer_grid_sum(rng, post, hdi_prob=0.95, num_decodings=10):
     timestamp = datetime.now().isoformat()
     path = f"/tmp/Infer summary {timestamp}.png"
     fig.savefig(path, dpi=125)
-    wandb.log({"Infer summaryT": wandb.Image(path)})
+    wandb.log({"Infer summary": wandb.Image(path)})
+    plt.clf()
+    plt.close(fig)
+    return path
+
+
+def plot_infer_2d_grid_summary(post, x_dim, y_dim, log=True):
+    obs_idxs, f, f_hat = post["obs_idxs"], post["f"], post["obs"]
+    f_2d = f.squeeze().reshape(x_dim, y_dim)
+    f_hat_mean_2d = f_hat.mean(axis=0).reshape(x_dim, y_dim)
+    f_hat_std_2d = f_hat.std(axis=0).reshape(x_dim, y_dim)
+    if log:
+        f_2d, f_hat_mean_2d = jnp.log(f_2d + 1), jnp.log(f_hat_mean_2d + 1)
+    vmin = min(f_2d.min(), f_hat_mean_2d.min())
+    vmax = max(f_2d.max(), f_hat_mean_2d.max())
+    fig, ax = plt.subplots(1, 4, figsize=(20, 7))
+    log_str = " (Log scale)" if log else ""
+    im0 = ax[0].imshow(f_2d, vmin=vmin, vmax=vmax, cmap="viridis", origin="lower")
+    ax[0].set_title(f"y obs{log_str}")
+    fig.colorbar(im0, ax=ax[0])
+    im1 = ax[1].imshow(
+        f_hat_mean_2d, vmin=vmin, vmax=vmax, cmap="viridis", origin="lower"
+    )
+    ax[1].set_title(f"Mean MCMC Samples{log_str}")
+    fig.colorbar(im1, ax=ax[1])
+    im2 = ax[2].imshow(f_hat_std_2d, cmap="plasma", origin="lower")
+    ax[2].set_title("MCMC STD")
+    fig.colorbar(im2, ax=ax[2])
+    mask = jnp.zeros((x_dim, y_dim))
+    mask = mask.at[jnp.unravel_index(jnp.array(obs_idxs), (x_dim, y_dim))].set(1)
+    obs_title = f"Observed Locations ({len(obs_idxs)} locations)"
+    im3 = ax[3].imshow(mask, vmin=0.0, vmax=1.0, cmap="coolwarm", origin="lower")
+    ax[3].set_title(obs_title)
+    fig.colorbar(im3, ax=ax[3])
+    for axis in ax:
+        axis.set_axis_off()
+    plt.tight_layout()
+    timestamp = datetime.now().isoformat()
+    path = f"/tmp/Infer summary 2D {timestamp}.png"
+    fig.savefig(path, dpi=125)
+    wandb.log({"Infer summary 2D": wandb.Image(path)})
     plt.clf()
     plt.close(fig)
     return path
@@ -360,32 +402,37 @@ def plot_infer_grid_sum(rng, post, hdi_prob=0.95, num_decodings=10):
 
 def plot_inference_run(
     rng: jax.Array,
-    inference_model: DictConfig,
+    cfg: DictConfig,
     model_name: str,
-    hmc_res: tuple[dict, MCMC, dict],
+    hmc_res: tuple[dict, Optional[MCMC], dict],
     f_obs: jax.Array,
-    surrogate_conds: dict,
+    conds: dict,
     priors: dict,
     map_data: Optional[gpd.GeoDataFrame],
-    log_scale_plots: bool,
 ):
+    inference_model = cfg.inference_model
+    log_scale_plots = cfg.log_scale_plots
     samples, mcmc, post = hmc_res
     if map_data is not None:
         plot_infer_map_sum(post, map_data, log=log_scale_plots)
         plot_map_predictive(rng, f_obs, post["obs"], map_data, log=log_scale_plots)
     elif post["s"].shape[-1] == 1:
-        plot_infer_grid_sum(rng, post)
+        plot_infer_1d_grid_summary(rng, post)
+    else:
+        x_dim, y_dim = cfg.data.s[0].num, cfg.data.s[1].num
+        plot_infer_2d_grid_summary(post, x_dim, y_dim, log=log_scale_plots)
     # NOTE: in case the chains\samples are very tightly batch (not converged) the plotting will fail
     try:
-        plot_infer_trace(samples, mcmc, surrogate_conds)
-        plot_histograms([samples], surrogate_conds, priors, [model_name])
+        if mcmc is not None:
+            plot_infer_trace(samples, mcmc, conds)
+        plot_histograms([samples], conds, priors, [model_name])
     except ValueError:
         pass
     plot_vae_scatter_plot(
         f_obs[None, ...],
         post["obs"].mean(axis=0)[None, ..., None],
-        [it for _, it in surrogate_conds.items()],
-        list(surrogate_conds.keys()),
+        [it for _, it in conds.items()],
+        list(conds.keys()),
         num_samples=1,
     )
     if inference_model.model.func not in ["poisson", "binomial"]:
@@ -466,13 +513,11 @@ def plot_vae_reconstruction(
     model: str,
     loader,
     conds_names: list[str],
-    is_decoder_only: bool,
     save_dir: Optional[Path] = None,
     num_plots: int = 5,
     samples_per_plot: int = 3,
     plot_locations=False,
     step="",
-    **kwargs,
 ):
     """Plots VAE predictions on map"""
     x_norm_vars, y_norm_vars = get_norm_vars(map_data)
@@ -481,16 +526,14 @@ def plot_vae_reconstruction(
     paths = []
     for i in range(num_plots):
         rng_drop, rng_extra, rng = jax.random.split(rng, 3)
-        f, z, conditionals = next(loader)
-        f_hat = state.apply_fn(
+        batch = next(loader)
+        f, conditionals = batch["f"], batch["conditionals"]
+        output: VAEOutput = state.apply_fn(
             {"params": state.params, **state.kwargs},
-            z if is_decoder_only else f,
-            conditionals,
-            **kwargs,
+            **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
-        # NOTE: full VAEs architectures return additional outputs
-        f_hat = f_hat if is_decoder_only else f_hat[0]
+        f_hat = output.f_hat
         fig, ax = plt.subplots(
             1, samples_per_plot * 2 + int(plot_locations), figsize=(16, 5)
         )
@@ -540,16 +583,17 @@ def plot_vae_decoder_samples(
     num_batches: int = 5,
     num_plots: int = 5,
     step="",
-    **kwargs,
 ):
     paths = []
     for i in range(num_batches):
         rng_z, rng = jax.random.split(rng)
         fig, ax = plt.subplots(1, num_plots + 1, figsize=(5 * num_plots, 5))
-        f_batch, _, conditionals = next(loader)
+        batch = next(loader)
+        f_batch, conditionals = batch["f"], batch["conditionals"]
         f = f_batch[0]
         z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim))
-        f_hat = surrogate_decoder(z, conditionals, **kwargs)
+        batch["z"] = z
+        f_hat = surrogate_decoder(**batch)
         vmin = min(f.min(), f_hat.min())
         vmax = max(f.max(), f_hat.max())
         plot_on_map(ax[0], gdf, f, vmin, vmax, "GT sample", "viridis")
@@ -626,16 +670,17 @@ def plot_dist_analysis_plots(
     map_data: Optional[gpd.GeoDataFrame],
     num_batches: int = 5,
     step="",
-    **kwargs,
 ):
     paths = []
     for i in range(num_batches):
         rng_z, rng = jax.random.split(rng)
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        f_batch, _, conditionals = next(loader)
+        batch = next(loader)
+        f_batch, conditionals = batch["f"], batch["conditionals"]
         f = f_batch[0]
         z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim))
-        f_hat = surrogate_decoder(z, conditionals, **kwargs)
+        batch["z"] = z
+        f_hat = surrogate_decoder(**batch)
         plot_matrix_with_colorbar(
             fig, ax[0], np.cov(f_batch.squeeze(), rowvar=False), "Empirical GT Cov"
         )
@@ -700,28 +745,20 @@ def log_vae_map_plots(
     s: jax.Array,
     conds_names: list[str],
     z_dim: int,
+    loader: Generator,
     large_batch_loader: Generator,
-    is_decoder_only: bool,
     data: DictConfig,
+    model: nn.Module,
 ):
-    def log_plots(
-        step: int,
-        rng_step: int,
-        state: TrainState,
-        model: nn.Module,
-        loader: Generator,
-        **kwargs,
-    ):
+    def log_plots(step: int, rng_step: int, state: TrainState, batch: dict, extra):
         rng_drop, rng_extra, rng_dec, rng_dist, rng_rcn = jax.random.split(rng_step, 5)
-        f, z, conditionals = next(loader)
-        f_hat = state.apply_fn(
+        f, conditionals = batch["f"], batch["conditionals"]
+        output: VAEOutput = state.apply_fn(
             {"params": state.params, **state.kwargs},
-            z if is_decoder_only else f,
-            conditionals,
-            **kwargs,
+            **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
-        f_hat = f_hat if is_decoder_only else f_hat[0]
+        f_hat = output.f_hat
         surrogate_decoder = generate_surrogate_decoder(state, model)
         plot_vae_reconstruction(
             rng_rcn,
@@ -731,10 +768,8 @@ def log_vae_map_plots(
             model.__class__.__name__,
             loader,
             conds_names,
-            is_decoder_only,
             plot_locations=True,
             step=str(step),
-            **kwargs,
         )
         plot_vae_decoder_samples(
             rng_dec,
@@ -744,7 +779,6 @@ def log_vae_map_plots(
             z_dim,
             surrogate_decoder,
             step=str(step),
-            **kwargs,
         )
         plot_vae_scatter_plot(
             f,
@@ -761,7 +795,6 @@ def log_vae_map_plots(
             surrogate_decoder,
             map_data,
             step=str(step),
-            **kwargs,
         )
 
     return log_plots
@@ -817,28 +850,24 @@ def plot_vae_rec_1d(
     model: str,
     loader,
     conds_names: list[str],
-    is_decoder_only: bool,
     save_dir: Optional[Path] = None,
     num_plots: int = 5,
     samples_per_plot: int = 3,
     step="",
-    **kwargs,
 ):
     """Plots VAE predictions on map"""
     paths = []
     s_flat = s.squeeze()
     for i in range(num_plots):
         rng_drop, rng_extra, rng = jax.random.split(rng, 3)
-        f, z, conditionals = next(loader)
-        f_hat = state.apply_fn(
+        batch = next(loader)
+        f, conditionals = batch["f"], batch["conditionals"]
+        output: VAEOutput = state.apply_fn(
             {"params": state.params, **state.kwargs},
-            z if is_decoder_only else f,
-            conditionals,
-            **kwargs,
+            **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
-        # NOTE: full VAEs architectures return additional outputs
-        f_hat = f_hat if is_decoder_only else f_hat[0]
+        f_hat = output.f_hat
         fig, ax = plt.subplots(1, samples_per_plot, figsize=(16, 5))
         for j in range(samples_per_plot):
             ax[j].plot(s_flat, f[j].squeeze(), color="black", label=r"$f$")
@@ -869,16 +898,17 @@ def plot_vae_decoder_1d(
     num_batches: int = 5,
     num_decodings: int = 10,
     step="",
-    **kwargs,
 ):
     s_flat = s.squeeze()
     fig, ax = plt.subplots(1, num_batches, figsize=(5 * num_batches, 5))
     for i in range(num_batches):
         rng_z, rng = jax.random.split(rng)
-        f_batch, _, conditionals = next(loader)
+        batch = next(loader)
+        f_batch, conditionals = batch["f"], batch["conditionals"]
         f = f_batch[0]
         z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim))
-        f_hat = surrogate_decoder(z, conditionals, **kwargs)
+        batch["z"] = z
+        f_hat = surrogate_decoder(**batch)
         ax[i].plot(s_flat, f.squeeze(), color="black", label=r"$f$")
         for j in range(num_decodings):
             ax[i].plot(s_flat, f_hat[j].squeeze(), label=f"{r'$\hat{f}$'} - {j}")
@@ -898,28 +928,20 @@ def log_vae_grid_plots(
     s: jax.Array,
     conds_names: list[str],
     z_dim: int,
+    loader: Generator,
     large_batch_loader: Generator,
-    is_decoder_only: bool,
     data: DictConfig,
+    model: nn.Module,
 ):
-    def log_plots(
-        step: int,
-        rng_step: int,
-        state: TrainState,
-        model: nn.Module,
-        loader: Generator,
-        **kwargs,
-    ):
+    def log_plots(step: int, rng_step: int, state: TrainState, batch: dict, extra):
         rng_drop, rng_extra, rng_dec, rng_dist, rng_rcn = jax.random.split(rng_step, 5)
-        f, z, conditionals = next(loader)
-        f_hat = state.apply_fn(
+        f, conditionals = batch["f"], batch["conditionals"]
+        output: VAEOutput = state.apply_fn(
             {"params": state.params, **state.kwargs},
-            z if is_decoder_only else f,
-            conditionals,
-            **kwargs,
+            **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
-        f_hat = f_hat if is_decoder_only else f_hat[0]
+        f_hat = output.f_hat
         surrogate_decoder = generate_surrogate_decoder(state, model)
         if s.shape[-1] == 1:
             plot_vae_rec_1d(
@@ -929,9 +951,7 @@ def log_vae_grid_plots(
                 model.__class__.__name__,
                 loader,
                 conds_names,
-                is_decoder_only,
                 step=str(step),
-                **kwargs,
             )
             plot_vae_decoder_1d(
                 rng_dec,
@@ -950,9 +970,7 @@ def log_vae_grid_plots(
                 model.__class__.__name__,
                 loader,
                 conds_names,
-                is_decoder_only,
                 step=str(step),
-                **kwargs,
             )
             plot_vae_decoder_2d(
                 rng_dec,
@@ -978,7 +996,6 @@ def log_vae_grid_plots(
             surrogate_decoder,
             map_data=None,
             step=str(step),
-            **kwargs,
         )
 
     return log_plots
@@ -991,28 +1008,24 @@ def plot_vae_rec_2d(
     model: str,
     loader,
     conds_names: list[str],
-    is_decoder_only: bool,
     save_dir: Optional[Path] = None,
     num_plots: int = 5,
     samples_per_plot: int = 3,
     step="",
-    **kwargs,
 ):
     """Plots VAE predictions on map"""
     paths = []
     for i in range(num_plots):
         rng_drop, rng_extra, rng = jax.random.split(rng, 3)
-        f, z, conditionals = next(loader)
-        f_hat = state.apply_fn(
+        batch = next(loader)
+        f, conditionals = batch["f"], batch["conditionals"]
+        output: VAEOutput = state.apply_fn(
             {"params": state.params, **state.kwargs},
-            z if is_decoder_only else f,
-            conditionals,
-            **kwargs,
+            **batch,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
         f = f.reshape(-1, grid_shape[0], grid_shape[1])
-        f_hat = f_hat if is_decoder_only else f_hat[0]
-        f_hat = f_hat.reshape(-1, grid_shape[0], grid_shape[1])
+        f_hat = output.f_hat.reshape(-1, grid_shape[0], grid_shape[1])
         fig, ax = plt.subplots(1, samples_per_plot * 2, figsize=(20, 5))
         vmin = min(f.min(), f_hat.min())
         vmax = max(f.max(), f_hat.max())
@@ -1050,18 +1063,17 @@ def plot_vae_decoder_2d(
     num_batches: int = 5,
     num_decodings: int = 10,
     step="",
-    **kwargs,
 ):
     paths = []
     for i in range(num_batches):
         rng_z, rng = jax.random.split(rng)
         fig, ax = plt.subplots(1, num_decodings + 1, figsize=(5 * num_decodings, 5))
-        f_batch, _, conditionals = next(loader)
+        batch = next(loader)
+        f_batch, conditionals = batch["f"], batch["conditionals"]
         f = f_batch[0].reshape(grid_shape[0], grid_shape[1])
         z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim))
-        f_hat = surrogate_decoder(z, conditionals, **kwargs).reshape(
-            -1, grid_shape[0], grid_shape[1]
-        )
+        batch["z"] = z
+        f_hat = surrogate_decoder(**batch).reshape(-1, grid_shape[0], grid_shape[1])
         vmin = min(f.min(), f_hat.min())
         vmax = max(f.max(), f_hat.max())
         im = ax[0].imshow(f, vmin=vmin, vmax=vmax)
@@ -1095,18 +1107,17 @@ def plot_2d_histograms_dec(
     num_batches: int = 5,
     num_decodings: int = 10,
     step="",
-    **kwargs,
 ):
     paths = []
     for i in range(num_batches):
         rng_z, rng = jax.random.split(rng)
         fig, ax = plt.subplots(1, num_decodings + 1, figsize=(5 * num_decodings, 5))
-        f_batch, _, conditionals = next(loader)
+        batch = next(loader)
+        f_batch, conditionals = batch["f"], batch["conditionals"]
         f = f_batch[0].reshape(grid_shape[0], grid_shape[1])
         z = jax.random.normal(rng_z, shape=(f_batch.shape[0], z_dim))
-        f_hat = surrogate_decoder(z, conditionals, **kwargs).reshape(
-            -1, grid_shape[0], grid_shape[1]
-        )
+        batch["z"] = z
+        f_hat = surrogate_decoder(**batch).reshape(-1, grid_shape[0], grid_shape[1])
         vmin = min(f.min(), f_hat.min())
         vmax = max(f.max(), f_hat.max())
         ax[0].hist(f.ravel(), bins=50, range=(vmin, vmax), color="blue", alpha=0.7)

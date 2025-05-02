@@ -41,7 +41,7 @@ class SpatiotemporalData(MetaLearningData):
         independent_t_masks: bool,
         num_test: int,
         forecast: bool,
-        batch_size: int = 4,
+        batch_size: int,
     ):
         """
         Args:
@@ -108,7 +108,7 @@ def _batch(
     independent_t_masks: bool,
     num_test: int,
     forecast: bool,
-    batch_size: int = 4,
+    batch_size: int,
 ):
     B, T, T_b = batch_size, t.shape[0], num_t
     rng_t, rng_p, rng_b, rng_v = random.split(rng, 4)
@@ -283,7 +283,7 @@ class SpatiotemporalBatch(MetaLearningBatch):
         f_pred: jax.Array,  # [B, L_test, D_f]
         f_std: jax.Array,  # [B, L_test, D_f]
         cmap=mpl.colormaps.get_cmap("grey"),
-        cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
+        cmap_std=mpl.colormaps.get_cmap("plasma"),
         norm=None,
         norm_std=None,
         remap_colors: Callable = lambda x: x,
@@ -309,9 +309,9 @@ class SpatiotemporalBatch(MetaLearningBatch):
         f_ctx, f_test, f_pred = map(remap_colors, [f_ctx, f_test, f_pred])
         if f_std.shape[-1] > 1:  # e.g. uncertainty per RGB channel
             f_std = f_std.mean(axis=-1, keepdims=True)
-        _, axs = plt.subplots(B, T_b + 2, figsize=(5 * (T_b + 2), B * 5), squeeze=False)
         kwargs = dict(cmap=cmap, norm=norm, interpolation="none")
         std_kwargs = dict(cmap=cmap_std, norm=norm_std, interpolation="none")
+        _, axs = plt.subplots(B, T_b + 2, figsize=(5 * (T_b + 2), B * 5), squeeze=False)
         for i in range(B):
             t_ctx = self.t_ctx.reshape(B, T_b - 1, -1, 1)
             for j in range(T_b - 1):

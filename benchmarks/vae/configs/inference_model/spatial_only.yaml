@@ -7,13 +7,14 @@ num_obs_locations: null # Can be used to randomly select partial number of locat
 # priors names and args must be compat with Numpyro distributions
 priors: # Priors for training DeepRV or for inference
   sigma:
-    numpyro_dist: Delta
+    numpyro_dist: Uniform
     kwargs:
-      v: 0.2
+      low: 0.1
+      high: 0.3
   var:
-    numpyro_dist: Delta
+    numpyro_dist: Dirichlet
     kwargs:
-      v: 1.0
+      concentration: [1.0]
   ls:
     numpyro_dist: Uniform
     kwargs:

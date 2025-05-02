@@ -1,22 +1,30 @@
 defaults:
   - _self_ # use default global values below
-  - model: scan_tnp_kr
+  - model: tnp_kr_scan
   - kernel: matern_1_2
   - data: 30x50
   - test: sim
 seed: 42
 wandb: True
 project: Heaton
-train_num_steps: 100000
-valid_num_steps: 1000
+train_num_steps: 50000
+valid_num_steps: 100
+valid_interval: 5000
+plot_interval: 50000
 finetune_num_steps: 1000
-finetune_on_real: False
-valid_interval: 1000
-plot_interval: 10000
-lr_peak: 5.0e-4
-lr_pct_decay: 0.6
-lr_alpha: 0.2
-lr_finetune: 1.0e-4
-clip_max_norm: 1.0
-monitor_metric: NLL
-early_stop_patience: 20
+finetune_on_real: True
+lr_finetune: 2.0e-4
+optimizer:
+  _target_: optax.chain
+  _args_:
+    - _target_: optax.clip_by_global_norm
+      max_norm: 1.0
+    - _target_: optax.adamw
+      learning_rate:
+        _target_: optax.cosine_decay_schedule
+        init_value: 2.0e-3
+        decay_steps: ${train_num_steps}
+        alpha: 2.0e-5
+      b1: 0.9
+      b2: 0.999
+      weight_decay: 1.0e-4

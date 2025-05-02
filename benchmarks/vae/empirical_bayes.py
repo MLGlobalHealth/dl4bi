@@ -45,9 +45,7 @@ def main(cfg: DictConfig):
     priors = {
         pr: instantiate(pr_dist) for pr, pr_dist in cfg.inference_model.priors.items()
     }
-    surrogate_kwargs = {}
-    if "FixedLocationTransfomer" in model_name:
-        surrogate_kwargs = {"s": s}
+    surrogate_kwargs = {"s": s}
     inference_model, conds_names = gen_inference_model(
         cfg, s, map_data, priors, surrogate_kwargs
     )

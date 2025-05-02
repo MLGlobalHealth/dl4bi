@@ -12,12 +12,11 @@ import pandas as pd
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random
-from jax.scipy.special import logsumexp
-from numpyro.infer import MCMC, NUTS, Predictive, log_likelihood
+from numpyro.infer import MCMC, NUTS, Predictive
 from omegaconf import DictConfig, OmegaConf
 
 from dl4bi.core.train import evaluate, save_ckpt, train
-from dl4bi.meta_learning.data.tabular import TabularBatch, TabularData
+from dl4bi.meta_learning.data.tabular import TabularBatch
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 # TODO(danj): calculate pointwise log likelihood

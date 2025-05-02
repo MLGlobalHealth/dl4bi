@@ -1,1 +1,27 @@
-_target_: dl4bi.meta_learning.SGNP
+_target_: dl4bi.meta_learning.sgnp.SGNP
+s_sim:
+  _target_: dl4bi.sim.l2_dist
+  _partial_: true
+s_bias:
+  _target_: dl4bi.bias.Bias.build_rbf_network_bias
+  num_basis: 5
+  num_heads: 4
+gblk:
+  _target_: dl4bi.gnn.GraphAttentionBlock
+  attn:
+    _target_: dl4bi.attention.MultiHeadGraphAttention
+    proj_qks:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_vs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_out:
+      _target_: dl4bi.mlp.MLP
+      dims: [64]
+head:
+  _target_: dl4bi.mlp.MLP
+  dims: [256, 64, 2]
+  act_fn:
+    _target_: jax.nn.gelu
+    _partial_: true

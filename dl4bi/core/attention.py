@@ -351,6 +351,7 @@ def scan_ks(
     D_v = vs.shape[-1]
     K_c = min(K, ks_chunk_size)
     qs_chunk /= jnp.sqrt(D)
+    epsilon = 1.0e-10
 
     @jit
     def ks_scanner(carry: tuple, _):
@@ -381,10 +382,10 @@ def scan_ks(
     def update(qs_chunk, ks_chunk, vs_chunk, mask_chunk, os, row_maxs, row_sums):
         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
         scores = jnp.where(mask_chunk, scores, -jnp.inf)
-        row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
+        row_maxs_chunk = jax.lax.stop_gradient(jnp.max(scores, axis=-1, keepdims=True))
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
         exp_scores = jnp.exp(scores - new_row_maxs)
-        row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
+        row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True) + epsilon
         os_chunk = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs_chunk)
         exp_row_maxs_diff = jnp.exp(row_maxs - new_row_maxs)
         new_row_sums = exp_row_maxs_diff * row_sums + row_sums_chunk
@@ -394,7 +395,7 @@ def scan_ks(
 
     os = jnp.zeros((Q_c, B, H, D_v))
     row_sums = jnp.zeros((Q_c, B, H, 1))
-    row_maxs = jnp.full((Q_c, B, H, 1), -jnp.inf)
+    row_maxs = jnp.full((Q_c, B, H, 1), -1.0e-6)
 
     (i, os, row_maxs, row_sums), _ = scan(
         ks_scanner,
@@ -472,15 +473,21 @@ class BiasedScanAttention(nn.Module):
         x_bias_func = x_bias_kwargs = None
         if self.x_bias is not None:
             x_bias_func = self.x_bias.scanned_bias_func
-            x_bias_kwargs = self.x_bias.init_params(self, **self.x_bias.init_kwargs)
+            x_bias_kwargs = self.x_bias.init_params(
+                self, "x_bias", **self.x_bias.init_kwargs
+            )
         s_bias_func = s_bias_kwargs = None
         if self.s_bias is not None:
             s_bias_func = self.s_bias.scanned_bias_func
-            s_bias_kwargs = self.s_bias.init_params(self, **self.s_bias.init_kwargs)
+            s_bias_kwargs = self.s_bias.init_params(
+                self, "s_bias", **self.s_bias.init_kwargs
+            )
         t_bias_func = t_bias_kwargs = None
         if self.t_bias is not None:
             t_bias_func = self.t_bias.scanned_bias_func
-            t_bias_kwargs = self.t_bias.init_params(self, **self.t_bias.init_kwargs)
+            t_bias_kwargs = self.t_bias.init_params(
+                self, "t_bias", **self.t_bias.init_kwargs
+            )
         return biased_scan_attention(
             qs,
             ks,
@@ -643,6 +650,7 @@ def biased_scan_ks(
     K_c = min(K, ks_chunk_size)
     D_v = vs.shape[-1]
     qs_chunk /= jnp.sqrt(D)
+    epsilon = 1.0e-10
 
     @jit
     def ks_scanner(carry: tuple, _):
@@ -712,23 +720,24 @@ def biased_scan_ks(
         to_BLM = lambda x: rearrange(x, "L B M -> B L M")
         to_QBHK = lambda x: rearrange(x, "B H Q K -> Q B H K")
         bias = jnp.array(0.0)
-        if qs_x_chunk is not None:
+        if x_bias_func is not None:
             qs_x_chunk_, ks_x_chunk_ = map(to_BLM, (qs_x_chunk, ks_x_chunk))
             x_bias = x_bias_func(qs_x_chunk_, ks_x_chunk_, **x_bias_kwargs)
             bias += to_QBHK(x_bias)
-        if qs_s_chunk is not None:
+        if s_bias_func is not None:
             qs_s_chunk_, ks_s_chunk_ = map(to_BLM, (qs_s_chunk, ks_s_chunk))
             s_bias = s_bias_func(qs_s_chunk_, ks_s_chunk_, **s_bias_kwargs)
             bias += to_QBHK(s_bias)
-        if qs_t_chunk is not None:
+        if t_bias_func is not None:
             qs_t_chunk_, ks_t_chunk_ = map(to_BLM, (qs_t_chunk, ks_t_chunk))
-            bias += t_bias_func(qs_t_chunk_, ks_t_chunk_, **t_bias_kwargs)
+            t_bias = t_bias_func(qs_t_chunk_, ks_t_chunk_, **t_bias_kwargs)
+            bias += to_QBHK(t_bias)
         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk) + bias
         scores = jnp.where(mask_chunk, scores, -jnp.inf)
-        row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
+        row_maxs_chunk = jax.lax.stop_gradient(jnp.max(scores, axis=-1, keepdims=True))
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
         exp_scores = jnp.exp(scores - new_row_maxs)
-        row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
+        row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True) + epsilon
         os_chunk = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs_chunk)
         exp_row_maxs_diff = jnp.exp(row_maxs - new_row_maxs)
         new_row_sums = exp_row_maxs_diff * row_sums + row_sums_chunk
@@ -738,7 +747,7 @@ def biased_scan_ks(
 
     os = jnp.zeros((Q_c, B, H, D_v))
     row_sums = jnp.zeros((Q_c, B, H, 1))
-    row_maxs = jnp.full((Q_c, B, H, 1), -jnp.inf)
+    row_maxs = jnp.full((Q_c, B, H, 1), -1.0e-6)
 
     (i, os, row_maxs, row_sums), _ = scan(
         ks_scanner,
@@ -834,7 +843,6 @@ class MultiHeadAttention(nn.Module):
 
     Returns:
         A `MultiHeadAttention` module.
-
     """
 
     attn: nn.Module = Attention()
@@ -874,6 +882,65 @@ class MultiHeadAttention(nn.Module):
         ctx, attn = self.attn(qs, ks, vs, mask, training, **kwargs)
         ctx = rearrange(ctx, "B H L D -> B L (H D)")
         return self.proj_out(ctx), attn
+
+
+class TEMultiHeadAttention(nn.Module):
+    """
+    Translation Equivariant MultiHeadAttention from [Translation Equivariant Neural Processes](https://arxiv.org/abs/2406.12409).
+
+    Args:
+        num_heads: Number of heads for attention module.
+        proj_qs: A module for projecting queries.
+        proj_ks: A module for projecting keys.
+        proj_vs: A module for projecting values.
+        proj_out: A module for projecting output.
+
+    Returns:
+        A `TranslationEquivariantMultiHeadAttention` module.
+    """
+
+    num_heads: int = 8
+    proj_qs: nn.Module = MLP([128])
+    proj_ks: nn.Module = MLP([128])
+    proj_vs: nn.Module = MLP([128])
+    proj_out: nn.Module = MLP([128])
+    kernel: nn.Module = MLP([128, 128, 8])
+    phi: Optional[nn.Module] = None
+    p_dropout: float = 0.0
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, D_q]
+        ks: jax.Array,  # [B, K, D_k]
+        vs: jax.Array,  # [B, K, D_v]
+        qs_s: jax.Array,  # [B, Q, D_s],
+        ks_s: jax.Array,  # [B, K, D_s],
+        mask: Optional[jax.Array] = None,  # [B, K]
+        training: bool = False,
+        **kwargs,
+    ):
+        H = self.num_heads
+        drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
+        reshape = jit(lambda x: rearrange(x, "B L (H D) -> B H L D", H=H))
+        qs, ks, vs = map(reshape, (qs, ks, vs))
+        D_qk = qs.shape[-1]
+        qk_s_diff = qs_s[:, :, None, :] - ks_s[:, None, :, :]  # [B, Q, K, D_s]
+        scores = jnp.einsum("B H Q D, B H K D -> B H Q K", qs, ks) / jnp.sqrt(D_qk)
+        scores = rearrange(scores, "B H Q K -> B Q K H")
+        scores = self.kernel(jnp.concat([scores, qk_s_diff], axis=-1))
+        scores = rearrange(scores, "B Q K H -> B H Q K")
+        if mask is not None:
+            scores = jnp.where(mask[:, None, None, :], scores, -jnp.inf)
+        attn = nn.softmax(scores, axis=-1)  # [B, H, Q, K]
+        ctx = jnp.einsum("B H Q K, B H K D -> B H Q D", drop(attn), vs)
+        out = self.proj_out(rearrange(ctx, "B H Q D -> B Q (H D)"))
+        qs_s_delta = 0.0
+        if self.phi is not None:  # phi: [..., H] -> [..., {1 or D_s}]
+            qs_s_scores = self.phi(rearrange(attn, "B H Q K -> B Q K H"))
+            qs_s_delta = (qk_s_diff * qs_s_scores).mean(axis=-2)  # [B, Q, D_s]
+        return out, qs_s + qs_s_delta, attn
 
 
 class MultiHeadGraphAttention(nn.Module):

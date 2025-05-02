@@ -2,7 +2,7 @@ _target_: dl4bi.meta_learning.ScanTNPKR
 num_blks: 6
 num_reps: 1
 embed_s:
-  _target_: dl4bi.meta_learning.utils.x_to_empty_array
+  _target_: dl4bi.meta_learning.utils.x_to_none
   _partial_: true
 embed_all:
   _target_: dl4bi.mlp.MLP
@@ -28,7 +28,10 @@ blk:
       dims: [128]
     proj_vs:
       _target_: dl4bi.mlp.MLP
-      dims: [128, 64]
+      dims: [128]
+    proj_out:
+      _target_: dl4bi.mlp.MLP
+      dims: [64]
   ffn:
     _target_: dl4bi.mlp.MLP
     dims: [256, 64]

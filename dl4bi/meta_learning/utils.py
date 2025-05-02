@@ -74,5 +74,5 @@ def wandb_2d_img_callback(
     wandb.log({f"Step {step}": wandb.Image(path)})
 
 
-def x_to_empty_array(x: jax.Array):
-    return jnp.array([])
+def x_to_none(x: jax.Array):
+    return None

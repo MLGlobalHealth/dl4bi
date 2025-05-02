@@ -13,6 +13,7 @@ from train import main as vae_main
 def run_experiments(
     seeds: jax.Array,
     simulated_data: bool,
+    missing_data: bool,
     real_data: bool,
     dry_run: bool,
 ):
@@ -35,40 +36,55 @@ def run_experiments(
             "wandb=False",
         ]
     if simulated_data:
-        exp_name = "UK_LTLA_sim"
-        map_path = "benchmarks/vae/maps/UK"
         spatial_priors = ["rbf", "matern_3_2", "matern_1_2", "matern_5_2", "car"]
         models = ["auto_deep_RV", "deep_RV_gMLP", "auto_prior_cvae"]
-        run_vae_train(
-            "deep_RV_sim",
-            map_path,
-            exp_name,
-            seeds,
-            spatial_priors,
-            models,
-            vae_overrides,
-        )
+        sim_overrides = [
+            "exp_name=UK_LTLA_sim",
+            "project=deep_RV_sim",
+            "data.map_path=benchmarks/vae/maps/UK",
+            "lr_peak=1.0e-3",  # Current paper status 1e-2 gets better results for gMLP
+        ]
+        run_vae_train(seeds, spatial_priors, models, sim_overrides + vae_overrides)
         run_empirical_bayes(
-            "deep_RV_sim",
-            map_path,
-            exp_name,
             seeds,
             spatial_priors,
             models + ["Baseline_GP"],
-            infer_overrides,
+            sim_overrides + infer_overrides,
         )
         # NOTE: only runs on one seed, comparison to full MCMC is required which
         # takes too long for multiple seeds
         run_inference(
-            "deep_RV_sim",
-            map_path,
-            exp_name,
             seeds[:1],
             spatial_priors,
             models + ["Baseline_GP"],
-            infer_overrides,
+            sim_overrides + infer_overrides,
         )
-
+    if missing_data:
+        spatial_priors = ["rbf", "matern_3_2", "matern_1_2", "matern_5_2"]
+        models = ["auto_deep_RV", "deep_RV_gMLP", "auto_prior_cvae"]
+        miss_overrides = [
+            "exp_name=2d_grid_sim",
+            "project=deep_RV_missing_data",
+            "data=2d",
+        ]
+        run_vae_train(
+            seeds[1:2],  # Not to repeat the same seed as in LTLA inference
+            spatial_priors,
+            models,
+            miss_overrides + vae_overrides,
+        )
+        # NOTE: only runs on one seed, comparison to full MCMC is required which
+        # takes too long for multiple seeds
+        for num_locs in [512, 100, 820, None]:
+            obs_override = []
+            if num_locs is not None:
+                obs_override = [f"inference_model.num_obs_locations={num_locs}"]
+            run_inference(
+                seeds[1:2],  # Not to repeat the same seed as in LTLA inference
+                spatial_priors,
+                models,
+                miss_overrides + infer_overrides + obs_override,
+            )
     if real_data:
         exp_names = ["male_U50_cancer_mort", "female_U50_cancer_mort", "zimbabwe_HIV"]
         map_paths = [
@@ -86,31 +102,28 @@ def run_experiments(
         for exp_name, map_path, spatial_priors, inf_model in zip(
             exp_names, map_paths, spatial_priors_per_exp, inf_model_per_exp
         ):
+            real_overrides = [
+                f"exp_name={exp_name}",
+                f"project=deep_RV_{exp_name}",
+                f"data.map_path={map_path}",
+                f"inference_model={inf_model}",
+                "lr_peak=1.0e-3",  # Current paper status 1e-2 gets better results for gMLP
+            ]
             run_vae_train(
-                f"deep_RV_{exp_name}",
-                map_path,
-                exp_name,
                 seeds[:1],
                 spatial_priors,
                 models,
-                vae_overrides + [f"inference_model={inf_model}"],
+                real_overrides + vae_overrides,
             )
             run_inference(
-                f"deep_RV_{exp_name}",
-                map_path,
-                exp_name,
                 seeds[:1],
                 spatial_priors,
                 models + ["Baseline_GP"],
-                infer_overrides + [f"inference_model={inf_model}"],
-                model_type="binomial",
+                real_overrides + infer_overrides,
             )
 
 
 def run_vae_train(
-    project: str,
-    map_path: str,
-    exp_name: str,
     seeds: jax.Array,
     spatial_priors: list[str],
     models: list[str],
@@ -124,22 +137,17 @@ def run_vae_train(
                         "default",
                         overrides=vae_overrides
                         + [
-                            f"project={project}",
-                            f"exp_name={exp_name}",
-                            f"data.map_path={map_path}",
                             f"inference_model.spatial_prior.func={spatial_prior}",
                             f"seed={seed}",
                             f"model={model}",
-                        ],
+                        ]
+                        + (["lr_peak=1.0e-3"] if model == "auto_prior_cvae" else []),
                     )
                     print("Running vae.py")
                     vae_main(cfg)
 
 
 def run_empirical_bayes(
-    project: str,
-    map_path: str,
-    exp_name: str,
     seeds: jax.Array,
     spatial_priors: list[str],
     models: list[str],
@@ -150,9 +158,6 @@ def run_empirical_bayes(
             for model in models:
                 with hydra.initialize(config_path="../configs", version_base=None):
                     overrides = infer_overrides + [
-                        f"project={project}",
-                        f"exp_name={exp_name}",
-                        f"data.map_path={map_path}",
                         "inference_model=spatial_only",
                         f"inference_model.spatial_prior.func={spatial_prior}",
                         f"seed={seed}",
@@ -165,31 +170,22 @@ def run_empirical_bayes(
                         "default",
                         overrides=overrides,
                     )
-                    # cfg.inference_model.spatial_prior.func = f"{spatial_prior}"
                     print("Running infer_empirical_bayes.py")
                     infer_empirical_bayes_main(cfg)
 
 
 def run_inference(
-    project: str,
-    map_path: str,
-    exp_name: str,
     seeds: jax.Array,
     spatial_priors: list[str],
     models: list[str],
     infer_overrides: list[str],
-    model_type: str = "poisson",
 ):
     for seed in seeds:
         for spatial_prior in spatial_priors:
             for model in models:
                 with hydra.initialize(config_path="../configs", version_base=None):
                     overrides = infer_overrides + [
-                        f"project={project}",
-                        f"exp_name={exp_name}",
-                        f"data.map_path={map_path}",
                         f"inference_model.spatial_prior.func={spatial_prior}",
-                        f"inference_model.model.func={model_type}",
                         f"seed={seed}",
                     ]
                     if model == "Baseline_GP":
@@ -233,6 +229,12 @@ def parse_args():
         help="Whether to run the simulated data experiments",
     )
     parser.add_argument(
+        "--missing_data",
+        action="store_true",
+        default=False,
+        help="Whether to run the missing data inference experiments",
+    )
+    parser.add_argument(
         "--real_data",
         action="store_true",
         default=False,
@@ -249,4 +251,6 @@ if __name__ == "__main__":
         shape=(args.num_runs,),
         replace=False,
     )
-    run_experiments(seeds, args.simulated_data, args.real_data, args.dry_run)
+    run_experiments(
+        seeds, args.simulated_data, args.missing_data, args.real_data, args.dry_run
+    )

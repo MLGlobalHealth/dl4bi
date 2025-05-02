@@ -1,0 +1,24 @@
+defaults:
+  - _self_ # use default global values below
+  - model: tnp_kr_scan
+seed: 42
+wandb: True
+project: ERA5
+train_num_steps: 250000
+valid_num_steps: 5000 # exhaust valid dataloader
+valid_interval: 10000
+plot_interval: 50000
+optimizer:
+  _target_: optax.chain
+  _args_:
+    - _target_: optax.clip_by_global_norm
+      max_norm: 1.0
+    - _target_: optax.adamw
+      learning_rate:
+        _target_: optax.cosine_onecycle_schedule
+        transition_steps: ${train_num_steps}
+        peak_value: 1.0e-3
+        pct_start: 0.2
+      b1: 0.9
+      b2: 0.999
+      weight_decay: 1.0e-4

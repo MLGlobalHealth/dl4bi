@@ -64,7 +64,7 @@ class SpatialData(MetaLearningData):
     ),
 )
 def _batch(
-    rng,
+    rng: jax.Array,
     x: Optional[jax.Array],
     s: jax.Array,
     f: jax.Array,
@@ -83,7 +83,7 @@ def _batch(
     S_to_L = jit(lambda v: v.reshape(v.shape[0], -1, v.shape[-1]))
     batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
     if batch_size is not None:
-        idx = random.choice(rng_i, f.shape[0], (batch_size,), replace=False)
+        idx = random.choice(rng_i, f.shape[0], (batch_size,))
         x, s, f = x[idx] if has_x else None, s[idx], f[idx]
     s_shape = s.shape
     if full_x:
@@ -185,7 +185,7 @@ class SpatialBatch(MetaLearningBatch):
         f_pred: jax.Array,  # [B, L_test, D_f]
         f_std: jax.Array,  # [B, L_test, D_f]
         cmap=mpl.colormaps.get_cmap("Spectral_r"),
-        cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
+        cmap_std=mpl.colormaps.get_cmap("plasma"),
         norm=None,
         norm_std=None,
         remap_colors: Callable = lambda x: x,
@@ -203,9 +203,9 @@ class SpatialBatch(MetaLearningBatch):
             f_std = f_std.mean(axis=-1, keepdims=True)
         if self.mask_test is not None:
             f_test = jnp.where(self.mask_test[..., None], self.f_test, jnp.nan)
-        reshape = jit(lambda v: v.reshape(*self.s_shape[:-1], v.shape[-1]).squeeze())
         arrays = unbatch_BLD([f_ctx, f_test, f_pred, f_std], L)
         arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
+        reshape = jit(lambda v: v.reshape(*self.s_shape[:-1], v.shape[-1]).squeeze())
         f_ctx, f_test, f_pred, f_std = map(reshape, arrays)
         f_ctx, f_test, f_pred = map(remap_colors, [f_ctx, f_test, f_pred])
         _, axs = plt.subplots(N, 4, figsize=(20, N * 5))
