@@ -142,7 +142,7 @@ def get_population(iso: str, locations: np.array, year=2007, res: int = 150):
             counts = data.read(window=window)
             # invalid values are set to < 0
             result.append(counts.sum(where=counts > 0))
-    return np.array(result)
+    return np.array(result).astype(np.float32)
 
 
 def get_population_density(iso: str, locations: np.array, year=2007):
@@ -162,7 +162,7 @@ def get_population_density(iso: str, locations: np.array, year=2007):
     data: rasterio.DatasetReader
     with rasterio.open(file_path) as data:
         densities = list(data.sample(locations))
-    return np.array(densities).squeeze(axis=-1)
+    return np.array(densities).squeeze(axis=-1).astype(np.float32)
 
 
 def get_urban_rural(iso: str, locations: np.array, year=2007):
