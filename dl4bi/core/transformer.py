@@ -318,3 +318,69 @@ class KRBlock(nn.Module):
         qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)
         qvs_5, kvs_5 = self.ffn(qvs_4, training), self.ffn(kvs_4, training)
         return qvs_3 + drop(qvs_5), kvs_3 + drop(kvs_5)
+
+
+# TODO(danj): add latent locations??
+class DistillBlock(nn.Module):
+    num_latents: int
+    num_reps: int = 2
+    attn: nn.Module = MultiHeadAttention()
+    norm: nn.Module = nn.LayerNorm()
+    ffn: nn.Module = MLP([256, 64])
+    p_dropout: float = 0.0
+
+    @nn.compact
+    def __init__(
+        self,
+        x: jax.Array,  # [B, L, D]
+        mask: Optional[jax.Array] = None,
+        training: bool = False,
+        zx_kwargs: dict = {},
+        zz_kwargs: dict = {},
+        **kwargs,
+    ):
+        (B, _L, D), Z = x.shape, self.num_latents
+        drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        z = self.param("latents", init.truncated_normal(), (1, Z, D))
+        z = jnp.repeat(z, B, axis=0)
+        # TODO(danj): share or create these params per repeat?
+        cross_attn, self_attn = self.attn.copy(), self.attn.copy()
+        cross_ffn, self_ffn = self.ffn.copy(), self.ffn.copy()
+        cross_norm, self_norm = self.norm.copy(), self.norm.copy()
+        for _ in range(self.num_reps):
+            # z->x cross attend "previous" layer x
+            z_1, *_ = cross_attn(z, x, x, mask, training, **zx_kwargs)
+            z_2 = z + drop(z_1)
+            z_3 = z_2 + drop(cross_ffn(cross_norm(z_2), training))
+            # z->s self attend to current layer z
+            z_4, *_ = self_attn(z_3, z_3, z_3, None, training, **zz_kwargs)
+            z_5 = z_3 + drop(z_4)
+            z = z_5 + drop(self_ffn(self_norm(z_3), training))
+        return z
+
+
+class InformBlock(nn.Module):
+    num_reps: int = 2
+    attn: nn.Module = MultiHeadAttention()
+    norm: nn.Module = nn.LayerNorm()
+    ffn: nn.Module = MLP([256, 64])
+    p_dropout: float = 0.0
+
+    @nn.compact
+    def __init__(
+        self,
+        x: jax.Array,  # [B, L, D]
+        z: jax.Array,  # [B, Z, D]
+        mask: Optional[jax.Array] = None,
+        training: bool = False,
+        xz_kwargs: dict = {},
+        zz_kwargs: dict = {},
+        **kwargs,
+    ):
+        drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        for _ in range(self.num_reps):
+            # x->z cross attend to latent layer z
+            x_1, *_ = self.attn(x, z, z, mask, training, **xz_kwargs)
+            x_2 = x + drop(x_1)
+            x = x_2 + drop(self.ffn(self.norm(x_2)))
+        return x
