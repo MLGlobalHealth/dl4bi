@@ -68,7 +68,7 @@ class TNPD(nn.Module):
         Returns:
             `ModelOutput`.
         """
-        (B, L_ctx), L_test = s_ctx[:2], s_test.shape[1]
+        (B, L_ctx), L_test = s_ctx.shape[:2], s_test.shape[1]
         test_shape = first_shape([x_test, s_test, t_test])
         f_test = jnp.zeros((*test_shape[:-1], f_ctx.shape[-1]))
         # NOTE: TNP-D does differentiate between fixed effects

@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-import pickle
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import hydra
 import jax
@@ -19,9 +16,7 @@ from sps.utils import build_grid
 from dl4bi.core.train import (
     Callback,
     TrainState,
-    collect_samples,
     evaluate,
-    load_ckpt,
     save_ckpt,
     train,
 )
@@ -43,6 +38,7 @@ def main(cfg: DictConfig):
     kernel = cfg.kernel.kernel._target_.split(".")[-1]
     path = f"results/{cfg.project}/{cfg.data.name}/{kernel}/{cfg.seed}/{run_name}"
     path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader = valid_dataloader = build_dataloader(cfg.data, cfg.kernel)
@@ -53,27 +49,6 @@ def main(cfg: DictConfig):
     if cfg.data.name == "2d":
         clbk = wandb_2d_plots
         clbk_dataloader = build_2d_grid_dataloader(cfg.data, cfg.kernel)
-    if cfg.evaluate_only:
-        state, _ = load_ckpt(path.with_suffix(".ckpt"))
-        # run once to compile
-        evaluate(rng_test, state, model.valid_step, valid_dataloader, num_steps=1)
-        start = time.perf_counter()
-        metrics = evaluate(
-            rng_test,
-            state,
-            model.valid_step,
-            valid_dataloader,
-            cfg.valid_num_steps,
-        )
-        end = time.perf_counter()
-        metrics["time_elapsed_s"] = end - start
-        print(metrics)
-        if cfg.collect_samples:
-            num_samples = 10
-            samples = collect_samples(rng_test, state, valid_dataloader, num_samples)
-            with open(path.parent / f"{path.stem}_samples.pkl", "wb") as f:
-                pickle.dump(samples, f)
-        return
     state = train(
         rng_train,
         model,
@@ -97,7 +72,6 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
@@ -175,18 +149,6 @@ def wandb_1d_plots(
     extra: dict,
     num_plots: int = 8,
 ):
-    path = plot_1d(rng_step, state, batch, extra, num_plots)
-    wandb.log({f"Step {step}": wandb.Image(path)})
-
-
-def plot_1d(
-    rng_step: int,
-    state: TrainState,
-    batch: SpatialBatch,
-    extra: dict,
-    num_plots: int = 8,
-    path: Optional[Path] = None,
-):
     rng_dropout, rng_extra = random.split(rng_step)
     output = state.apply_fn(
         {"params": state.params, **state.kwargs},
@@ -195,13 +157,12 @@ def plot_1d(
     )
     if isinstance(output, tuple):
         output, _ = output  # throw away latent samples
-    if not path:
-        path = Path(f"/tmp/gp_1d_{datetime.now().isoformat()}.png")
+    path = Path(f"/tmp/gp_1d_{datetime.now().isoformat()}.png")
     subtitle = ", ".join([f"{k}: {v:.2f}" for k, v in extra.items()])
     fig = batch.plot_1d(output.mu, output.std, subtitle=subtitle, num_plots=num_plots)
     fig.savefig(path)
     plt.close(fig)
-    return path
+    wandb.log({f"Step {step}": wandb.Image(path)})
 
 
 def wandb_2d_plots(
@@ -213,18 +174,6 @@ def wandb_2d_plots(
     num_plots: int = 8,
 ):
     """Logs `num_plots` from the given batch for 2D GPs."""
-    path = plot_2d(rng_step, state, batch, extra, num_plots)
-    wandb.log({f"Step {step}": wandb.Image(path)})
-
-
-def plot_2d(
-    rng_step: int,
-    state: TrainState,
-    batch: SpatialBatch,
-    extra: dict,
-    num_plots: int = 8,
-    path: Optional[Path] = None,
-):
     rng_dropout, rng_extra = random.split(rng_step)
     output = state.apply_fn(
         {"params": state.params, **state.kwargs},
@@ -233,8 +182,7 @@ def plot_2d(
     )
     if isinstance(output, tuple):
         output, _ = output  # throw away latent samples
-    if not path:
-        path = Path(f"/tmp/gp_2d_{datetime.now().isoformat()}.png")
+    path = Path(f"/tmp/gp_2d_{datetime.now().isoformat()}.png")
     cmap = mpl.colormaps.get_cmap("Spectral_r")
     cmap.set_bad("grey")
     subtitle = ", ".join([f"{k}: {v:.2f}" for k, v in extra.items()])
@@ -247,7 +195,7 @@ def plot_2d(
     )
     fig.savefig(path)
     plt.close(fig)
-    return path
+    wandb.log({f"Step {step}": wandb.Image(path)})
 
 
 if __name__ == "__main__":

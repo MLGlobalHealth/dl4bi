@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import math
-import time
 from functools import partial
 from pathlib import Path
 
@@ -16,22 +15,12 @@ from sps.utils import build_grid
 from dl4bi.core.train import (
     Callback,
     evaluate,
-    load_ckpt,
     save_ckpt,
     train,
 )
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData
 from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
-
-# Example command to evaluate only:
-# python sir.py \
-#   model=icml/tnp_kr_scan \
-#   data=space_128x128 \
-#   data.batch_size=1 \
-#   valid_num_steps=100 \
-#   wandb=False \
-#   evaluate_only=True
 
 
 @hydra.main("configs/sir", config_name="default", version_base=None)
@@ -45,6 +34,7 @@ def main(cfg: DictConfig):
         reinit=True,  # allows reinitialization for multiple runs
     )
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
+    path.parent.mkdir(parents=True, exist_ok=True)
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
@@ -55,21 +45,6 @@ def main(cfg: DictConfig):
     train_dataloader = valid_dataloader = dataloader
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
-    if cfg.evaluate_only:
-        state, _ = load_ckpt(path.with_suffix(".ckpt"))
-        # run once to compile
-        evaluate(rng_test, state, model.valid_step, valid_dataloader, num_steps=1)
-        start = time.perf_counter()
-        metrics = evaluate(
-            rng_test,
-            state,
-            model.valid_step,
-            valid_dataloader,
-            cfg.valid_num_steps,
-        )
-        end = time.perf_counter()
-        metrics["time_elapsed_s"] = end - start
-        return print(metrics)
     clbk = partial(
         wandb_2d_img_callback,
         filename_prefix="sir",
@@ -99,7 +74,6 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
