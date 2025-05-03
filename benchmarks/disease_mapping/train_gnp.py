@@ -96,7 +96,9 @@ def sample_n(rng, sample_shape):
 
 
 def sample_x(rng, sample_shape):
-    p = 0.1
+    # TODO: might need to sample this per context/target
+    # about 30% of surveys are urban but <1% of the country grid is
+    p = 0.3
     urban = random.bernoulli(rng, p, sample_shape).astype(jnp.float32)
     rural = 1 - urban
     return jnp.stack([urban, rural], axis=-1)
