@@ -88,10 +88,11 @@ def sample_prior(rng, s: jax.Array, n: jax.Array, x: jax.Array | None, B: int):
 
 
 def sample_n(rng, sample_shape):
-    scale = 100
-    shape = 3
-    # floor ( InverseGamma(scale, shape) )
-    return jnp.ceil(scale / random.gamma(rng, shape, sample_shape)).astype(jnp.int32)
+    return random.randint(rng, sample_shape, 1, 150)
+    # scale = 100
+    # shape = 3
+    # # floor ( InverseGamma(scale, shape) )
+    # return jnp.ceil(scale / random.gamma(rng, shape, sample_shape)).astype(jnp.int32)
 
 
 def sample_x(rng, sample_shape):
