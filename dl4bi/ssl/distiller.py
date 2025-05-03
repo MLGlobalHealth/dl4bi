@@ -1,8 +1,10 @@
-from typing import Callable, Optional
+from dataclasses import field
+from typing import Callable, Optional, Sequence
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from sps.utils import build_grid
 
 from ..core.mlp import MLP
 from ..core.model_output import DiagonalMVNOutput
@@ -27,6 +29,9 @@ class SPDistiller(nn.Module):
         An instance of the `HLNP` model.
     """
 
+    dims: Sequence[tuple[int, int]]
+    s_lower: list[float] = field(default_factory=lambda: [-2.5])
+    s_upper: list[float] = field(default_factory=lambda: [2.5])
     embed_x: Callable = lambda x: x
     embed_s: Callable = lambda x: x
     embed_t: Callable = lambda x: x
@@ -79,25 +84,19 @@ class SPDistiller(nn.Module):
         ctx = safe_stack(
             self.embed_obs(obs),
             self.embed_x(x_ctx),
-            self.embed_s(s_ctx),
             self.embed_t(t_ctx),
             self.embed_f(f_ctx),
         )
         test = safe_stack(
             self.embed_obs(unobs),
             self.embed_x(x_test),
-            self.embed_s(s_test),
             self.embed_t(t_test),
             self.embed_f(f_test),
         )
         norm = nn.LayerNorm()
-        qs, ks_0 = map(lambda x: norm(self.embed_all(x)), (test, ctx))
-        s_grid = build_grid(
-            [
-                dict(start=lo, stop=up, num=int(self.points_per_unit * (up - lo)))
-                for (lo, up) in zip(self.s_lower, self.s_upper)
-            ]
-        )  # [*P..., s_dim]
+        qs, ks = map(lambda x: norm(self.embed_all(x)), (test, ctx))
+        for H, W in self.dims:
+            pass
         # qs = self.param("latents", init.truncated_normal(), (1, Z, D))
         # qs = jnp.repeat(qs, B, axis=0)
         # TODO(danj): add positional embeddings to distill blocks

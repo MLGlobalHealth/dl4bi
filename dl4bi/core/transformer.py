@@ -1,3 +1,4 @@
+from dataclasses import field
 from typing import Optional
 
 import flax.linen as nn
@@ -5,6 +6,7 @@ import jax
 import jax.numpy as jnp
 from flax.linen import initializers as init
 from jax import jit
+from sps.utils import build_grid
 
 from .attention import MultiHeadAttention, TEMultiHeadAttention
 from .mlp import MLP
@@ -318,6 +320,33 @@ class KRBlock(nn.Module):
         qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)
         qvs_5, kvs_5 = self.ffn(qvs_4, training), self.ffn(kvs_4, training)
         return qvs_3 + drop(qvs_5), kvs_3 + drop(kvs_5)
+
+
+class GridBlock(nn.Module):
+    embed_s: nn.Module
+    s_lower: list[float] = field(default_factory=lambda: [-2.5])
+    s_upper: list[float] = field(default_factory=lambda: [2.5])
+    points_per_unit: int = 16
+
+    @nn.compact
+    def __call__(
+        self,
+        ks: jax.Array,
+        ks_s_embed: jax.Array,
+        mask: Optional[jax.Array] = None,
+        training: bool = False,
+        **kwargs,
+    ):
+        B = ks.shape[0]
+        qs_s = build_grid(
+            [
+                dict(start=lo, stop=up, num=int(self.points_per_unit * (up - lo)))
+                for (lo, up) in zip(self.s_lower, self.s_upper)
+            ]
+        )  # [*P..., s_dim]
+        qs_s_embed = self.embed_s(qs_s)
+        qs_s_embed = jnp.repeat(qs_s_embed[None, :], B, axis=0)  # [B, *P..., s_dim]
+        ks_s_embed = embed
 
 
 # TODO(danj): add latent locations??
