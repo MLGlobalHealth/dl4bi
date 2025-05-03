@@ -24,3 +24,5 @@ optimizer:
       b1: 0.9
       b2: 0.999
       weight_decay: 1.0e-4
+evaluate_only: False
+collect_samples: False 

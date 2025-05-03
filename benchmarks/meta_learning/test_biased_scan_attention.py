@@ -13,7 +13,7 @@ from dl4bi.core.bias import Bias
 
 def main(seed: int, N: int, B: int, H: int, L: int, D: int, D_s: int):
     rng = random.key(seed)
-    bias = Bias.build_rbf_network_bias(num_heads=4, num_basis=5)
+    bias = Bias.build_rbf_network_bias(num_heads=H, num_basis=5)
     attn = BiasedScanAttention(s_bias=bias)
     b = sample_batch(rng, B, H, L, D, D_s)
     params = attn.init(rng, **b)
