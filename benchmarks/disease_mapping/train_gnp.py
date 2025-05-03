@@ -78,6 +78,7 @@ def main(cfg: DictConfig):
 
 
 def sample_prior(rng, s: jax.Array, n: jax.Array, x: jax.Array | None, B: int):
+    # note that s, n, x, and the kernel parameters will be shared across the batch
     trace = handlers.trace(handlers.seed(numpyro_model.survey_model, rng)).get_trace(
         s, n, None, x, sample_shape=(B,)
     )
@@ -146,8 +147,6 @@ def make_batch(
         s_c, x_c, n_c, z_c, n_pos_c, mask_c, s_t, x_t, n_t, z_t, n_pos_t, mask_t = (
             batch_BLD(rng_b, [s, x, n, z, n_pos], *batch_args)
         )
-
-    z_c_obs = jsp.special.logit(n_pos_c / n_c)
 
     # Various options for feeding the context
     # f_c = z_c_obs

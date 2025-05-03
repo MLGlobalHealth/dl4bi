@@ -1,11 +1,15 @@
 from pathlib import Path
+from timeit import default_timer as timer
 
 import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 import pandas as pd
+from jax import jit
+from omegaconf import OmegaConf
 from scipy.stats import chi2  # jax doesn't implement ppf
 
+from benchmarks.disease_mapping.data import get_urban_rural
 from benchmarks.disease_mapping.visualize import map_grid, scatter_map
 from dl4bi.core.model_output import DiagonalMVNOutput
 from dl4bi.core.train import load_ckpt
@@ -57,6 +61,8 @@ def mvn_hdi(mean, cov, samples):
 
 
 def evaluate(mcmc_path: Path, gnp_path: Path):
+    rng = jax.random.key(0)
+
     if isinstance(mcmc_path, str):
         mcmc_path = Path(mcmc_path)
 
@@ -67,6 +73,7 @@ def evaluate(mcmc_path: Path, gnp_path: Path):
         if path.exists():
             print(f"Using {true_model} as ground truth.")
             true_dist = dict(jnp.load(path / "predictions.npz"))
+            true_cfg = OmegaConf.load(path / "config.yaml")
             break
     else:
         raise ValueError(
@@ -78,19 +85,30 @@ def evaluate(mcmc_path: Path, gnp_path: Path):
     print(data.keys())
 
     s_c, n, n_pos = data["s"], data["n"], data["n_pos"]
+    y_c = jnp.stack([n_pos, n], axis=-1)
     s_t, theta_t = true_dist["s"], true_dist["theta"]
+
+    if "x" in data:
+        x_c = data["x"]
+        x_t = get_urban_rural(true_cfg.iso, s_t, true_cfg.year)
+        print("Using x.")
+    else:
+        x_c = x_t = None
+        print("No x.")
 
     # Load GNP model
     state, config = load_ckpt(gnp_path)
     model_name = config.name
 
-    # no jit since only one prediction is made here
-    def predict(rng, s_c, y_c, s_t):
+    @jit
+    def predict(rng, s_c, x_c, y_c, s_t, x_t):
         # expects a single task, not a batch
         output = state.apply_fn(
             {"params": state.params, **state.kwargs},
+            x_ctx=x_c[None] if x_c is not None else None,
             s_ctx=s_c[None],
             f_ctx=y_c[None],
+            x_test=x_t[None] if x_t is not None else None,
             s_test=s_t[None],
             rngs={"extra": rng},
         )
@@ -101,11 +119,29 @@ def evaluate(mcmc_path: Path, gnp_path: Path):
             case _:
                 raise NotImplementedError()
 
-    # mean, std of dimensions [L]
-    print("Running predictions...")
-    predicted_mean, predicted_std = predict(
-        jax.random.key(0), s_c, jnp.stack([n_pos, n], axis=-1), s_t
+    print("Compiling model...")
+    rng_c = jax.random.key(0)
+    time_start = timer()
+    jax.block_until_ready(
+        predict(
+            rng_c,
+            jax.random.uniform(rng_c, s_c.shape),
+            jax.random.uniform(rng_c, x_c.shape) if x_c is not None else None,
+            jax.random.uniform(rng_c, y_c.shape),
+            jax.random.uniform(rng_c, s_t.shape),
+            jax.random.uniform(rng_c, x_t.shape) if x_t is not None else None,
+        )
     )
+    time_end = timer()
+    print(f"Took {time_end - time_start:.2f} seconds.")
+    print("Running predictions...")
+    # mean, std of dimensions [L]
+    time_start = timer()
+    predicted_mean, predicted_std = jax.block_until_ready(
+        predict(rng, s_c, x_c, y_c, s_t, x_t)
+    )
+    time_end = timer()
+    print(f"Took {time_end - time_start:.2f} seconds.")
     print("Saving predictions...")
     results_path = mcmc_path / model_name
     results_path.mkdir(parents=True, exist_ok=True)
@@ -140,11 +176,12 @@ def evaluate(mcmc_path: Path, gnp_path: Path):
 
     results = dict()
     # pointwise-averaged metrics
+    results["true mean"] = true_mean.mean()  # to provide context for rmse
     results["rmse mean"] = rmse(true_mean, predicted_mean)
-    results["rmse std"] = rmse(true_std, predicted_std)
     results["MAP L2 loss"] = (
         (true_samples - predicted_mean) ** 2
     ).mean()  # L2 loss averaged over samples and locations
+    results["rmse std"] = rmse(true_std, predicted_std)
     results["average coverage"] = jnp.mean((lo <= true_samples) & (true_samples <= up))
 
     # global metrics

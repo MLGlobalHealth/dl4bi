@@ -1,7 +1,7 @@
 import pickle
-from datetime import datetime
 from functools import partial
 from pathlib import Path
+from timeit import default_timer as timer
 
 import arviz as az
 import hydra
@@ -127,7 +127,8 @@ def main(cfg: DictConfig):
         print("Not using urban/rural covariate.")
         x_t = None
 
-    t_start = datetime.now()
+    print("Running predictions...")
+    t_start = timer()
     model_name, s_t, y_t, theta_t = predict(
         cfg.seed,
         cfg.np,
@@ -138,13 +139,14 @@ def main(cfg: DictConfig):
         cfg.batch_size,
     )
     theta_t = theta_t.block_until_ready()
-    t_end = datetime.now()
-    print(f"Prediction took {t_end - t_start}.")
+    t_end = timer()
+    print(f"Took {t_end - t_start:.2f} seconds.")
 
     # Save results
     print("Saving results...")
     results_path = mcmc_results_path / model_name
     results_path.mkdir(parents=True, exist_ok=True)
+    OmegaConf.save(cfg, results_path / "config.yaml")
 
     jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t, y=y_t)
 
