@@ -26,7 +26,7 @@ def main(seed: int, N: int, B: int, H: int, L: int, D: int, D_s: int):
     #     "BLOCK_N2": 32,
     # }  # https://github.com/pytorch/pytorch/issues/133254
     attn = BiasedFlexAttention(bias, kernel_options)
-    # attn = torch.compile(attn, dynamic=False)  # NOTE: fails
+    attn = torch.compile(attn, dynamic=False)  # NOTE: cannot reduce over num_basis > 1
     b = sample_batch(B, H, L, D, D_s)
     attn(**b)  # precompile flex_attention (?)
     torch.cuda.synchronize()
@@ -47,8 +47,11 @@ def main(seed: int, N: int, B: int, H: int, L: int, D: int, D_s: int):
 class RBFBias(nn.Module):
     def __init__(self, num_heads, num_basis):
         super().__init__()
-        self.alpha = nn.Parameter(torch.randn(num_heads, num_basis))
-        self.beta = nn.Parameter(torch.randn(num_heads, num_basis))
+        # torch.compile cannot reduce over num_basis
+        # self.alpha = nn.Parameter(torch.randn(num_heads, num_basis))
+        # self.beta = nn.Parameter(torch.randn(num_heads, num_basis))
+        self.alpha = nn.Parameter(torch.randn(num_heads))
+        self.beta = nn.Parameter(torch.randn(num_heads))
 
     def forward(self, score, b, h, q_idx, kv_idx, qs_s, ks_s):
         q_s = qs_s[b, q_idx]
@@ -56,7 +59,8 @@ class RBFBias(nn.Module):
         d_sq = torch.square(q_s - k_s).sum()
         alpha, beta = self.alpha[h], self.beta[h]
         d_rbf = alpha * torch.exp(-beta * d_sq)
-        return score + d_rbf.sum()
+        # return score + d_rbf.sum()
+        return score + d_rbf  # when num_basis = 1
 
 
 class BiasedFlexAttention(nn.Module):

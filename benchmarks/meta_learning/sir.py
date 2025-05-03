@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import math
+import time
 from functools import partial
 from pathlib import Path
-from time import time
 
 import hydra
 import jax
@@ -51,14 +51,15 @@ def main(cfg: DictConfig):
     build = build_spatial_dataloader
     if cfg.data.type == "spatiotemporal":
         build = build_spatiotemporal_dataloader
-    train_dataloader, valid_dataloader, clbk_dataloader = build(cfg.data, cfg.sim)
+    dataloader, clbk_dataloader = build(cfg.data, cfg.sim)
+    train_dataloader = valid_dataloader = dataloader
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     if cfg.evaluate_only:
         state, _ = load_ckpt(path.with_suffix(".ckpt"))
         # run once to compile
-        evaluate(rng_test, state, model.valid_step, dataloader, num_steps=1)
-        start = time()
+        evaluate(rng_test, state, model.valid_step, valid_dataloader, num_steps=1)
+        start = time.perf_counter()
         metrics = evaluate(
             rng_test,
             state,
@@ -66,7 +67,7 @@ def main(cfg: DictConfig):
             valid_dataloader,
             cfg.valid_num_steps,
         )
-        end = time()
+        end = time.perf_counter()
         metrics["time_elapsed_s"] = end - start
         return print(metrics)
     clbk = partial(
@@ -94,7 +95,7 @@ def main(cfg: DictConfig):
         rng_test,
         state,
         model.valid_step,
-        valid_dataloader,
+        dataloader,
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
@@ -163,7 +164,7 @@ def build_spatiotemporal_dataloader(data: DictConfig, priors: DictConfig):
                     data.batch_size,
                 )
 
-    return dataloader, dataloader, partial(dataloader, is_callback=True)
+    return dataloader, partial(dataloader, is_callback=True)
 
 
 @jit
