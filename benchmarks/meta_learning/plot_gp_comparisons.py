@@ -17,6 +17,10 @@ from dl4bi.meta_learning.data.utils import (
     unbatch_BLD,
 )
 
+# TODO(danj): "fix" ConvCNP - shift and expand its window
+# TODO(danj): do expansion of domain
+# TODO(danj): do the same tests for SIR model
+
 
 def main(args):
     print(args.model_name_pattern)
