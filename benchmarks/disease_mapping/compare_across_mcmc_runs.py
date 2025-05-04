@@ -51,7 +51,7 @@ def main(runs: list[Path]):
     else:
         raise ValueError("Not ground truth found.")
 
-    data = []
+    results = []
     for run in runs:
         for outputs_path in run.glob("*/predictions.npz"):
             predicted_dist = np.load(outputs_path)
@@ -64,9 +64,17 @@ def main(runs: list[Path]):
                     true_dist, None, predicted_dist["mean"], predicted_dist["std"]
                 )
             metrics["model"] = run.name + "/" + outputs_path.parent.name
-            data.append(metrics)
+            results.append(metrics)
 
-    df = pd.DataFrame.from_records(data, index="model")
+    # constant predictor
+    data = np.load(true_run / "data.npz")
+    trivial_predictor = np.mean(data["n_pos"] / data["n"], axis=0)
+    results.append(
+        {"model": "emprirical mean constant predictor"}
+        | evaluate(true_dist, None, trivial_predictor, 0)
+    )
+
+    df = pd.DataFrame.from_records(results, index="model")
     return df
 
 
