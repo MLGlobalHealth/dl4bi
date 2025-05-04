@@ -45,6 +45,9 @@ def scatter_map(locations, values, ax: plt.Axes, cmap="viridis", vmin=None, vmax
 
 def plot_surveys_ax(data, ax: plt.Axes):
     s, n_pos, n = data["s"], data["n_pos"], data["n"]
+    if s.shape[-1] == 3:
+        # TODO draw time somehow?
+        s = s[..., :2]
 
     scatter = ax.scatter(
         *s.T,
