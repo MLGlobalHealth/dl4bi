@@ -70,7 +70,11 @@ def plot_surveys(
     data,
     shape: MultiPolygon | None = None,
 ):
-    fig, ax = map_grid(data["s"], 1, 1)
+    s = data["s"]
+    if s.shape[-1] == 3:
+        # TODO draw time somehow?
+        s = s[..., :2]  # drop time
+    fig, ax = map_grid(s, 1, 1)
     plot_surveys_ax(data, ax[0, 0])
 
     return fig
