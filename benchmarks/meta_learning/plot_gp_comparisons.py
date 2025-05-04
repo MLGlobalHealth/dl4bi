@@ -18,8 +18,6 @@ from dl4bi.meta_learning.data.utils import (
     unbatch_BLD,
 )
 
-# TODO(danj): "fix" ConvCNP - shift and expand its window
-# TODO(danj): do expansion of domain
 # TODO(danj): do the same tests for SIR model
 
 
@@ -29,25 +27,35 @@ def main(args):
         state, cfg = load_ckpt(path)
         model_cls_name = cfg.model._target_.split(".")[-1]
         models[model_cls_name] = {"state": state, "cfg": cfg}
-    plot(models, args.scale, args.shift, args.num_samples)
+    plot(
+        models,
+        args.scale,
+        args.shift,
+        args.num_ctx,
+        args.num_samples,
+        args.num_points_per_unit,
+    )
 
 
 def plot(
     models,
-    scale: int = 1,
-    shift: int = 0,
+    scale: float = 4.0,
+    shift: float = 0.0,
+    num_ctx: int = 32,
     num_samples: int = 16,
+    num_points_per_unit: int = 16,
 ):
     cfg = models["ScanTNPKR"]["cfg"]  # cfg.data, cfg.kernel should be the same for all
     cfg.data.batch_size = 1
+    half = scale / 2
     for axis in cfg.data.s:  # assumes coordinate axis is centered on origin
-        axis.start *= scale
-        axis.stop *= scale
-        axis.num *= scale
+        axis.start = -half
+        axis.stop = half
+        axis.num = int(scale * num_points_per_unit)
         axis.start += shift
         axis.stop += shift
-    cfg.data.num_ctx.min *= scale**2
-    cfg.data.num_ctx.max *= scale**2
+    cfg.data.num_ctx.min = num_ctx
+    cfg.data.num_ctx.max = num_ctx
     models["ConvCNP"] = update_convcnp_grid(models["ConvCNP"], cfg.data.s)
     dataloader = build_2d_grid_dataloader(cfg.data, cfg.kernel)
     rng = random.key(cfg.seed)
@@ -57,9 +65,9 @@ def plot(
     Path("samples").mkdir(exist_ok=True)
     for i in tqdm(range(1, num_samples + 1)):
         rng_i, rng = random.split(rng)
-        batch, _ = next(batches)
+        batch, extra = next(batches)
         f_std_min, f_std_max = jnp.inf, -jnp.inf
-        f_min, f_max = batch.f_test.min() - 0.1, batch.f_test.max() + 0.1
+        f_min, f_max = batch.f_test.min(), batch.f_test.max()
         for j, (model_cls_name, d) in enumerate(models.items()):
             state = d["state"]
             output = state.apply_fn(
@@ -72,6 +80,8 @@ def plot(
             models[model_cls_name]["output"] = output
             f_std_min = min(f_std_min, output.std.min())
             f_std_max = max(f_std_max, output.std.max())
+            f_max = max(f_max, output.mu.max())
+            f_min = min(f_max, output.mu.min())
         f_norm = mpl.colors.Normalize(vmin=f_min, vmax=f_max)
         f_std_norm = mpl.colors.Normalize(vmin=f_std_min, vmax=f_std_max)
         fig, axes = plt.subplots(3, len(models), figsize=(3 * num_models, 9))
@@ -86,7 +96,7 @@ def plot(
                 f_pred_axis=axes[1, j],
                 f_std_axis=axes[2, j],
                 f_norm=f_norm,
-                # f_std_norm=f_std_norm,
+                f_std_norm=f_std_norm,
                 task_axis=None if j else axes[0, 1],
                 ground_truth_axis=None if j else axes[0, 2],
             )
@@ -96,7 +106,9 @@ def plot(
             if not ax.has_data():
                 ax.axis("off")
         plt.tight_layout()
-        plt.savefig(f"samples/gp_scaled_{scale}x_shifted_{shift}_{i}.png")
+        plt.savefig(
+            f"samples/gp_ls_{extra['ls']:0.3f}scale_{scale}_shifted_{shift}_{i}.png"
+        )
         plt.clf()
 
 
@@ -158,22 +170,33 @@ def parse_args(argv):
     )
     parser.add_argument(
         "--scale",
-        default=1,
-        type=int,
-        help="Scale each axis in image by this value.",
+        default=4.0,
+        type=float,
+        help="Number of units in each axis.",
     )
     parser.add_argument(
         "--shift",
-        default=0,
-        type=int,
+        default=0.0,
+        type=float,
         help="Shift image by this value.",
     )
     parser.add_argument(
-        "-n",
+        "--num_ctx",
+        default=256,
+        type=int,
+        help="Number of context points.",
+    )
+    parser.add_argument(
         "--num_samples",
         default=16,
         type=int,
-        help="Shift image by this value.",
+        help="Number of samples to plot.",
+    )
+    parser.add_argument(
+        "--num_points_per_unit",
+        default=16,
+        type=int,
+        help="Number of points per unit.",
     )
     return parser.parse_args(argv[1:])
 
