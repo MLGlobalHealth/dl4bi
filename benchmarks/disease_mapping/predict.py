@@ -166,7 +166,7 @@ def main(cfg: DictConfig):
 
     # Summary
     print("Preparing Arviz summary...")
-    num_chains = OmegaConf.load(mcmc_results_path / "config.yaml").num_chains
+    num_chains = mcmc.num_chains
 
     def split_chains(samples: jax.Array):
         return samples.reshape(num_chains, -1, *samples.shape[1:])
