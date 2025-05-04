@@ -9,10 +9,10 @@ valid_num_steps: 5000 # exhaust valid dataloader
 valid_interval: 5000
 plot_interval: 50000
 data:
-  batch_size: 16
-  num_ctx_min_per_t: 12  # ~5% of 225 = 15 * 15
-  num_ctx_max_per_t: 56  # ~25% of 225 = 15 * 15
-  num_test: 225  # 225 = 15 * 15 = predicted frame
+  batch_size: 8
+  num_ctx_min_per_t: 45  # ~5% of 900 = 30 * 30
+  num_ctx_max_per_t: 225  # ~25% of 900 = 30 * 30
+  num_test: 900  # 900 = 30 * 30 = predicted frame
   train_region: central_europe
   valid_region: northern_europe
   test_region: western_europe
