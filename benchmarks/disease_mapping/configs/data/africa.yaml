@@ -9,8 +9,8 @@ s:
     stop: 38
     num: 74
 num_ctx:
-  min: 500 # ~5%
-  max: 5000 # ~50%
-num_test: 10000
-batch_size: 4 
+  min: 200 # ~5%
+  max: 2048 # ~50%
+num_test: 4096
+batch_size: 16 
 # obs_noise: 0.01

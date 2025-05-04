@@ -9,6 +9,7 @@ import numpyro.distributions as dist
 from sps.kernels import _prepare_dims, exponential, periodic, rbf
 
 from benchmarks.disease_mapping.utils import haversine_distance, make_pairwise
+from dl4bi.core.utils import breakpoint_if_nonfinite
 
 # TODO @pgrynfelder:
 # perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
@@ -29,12 +30,12 @@ def kernel(x, y, /, *, var, ls, var_t=None, ls_t=None, **_):
         x, xt = jnp.split(x, [2], axis=-1)
         y, yt = jnp.split(y, [2], axis=-1)
         assert var_t is not None and ls_t is not None
-        k_t = periodic(xt, yt, var=var_t, ls=ls_t)
+        k_t = make_pairwise(lambda x, y: jnp.sin(jnp.pi * jnp.abs(x - y)))(xt, yt)
+        k_t = var_t * jnp.exp(-k_t / ls_t)
     else:
         raise ValueError(f"Invalid input shape to kernel: {x.shape}")
 
     d = make_pairwise(haversine_distance)(x, y)
-
     return var * jnp.exp(-d / ls) + k_t
 
 
@@ -60,6 +61,7 @@ def spatial_effect(s: jax.Array, *, sample_shape: tuple[int, ...] = ()):
     cov = kernel(s, s, var=var, ls=ls, var_t=var_t, ls_t=ls_t)
     L = cov.shape[0]
     cov = cov + jitter * jnp.eye(L)
+    breakpoint_if_nonfinite(cov)
 
     y = numpyro.sample(
         "y",
