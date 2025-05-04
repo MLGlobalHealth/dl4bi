@@ -43,7 +43,6 @@ def spatial_effect(s: jax.Array, *, sample_shape: tuple[int, ...] = ()):
     cov = kernel(s, s, var=var, ls=ls)
     L = cov.shape[0]
     cov = cov + jitter * jnp.eye(L)
-    breakpoint_if_nonfinite(cov)
 
     y = numpyro.sample(
         "y",
