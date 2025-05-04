@@ -85,7 +85,6 @@ def evaluate(mcmc_path: Path, gnp_path: Path):
     print(data.keys())
 
     s_c, n, n_pos = data["s"], data["n"], data["n_pos"]
-    y_c = jnp.stack([n_pos, n], axis=-1)
     s_t, theta_t = true_dist["s"], true_dist["theta"]
 
     if "x" in data:
@@ -97,8 +96,13 @@ def evaluate(mcmc_path: Path, gnp_path: Path):
         print("No x.")
 
     # Load GNP model
-    state, config = load_ckpt(gnp_path)
-    model_name = config.name
+    state, model_cfg = load_ckpt(gnp_path)
+    model_name = model_cfg.name
+    match model_cfg.get("input_format", "survey"):
+        case "survey":
+            y_c = jnp.stack([n_pos, n], axis=-1)
+        case "theta":
+            y_c = (n_pos / n)[..., None]
 
     @jit
     def predict(rng, s_c, x_c, y_c, s_t, x_t):
