@@ -14,6 +14,7 @@ conv_net:
 dec:
   _target_: dl4bi.conv.ConvDeepSet
   d_out: 128
+  use_density: False
 head:
   _target_: dl4bi.mlp.MLP
   dims: [128, 128, 128, 2]
