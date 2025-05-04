@@ -43,8 +43,11 @@ def plot(
     for axis in cfg.data.s:  # assumes coordinate axis is centered on origin
         axis.start *= scale
         axis.stop *= scale
+        axis.num *= scale
         axis.start += shift
         axis.stop += shift
+    cfg.data.num_ctx.min *= scale**2
+    cfg.data.num_ctx.max *= scale**2
     models["ConvCNP"] = update_convcnp_grid(models["ConvCNP"], cfg.data.s)
     dataloader = build_2d_grid_dataloader(cfg.data, cfg.kernel)
     rng = random.key(cfg.seed)
@@ -56,7 +59,7 @@ def plot(
         rng_i, rng = random.split(rng)
         batch, _ = next(batches)
         f_std_min, f_std_max = jnp.inf, -jnp.inf
-        f_min, f_max = batch.f_test.min(), batch.f_test.max()
+        f_min, f_max = batch.f_test.min() - 0.1, batch.f_test.max() + 0.1
         for j, (model_cls_name, d) in enumerate(models.items()):
             state = d["state"]
             output = state.apply_fn(
@@ -69,8 +72,6 @@ def plot(
             models[model_cls_name]["output"] = output
             f_std_min = min(f_std_min, output.std.min())
             f_std_max = max(f_std_max, output.std.max())
-            f_min = min(f_min, output.mu.min())
-            f_max = max(f_max, output.mu.max())
         f_norm = mpl.colors.Normalize(vmin=f_min, vmax=f_max)
         f_std_norm = mpl.colors.Normalize(vmin=f_std_min, vmax=f_std_max)
         fig, axes = plt.subplots(3, len(models), figsize=(3 * num_models, 9))
@@ -85,7 +86,7 @@ def plot(
                 f_pred_axis=axes[1, j],
                 f_std_axis=axes[2, j],
                 f_norm=f_norm,
-                f_std_norm=f_std_norm,
+                # f_std_norm=f_std_norm,
                 task_axis=None if j else axes[0, 1],
                 ground_truth_axis=None if j else axes[0, 2],
             )
@@ -95,7 +96,7 @@ def plot(
             if not ax.has_data():
                 ax.axis("off")
         plt.tight_layout()
-        plt.savefig(f"samples/gp_shifted_{shift}_scaled_{scale}x_{i}.png")
+        plt.savefig(f"samples/gp_scaled_{scale}x_shifted_{shift}_{i}.png")
         plt.clf()
 
 
