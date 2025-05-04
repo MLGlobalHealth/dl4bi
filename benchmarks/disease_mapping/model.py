@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from sps.kernels import _prepare_dims, exponential, rbf
+from sps.kernels import _prepare_dims, exponential, periodic, rbf
 
 from benchmarks.disease_mapping.utils import haversine_distance, make_pairwise
 
@@ -15,7 +15,7 @@ from benchmarks.disease_mapping.utils import haversine_distance, make_pairwise
 
 
 # NOTE: RBF is not positive definite on a sphere!
-def kernel(x, y, /, *, var, ls, **_):
+def kernel(x, y, /, *, var, ls, var_t=None, ls_t=None, **_):
     """
     Geodesic Laplace (also Exponential, Matern 1/2) kernel.
     """
@@ -23,10 +23,19 @@ def kernel(x, y, /, *, var, ls, **_):
     # return exponential(x, y, var=var, ls=ls)
 
     x, y = _prepare_dims(x, y)
+    if x.shape[-1] == 2:
+        k_t = 0
+    elif x.shape[-1] == 3:
+        x, xt = jnp.split(x, [2], axis=-1)
+        y, yt = jnp.split(y, [2], axis=-1)
+        assert var_t is not None and ls_t is not None
+        k_t = periodic(xt, yt, var=var_t, ls=ls_t)
+    else:
+        raise ValueError(f"Invalid input shape to kernel: {x.shape}")
 
     d = make_pairwise(haversine_distance)(x, y)
-    # d *= jnp.pi / 180.0 * 6371  # convert to km
-    return var * jnp.exp(-d / ls)
+
+    return var * jnp.exp(-d / ls) + k_t
 
 
 jitter = 1e-4  # note this is in fact N(0, s2=jitter) independent noise
