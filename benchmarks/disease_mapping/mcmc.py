@@ -2,6 +2,7 @@ import pickle
 from datetime import datetime
 from inspect import getsource
 from pathlib import Path
+from timeit import default_timer as timer
 
 import arviz as az
 import hydra
@@ -80,8 +81,11 @@ def main(cfg: DictConfig):
     (results_path / "model.txt").write_text(getsource(model))
 
     # Run MCMC
+    timer_start = timer()
     mcmc = run_mcmc(cfg, data)
-
+    timer_end = timer()
+    print(f"MCMC took {timer_end - timer_start:.2f} seconds.")
+    (results_path / "time.txt").write_text(f"{timer_end - timer_start:.2f} seconds")
     # Save results
     with open(results_path / "mcmc.pickle", "wb") as f:
         pickle.dump(mcmc, f)
