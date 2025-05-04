@@ -88,6 +88,7 @@ def sample_prior(rng, s: jax.Array, n: jax.Array, x: jax.Array | None, B: int):
 
 
 def sample_n(rng, sample_shape):
+    # TODO change to floor(Normal(50, 35^2)) v 1
     return random.randint(rng, sample_shape, 1, 150)
     # scale = 100
     # shape = 3
