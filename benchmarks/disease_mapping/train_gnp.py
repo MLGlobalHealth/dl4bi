@@ -42,7 +42,7 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader = valid_dataloader = build_dataloader(cfg.data)
+    train_dataloader = valid_dataloader = build_dataloader(cfg.data, cfg.input_format)
     # TODO: fix this
     # callbacks = [Callback(wandb_2d_plots, cfg.plot_interval)]
     # callback_dataloader = build_grid_dataloader(cfg.data)
@@ -116,6 +116,7 @@ def make_batch(
     num_ctx_max,
     num_test,
     test_includes_ctx,
+    input_format="survey",
 ):
     """
     Adapted from `meta_learning.data.spatial._batch`,
@@ -154,8 +155,12 @@ def make_batch(
     # Various options for feeding the context
     # f_c = z_c_obs
     # f_c = jnp.concat([z_c_obs, n_c], axis=-1)
-    f_c = jnp.concat([n_pos_c, n_c], axis=-1)
     # f_c = jnp.concat([n_pos_c / n_c, n_c], axis=-1)
+    match input_format:
+        case "survey":
+            f_c = jnp.concat([n_pos_c, n_c], axis=-1)
+        case "theta":
+            f_c = (n_pos_c / n_c)[..., None]
 
     # Target theta
     f_t = jax.nn.sigmoid(z_t)
@@ -174,7 +179,7 @@ def make_batch(
     )
 
 
-def build_dataloader(cfg: DictConfig):
+def build_dataloader(cfg: DictConfig, input_format="survey"):
     """
     Generates samples from `model.spatial_effect`.
     """
@@ -207,6 +212,7 @@ def build_dataloader(cfg: DictConfig):
             num_ctx_max=cfg.num_ctx.max,
             num_test=cfg.num_test,
             test_includes_ctx=True,
+            input_format=input_format,
         )
 
     def dataloader(rng: jax.Array):

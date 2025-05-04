@@ -36,3 +36,4 @@ optimizer:
       b1: 0.9
       b2: 0.999
       weight_decay: 1.0e-4
+input_format: "survey" # survey -> [n_pos, n], or theta -> [n_pos / n]
