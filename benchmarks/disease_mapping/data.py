@@ -154,7 +154,13 @@ def get_population_density(iso: str, locations: np.array, year=2007):
     year = int(year)
     iso = iso.upper()
     file_path = CACHE_DIR / f"{iso}_{year}_population_density.tif"
-    assert 2000 <= year <= 2020
+    # assert 2000 <= year <= 2020
+    if year < 2000:
+        year = 2000
+        print(f"Year {year} is not available. Using 2000 instead.")
+    if year > 2020:
+        year = 2020
+        print(f"Year {year} is not available. Using 2020 instead.")
 
     if not file_path.exists():
         url = f"https://data.worldpop.org/GIS/Population_Density/Global_2000_2020_1km_UNadj/{year}/{iso}/{iso.lower()}_pd_{year}_1km_UNadj.tif"
