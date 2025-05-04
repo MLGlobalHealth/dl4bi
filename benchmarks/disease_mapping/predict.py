@@ -35,7 +35,7 @@ def predict(seed, model, s_c, samples_c, s_t, x_t, batch_size):
     rng = jax.random.key(seed)
 
     y_c = samples_c["y"]
-    params = samples_c
+    params = {k: v for k, v in samples_c.items() if k != "y"}
 
     print("Num samples:", y_c.shape[0])
     print("Num context locations:", s_c.shape[0])
