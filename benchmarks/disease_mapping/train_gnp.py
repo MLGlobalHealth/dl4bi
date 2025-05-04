@@ -88,18 +88,13 @@ def sample_prior(rng, s: jax.Array, n: jax.Array, x: jax.Array | None, B: int):
 
 
 def sample_n(rng, sample_shape):
-    # TODO change to floor(Normal(50, 35^2)) v 1
-    return random.randint(rng, sample_shape, 1, 150)
-    # scale = 100
-    # shape = 3
-    # # floor ( InverseGamma(scale, shape) )
-    # return jnp.ceil(scale / random.gamma(rng, shape, sample_shape)).astype(jnp.int32)
+    return random.geometric(rng, 0.02, sample_shape)
 
 
 def sample_x(rng, sample_shape):
-    # TODO: might need to sample this per context/target
+    # TODO: might need to sample this per context/target, but that messes with the batch generation
     # about 30% of surveys are urban but <1% of the country grid is
-    p = 0.3
+    p = 0.2
     urban = random.bernoulli(rng, p, sample_shape).astype(jnp.float32)
     rural = 1 - urban
     return jnp.stack([urban, rural], axis=-1)
