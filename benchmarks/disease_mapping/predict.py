@@ -34,7 +34,7 @@ def predict(seed, model, s_c, samples_c, s_t, x_t, batch_size):
     """
     rng = jax.random.key(seed)
 
-    y_c = samples_c.pop("y")
+    y_c = samples_c["y"]
     params = samples_c
 
     print("Num samples:", y_c.shape[0])
