@@ -49,8 +49,15 @@ def spatial_effect(s: jax.Array, *, sample_shape: tuple[int, ...] = ()):
     """
     ls = numpyro.sample("ls", dist.InverseGamma(3, 3))
     var = numpyro.sample("var", dist.InverseGamma(3, 3))
+    if s.shape[-1] == 3:
+        # parameters for the time component
+        ls_t = numpyro.sample("ls_t", dist.InverseGamma(3, 3))
+        var_t = numpyro.sample("var_t", dist.InverseGamma(3, 3))
+    else:
+        ls_t = None
+        var_t = None
 
-    cov = kernel(s, s, var=var, ls=ls)
+    cov = kernel(s, s, var=var, ls=ls, var_t=var_t, ls_t=ls_t)
     L = cov.shape[0]
     cov = cov + jitter * jnp.eye(L)
 
