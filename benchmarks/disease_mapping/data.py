@@ -189,6 +189,7 @@ def get_survey_data(
     query: str | None = None,
     res: int | None = None,  # if not None round to grid of given res in seconds
     urban_rural: bool = False,
+    time: bool = False,
 ):
     dataset_id = "doi:10.7910/DVN/Z29FR0/FFDQI3"
     url = f"https://dataverse.harvard.edu/api/access/datafile/:persistentId/?persistentId={dataset_id}"
@@ -227,31 +228,10 @@ def get_survey_data(
     print(f"Selected {len(df)} rows.")
     assert len(df) > 0, "Number of surveys selected must be >0."
 
-    # if res is not None:
-    #     df.Long = round_to_grid(df.Long, res)
-    #     df.Lat = round_to_grid(df.Lat, res)
-    #     # merge surveys from points close-by into one
-    #     df = df.groupby(
-    #         # since skipping time in s, ignore time for merging
-    #         ["Lat", "Long"],
-    #         # ["Lat", "Long", "YY", "MM"],
-    #         as_index=False,
-    #     ).sum()
-
     s = np.stack([df.Long, df.Lat], axis=-1)
     print(
         f"Locations: shape {s.shape}, bbox: ({s[:, 0].min()}, {s[:, 1].min()}), ({s[:, 0].max()}, {s[:, 1].max()})"
     )
-
-    # skip time for now
-    # t = (df.YY * 12 + df.MM).to_numpy()
-    # t -= t.min()
-    # t = t[..., None]
-
-    # s = np.hstack([s, t])
-
-    n_pos = df.Pf.to_numpy()
-    n = df.Ex.to_numpy()
 
     if urban_rural:
         x = np.zeros((s.shape[0], 2))
@@ -262,6 +242,20 @@ def get_survey_data(
                     print(f"Getting urban/rural for {country} in {year}")
                     urban_rural = get_urban_rural(country, s[mask], year)
                     x[mask] = urban_rural
-        return {"s": s, "n_pos": n_pos, "n": n, "x": x}
     else:
-        return {"s": s, "n_pos": n_pos, "n": n}
+        x = None
+
+    if time:
+        t = (df.YY + (df.MM - 1) / 12).to_numpy()
+        t -= df.YY.min()
+        t = t[..., None]
+        print("Time extent:", t.min(), t.max())
+        s = np.concat([s, t], axis=-1)
+
+    n_pos = df.Pf.to_numpy()
+    n = df.Ex.to_numpy()
+
+    data = {"s": s, "n_pos": n_pos, "n": n}
+    if x is not None:
+        data["x"] = x
+    return data
