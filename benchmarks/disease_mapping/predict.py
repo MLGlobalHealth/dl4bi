@@ -97,13 +97,6 @@ def predict(seed, model, s_c, samples_c, s_t, x_t, batch_size):
     return model_name, s_t[0], unbatch(y_t), unbatch(theta_t)
 
 
-def aggregate(
-    samples,  # [..., L],
-    populations,  # [L]
-):
-    return jnp.sum(samples * populations, axis=-1) / jnp.sum(populations)
-
-
 @hydra.main("configs", "prediction", None)
 def main(cfg: DictConfig):
     if cfg.mcmc:
@@ -155,15 +148,6 @@ def main(cfg: DictConfig):
     fig = plot_predictions(s_t, y_t, theta_t, data, samples_c["y"])
     fig.savefig(results_path / "predictions.png", dpi=300)
 
-    # Aggregate results
-    print("Aggregating over the area...")
-    populations = get_population(cfg.iso, s_t, cfg.year, cfg.res)
-    aggregate_samples = aggregate(theta_t, populations)
-
-    jnp.save(results_path / "aggregate_samples.npy", aggregate_samples)
-    fig = plot_distribution(aggregate_samples)
-    fig.savefig(results_path / "aggregate_distribution.png", dpi=300)
-
     # Summary
     print("Preparing Arviz summary...")
     num_chains = mcmc.num_chains
@@ -172,7 +156,6 @@ def main(cfg: DictConfig):
         return samples.reshape(num_chains, -1, *samples.shape[1:])
 
     posterior = {
-        "aggregate_theta_t": aggregate_samples,
         "theta_t": theta_t,
         "y_t": y_t,
     }  # | samples

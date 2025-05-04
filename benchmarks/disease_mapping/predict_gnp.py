@@ -16,7 +16,7 @@ from dl4bi.core.train import load_ckpt
 
 
 def plot_side_by_side(s, gp_mean, gp_std, predicted_mean, predicted_std):
-    fig, axes = map_grid(s, 2, 2)
+    fig, axes = map_grid(s, 2, 3)
     fig.suptitle("GP vs Neural Process")
 
     std_min = min(gp_std.min(), predicted_std.min())
@@ -25,13 +25,22 @@ def plot_side_by_side(s, gp_mean, gp_std, predicted_mean, predicted_std):
     mean_max = 1
 
     scatter_map(s, gp_mean, ax=axes[0, 0], vmin=mean_min, vmax=mean_max)
-    scatter_map(s, gp_std, ax=axes[0, 1], vmin=std_min, vmax=std_max)
-    scatter_map(s, predicted_mean, ax=axes[1, 0], vmin=mean_min, vmax=mean_max)
+    scatter_map(s, predicted_mean, ax=axes[0, 1], vmin=mean_min, vmax=mean_max)
+    mean_diff = predicted_mean - gp_mean
+    vmax = jnp.abs(mean_diff).max()
+    scatter_map(s, mean_diff, ax=axes[0, 2], vmin=-vmax, vmax=vmax, cmap="RdBu")
+    scatter_map(s, gp_std, ax=axes[1, 0], vmin=std_min, vmax=std_max)
     scatter_map(s, predicted_std, ax=axes[1, 1], vmin=std_min, vmax=std_max)
+    std_diff = predicted_std - gp_std
+    vmax = jnp.abs(std_diff).max()
+    scatter_map(s, std_diff, ax=axes[1, 2], vmin=-vmax, vmax=vmax, cmap="RdBu")
     axes[0, 0].set_title("GP mean")
-    axes[0, 1].set_title("GP std")
-    axes[1, 0].set_title("NP mean")
+    axes[0, 1].set_title("NP mean")
+    axes[0, 2].set_title("Difference")
+    axes[1, 0].set_title("GP std")
     axes[1, 1].set_title("NP std")
+    axes[1, 2].set_title("Difference")
+
     return fig
 
 
@@ -60,7 +69,7 @@ def mvn_hdi(mean, cov, samples):
         raise ValueError(f"Invalid covariance shape: {cov.shape}")
 
 
-def evaluate(mcmc_path: Path, gnp_path: Path):
+def predict(mcmc_path: Path, gnp_path: Path):
     rng = jax.random.key(0)
 
     if isinstance(mcmc_path, str):
@@ -115,6 +124,7 @@ def evaluate(mcmc_path: Path, gnp_path: Path):
             x_test=x_t[None] if x_t is not None else None,
             s_test=s_t[None],
             rngs={"extra": rng},
+            training=False,
         )
         match output:
             case DiagonalMVNOutput(mean, std):
@@ -165,40 +175,6 @@ def evaluate(mcmc_path: Path, gnp_path: Path):
     )
     fig.savefig(results_path / "predictions.png", dpi=300)
 
-    # ---
-    # Benchmarks
-    # ---
-    print("Running benchmarks...")
-    true_samples = theta_t
-    true_mean = true_samples.mean(axis=0)
-    true_std = true_samples.std(axis=0)
-
-    ci = 0.95
-    z_score = jnp.abs(jax.scipy.stats.norm.ppf((1 - ci) / 2))
-    lo = predicted_mean - z_score * predicted_std
-    up = predicted_mean + z_score * predicted_std
-
-    results = dict()
-    # pointwise-averaged metrics
-    results["true mean"] = true_mean.mean()  # to provide context for rmse
-    results["rmse mean"] = rmse(true_mean, predicted_mean)
-    results["MAP L2 loss"] = (
-        (true_samples - predicted_mean) ** 2
-    ).mean()  # L2 loss averaged over samples and locations
-    results["rmse std"] = rmse(true_std, predicted_std)
-    results["average coverage"] = jnp.mean((lo <= true_samples) & (true_samples <= up))
-
-    # global metrics
-    # this nll is normalized by num samples and num locations
-    results["data nll"] = -jsp.stats.norm.logpdf(
-        true_samples, predicted_mean, predicted_std
-    ).mean()
-    results["coverage"] = mvn_hdi(predicted_mean, predicted_std, true_samples)
-
-    df = pd.DataFrame(results.items(), columns=["metric", "value"])
-    df.to_csv(results_path / "metrics.csv", index=False)
-    return results
-
 
 def main():
     import argparse
@@ -224,8 +200,7 @@ def main():
     )
     print(f"Using MCMC path: {mcmc_path}")
 
-    results = evaluate(mcmc_path, args.gnp_path)
-    print(results)
+    predict(mcmc_path, args.gnp_path)
 
 
 if __name__ == "__main__":
