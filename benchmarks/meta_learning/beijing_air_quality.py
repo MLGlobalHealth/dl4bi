@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import sys
+from io import StringIO
 from pathlib import Path
 
 import hydra
@@ -9,18 +11,23 @@ import wandb
 from hydra.utils import instantiate
 from jax import random, vmap
 from omegaconf import DictConfig, OmegaConf
-from sklearn.preprocessing import StandardScaler
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from dl4bi.core.train import (
+    Callback,
     evaluate,
     save_ckpt,
     train,
 )
-from dl4bi.meta_learning.data.tabular import TabularBatch, TabularData
+from dl4bi.meta_learning.data.spatiotemporal import (
+    SpatiotemporalBatch,
+    SpatiotemporalData,
+)
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
-@hydra.main("configs/household_electric", config_name="default", version_base=None)
+@hydra.main("configs/beijing_air_quality", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
     wandb.init(
@@ -32,10 +39,13 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    rng_data, rng_train, rng_test = random.split(rng, 3)
-    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(rng_data)
+    rng_train, rng_test = random.split(rng)
+    train_dataloader, valid_dataloader, test_dataloader, callback_dataloader = (
+        build_dataloaders(**cfg.data)
+    )
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
+    clbk = Callback(plot, cfg.plot_interval)
     state = train(
         rng_train,
         model,
@@ -47,12 +57,15 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         cfg.valid_num_steps,
         valid_dataloader,
+        callbacks=[clbk],
+        callback_dataloader=callback_dataloader,
+        return_state="best",
     )
     metrics = evaluate(
         rng_test,
         state,
         model.valid_step,
-        valid_dataloader,
+        test_dataloader,
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
@@ -61,6 +74,7 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
+# TODO(danj): finish!!
 def build_dataloaders(
     rng: jax.Array,
     batch_size: int = 16,
@@ -118,32 +132,75 @@ def build_dataloaders(
 
 
 def load_data(rng: jax.Array):
-    # source: https://www.kaggle.com/datasets/uciml/electric-power-consumption-data-set
-    df = pd.read_csv("cache/household_power_consumption.txt", sep=";").dropna()
-    df["dt"] = pd.to_datetime(df.Date + " " + df.Time, dayfirst=True)
-    df["year"] = df.dt.dt.year
-    df["month"] = df.dt.dt.month
-    df["day"] = df.dt.dt.day
-    df = df.drop(columns=["Date", "Time", "dt"])
-    fX = df.values
-    N = fX.shape[0]
-    pct_train, pct_test = 0.8, 0.1
-    num_train, num_test = int(pct_train * N), int(pct_test * N)
-    perm = random.permutation(rng, N)
-    fX = fX[perm]
-    fX_train, fX_valid, fX_test = (
-        fX[:num_train],
-        fX[num_train:-num_test],
-        fX[-num_test:],
+    dir = Path("cache/beijing_air_quality")
+    try:
+        df = pd.concat([pd.read_csv(p) for p in dir.glob("*.csv")], ignore_index=True)
+        df = df.dropna()
+        df_coords = load_coords()
+        df = df.merge(df_coords, on="station", how="left")
+        df = df.drop(columns=["No", "station"])
+    except FileNotFoundError:
+        url = "https://archive.ics.uci.edu/dataset/501/beijing+multi+site+air+quality+data"
+        msg = f"""
+        1. Download the dataset here: {url}
+        2. Unzip the dataset
+        3. Move files from the PRSA_* directory into "{dir}"
+        """
+        print(msg)
+        sys.exit("Dataset not available.")
+    N = df.shape[0]
+    N_train = int(N * 0.8)
+    N_test = int(N * 0.1)
+    permute_idx = random.choice(rng, N, (N,), replace=False)
+    df = df.iloc[permute_idx]
+    df_train, df_valid, df_test = df[:N_train], df[N_train:-N_test], df[-N_test:]
+    df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
+
+
+def load_coords():
+    return pd.read_csv(
+        StringIO("""
+station,Latitude,Longitude
+Aotizhongxin,39.982,116.397
+Changping,40.217,116.230
+Dingling,40.292,116.220
+Dongsi,39.929,116.417
+Guanyuan,39.929,116.339
+Gucheng,39.914,116.184
+Huairou,40.328,116.628
+Nongzhanguan,39.937,116.461
+Shunyi,40.127,116.655
+Tiantan,39.886,116.407
+Wanliu,39.987,116.287
+Wanshouxigong,39.878,116.352
+    """)
     )
-    scaler = StandardScaler()
-    fX_train = scaler.fit_transform(fX_train)
-    fX_valid = scaler.transform(fX_valid)
-    fX_test = scaler.transform(fX_test)
-    f_train, X_train = fX_train[:, [0]], fX_train[:, 1:]
-    f_valid, X_valid = fX_valid[:, [0]], fX_valid[:, 1:]
-    f_test, X_test = fX_test[:, [0]], fX_test[:, 1:]
-    return (f_train, X_train), (f_valid, X_valid), (f_test, X_test)
+
+
+def standardize_by_train(
+    df_train: pd.DataFrame,
+    df_valid: pd.DataFrame,
+    df_test: pd.DataFrame,
+):
+    num_feats = list(set(df_train.columns) - {"wd"})
+    cat_feats = ["wd"]
+    tx = ColumnTransformer(
+        transformers=[
+            ("num", StandardScaler(), num_feats),
+            ("cat", OneHotEncoder(sparse_output=False), cat_feats),
+        ],
+        remainder="passthrough",
+    )
+    x_train = tx.fit_transform(df_train)
+    x_valid = tx.transform(df_valid)
+    x_test = tx.transform(df_test)
+    tx_onehot = tx.named_transformers_["cat"]
+    cat_feats = tx_onehot.get_feature_names_out(cat_feats).tolist()
+    cols = num_feats + cat_feats
+    df_train = pd.DataFrame(x_train, columns=cols)
+    df_valid = pd.DataFrame(x_valid, columns=cols)
+    df_test = pd.DataFrame(x_test, columns=cols)
+    return df_train, df_valid, df_test
 
 
 if __name__ == "__main__":
