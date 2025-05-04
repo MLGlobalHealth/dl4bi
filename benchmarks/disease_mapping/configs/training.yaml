@@ -1,6 +1,6 @@
 defaults:
   - _self_ # use default global values below
-  - data: moz
+  - data: tza
   - model: spatial/tnp_kr_scan 
   # specified in code
   # - kernel: rbf 

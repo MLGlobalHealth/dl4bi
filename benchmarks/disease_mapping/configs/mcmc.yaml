@@ -1,7 +1,7 @@
 # data
-iso: "moz" # `null` for all of Africa
+iso: "tza" # `null` for all of Africa
 region: null
-query: "YY==2007" # extra data filtering
+query: "YY==2015" # extra data filtering
 urban_rural: false
 time: false
 
