@@ -30,13 +30,14 @@ def kernel(x, y, /, *, var, ls, var_t=None, ls_t=None, **_):
         x, xt = jnp.split(x, [2], axis=-1)
         y, yt = jnp.split(y, [2], axis=-1)
         assert var_t is not None and ls_t is not None
-        k_t = make_pairwise(lambda x, y: jnp.sin(jnp.pi * jnp.abs(x - y)))(xt, yt)
-        k_t = var_t * jnp.exp(-k_t / ls_t)
+        d_t = make_pairwise(lambda x, y: jnp.sin(jnp.pi * jnp.abs(x - y)))(xt, yt)
+        d_t = d_t.squeeze(-1)
+        k_t = var_t * jnp.exp(-d_t / ls_t)
     else:
         raise ValueError(f"Invalid input shape to kernel: {x.shape}")
 
     d = make_pairwise(haversine_distance)(x, y)
-    return var * jnp.exp(-d / ls) + k_t
+    return var * jnp.exp(-d / ls) * k_t
 
 
 jitter = 1e-4  # note this is in fact N(0, s2=jitter) independent noise
