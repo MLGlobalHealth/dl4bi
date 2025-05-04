@@ -246,9 +246,7 @@ def get_survey_data(
         x = None
 
     if time:
-        t = (df.YY + (df.MM - 1) / 12).to_numpy()
-        t -= df.YY.min()
-        t = t[..., None]
+        t = (df.YY + (df.MM - 1) / 12 - df.YY.min()).to_numpy()[..., None]
         print("Time extent:", t.min(), t.max())
         s = np.concat([s, t], axis=-1)
 
