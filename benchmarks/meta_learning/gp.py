@@ -157,7 +157,7 @@ def wandb_1d_plots(
     )
     if isinstance(output, tuple):
         output, _ = output  # throw away latent samples
-    path = Path(f"/tmp/gp_1d_{datetime.now().isoformat()}.png")
+    path = f"/tmp/gp_1d_{datetime.now().isoformat()}.png"
     subtitle = ", ".join([f"{k}: {v:.2f}" for k, v in extra.items()])
     fig = batch.plot_1d(output.mu, output.std, subtitle=subtitle, num_plots=num_plots)
     fig.savefig(path)
@@ -182,7 +182,7 @@ def wandb_2d_plots(
     )
     if isinstance(output, tuple):
         output, _ = output  # throw away latent samples
-    path = Path(f"/tmp/gp_2d_{datetime.now().isoformat()}.png")
+    path = f"/tmp/gp_2d_{datetime.now().isoformat()}.png"
     cmap = mpl.colormaps.get_cmap("Spectral_r")
     cmap.set_bad("grey")
     subtitle = ", ".join([f"{k}: {v:.2f}" for k, v in extra.items()])
