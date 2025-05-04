@@ -160,7 +160,7 @@ def make_batch(
         case "survey":
             f_c = jnp.concat([n_pos_c, n_c], axis=-1)
         case "theta":
-            f_c = (n_pos_c / n_c)[..., None]
+            f_c = n_pos_c / n_c
 
     # Target theta
     f_t = jax.nn.sigmoid(z_t)
