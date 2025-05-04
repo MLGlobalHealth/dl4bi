@@ -16,28 +16,16 @@ from dl4bi.core.utils import breakpoint_if_nonfinite
 
 
 # NOTE: RBF is not positive definite on a sphere!
-def kernel(x, y, /, *, var, ls, var_t=None, ls_t=None, **_):
+def kernel(x, y, /, *, var, ls, **_):
     """
     Geodesic Laplace (also Exponential, Matern 1/2) kernel.
     """
-    # return rbf(x, y, var=var, ls=ls)
-    # return exponential(x, y, var=var, ls=ls)
 
     x, y = _prepare_dims(x, y)
-    if x.shape[-1] == 2:
-        k_t = 0
-    elif x.shape[-1] == 3:
-        x, xt = jnp.split(x, [2], axis=-1)
-        y, yt = jnp.split(y, [2], axis=-1)
-        assert var_t is not None and ls_t is not None
-        d_t = make_pairwise(lambda x, y: jnp.sin(jnp.pi * jnp.abs(x - y)))(xt, yt)
-        d_t = d_t.squeeze(-1)
-        k_t = var_t * jnp.exp(-d_t / ls_t)
-    else:
-        raise ValueError(f"Invalid input shape to kernel: {x.shape}")
+    assert x.shape[-1] == y.shape[-1] == 2
 
     d = make_pairwise(haversine_distance)(x, y)
-    return var * jnp.exp(-d / ls) * k_t
+    return var * jnp.exp(-d / ls)
 
 
 jitter = 1e-4  # note this is in fact N(0, s2=jitter) independent noise
@@ -51,15 +39,8 @@ def spatial_effect(s: jax.Array, *, sample_shape: tuple[int, ...] = ()):
     """
     ls = numpyro.sample("ls", dist.InverseGamma(3, 3))
     var = numpyro.sample("var", dist.InverseGamma(3, 3))
-    if s.shape[-1] == 3:
-        # parameters for the time component
-        ls_t = numpyro.sample("ls_t", dist.InverseGamma(3, 3))
-        var_t = numpyro.sample("var_t", dist.InverseGamma(3, 3))
-    else:
-        ls_t = None
-        var_t = None
 
-    cov = kernel(s, s, var=var, ls=ls, var_t=var_t, ls_t=ls_t)
+    cov = kernel(s, s, var=var, ls=ls)
     L = cov.shape[0]
     cov = cov + jitter * jnp.eye(L)
     breakpoint_if_nonfinite(cov)
