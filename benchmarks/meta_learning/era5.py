@@ -90,7 +90,7 @@ def build_dataloaders(
     test_region: str = "western_europe",
     num_batches_per_subset: int = 50,
 ):
-    grid_res, H_deg, W_deg, T_hrs, T_hrs_delta = 0.5, 7.5, 7.5, 30, 6
+    grid_res, H_deg, W_deg, T_hrs, T_hrs_delta = 0.25, 7.5, 7.5, 30, 6
     H, W = int(H_deg / grid_res), int(W_deg / grid_res)
     df_train, df_valid, df_test, revert = load_data(
         train_region, valid_region, test_region
@@ -188,7 +188,7 @@ def download_if_not_cached():
     central_europe = [53, 8, 42, 28]  # N, W, S, E
     western_europe = [53, -4, 42, 8]
     northern_europe = [62, 8, 53, 28]
-    grid = [0.5, 0.5]
+    grid = [0.25, 0.25]
 
     for region, area in [
         ("central_europe", central_europe),
@@ -299,8 +299,8 @@ def plot(
         f_pred,
         f_std,
         cmap=cmap,
-        norm=norm,
-        norm_std=norm_std,
+        # norm=norm,
+        # norm_std=norm_std,
         **kwargs,
     )
     # TODO(danj): add tick labels for lat/lng
