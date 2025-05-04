@@ -10,11 +10,7 @@ import jax.numpy as jnp
 from numpyro.infer import MCMC
 from omegaconf import DictConfig, OmegaConf
 
-from benchmarks.disease_mapping.data import (
-    get_grid,
-    get_population,
-    get_urban_rural,
-)
+from benchmarks.disease_mapping.data import get_grid, get_urban_rural
 from benchmarks.disease_mapping.samplers import (
     get_np_sampler,
     sample_gp,
@@ -23,7 +19,7 @@ from benchmarks.disease_mapping.samplers import (
     sample_prevalence,
 )
 from benchmarks.disease_mapping.utils import batch, map_fn, unbatch
-from benchmarks.disease_mapping.visualize import plot_distribution, plot_predictions
+from benchmarks.disease_mapping.visualize import plot_predictions
 from dl4bi.core.train import load_ckpt
 from dl4bi.core.utils import breakpoint_if_nonfinite
 
