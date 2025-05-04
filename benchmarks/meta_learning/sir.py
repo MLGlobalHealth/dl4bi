@@ -104,7 +104,7 @@ def build_spatial_dataloader(data: DictConfig, priors: DictConfig):
                     batch_size=B,
                 )
 
-    return dataloader, dataloader, partial(dataloader, is_callback=True)
+    return dataloader, partial(dataloader, is_callback=True)
 
 
 def build_spatiotemporal_dataloader(data: DictConfig, priors: DictConfig):
