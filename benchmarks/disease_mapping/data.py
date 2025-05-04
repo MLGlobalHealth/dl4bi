@@ -187,7 +187,6 @@ def get_survey_data(
     iso: str | None,  # if None use all countries in Africa
     region: str | None = None,
     query: str | None = None,
-    res: int | None = None,  # if not None round to grid of given res in seconds
     urban_rural: bool = False,
     time: bool = False,
 ):

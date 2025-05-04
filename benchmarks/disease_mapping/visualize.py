@@ -71,7 +71,6 @@ def plot_surveys_ax(data, ax: plt.Axes):
 
 def plot_surveys(
     data,
-    shape: MultiPolygon | None = None,
 ):
     s = data["s"]
     if s.shape[-1] == 3:

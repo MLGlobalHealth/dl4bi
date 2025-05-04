@@ -12,7 +12,7 @@ from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig, OmegaConf
 
 import benchmarks.disease_mapping.model as model
-from benchmarks.disease_mapping.data import get_shape, get_survey_data
+from benchmarks.disease_mapping.data import get_survey_data
 from benchmarks.disease_mapping.visualize import plot_surveys
 
 
@@ -68,7 +68,6 @@ def main(cfg: DictConfig):
         cfg.iso,
         cfg.region,
         cfg.query,
-        cfg.res,
         cfg.urban_rural,
         cfg.time,
     )
@@ -76,8 +75,7 @@ def main(cfg: DictConfig):
     # Dump config, data, and model
     OmegaConf.save(cfg, results_path / "config.yaml", resolve=True)
     jnp.savez(results_path / "data.npz", **data)
-    shape = get_shape(cfg.iso, cfg.region) if cfg.iso else None
-    fig = plot_surveys(data, shape=shape)
+    fig = plot_surveys(data)
     fig.savefig(results_path / "data.png", dpi=300)
     (results_path / "model.txt").write_text(getsource(model))
 
