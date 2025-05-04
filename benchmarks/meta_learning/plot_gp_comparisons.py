@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -8,7 +7,9 @@ import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from gp import build_2d_grid_dataloader
+from hydra.utils import instantiate
 from jax import jit, random
+from omegaconf import DictConfig
 from tqdm import tqdm
 
 from dl4bi.core.train import load_ckpt
@@ -23,35 +24,39 @@ from dl4bi.meta_learning.data.utils import (
 
 
 def main(args):
-    print(args.model_name_pattern)
-    regex = re.compile(args.model_name_pattern)
-    paths = [p for p in Path(args.dir).iterdir() if regex.search(p.name)]
     models = {}
-    for path in paths:
+    for path in Path(args.dir).glob("*.ckpt"):
         state, cfg = load_ckpt(path)
         model_cls_name = cfg.model._target_.split(".")[-1]
         models[model_cls_name] = {"state": state, "cfg": cfg}
-    plot_shifted(models)
+    plot(models, args.scale, args.shift, args.num_samples)
 
 
-def plot_shifted(models, shift: float = 10.0, num_samples: int = 1):
-    cfg = models["ScanTNPKR"]["cfg"]
+def plot(
+    models,
+    scale: int = 1,
+    shift: int = 0,
+    num_samples: int = 16,
+):
+    cfg = models["ScanTNPKR"]["cfg"]  # cfg.data, cfg.kernel should be the same for all
     cfg.data.batch_size = 1
-    for axis in cfg.data.s:
+    for axis in cfg.data.s:  # assumes coordinate axis is centered on origin
+        axis.start *= scale
+        axis.stop *= scale
         axis.start += shift
         axis.stop += shift
+    models["ConvCNP"] = update_convcnp_grid(models["ConvCNP"], cfg.data.s)
     dataloader = build_2d_grid_dataloader(cfg.data, cfg.kernel)
     rng = random.key(cfg.seed)
     rng_data, rng = random.split(rng)
     batches = dataloader(rng_data)
     num_models = len(models)
+    Path("samples").mkdir(exist_ok=True)
     for i in tqdm(range(1, num_samples + 1)):
         rng_i, rng = random.split(rng)
-        fig, axes = plt.subplots(3, len(models), figsize=(3 * num_models, 9))
-        for ax in axes.flatten():
-            ax.set_xticks([])
-            ax.set_yticks([])
         batch, _ = next(batches)
+        f_std_min, f_std_max = jnp.inf, -jnp.inf
+        f_min, f_max = batch.f_test.min(), batch.f_test.max()
         for j, (model_cls_name, d) in enumerate(models.items()):
             state = d["state"]
             output = state.apply_fn(
@@ -61,12 +66,26 @@ def plot_shifted(models, shift: float = 10.0, num_samples: int = 1):
             )
             if isinstance(output, tuple):
                 output, _ = output  # latent output not used here
+            models[model_cls_name]["output"] = output
+            f_std_min = min(f_std_min, output.std.min())
+            f_std_max = max(f_std_max, output.std.max())
+            f_min = min(f_min, output.mu.min())
+            f_max = max(f_max, output.mu.max())
+        f_norm = mpl.colors.Normalize(vmin=f_min, vmax=f_max)
+        f_std_norm = mpl.colors.Normalize(vmin=f_std_min, vmax=f_std_max)
+        fig, axes = plt.subplots(3, len(models), figsize=(3 * num_models, 9))
+        for ax in axes.flatten():
+            ax.set_xticks([])
+            ax.set_yticks([])
+        for j, (model_cls_name, d) in enumerate(models.items()):
             _plot(
                 name=model_cls_name,
                 batch=batch,
-                output=output,
+                output=d["output"],
                 f_pred_axis=axes[1, j],
                 f_std_axis=axes[2, j],
+                f_norm=f_norm,
+                f_std_norm=f_std_norm,
                 task_axis=None if j else axes[0, 1],
                 ground_truth_axis=None if j else axes[0, 2],
             )
@@ -75,16 +94,8 @@ def plot_shifted(models, shift: float = 10.0, num_samples: int = 1):
         for ax in axes.flatten():
             if not ax.has_data():
                 ax.axis("off")
-        fig.subplots_adjust(
-            left=0.05,
-            right=0.95,
-            bottom=0.05,
-            top=0.95,
-            wspace=0.05,
-            hspace=0.05,
-        )
         plt.tight_layout()
-        plt.savefig(f"sample_{i}.png")
+        plt.savefig(f"samples/gp_shifted_{shift}_scaled_{scale}x_{i}.png")
         plt.clf()
 
 
@@ -94,6 +105,8 @@ def _plot(
     output,
     f_pred_axis,
     f_std_axis,
+    f_norm=None,
+    f_std_norm=None,
     task_axis=None,
     ground_truth_axis=None,
 ):
@@ -112,8 +125,8 @@ def _plot(
     cmap = mpl.colormaps.get_cmap("Spectral_r")
     cmap.set_bad("grey")
     cmap_std = mpl.colormaps.get_cmap("plasma")
-    kwargs = dict(cmap=cmap, interpolation="none")
-    kwargs_std = dict(cmap=cmap_std, interpolation="none")
+    kwargs = dict(cmap=cmap, norm=f_norm, interpolation="none")
+    kwargs_std = dict(cmap=cmap_std, norm=f_std_norm, interpolation="none")
     f_pred_axis.imshow(f_pred, **kwargs)
     f_std_axis.imshow(f_std, **kwargs_std)
     f_std_axis.set_xlabel(name, fontsize=20)
@@ -123,6 +136,14 @@ def _plot(
     if ground_truth_axis:
         ground_truth_axis.set_title("Ground Truth", fontsize=20)
         ground_truth_axis.imshow(f_test, **kwargs)
+
+
+def update_convcnp_grid(model, axes: list[DictConfig]):
+    state, cfg = model["state"], model["cfg"]
+    cfg.model.s_lower = [axis.start - 0.5 for axis in axes]
+    cfg.model.s_upper = [axis.stop + 0.5 for axis in axes]
+    model = instantiate(cfg.model)
+    return {"state": state.replace(apply_fn=model.apply), "cfg": cfg}
 
 
 def parse_args(argv):
@@ -135,10 +156,23 @@ def parse_args(argv):
         help="Directory with model checkpoints to compare.",
     )
     parser.add_argument(
-        "-p",
-        "--model_name_pattern",
-        default=r".*\.ckpt",
-        help="Load models that match this pattern.",
+        "--scale",
+        default=1,
+        type=int,
+        help="Scale each axis in image by this value.",
+    )
+    parser.add_argument(
+        "--shift",
+        default=0,
+        type=int,
+        help="Shift image by this value.",
+    )
+    parser.add_argument(
+        "-n",
+        "--num_samples",
+        default=16,
+        type=int,
+        help="Shift image by this value.",
     )
     return parser.parse_args(argv[1:])
 
