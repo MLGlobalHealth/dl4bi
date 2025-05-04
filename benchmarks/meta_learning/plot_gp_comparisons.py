@@ -107,7 +107,7 @@ def plot(
                 ax.axis("off")
         plt.tight_layout()
         plt.savefig(
-            f"samples/gp_ls_{extra['ls']:0.3f}scale_{scale}_shifted_{shift}_{i}.png"
+            f"samples/gp_scale_{scale:g}_shifted_{shift:g}_ls_{extra['ls']:0.2f}_{i}.png"
         )
         plt.clf()
 
