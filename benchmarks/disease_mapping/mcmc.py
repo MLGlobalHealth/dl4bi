@@ -55,9 +55,12 @@ def main(cfg: DictConfig):
     """
     Run MCMC inference on the survey model.
     """
-    results_path = Path("results") / (
-        "MCMC " + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    )
+    if cfg.get("name", None):
+        results_path = Path("results") / f"MCMC {cfg.name}"
+    else:
+        results_path = Path("results") / (
+            "MCMC " + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        )
     results_path.mkdir(parents=True, exist_ok=True)
 
     # Load data
@@ -67,6 +70,7 @@ def main(cfg: DictConfig):
         cfg.query,
         cfg.res,
         cfg.urban_rural,
+        cfg.time,
     )
 
     # Dump config, data, and model
