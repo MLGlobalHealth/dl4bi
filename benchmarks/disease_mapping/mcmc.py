@@ -66,9 +66,8 @@ def main(cfg: DictConfig):
         cfg.region,
         cfg.query,
         cfg.res,
+        cfg.urban_rural,
     )
-    if not cfg.urban_rural:
-        del data["x"]
 
     # Dump config, data, and model
     OmegaConf.save(cfg, results_path / "config.yaml", resolve=True)
