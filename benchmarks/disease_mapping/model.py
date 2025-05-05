@@ -9,7 +9,6 @@ import numpyro.distributions as dist
 from sps.kernels import _prepare_dims, exponential, periodic, rbf
 
 from benchmarks.disease_mapping.utils import haversine_distance, make_pairwise
-from dl4bi.core.utils import breakpoint_if_nonfinite
 
 # TODO @pgrynfelder:
 # perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
@@ -57,7 +56,7 @@ def prevalence(y, x=None):
     *sample_shape, L = y.shape
     sample_shape = tuple(sample_shape)
 
-    b0 = numpyro.sample("b0", dist.Normal(-1, 5), sample_shape=sample_shape)
+    b0 = numpyro.sample("b0", dist.Normal(-2, 5), sample_shape=sample_shape)
     b0 = b0[..., None]  # make broadcastable to [sample_shape, L]
 
     if x is not None:
