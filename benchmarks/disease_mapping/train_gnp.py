@@ -4,7 +4,6 @@ Learns the map
 (s, N, N+)_ctx, s_test -> distribution over logit(theta)_test
 """
 
-from functools import partial
 from inspect import getsourcefile
 from pathlib import Path
 
@@ -14,7 +13,7 @@ import jax.numpy as jnp
 import jax.scipy as jsp
 import wandb
 from hydra.utils import instantiate
-from jax import jit, random
+from jax import jit, random, vmap
 from numpyro import handlers
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
@@ -77,14 +76,23 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def sample_prior(rng, s: jax.Array, n: jax.Array, x: jax.Array | None, B: int):
+def sample_prior(
+    rng,
+    s: jax.Array,
+    n: jax.Array,
+    x: jax.Array | None = None,
+    sample_shape: tuple[int, ...] = (),
+):
     # note that s, n, x, and the kernel parameters will be shared across the batch
     trace = handlers.trace(handlers.seed(numpyro_model.survey_model, rng)).get_trace(
-        s, n, None, x, sample_shape=(B,)
+        s, n, None, x, sample_shape=sample_shape
     )
     z = trace["z"]["value"]
     n_pos = trace["n_pos"]["value"]
     return z, n_pos
+
+
+batch_sample_prior = vmap(sample_prior)
 
 
 def sample_n(rng, sample_shape):
@@ -183,20 +191,18 @@ def build_dataloader(cfg: DictConfig, input_format="survey"):
     B, L, D = cfg.batch_size, cfg.num_test, len(cfg.s)
     s_min = jnp.array([axis["start"] for axis in cfg.s])
     s_max = jnp.array([axis["stop"] for axis in cfg.s])
-    batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
-    urban_rural = cfg.urban_rural
+    has_x = cfg.urban_rural
 
     @jit
     def sample_batch(rng):
         rng_s, rng_n, rng_x, rng_sp, rng_b = random.split(rng, 5)
-        s = random.uniform(rng_s, (L, D), jnp.float32, s_min, s_max)
-        n = sample_n(rng_n, (L,))
-        if urban_rural:
-            x = sample_x(rng_x, (L,))
+        s = random.uniform(rng_s, (B, L, D), jnp.float32, s_min, s_max)
+        n = sample_n(rng_n, (B, L))
+        if has_x:
+            x = sample_x(rng_x, (B, L))
         else:
             x = None
-        z, n_pos = sample_prior(rng_sp, s, n, x, B)
-        s, n, x = batchify(s), batchify(n), batchify(x) if x is not None else None
+        z, n_pos = batch_sample_prior(random.split(rng_sp, B), s, n, x)
         return make_batch(
             rng_b,
             s,
