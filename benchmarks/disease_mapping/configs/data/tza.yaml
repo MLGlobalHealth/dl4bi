@@ -13,3 +13,4 @@ num_ctx:
 num_test: 1024
 batch_size: 16
 # obs_noise: 0.01
+urban_rural: false
