@@ -13,6 +13,7 @@ from benchmarks.disease_mapping.data import get_urban_rural
 from benchmarks.disease_mapping.visualize import map_grid, scatter_map
 from dl4bi.core.model_output import DiagonalMVNOutput
 from dl4bi.core.train import load_ckpt
+from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
 def plot_side_by_side(s, gp_mean, gp_std, predicted_mean, predicted_std):
@@ -106,7 +107,7 @@ def predict(mcmc_path: Path, gnp_path: Path):
 
     # Load GNP model
     state, model_cfg = load_ckpt(gnp_path)
-    model_name = model_cfg.name
+    model_name = model_cfg.get("name", cfg_to_run_name(model_cfg))
     match model_cfg.get("input_format", "survey"):
         case "survey":
             y_c = jnp.stack([n_pos, n], axis=-1)
