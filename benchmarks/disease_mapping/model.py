@@ -6,9 +6,9 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from sps.kernels import _prepare_dims, exponential, periodic, rbf
+from sps.kernels import _prepare_dims
 
-from benchmarks.disease_mapping.utils import great_circle_distance, haversine_distance
+from benchmarks.disease_mapping.utils import great_circle_distance
 from dl4bi.core.utils import make_pairwise
 
 # TODO @pgrynfelder:
