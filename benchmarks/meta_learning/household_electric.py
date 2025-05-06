@@ -18,8 +18,8 @@ from dl4bi.core.train import (
     train,
 )
 from dl4bi.meta_learning.data.spatiotemporal import (
-    SpatiotemporalBatch,
-    SpatiotemporalData,
+    TemporalBatch,
+    TemporalData,
 )
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
@@ -84,7 +84,7 @@ def build_dataloaders(
                 idx = vmap(lambda rng: random.choice(rng, N, (L,), replace=False))(
                     rng_bs
                 )  # [B, L]
-                yield TabularData(x=X[idx], f=f[idx]).batch(
+                yield TemporalData(x=X[idx], f=f[idx]).batch(
                     rng_i,
                     num_ctx_min,
                     num_ctx_max,
@@ -136,8 +136,7 @@ def load_data(rng: jax.Array):
         sys.exit("Dataset not available.")
     df["dt"] = pd.to_datetime(df.Date + " " + df.Time, dayfirst=True)
     df["year"] = df.dt.dt.year
-    df["day_of_year"] = df.dt.dt.day_of_year
-    df["min_of_day"] = df.dt.dt.hour * 60 + df.dt.dt.minute
+    df["min_of_year"] = df.dt.dt.day_of_year * 24 * 60
     df = df.drop(columns=["Date", "Time", "dt"])
     fX = df.values
     N = fX.shape[0]
