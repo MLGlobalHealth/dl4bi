@@ -40,12 +40,9 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader, valid_dataloader, test_dataloader, callback_dataloader = (
-        build_dataloaders(**cfg.data)
-    )
+    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(**cfg.data)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
-    clbk = Callback(plot, cfg.plot_interval)
     state = train(
         rng_train,
         model,
@@ -57,8 +54,6 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         cfg.valid_num_steps,
         valid_dataloader,
-        callbacks=[clbk],
-        callback_dataloader=callback_dataloader,
         return_state="best",
     )
     metrics = evaluate(
@@ -74,7 +69,7 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-# TODO(danj): finish!!
+# TODO(danj): TaublarData needs to support space and time
 def build_dataloaders(
     rng: jax.Array,
     batch_size: int = 16,
@@ -82,9 +77,12 @@ def build_dataloaders(
     num_ctx_max: int = 128,
     num_test: int = 256,
 ):
-    (f_train, X_train), (f_valid, X_valid), (f_test, X_test) = load_data(rng)
+    train, valid, test = load_data(rng)
+    x_train, s_train, t_train, f_train = train
+    x_valid, s_valid, t_valid, f_valid = valid
+    x_test, s_valid, t_test, f_test = test
 
-    def build_dataloader(f, X):
+    def build_dataloader(x, s, t, f):
         N, L = X.shape[0], num_ctx_max + num_test
 
         def dataloader(rng: jax.Array):
@@ -94,7 +92,7 @@ def build_dataloaders(
                 idx = vmap(lambda rng: random.choice(rng, N, (L,), replace=False))(
                     rng_bs
                 )  # [B, L]
-                yield TabularData(x=X[idx], f=f[idx]).batch(
+                yield SpatiotemporalData(x[idx], s[idx], t[idx], f[idx]).batch(
                     rng_i,
                     num_ctx_min,
                     num_ctx_max,
@@ -104,24 +102,18 @@ def build_dataloaders(
 
         return dataloader
 
-    # NOTE: uncomment to use _entire_ valid set, similar to test set (much slower)
-    # def valid_dataloader(rng: jax.Array):
-    #     yield TabularBatch(
-    #         x_ctx=X_train[None, ...],
-    #         f_ctx=f_train[None, ...],
-    #         mask_ctx=jnp.ones((1, X_train.shape[0]), dtype=bool),
-    #         x_test=X_valid[None, ...],
-    #         f_test=f_valid[None, ...],
-    #     )
-
     def test_dataloader(rng: jax.Array):
-        N = X_train.shape[0] + X_valid.shape[0]
-        yield TabularBatch(
-            x_ctx=jnp.concat([X_train, X_valid], axis=0)[None, ...],
+        N = x_train.shape[0] + x_valid.shape[0]
+        yield TemporalBatch(
+            x_ctx=jnp.concat([x_train, x_valid], axis=0)[None, ...],
+            t_ctx=jnp.concat([t_train, f_train], axis=0)[None, ...],
             f_ctx=jnp.concat([f_train, f_valid], axis=0)[None, ...],
             mask_ctx=jnp.ones((1, N), dtype=bool),
-            x_test=X_test[None, ...],
+            x_test=x_test[None, ...],
+            t_test=t_test[None, ...],
             f_test=f_test[None, ...],
+            mask_test=jnp.ones((1, f_test.shape[0]), dtype=bool),
+            inv_permute_idx=jnp.arange(N),
         )
 
     return (
