@@ -6,6 +6,7 @@ Learns the map
 
 from inspect import getsourcefile
 from pathlib import Path
+from typing import Literal
 
 import hydra
 import jax
@@ -41,7 +42,9 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader = valid_dataloader = build_dataloader(cfg.data, cfg.input_format)
+    train_dataloader = valid_dataloader = build_dataloader(
+        cfg.data, cfg.input_format, cfg.output_format
+    )
     # TODO: fix this
     # callbacks = [Callback(wandb_2d_plots, cfg.plot_interval)]
     # callback_dataloader = build_grid_dataloader(cfg.data)
@@ -120,7 +123,8 @@ def make_batch(
     num_ctx_max,
     num_test,
     test_includes_ctx,
-    input_format="survey",
+    input_format: Literal["survey", "theta"],
+    output_format: Literal["theta", "z"],
 ):
     """
     Adapted from `meta_learning.data.spatial._batch`,
@@ -166,8 +170,11 @@ def make_batch(
         case "theta":
             f_c = n_pos_c / n_c
 
-    # Target theta
-    f_t = jax.nn.sigmoid(z_t)
+    match output_format:
+        case "theta":
+            f_t = jax.nn.sigmoid(z_t)
+        case "z":
+            f_t = z_t
 
     return SpatialBatch(
         x_c,
@@ -183,7 +190,7 @@ def make_batch(
     )
 
 
-def build_dataloader(cfg: DictConfig, input_format="survey"):
+def build_dataloader(cfg: DictConfig, input_format, output_format):
     """
     Generates samples from `model.spatial_effect`.
     """
@@ -215,6 +222,7 @@ def build_dataloader(cfg: DictConfig, input_format="survey"):
             num_test=cfg.num_test,
             test_includes_ctx=True,
             input_format=input_format,
+            output_format=output_format,
         )
 
     def dataloader(rng: jax.Array):

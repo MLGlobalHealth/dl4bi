@@ -160,6 +160,7 @@ def predict(mcmc_path: Path, gnp_path: Path):
     print("Saving predictions...")
     results_path = mcmc_path / model_name
     results_path.mkdir(parents=True, exist_ok=True)
+    OmegaConf.save(model_cfg, results_path / "config.yaml")
     jnp.savez(
         results_path / "predictions.npz",
         s=s_t,
