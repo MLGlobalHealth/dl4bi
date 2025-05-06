@@ -108,7 +108,6 @@ def main(cfg: DictConfig):
     # Prior predictive check
     fig = prior_predictive_check(data)
     fig.savefig(results_path / "prior_predictive.png", dpi=300)
-    return
 
     # Run MCMC
     timer_start = timer()
