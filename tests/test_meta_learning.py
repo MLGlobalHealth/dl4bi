@@ -39,8 +39,9 @@ def test_models():
     valid_lens = jnp.array([22, 44, 97, 32])
     mask_ctx = mask_from_valid_lens(L, valid_lens)
     f = random.normal(rng_data, s.shape)
+    bias = Bias.build_rbf_network_bias()
     scanned_kr_block = KRBlock(
-        MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
+        MultiHeadAttention(BiasedScanAttention(bias={"s": bias}))
     )
     for model in [
         NP,
@@ -108,8 +109,9 @@ def test_context_data_leaks():
     # set second half to large value (different from using half the array because of attn)
     s2 = s.at[:, V:, :].set(jnp.full((B, L - V, 1), 10000))
     f2 = f.at[:, V:, :].set(jnp.full((B, L - V, 1), 10000))
+    bias = Bias.build_rbf_network_bias()
     scanned_kr_block = KRBlock(
-        MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
+        MultiHeadAttention(BiasedScanAttention(bias={"s": bias}))
     )
     for model in [
         NP,
@@ -186,8 +188,9 @@ def test_train_step_loss():
     batch_1 = d.batch(rng_b1, 1, N, L, True)
     batch_2 = d.batch(rng_b2, 1, N, L, True)
     rng_init, rng_drop, rng_extra, rng_step = random.split(rng, 4)
+    bias = Bias.build_rbf_network_bias()
     scanned_kr_block = KRBlock(
-        MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
+        MultiHeadAttention(BiasedScanAttention(bias={"s": bias}))
     )
     for model in [
         NP,

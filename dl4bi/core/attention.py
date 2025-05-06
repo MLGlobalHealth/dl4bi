@@ -425,10 +425,12 @@ def scan_ks(
 class BiasedScanAttention(nn.Module):
     r"""Performs query-key-value attention with arbitrary bias functions.
 
+    .. note::
+        For each `<bias_name>`, this module assumes there will be queries
+        and keys passed in with the form `qs_<bias_name>`, `ks_bias_name`.
+
     Args:
-        x_bias: A bias module for fixed effect inputs.
-        s_bias: A bias module for spatial inputs.
-        t_bias: A bias module for temporal inputs.
+        bias: A dictionary of {<bias_name>: <bias module>}.
         qs_chunk_size: Number of queries to process in each chunk of scan.
         ks_chunk_size: Number of keys to process in each chunk of scan.
 
@@ -436,9 +438,7 @@ class BiasedScanAttention(nn.Module):
         An `BiasedScanAttention` module.
     """
 
-    x_bias: Optional[Bias] = None
-    s_bias: Optional[Bias] = None
-    t_bias: Optional[Bias] = None
+    bias: dict  # {name: Bias}
     qs_chunk_size: int = 1024
     ks_chunk_size: int = 1024
 
@@ -460,38 +460,20 @@ class BiasedScanAttention(nn.Module):
             vs: Values of shape [B, H, K, D_v].
             mask: Mask for keys and values of shape [B, K].
             training: Boolean indicating whether currently training.
-            qs_x: Query fixed effects of shape [B, Q, D_x].
-            ks_x: Key fixed effects of shape [B, K, D_x].
-            qs_s: Query locations of shape [B, Q, D_s].
-            ks_s: Key locations of shape [B, K, D_s].
-            qs_t: Query locations of shape [B, Q, D_t].
-            ks_t: Key locations of shape [B, K, D_t].
+            kwargs: Contains `qs_<bias_name>, ks_<bias_name>`, etc.
 
         Returns:
             `ctx` and `attn`, the updated values and None, respectively,
             since scanned attention never materializes the attention matrix.
         """
         qs_bias, ks_bias, bias_func, bias_kwargs = {}, {}, {}, {}
-        if self.x_bias is not None:
-            qs_bias["x"] = kwargs["qs_x"]
-            ks_bias["x"] = kwargs["ks_x"]
-            bias_func["x"] = self.x_bias.scanned_bias_func
-            bias_kwargs["x"] = self.x_bias.init_params(
-                self, "x_bias", **self.x_bias.init_kwargs
-            )
-        if self.s_bias is not None:
-            qs_bias["s"] = kwargs["qs_s"]
-            ks_bias["s"] = kwargs["ks_s"]
-            bias_func["s"] = self.s_bias.scanned_bias_func
-            bias_kwargs["s"] = self.s_bias.init_params(
-                self, "s_bias", **self.s_bias.init_kwargs
-            )
-        if self.t_bias is not None:
-            qs_bias["t"] = kwargs["qs_t"]
-            ks_bias["t"] = kwargs["ks_t"]
-            bias_func["t"] = self.t_bias.scanned_bias_func
-            bias_kwargs["t"] = self.t_bias.init_params(
-                self, "t_bias", **self.t_bias.init_kwargs
+        for name in self.bias:
+            qs_bias[name] = kwargs[f"qs_{name}"]
+            ks_bias[name] = kwargs[f"ks_{name}"]
+            bias_func[name] = self.bias[name].scanned_bias_func
+            # NOTE: intialize parameters as part of this module
+            bias_kwargs[name] = self.bias[name].init_params(
+                self, f"{name}_bias", **self.bias[name].init_kwargs
             )
         return biased_scan_attention(
             qs,

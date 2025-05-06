@@ -129,7 +129,7 @@ def test_biased_scan_attention_impl():
     tisa_bias = Bias.build_tisa_bias()
     rbf_bias = Bias.build_rbf_network_bias()
     for bias in [scalar_bias, tisa_bias, rbf_bias]:
-        (ctx_scan, _), _ = BiasedScanAttention(s_bias=bias).init_with_output(
+        (ctx_scan, _), _ = BiasedScanAttention(bias={"s": bias}).init_with_output(
             rng_init,
             qs,
             ks,
@@ -218,7 +218,7 @@ def test_biased_scan_attention_speed():
     tisa_bias = Bias.build_tisa_bias()
     rbf_bias = Bias.build_rbf_network_bias()
     for bias in [scalar_bias, tisa_bias, rbf_bias]:
-        scan_attn = BiasedScanAttention(s_bias=bias)
+        scan_attn = BiasedScanAttention(bias={"s": bias})
         _, params = scan_attn.init_with_output(
             rng_init, qs, ks, vs, mask, qs_s=qs_s, ks_s=ks_s
         )
@@ -322,7 +322,7 @@ def test_biased_scan_attention_scale():
     tisa_bias = Bias.build_tisa_bias()
     rbf_bias = Bias.build_rbf_network_bias()
     for bias in [scalar_bias, tisa_bias, rbf_bias]:
-        scan_attn = BiasedScanAttention(s_bias=bias)
+        scan_attn = BiasedScanAttention(bias={"s": bias})
         (ctx_scan_init, _), params = scan_attn.init_with_output(
             rng_init, qs, kvs, kvs, qs_s=qs_s, ks_s=ks_s
         )
