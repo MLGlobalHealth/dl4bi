@@ -68,7 +68,7 @@ def cfg_to_name(cfg: DictConfig) -> str:
             return "".join(x[0] for x in key.split("_"))
 
         values_repr = [
-            +shorten_key(k) + ":" + str(v)
+            shorten_key(k) + ":" + str(v)
             # for k, v in sorted(d.items(), key=lambda x: x[0])
             for k, v in cfg.items()
             if v is not None
