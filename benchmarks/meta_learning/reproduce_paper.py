@@ -42,16 +42,16 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     ]
 
     # TRANSLATION INVARIANCE
-    gp_benchmark(
-        seeds,
-        "2d",
-        gp_kernels_2d,
-        [f"2d/{m}" for m in models],
-        gp_main,
-        overrides,
-        "NeurIPS TNP-KR - Gaussian Processes",
-        dry_run=dry_run,
-    )
+    # gp_benchmark(
+    #     seeds,
+    #     "2d",
+    #     gp_kernels_2d,
+    #     [f"2d/{m}" for m in models],
+    #     gp_main,
+    #     overrides,
+    #     "NeurIPS TNP-KR - Gaussian Processes",
+    #     dry_run=dry_run,
+    # )
     # img_benchmark(
     #     seeds,
     #     "configs/sir",
@@ -97,7 +97,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     # HIGH DIMENSIONAL
     # TODO(danj):
     # fixed + spatial effects:
-    #
+    # tabular_models = ["tnp_kr_scan", "te_tnp"]
     # tabular_benchmark(
     #     seeds,
     #     "configs/household_electric",
@@ -167,7 +167,7 @@ def img_benchmark(
     seeds: jax.Array,
     cfg_dir: str = "configs/celeba",
     models: list[str] = ["tnp_kr_scan"],
-    main_fn: Callable = mnist_main,
+    main_fn: Callable = celeba_main,
     overrides: list = [],
     project: str = "",
     dry_run: bool = False,

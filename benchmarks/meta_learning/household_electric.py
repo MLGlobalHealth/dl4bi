@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import sys
 from pathlib import Path
 
 import hydra
@@ -16,7 +17,10 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
-from dl4bi.meta_learning.data.tabular import TabularBatch, TabularData
+from dl4bi.meta_learning.data.spatiotemporal import (
+    SpatiotemporalBatch,
+    SpatiotemporalData,
+)
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
@@ -63,9 +67,9 @@ def main(cfg: DictConfig):
 
 def build_dataloaders(
     rng: jax.Array,
-    batch_size: int = 16,
-    num_ctx_min: int = 16,
-    num_ctx_max: int = 128,
+    batch_size: int = 32,
+    num_ctx_min: int = 32,
+    num_ctx_max: int = 256,
     num_test: int = 256,
 ):
     (f_train, X_train), (f_valid, X_valid), (f_test, X_test) = load_data(rng)
@@ -118,12 +122,22 @@ def build_dataloaders(
 
 
 def load_data(rng: jax.Array):
-    # source: https://www.kaggle.com/datasets/uciml/electric-power-consumption-data-set
-    df = pd.read_csv("cache/household_power_consumption.txt", sep=";").dropna()
+    try:
+        df = pd.read_csv("cache/household_power_consumption.txt", sep=";").dropna()
+    except FileNotFoundError:
+        url = (
+            "https://www.kaggle.com/datasets/uciml/electric-power-consumption-data-set"
+        )
+        msg = f"""
+        1. Download the dataset here: {url}
+        3. Move the file into the "cache" directory.
+        """
+        print(msg)
+        sys.exit("Dataset not available.")
     df["dt"] = pd.to_datetime(df.Date + " " + df.Time, dayfirst=True)
     df["year"] = df.dt.dt.year
-    df["month"] = df.dt.dt.month
-    df["day"] = df.dt.dt.day
+    df["day_of_year"] = df.dt.dt.day_of_year
+    df["min_of_day"] = df.dt.dt.hour * 60 + df.dt.dt.minute
     df = df.drop(columns=["Date", "Time", "dt"])
     fX = df.values
     N = fX.shape[0]
