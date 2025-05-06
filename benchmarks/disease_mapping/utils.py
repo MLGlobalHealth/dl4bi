@@ -2,6 +2,7 @@ from functools import partial, wraps
 
 import jax
 import jax.numpy as jnp
+import jax.scipy as jsp
 from jax import jit, vmap
 
 
@@ -107,3 +108,19 @@ def rng_vmap(fn):
         return vmap(fn)(rng, *args, **kwargs)
 
     return wrapped_fn
+
+
+def z_to_theta(mean, std):
+    n = 1000
+    rng = jax.random.key(0)
+    zs = jax.random.normal(rng, (n, *mean.shape)) * std + mean
+    thetas = jax.nn.sigmoid(zs)
+    return thetas.mean(axis=0), thetas.std(axis=0)
+
+
+def theta_to_z(mean, std):
+    n = 1000
+    rng = jax.random.key(0)
+    thetas = jax.random.normal(rng, (n, *mean.shape)) * std + mean
+    zs = jsp.special.logit(thetas)
+    return zs.mean(axis=0), zs.std(axis=0)

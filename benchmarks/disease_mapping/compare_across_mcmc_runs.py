@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import jax
 import jax.numpy as jnp
@@ -67,7 +68,13 @@ def evaluate(
     return metrics
 
 
-def main(runs: list[Path]):
+def main(
+    runs: list[Path],
+    target_quantity: Literal["theta", "z"],
+    seed=0,
+    n_samples_for_conversion=1000,
+):
+    rng = jax.random.key(seed)
     true_run = runs[0]
     candidates = ["matheron", "gp", "gp_pointwise"]
     for candidate in candidates:
@@ -90,9 +97,9 @@ def main(runs: list[Path]):
         for outputs_path in run.glob("*/predictions.npz"):
             predicted_dist = jnp.load(outputs_path)
             print(predicted_dist)
-            if "theta" in predicted_dist:
+            if target_quantity in predicted_dist:
                 # its from an MCMC run
-                predicted_dist = predicted_dist["theta"]
+                predicted_dist = predicted_dist[target_quantity]
                 metrics = evaluate(true_dist, predicted_dist)
                 metrics["model"] = outputs_path.parent.name
                 metrics |= run_params
@@ -108,9 +115,33 @@ def main(runs: list[Path]):
                     metrics |= run_params | {"chains": [i]}
                     results.append(metrics)
             else:
-                metrics = evaluate(
-                    true_dist, None, predicted_dist["mean"], predicted_dist["std"]
+                # its from a Neural Process
+                mean, std = predicted_dist["mean"], predicted_dist["std"]
+                output_format = OmegaConf.load(outputs_path.parent / "config.yaml").get(
+                    "output_format", "theta"
                 )
+                match (target_quantity, output_format):
+                    case ("theta", "theta") | ("z", "z"):
+                        metrics = evaluate(true_dist, None, mean, std)
+                    case ("theta", "z"):
+                        metrics = evaluate(
+                            true_dist,
+                            jax.random.normal(
+                                rng, (n_samples_for_conversion, *mean.shape)
+                            )
+                            * std
+                            + mean,
+                        )
+                    case ("z", "theta"):
+                        metrics = evaluate(
+                            true_dist,
+                            jax.random.normal(
+                                rng, (n_samples_for_conversion, *mean.shape)
+                            )
+                            * std
+                            + mean,
+                        )
+
                 metrics["model"] = outputs_path.parent.name
                 results.append(metrics)
 
@@ -131,7 +162,18 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Compare MCMC runs.")
     parser.add_argument("runs", type=Path, nargs="+", help="Paths to MCMC runs.")
+    parser.add_argument(
+        "--theta", action="store_true", help="Use theta as target quantity."
+    )
+    parser.add_argument("--z", action="store_true", help="Use z as target quantity.")
     args = parser.parse_args()
+
+    if args.theta and args.z:
+        raise ValueError("Cannot use both theta and z as target quantity.")
+    elif args.z:
+        target_quantity = "z"
+    else:
+        target_quantity = "theta"
 
     result = main(args.runs)
 

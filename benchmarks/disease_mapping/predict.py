@@ -90,7 +90,7 @@ def predict(seed, model, s_c, samples_c, s_t, x_t, batch_size):
     theta_t = jax.nn.sigmoid(z_t)
 
     breakpoint_if_nonfinite(theta_t)
-    return model_name, s_t[0], unbatch(y_t), unbatch(theta_t)
+    return model_name, s_t[0], unbatch(y_t), unbatch(theta_t), unbatch(z_t)
 
 
 @hydra.main("configs", "prediction", None)
@@ -122,7 +122,7 @@ def main(cfg: DictConfig):
 
     print("Running predictions...")
     t_start = timer()
-    model_name, s_t, y_t, theta_t = predict(
+    model_name, s_t, y_t, theta_t, z_t = predict(
         cfg.seed,
         cfg.np,
         data["s"],
@@ -141,7 +141,7 @@ def main(cfg: DictConfig):
     results_path.mkdir(parents=True, exist_ok=True)
     OmegaConf.save(cfg, results_path / "config.yaml")
 
-    jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t, y=y_t)
+    jnp.savez(results_path / "predictions.npz", s=s_t, theta=theta_t, y=y_t, z=z_t)
 
     # Plotting
     print("Plotting...")

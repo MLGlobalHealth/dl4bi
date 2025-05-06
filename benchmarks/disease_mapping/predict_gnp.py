@@ -10,6 +10,7 @@ from omegaconf import OmegaConf
 from scipy.stats import chi2  # jax doesn't implement ppf
 
 from benchmarks.disease_mapping.data import get_urban_rural
+from benchmarks.disease_mapping.utils import theta_to_z, z_to_theta
 from benchmarks.disease_mapping.visualize import map_grid, scatter_map
 from dl4bi.core.model_output import DiagonalMVNOutput
 from dl4bi.core.train import load_ckpt
@@ -22,8 +23,8 @@ def plot_side_by_side(s, gp_mean, gp_std, predicted_mean, predicted_std):
 
     std_min = min(gp_std.min(), predicted_std.min())
     std_max = max(gp_std.max(), predicted_std.max())
-    mean_min = 0
-    mean_max = 1
+    mean_min = min(gp_mean.min(), predicted_mean.min())
+    mean_max = max(gp_mean.max(), predicted_mean.max())
 
     scatter_map(s, gp_mean, ax=axes[0, 0], vmin=mean_min, vmax=mean_max)
     scatter_map(s, predicted_mean, ax=axes[0, 1], vmin=mean_min, vmax=mean_max)
@@ -95,7 +96,7 @@ def predict(mcmc_path: Path, gnp_path: Path):
     print(data.keys())
 
     s_c, n, n_pos = data["s"], data["n"], data["n_pos"]
-    s_t, theta_t = true_dist["s"], true_dist["theta"]
+    s_t, theta_t, z_t = true_dist["s"], true_dist["theta"], true_dist["z"]
 
     if "x" in data:
         x_c = data["x"]
@@ -168,14 +169,31 @@ def predict(mcmc_path: Path, gnp_path: Path):
         std=predicted_std,
     )
     # Plotting
-    fig = plot_side_by_side(
+
+    match model_cfg.get("output_format", "theta"):
+        case "theta":
+            theta_mean = predicted_mean
+            theta_std = predicted_std
+            z_mean, z_std = theta_to_z(predicted_mean, predicted_std)
+        case "z":
+            z_mean = predicted_mean
+            z_std = predicted_std
+            theta_mean, theta_std = z_to_theta(predicted_mean, predicted_std)
+
+    plot_side_by_side(
         s_t,
         theta_t.mean(0),
         theta_t.std(0),
-        predicted_mean,
-        predicted_std,
-    )
-    fig.savefig(results_path / "predictions.png", dpi=300)
+        theta_mean,
+        theta_std,
+    ).savefig(results_path / "theta_predictions.png", dpi=300)
+    plot_side_by_side(
+        s_t,
+        z_t.mean(0),
+        z_t.std(0),
+        z_mean,
+        z_std,
+    ).savefig(results_path / "z_predictions.png", dpi=300)
 
 
 def main():
