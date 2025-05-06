@@ -4,6 +4,23 @@ import jax
 import jax.numpy as jnp
 import pandas as pd
 from jax import scipy as jsp
+from omegaconf import OmegaConf
+
+
+def mse(x, y):
+    return jnp.mean((x - y) ** 2)
+
+
+def rmse(x, y):
+    return jnp.sqrt(mse(x, y))
+
+
+def mae(x, y):
+    return jnp.mean(jnp.abs(x - y))
+
+
+def mre(x, y):
+    return jnp.mean(jnp.abs(x - y) / (jnp.abs(x) + 1e-8))
 
 
 def evaluate(
@@ -22,13 +39,15 @@ def evaluate(
         # predicted_cov = jnp.cov(predicted_dist, rowvar=False)
 
     metrics = {}
-
+    metrics["N samples"] = predicted_dist.shape[0] if predicted_dist is not None else 0
     metrics["MEAN(true mean)"] = jnp.mean(true_mean)
-    metrics["MAE(mean)"] = jnp.mean(jnp.abs(predicted_mean - true_mean))
-    metrics["MAE(std)"] = jnp.mean(jnp.abs(predicted_std - true_std))
-    metrics["RMSE(mean)"] = jnp.sqrt(jnp.mean((predicted_mean - true_mean) ** 2))
-    metrics["RMSE(std)"] = jnp.sqrt(jnp.mean((predicted_std - true_std) ** 2))
-    metrics["avg L2(map)"] = jnp.mean((true_dist - predicted_mean) ** 2)
+    metrics["MAE(mean)"] = mae(predicted_mean, true_mean)
+    metrics["MRE(mean)"] = mre(predicted_mean, true_mean)
+    metrics["MAE(std)"] = mae(predicted_std, true_std)
+    metrics["MRE(std)"] = mre(predicted_std, true_std)
+    metrics["RMSE(mean)"] = rmse(predicted_mean, true_mean)
+    metrics["RMSE(std)"] = rmse(predicted_std, true_std)
+    metrics["avg L2(map)"] = rmse(predicted_mean, true_mean)
     # this assumes diagonal normal posterior predictive
     metrics["avg pointwise NLL"] = -jsp.stats.norm.logpdf(
         true_dist, predicted_mean, predicted_std
@@ -61,18 +80,39 @@ def main(runs: list[Path]):
 
     results = []
     for run in runs:
+        mcmc_config = OmegaConf.load(run / "config.yaml")
+        num_chains = mcmc_config.num_chains
+        run_params = {
+            "chains": jnp.arange(num_chains),
+            "num_samples": mcmc_config.num_samples,
+            "num_warmup": mcmc_config.num_warmup,
+        }
         for outputs_path in run.glob("*/predictions.npz"):
             predicted_dist = jnp.load(outputs_path)
             print(predicted_dist)
             if "theta" in predicted_dist:
+                # its from an MCMC run
                 predicted_dist = predicted_dist["theta"]
                 metrics = evaluate(true_dist, predicted_dist)
+                metrics["model"] = outputs_path.parent.name
+                metrics |= run_params
+                results.append(metrics)
+
+                # per-chain statistics
+                predicted_dist = predicted_dist.reshape(
+                    num_chains, -1, *predicted_dist.shape[1:]
+                )
+                for i in range(num_chains):
+                    metrics = evaluate(true_dist, predicted_dist[i])
+                    metrics["model"] = outputs_path.parent.name + f"/{i}"
+                    metrics |= run_params | {"chains": [i]}
+                    results.append(metrics)
             else:
                 metrics = evaluate(
                     true_dist, None, predicted_dist["mean"], predicted_dist["std"]
                 )
-            metrics["model"] = run.name + "/" + outputs_path.parent.name
-            results.append(metrics)
+                metrics["model"] = outputs_path.parent.name
+                results.append(metrics)
 
     # constant predictor
     data = jnp.load(true_run / "data.npz")
