@@ -1,0 +1,15 @@
+name: generic
+s:
+  # nums are too small
+  - start: -10
+    stop: +10
+    num: 20
+  - start: -10
+    stop: +10
+    num: 20
+num_ctx:
+  min: 50 # ~5%
+  max: 512 # ~50%
+num_test: 1024
+batch_size: 16
+urban_rural: false
