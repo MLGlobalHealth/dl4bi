@@ -61,20 +61,20 @@ def prior_predictive_check(data: dict[str, jax.Array]):
 
 def cfg_to_name(cfg: DictConfig) -> str:
     if cfg.get("name") is not None:
-        return "MCMC(" + cfg.name + ")"
+        return "MCMC_" + cfg.name
     else:
 
         def shorten_key(key: str):
             return "".join(x[0] for x in key.split("_"))
 
         values_repr = [
-            "(" + shorten_key(k) + ":" + str(v) + ")"
+            +shorten_key(k) + ":" + str(v)
             # for k, v in sorted(d.items(), key=lambda x: x[0])
             for k, v in cfg.items()
             if v is not None
         ]
 
-        return "MCMC" + "".join(values_repr)
+        return "MCMC_" + "_".join(values_repr)
 
 
 @hydra.main("configs", "mcmc", None)
