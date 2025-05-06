@@ -237,7 +237,7 @@ class Bias(nn.Module):
             scanned_bias_func=scanned_tisa_bias,
         )
 
-    # TODO: how do I set the `func` to `great_circle_dist` in the non-scan variant?
+    # NOTE: set s_sim in the config to great_circle_dist to use this with non-scan TNP-KR
     @classmethod
     def build_geodesic_network_bias(cls, num_heads: int = 4, num_basis: int = 5):
         return Bias(
@@ -247,4 +247,14 @@ class Bias(nn.Module):
             scanned_bias_func=partial(
                 scanned_exponential_network_bias, func=great_circle_dist
             ),
+        )
+
+    @classmethod
+    def build_geodesic_rbf_network_bias(cls, num_heads: int = 4, num_basis: int = 5):
+        # NOTE this is not a valid kernel on a sphere
+        return Bias(
+            init_rbf_network_bias_params,
+            {"num_heads": num_heads, "num_basis": num_basis},
+            bias_func=rbf_network_bias,
+            scanned_bias_func=partial(scanned_rbf_network_bias, func=great_circle_dist),
         )
