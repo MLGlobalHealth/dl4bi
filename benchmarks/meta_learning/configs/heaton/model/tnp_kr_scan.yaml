@@ -17,10 +17,12 @@ blk:
     num_heads: 4
     attn:
       _target_: dl4bi.attention.BiasedScanAttention
-      s_bias:
-        _target_: dl4bi.bias.Bias.build_rbf_network_bias
-        num_heads: 4
-        num_basis: 5
+      bias:
+        _target_: builtins.dict
+        s:
+          _target_: dl4bi.bias.Bias.build_rbf_network_bias
+          num_heads: 4
+          num_basis: 5
     proj_qs:
       _target_: dl4bi.mlp.MLP
       dims: [128]

@@ -179,6 +179,7 @@ class TNPKR(nn.Module):
         return self.output_fn(output)
 
 
+# TODO(danj): make generic to input arguments beyond (x, s, t)
 class ScanTNPKR(nn.Module):
     """Transformer Neural Process - Kernel Regression (TNP-KR) using memory efficient
     scanning.
