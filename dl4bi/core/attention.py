@@ -421,7 +421,6 @@ def scan_ks(
     return os / row_sums
 
 
-# TODO(danj): update to allow arbitrary biases, not just (x, s, t)
 class BiasedScanAttention(nn.Module):
     r"""Performs query-key-value attention with arbitrary bias functions.
 
@@ -438,7 +437,7 @@ class BiasedScanAttention(nn.Module):
         An `BiasedScanAttention` module.
     """
 
-    bias: dict  # {name: Bias}
+    bias: dict[str, Bias]  # {name: Bias}
     qs_chunk_size: int = 1024
     ks_chunk_size: int = 1024
 

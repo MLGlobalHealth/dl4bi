@@ -140,12 +140,12 @@ class TemporalBatch(MetaLearningBatch):
         _, axs = plt.subplots(N, 1, figsize=(8, N * 4))
         for i in range(N):
             if i == 0:
-                title = "Spatial Posterior Predictive"
+                title = "Temporal Posterior Predictive"
                 title += f"\n{subtitle}" if subtitle else ""
                 axs[i].set_title(title, fontsize=16)
             elif i == B - 1:
                 axs[i].set_xlabel("t", fontsize=14)
-            axs[i].set_ylabel(f"Sample {i+1}", fontsize=14, rotation=90)
+            axs[i].set_ylabel(f"Sample {i + 1}", fontsize=14, rotation=90)
             axs[i].scatter(
                 self.t_ctx[i, self.mask_ctx[i], 0],
                 self.f_ctx[i, self.mask_ctx[i], 0],

@@ -7,15 +7,16 @@ so an account is necessary to log and collect the results from these runs.
 """
 
 import argparse
-import itertools as it
 import sys
 from collections.abc import Callable
 
 import jax
+from beijing_air_quality import main as beijing_air_quality_main
 from celeba import main as celeba_main
 from cifar_10 import main as cifar_10_main
 from era5 import main as era5_main
 from gp import main as gp_main
+from household_electric import main as household_electric_main
 from hydra import compose, initialize
 from jax import random
 from mnist import main as mnist_main
@@ -52,7 +53,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     #     "NeurIPS TNP-KR - Gaussian Processes",
     #     dry_run=dry_run,
     # )
-    # img_benchmark(
+    # generic_benchmark(
     #     seeds,
     #     "configs/sir",
     #     models,
@@ -71,7 +72,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     #     "data.valid_region=northern_europe",
     #     "data.test_region=western_europe",
     # ]
-    # img_benchmark(
+    # generic_benchmark(
     #     seeds,
     #     "configs/era5",
     #     era5_models,
@@ -84,7 +85,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     #     "data.valid_region=western_europe",
     #     "data.test_region=northern_europe",
     # ]
-    # img_benchmark(
+    # generic_benchmark(
     #     seeds,
     #     "configs/era5",
     #     era5_models,
@@ -97,19 +98,28 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     # HIGH DIMENSIONAL
     # TODO(danj):
     # fixed + spatial effects:
-    # tabular_models = ["tnp_kr_scan", "te_tnp"]
-    # tabular_benchmark(
+    tabular_models = ["tnp_kr_scan", "te_tnp"]
+    generic_benchmark(
+        seeds,
+        "configs/household_electric",
+        tabular_models,
+        household_electric_main,
+        overrides,
+        "NeurIPS TNP-KR - Household Electric",
+        dry_run=dry_run,
+    )
+    # generic_benchmark(
     #     seeds,
-    #     "configs/household_electric",
-    #     models,
-    #     era5_main,
+    #     "configs/beijing_air_quality",
+    #     tabular_models,
+    #     beijing_air_quality_main,
     #     overrides,
-    #     "NeurIPS TNP-KR - Household Electric",
+    #     "NeurIPS TNP-KR - Beijing Air Quality",
     #     dry_run=dry_run,
     # )
 
     # NON-STATIONARY DISTRIBUTIONS
-    # img_benchmark(
+    # generic_benchmark(
     #     seeds,
     #     "configs/celeba",
     #     models,
@@ -118,7 +128,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     #     "NeurIPS TNP-KR - CelebA",
     #     dry_run=dry_run,
     # )
-    # img_benchmark(
+    # generic_benchmark(
     #     seeds,
     #     "configs/cifar_10",
     #     models,
@@ -163,7 +173,7 @@ def gp_benchmark(
                     main_fn(cfg)
 
 
-def img_benchmark(
+def generic_benchmark(
     seeds: jax.Array,
     cfg_dir: str = "configs/celeba",
     models: list[str] = ["tnp_kr_scan"],
@@ -196,12 +206,6 @@ def parse_args(argv):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "paper",
-        choices=["tnp_kr", "lore"],
-        default="tnp_kr",
-        help="Select which paper to reproduce.",
-    )
-    parser.add_argument(
         "-s",
         "--seed",
         type=int,
@@ -228,8 +232,4 @@ if __name__ == "__main__":
     args = parse_args(sys.argv)
     rng = random.key(args.seed)
     seeds = random.choice(rng, 100, (args.num_runs,), replace=False)
-    match args.paper:
-        case "tnp_kr":
-            tnp_kr_paper(seeds, args.dry_run)
-        case _:
-            pass
+    tnp_kr_paper(seeds, args.dry_run)
