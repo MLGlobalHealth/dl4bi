@@ -107,11 +107,15 @@ def main(cfg: DictConfig):
     with open(mcmc_results_path / "mcmc.pickle", "rb") as f:
         mcmc: MCMC = pickle.load(f)
     samples_c = mcmc.get_samples()
+    mcmc_config = OmegaConf.load(mcmc_results_path / "config.yaml")
+    iso = cfg.get("iso", mcmc_config.iso)
+    region = cfg.get("region", mcmc_config.region)
+
     # Predict
-    s_t = get_grid(cfg.iso, cfg.region, cfg.res)
+    s_t = get_grid(iso, region, cfg.res)
     if "x" in data.keys():
         print("Using urban/rural covariate.")
-        x_t = get_urban_rural(cfg.iso, s_t, cfg.year)
+        x_t = get_urban_rural(iso, s_t, cfg.year)
     else:
         print("Not using urban/rural covariate.")
         x_t = None
