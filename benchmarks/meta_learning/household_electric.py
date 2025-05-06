@@ -17,10 +17,7 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
-from dl4bi.meta_learning.data.spatiotemporal import (
-    TemporalBatch,
-    TemporalData,
-)
+from dl4bi.meta_learning.data.temporal import TemporalBatch, TemporalData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
@@ -51,6 +48,7 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         cfg.valid_num_steps,
         valid_dataloader,
+        return_state="best",
     )
     metrics = evaluate(
         rng_test,
@@ -72,10 +70,13 @@ def build_dataloaders(
     num_ctx_max: int = 256,
     num_test: int = 256,
 ):
-    (f_train, X_train), (f_valid, X_valid), (f_test, X_test) = load_data(rng)
+    train, valid, test = load_data(rng)
+    x_train, t_train, f_train = train
+    x_valid, t_valid, f_valid = valid
+    x_test, t_test, f_test = test
 
-    def build_dataloader(f, X):
-        N, L = X.shape[0], num_ctx_max + num_test
+    def build_dataloader(x, t, f):
+        N, L = x.shape[0], num_ctx_max + num_test
 
         def dataloader(rng: jax.Array):
             while True:
@@ -83,8 +84,8 @@ def build_dataloaders(
                 rng_bs = random.split(rng_b, batch_size)
                 idx = vmap(lambda rng: random.choice(rng, N, (L,), replace=False))(
                     rng_bs
-                )  # [B, L]
-                yield TemporalData(x=X[idx], f=f[idx]).batch(
+                )  # [B, T]
+                yield TemporalData(x[idx], t[idx], f[idx]).batch(
                     rng_i,
                     num_ctx_min,
                     num_ctx_max,
@@ -94,29 +95,23 @@ def build_dataloaders(
 
         return dataloader
 
-    # NOTE: uncomment to use _entire_ valid set, similar to test set (much slower)
-    # def valid_dataloader(rng: jax.Array):
-    #     yield TabularBatch(
-    #         x_ctx=X_train[None, ...],
-    #         f_ctx=f_train[None, ...],
-    #         mask_ctx=jnp.ones((1, X_train.shape[0]), dtype=bool),
-    #         x_test=X_valid[None, ...],
-    #         f_test=f_valid[None, ...],
-    #     )
-
     def test_dataloader(rng: jax.Array):
-        N = X_train.shape[0] + X_valid.shape[0]
-        yield TabularBatch(
-            x_ctx=jnp.concat([X_train, X_valid], axis=0)[None, ...],
+        N = x_train.shape[0] + x_valid.shape[0]
+        yield TemporalBatch(
+            x_ctx=jnp.concat([x_train, x_valid], axis=0)[None, ...],
+            t_ctx=jnp.concat([t_train, f_train], axis=0)[None, ...],
             f_ctx=jnp.concat([f_train, f_valid], axis=0)[None, ...],
             mask_ctx=jnp.ones((1, N), dtype=bool),
-            x_test=X_test[None, ...],
+            x_test=x_test[None, ...],
+            t_test=t_test[None, ...],
             f_test=f_test[None, ...],
+            mask_test=jnp.ones((1, f_test.shape[0]), dtype=bool),
+            inv_permute_idx=jnp.arange(N),
         )
 
     return (
-        build_dataloader(f_train, X_train),
-        build_dataloader(f_valid, X_valid),
+        build_dataloader(x_train, t_train, f_train),
+        build_dataloader(x_valid, t_valid, f_valid),
         test_dataloader,
     )
 
@@ -136,27 +131,27 @@ def load_data(rng: jax.Array):
         sys.exit("Dataset not available.")
     df["dt"] = pd.to_datetime(df.Date + " " + df.Time, dayfirst=True)
     df["year"] = df.dt.dt.year
-    df["min_of_year"] = df.dt.dt.day_of_year * 24 * 60
+    df["month"] = df.dt.dt.month
+    df["day"] = df.dt.dt.day
+    df["minute_of_year"] = df.dt.dt.day_of_year * 24 * 60
     df = df.drop(columns=["Date", "Time", "dt"])
-    fX = df.values
-    N = fX.shape[0]
+    data = df.values
+    N = data.shape[0]
     pct_train, pct_test = 0.8, 0.1
     num_train, num_test = int(pct_train * N), int(pct_test * N)
     perm = random.permutation(rng, N)
-    fX = fX[perm]
-    fX_train, fX_valid, fX_test = (
-        fX[:num_train],
-        fX[num_train:-num_test],
-        fX[-num_test:],
+    data = data[perm]
+    train, valid, test = (
+        data[:num_train],
+        data[num_train:-num_test],
+        data[-num_test:],
     )
     scaler = StandardScaler()
-    fX_train = scaler.fit_transform(fX_train)
-    fX_valid = scaler.transform(fX_valid)
-    fX_test = scaler.transform(fX_test)
-    f_train, X_train = fX_train[:, [0]], fX_train[:, 1:]
-    f_valid, X_valid = fX_valid[:, [0]], fX_valid[:, 1:]
-    f_test, X_test = fX_test[:, [0]], fX_test[:, 1:]
-    return (f_train, X_train), (f_valid, X_valid), (f_test, X_test)
+    train = scaler.fit_transform(train)
+    valid = scaler.transform(valid)
+    test = scaler.transform(test)
+    split_xtf = lambda d: (d[:, 1:-1], d[:, -1], d[:, [0]])
+    return split_xtf(train), split_xtf(valid), split_xtf(test)
 
 
 if __name__ == "__main__":
