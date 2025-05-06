@@ -1,4 +1,5 @@
 import pickle
+from cProfile import label
 from datetime import datetime
 from inspect import getsource
 from pathlib import Path
@@ -18,7 +19,7 @@ from benchmarks.disease_mapping.visualize import plot_surveys
 
 
 def run_mcmc(cfg: DictConfig, data: dict[str, jax.Array]) -> MCMC:
-    sampler = NUTS(model.survey_model, init_strategy=init_to_median())
+    sampler = NUTS(model.survey_model)
     mcmc = MCMC(
         sampler,
         num_warmup=cfg.num_warmup,
@@ -33,22 +34,47 @@ def run_mcmc(cfg: DictConfig, data: dict[str, jax.Array]) -> MCMC:
     return mcmc
 
 
-def prior_predictive(data: dict[str, jax.Array]) -> MCMC:
+def prior_predictive_check(data: dict[str, jax.Array]):
     rng = jax.random.key(0)
-    s, n, n_pos = data["s"], data["n"], data["n_pos"]
+    s, n, n_pos, x = data["s"], data["n"], data["n_pos"], data.get("x", None)
     n = data["n"].astype(jnp.int32)
+    L = n.shape[-1]
 
     predictive = Predictive(model.survey_model, num_samples=100)
-    samples = predictive(rng, s, n, None)
+    samples = predictive(rng, s, n, None, x)
     prior_n_pos = samples["n_pos"]
-    mean = prior_n_pos.mean(0)
-    std = prior_n_pos.std(0)
 
-    x = jnp.arange(len(mean))
-    plt.errorbar(x, mean, std, fmt="none", alpha=0.5, label="Prior 68% CI")
-    plt.scatter(x, n_pos, s=1, color="red", label="Observed data")
-    plt.legend()
-    return plt.gcf()
+    ci = 95
+    lo = jnp.percentile(prior_n_pos, (100 - ci) / 2, axis=0)
+    hi = jnp.percentile(prior_n_pos, 100 - (100 - ci) / 2, axis=0)
+    y = jnp.stack([lo, hi], axis=-1)
+    x = jnp.arange(L)
+
+    fig, ax = plt.subplots(constrained_layout=True)
+    ax.fill_between(
+        x, lo, hi, step="mid", alpha=0.3, label=f"Prior predictive {ci}% CI"
+    )
+    ax.scatter(x, n_pos, s=1, color="red", label="Observed data")
+    ax.legend()
+    return fig
+
+
+def cfg_to_name(cfg: DictConfig) -> str:
+    if cfg.get("name") is not None:
+        return "MCMC(" + cfg.name + ")"
+    else:
+
+        def shorten_key(key: str):
+            return "".join(x[0] for x in key.split("_"))
+
+        values_repr = [
+            "(" + shorten_key(k) + ":" + str(v) + ")"
+            # for k, v in sorted(d.items(), key=lambda x: x[0])
+            for k, v in cfg.items()
+            if v is not None
+        ]
+
+        return "MCMC" + "".join(values_repr)
 
 
 @hydra.main("configs", "mcmc", None)
@@ -56,12 +82,11 @@ def main(cfg: DictConfig):
     """
     Run MCMC inference on the survey model.
     """
-    if cfg.get("name", None):
-        results_path = Path("results") / f"MCMC {cfg.name}"
-    else:
-        results_path = Path("results") / (
-            "MCMC " + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        )
+    print("Running MCMC with config:")
+    print(OmegaConf.to_yaml(cfg, resolve=True))
+
+    name = cfg_to_name(cfg)
+    results_path = Path("results") / name
     results_path.mkdir(parents=True, exist_ok=True)
 
     # Load data
@@ -79,6 +104,11 @@ def main(cfg: DictConfig):
     fig = plot_surveys(data)
     fig.savefig(results_path / "data.png", dpi=300)
     (results_path / "model.txt").write_text(getsource(model))
+
+    # Prior predictive check
+    fig = prior_predictive_check(data)
+    fig.savefig(results_path / "prior_predictive.png", dpi=300)
+    return
 
     # Run MCMC
     timer_start = timer()
