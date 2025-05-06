@@ -87,7 +87,7 @@ def map_grid(s, nrows, ncols, **kwargs):
         subplot_kw=dict(projection=projection),
         squeeze=False,
         layout="compressed",
-        # figsize=(ncols * 10, nrows * 10),
+        figsize=(ncols * 8, nrows * 8),
         sharex=True,
         sharey=True,
     )
