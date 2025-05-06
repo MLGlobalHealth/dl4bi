@@ -17,7 +17,8 @@ blk:
     attn:
       _target_: dl4bi.attention.BiasedScanAttention
       s_bias:
-        _target_: dl4bi.bias.Bias.build_geodesic_network_bias
+        _target_: dl4bi.bias.Bias.build_geodesic_rbf_network_bias
+        # _target_: dl4bi.bias.Bias.build_geodesic_network_bias
         num_heads: 4
         num_basis: 5
     proj_qs:
