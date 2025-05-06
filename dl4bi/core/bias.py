@@ -239,9 +239,7 @@ class Bias(nn.Module):
 
     # TODO: how do I set the `func` to `great_circle_dist` in the non-scan variant?
     @classmethod
-    def build_geodesic_exponential_network_bias(
-        cls, num_heads: int = 4, num_basis: int = 5
-    ):
+    def build_geodesic_network_bias(cls, num_heads: int = 4, num_basis: int = 5):
         return Bias(
             init_rbf_network_bias_params,
             {"num_heads": num_heads, "num_basis": num_basis},
