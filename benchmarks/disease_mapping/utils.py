@@ -1,5 +1,4 @@
 from functools import partial, wraps
-from typing import Callable, Literal
 
 import jax
 import jax.numpy as jnp
@@ -48,6 +47,10 @@ def haversine_distance(x, y):
 
 
 def great_circle_distance(x, y):
+    """
+    Given two (longitude, latitude) pairs in degrees,
+    returns the great circle distance in degrees.
+    """
     # based on https://en.wikipedia.org/wiki/Great-circle_distance#Computational_formulae
     x_lon, x_lat = x
     y_lon, y_lat = y
@@ -67,25 +70,6 @@ def great_circle_distance(x, y):
     )
 
     return jnp.rad2deg(arc_length)
-
-
-
-
-def make_pairwise(
-    fn: Callable, method: Literal["sequential", "vectorized"] = "vectorized"
-):
-    match method:
-        case "vectorized":
-            f = vmap(vmap(fn, in_axes=(None, 0)), in_axes=(0, None))
-        case "sequential":
-
-            def f_over_xs(xs, y):
-                return jax.lax.map(lambda x: fn(x, y), xs)
-
-            def f(xs, ys):
-                return jax.lax.map(lambda y: f_over_xs(xs, y), ys)
-
-    return wraps(fn)(f)
 
 
 def cartesian_product(*xs):

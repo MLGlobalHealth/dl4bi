@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from jax import jit, vmap
 from pandas import DataFrame
 
-from benchmarks.disease_mapping.utils import make_pairwise
+from dl4bi.core.utils import make_pairwise
 
 
 def l2(x: jax.Array, y: jax.Array):

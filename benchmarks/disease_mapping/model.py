@@ -8,7 +8,8 @@ import numpyro
 import numpyro.distributions as dist
 from sps.kernels import _prepare_dims, exponential, periodic, rbf
 
-from benchmarks.disease_mapping.utils import haversine_distance, make_pairwise
+from benchmarks.disease_mapping.utils import great_circle_distance, haversine_distance
+from dl4bi.core.utils import make_pairwise
 
 # TODO @pgrynfelder:
 # perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py
@@ -23,7 +24,7 @@ def kernel(x, y, /, *, var, ls, **_):
     x, y = _prepare_dims(x, y)
     assert x.shape[-1] == y.shape[-1] == 2
 
-    d = make_pairwise(haversine_distance)(x, y)
+    d = make_pairwise(great_circle_distance)(x, y)
     return var * jnp.exp(-d / ls)
 
 
