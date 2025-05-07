@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import pandas as pd
 import wandb
 from hydra.utils import instantiate
-from jax import random, vmap
+from jax import jit, random, vmap
 from omegaconf import DictConfig, OmegaConf
 from sklearn.preprocessing import StandardScaler
 
@@ -119,8 +119,18 @@ def build_dataloaders(
 
 
 def load_data(rng: jax.Array):
+    rng_valid, rng_test = random.split(rng)
     try:
         df = pd.read_csv("cache/household_power_consumption.txt", sep=";").dropna()
+        df["dt"] = pd.to_datetime(df.Date + " " + df.Time, dayfirst=True)
+        df["year"] = df.dt.dt.year
+        df["month"] = df.dt.dt.month
+        df["day"] = df.dt.dt.day
+        df["hour"] = df.dt.dt.hour
+        df["minute"] = df.dt.dt.minute
+        df["t"] = (df.dt - df.dt.min()).dt.total_seconds()
+        df = df.sort_values(by="t").reset_index(drop=True)
+        df = df.drop(columns=["Date", "Time", "dt"])
     except FileNotFoundError:
         url = (
             "https://www.kaggle.com/datasets/uciml/electric-power-consumption-data-set"
@@ -131,29 +141,50 @@ def load_data(rng: jax.Array):
         """
         print(msg)
         sys.exit("Dataset not available.")
-    df["dt"] = pd.to_datetime(df.Date + " " + df.Time, dayfirst=True)
-    df["year"] = df.dt.dt.year
-    df["month"] = df.dt.dt.month
-    df["day"] = df.dt.dt.day
-    df["minute_of_year"] = df.dt.dt.day_of_year * 24 * 60
-    df = df.drop(columns=["Date", "Time", "dt"])
-    data = df.values
-    N = data.shape[0]
-    pct_train, pct_test = 0.8, 0.1
-    num_train, num_test = int(pct_train * N), int(pct_test * N)
-    perm = random.permutation(rng, N)
-    data = data[perm]
-    train, valid, test = (
-        data[:num_train],
-        data[num_train:-num_test],
-        data[-num_test:],
-    )
-    scaler = StandardScaler()
-    train = scaler.fit_transform(train)
-    valid = scaler.transform(valid)
-    test = scaler.transform(test)
-    split_xtf = lambda d: (d[:, 1:-1], d[:, -1], d[:, [0]])
-    return split_xtf(train), split_xtf(valid), split_xtf(test)
+    N = df.shape[0]
+    block_size = int(N * 0.1)
+    df_train, df_valid = extract_temporal_block(rng_valid, df, block_size)
+    df_train, df_test = extract_temporal_block(rng_test, df_train, block_size)
+    df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
+    t_cols = ["t"]
+    f_cols = ["Global_active_power"]
+    exclude_cols = ["Sub_metering_1", "Sub_metering_2", "Sub_metering_3"]
+    x_cols = list(set(df.columns) - set(t_cols + f_cols)) - set(exclude_cols)
+    split_xtf = jit(lambda df: [df[c].values for c in [x_cols, t_cols, f_cols]])
+    return split_xtf(df_train), split_xtf(df_valid), split_xtf(df_test)
+
+
+def extract_temporal_block(
+    rng: jax.Array,
+    df: pd.DataFrame,
+    block_size: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Extracts a contiguous temporal block.
+
+    .. note::
+        Assumes the data is temporally ordered.
+    """
+    N = df.shape[0]
+    i = random.choice(rng, N, (1,)).item()
+    df_block = df.iloc[i : i + block_size]
+    df_sans_block = df.drop(df.index[i : i + block_size]).reset_index(drop=True)
+    return df_sans_block, df_block
+
+
+def standardize_by_train(
+    df_train: pd.DataFrame,
+    df_valid: pd.DataFrame,
+    df_test: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    cols = df_train.columns
+    tx = StandardScaler()
+    x_train = tx.fit_transform(df_train)
+    x_valid = tx.transform(df_valid)
+    x_test = tx.transform(df_test)
+    df_train = pd.DataFrame(x_train, columns=cols)
+    df_valid = pd.DataFrame(x_valid, columns=cols)
+    df_test = pd.DataFrame(x_test, columns=cols)
+    return df_train, df_valid, df_test
 
 
 if __name__ == "__main__":

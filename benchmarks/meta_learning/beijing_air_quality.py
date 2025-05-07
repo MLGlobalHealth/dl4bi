@@ -136,6 +136,7 @@ def build_dataloaders(
 
 
 def load_data(rng: jax.Array):
+    rng_valid, rng_test = random.split(rng)
     dir = Path("cache/beijing_air_quality")
     try:
         df = pd.concat([pd.read_csv(p) for p in dir.glob("*.csv")], ignore_index=True)
@@ -144,7 +145,8 @@ def load_data(rng: jax.Array):
         df = df.merge(df_coords, on="station", how="left")
         df = df.drop(columns=["No", "station"])
         df["t"] = pd.to_datetime(df[["year", "month", "day", "hour"]])
-        df["t"] = (df.t - df.t.min()).dt.total_seconds()
+        df["t"] = (df.dt - df.dt.min()).dt.total_seconds()
+        df = df.sort_values(by="t").reset_index(drop=True)
     except FileNotFoundError:
         url = "https://archive.ics.uci.edu/dataset/501/beijing+multi+site+air+quality+data"
         msg = f"""
@@ -155,17 +157,17 @@ def load_data(rng: jax.Array):
         print(msg)
         sys.exit("Dataset not available.")
     N = df.shape[0]
-    N_train = int(N * 0.8)
-    N_test = int(N * 0.1)
-    permute_idx = random.choice(rng, N, (N,), replace=False)
-    df = df.iloc[permute_idx]
-    df_train, df_valid, df_test = df[:N_train], df[N_train:-N_test], df[-N_test:]
+    block_size = int(N * 0.1)
+    df_train, df_valid = extract_temporal_block(rng_valid, df, block_size)
+    df_train, df_test = extract_temporal_block(rng_test, df_train, block_size)
     df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
     s_cols = ["Latitude", "Longitude"]
     t_cols = ["t"]
     f_cols = ["PM2.5"]
     x_cols = list(set(df_train.columns) - set(s_cols + t_cols + f_cols))
-    split_xstf = lambda df: [df[c].values for c in [x_cols, s_cols, t_cols, f_cols]]
+    split_xstf = jit(
+        lambda df: [df[c].values for c in [x_cols, s_cols, t_cols, f_cols]]
+    )
     return split_xstf(df_train), split_xstf(df_valid), split_xstf(df_test)
 
 
@@ -189,11 +191,28 @@ Wanshouxigong,39.878,116.352
     )
 
 
+def extract_temporal_block(
+    rng: jax.Array,
+    df: pd.DataFrame,
+    block_size: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Extracts a contiguous temporal block.
+
+    .. note::
+        Assumes the data is temporally ordered.
+    """
+    N = df.shape[0]
+    i = random.choice(rng, N, (1,))
+    df_block = df.iloc[i : i + block_size]
+    df_sans_block = df.drop(df.index[i : i + block_size]).reset_index(drop=True)
+    return df_sans_block, df_block
+
+
 def standardize_by_train(
     df_train: pd.DataFrame,
     df_valid: pd.DataFrame,
     df_test: pd.DataFrame,
-):
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     num_feats = list(set(df_train.columns) - {"wd"})
     cat_feats = ["wd"]  # wind direction
     tx = ColumnTransformer(
