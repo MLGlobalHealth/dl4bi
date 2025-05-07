@@ -8,9 +8,9 @@ import jax.numpy as jnp
 import pandas as pd
 import wandb
 from hydra.utils import instantiate
-from jax import jit, random, vmap
+from jax import random, vmap
 from omegaconf import DictConfig, OmegaConf
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
 
 from dl4bi.core.train import (
     evaluate,
@@ -87,7 +87,7 @@ def build_dataloaders(
                 idx = vmap(lambda rng: random.choice(rng, N, (L,), replace=False))(
                     rng_bs
                 )  # [B, T]
-                yield TemporalData(x[idx], t[idx], f[idx]).batch(
+                yield TemporalData(x[idx], t[idx].squeeze(), f[idx]).batch(
                     rng_i,
                     num_ctx_min,
                     num_ctx_max,
@@ -97,18 +97,32 @@ def build_dataloaders(
 
         return dataloader
 
+    def valid_dataloader(rng: jax.Array):
+        Nc, Nt = f_train.shape[0], f_valid.shape[0]
+        yield TemporalBatch(
+            x_ctx=x_train[None, ...],
+            t_ctx=t_train[None, ...],
+            f_ctx=f_train[None, ...],
+            mask_ctx=jnp.ones((1, Nc), dtype=bool),
+            x_test=x_valid[None, ...],
+            t_test=t_valid[None, ...],
+            f_test=f_valid[None, ...],
+            mask_test=jnp.ones((1, Nt), dtype=bool),
+            inv_permute_idx=jnp.arange(Nc),
+        )
+
     def test_dataloader(rng: jax.Array):
-        N = x_train.shape[0] + x_valid.shape[0]
+        Nc, Nt = f_train.shape[0] + f_valid.shape[0], f_test.shape[0]
         yield TemporalBatch(
             x_ctx=jnp.concat([x_train, x_valid], axis=0)[None, ...],
             t_ctx=jnp.concat([t_train, f_train], axis=0)[None, ...],
             f_ctx=jnp.concat([f_train, f_valid], axis=0)[None, ...],
-            mask_ctx=jnp.ones((1, N), dtype=bool),
+            mask_ctx=jnp.ones((1, Nc), dtype=bool),
             x_test=x_test[None, ...],
             t_test=t_test[None, ...],
             f_test=f_test[None, ...],
-            mask_test=jnp.ones((1, f_test.shape[0]), dtype=bool),
-            inv_permute_idx=jnp.arange(N),
+            mask_test=jnp.ones((1, Nt), dtype=bool),
+            inv_permute_idx=jnp.arange(Nc),
         )
 
     return (
@@ -120,17 +134,24 @@ def build_dataloaders(
 
 def load_data(rng: jax.Array):
     rng_valid, rng_test = random.split(rng)
+    path = Path("cache/household_power_consumption.txt")
     try:
-        df = pd.read_csv("cache/household_power_consumption.txt", sep=";").dropna()
+        df = pd.read_csv(path, sep=";", na_values="?")
         df["dt"] = pd.to_datetime(df.Date + " " + df.Time, dayfirst=True)
         df["year"] = df.dt.dt.year
         df["month"] = df.dt.dt.month
         df["day"] = df.dt.dt.day
         df["hour"] = df.dt.dt.hour
         df["minute"] = df.dt.dt.minute
+        df["day_of_week"] = df.dt.dt.day_of_week
+        df["is_weekend"] = (df.dt.dt.day_of_week >= 5).astype(int)
+        df["power"] = df.Global_active_power
+        # NOTE: these won't be available for test points in temporal blocks
+        # df["power_lag_1"] = df.Global_active_power.shift(1)
+        # df["power_roll_5"] = df.Global_active_power.rolling(5).mean().shift(1)
         df["t"] = (df.dt - df.dt.min()).dt.total_seconds()
         df = df.sort_values(by="t").reset_index(drop=True)
-        df = df.drop(columns=["Date", "Time", "dt"])
+        df = df.drop(columns=["Date", "Time", "dt"]).dropna()
     except FileNotFoundError:
         url = (
             "https://www.kaggle.com/datasets/uciml/electric-power-consumption-data-set"
@@ -146,11 +167,18 @@ def load_data(rng: jax.Array):
     df_train, df_valid = extract_temporal_block(rng_valid, df, block_size)
     df_train, df_test = extract_temporal_block(rng_test, df_train, block_size)
     df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
+    x_cols = [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "minute",
+        "day_of_week",
+        "is_weekend",
+    ]
     t_cols = ["t"]
-    f_cols = ["Global_active_power"]
-    exclude_cols = ["Sub_metering_1", "Sub_metering_2", "Sub_metering_3"]
-    x_cols = list(set(df.columns) - set(t_cols + f_cols)) - set(exclude_cols)
-    split_xtf = jit(lambda df: [df[c].values for c in [x_cols, t_cols, f_cols]])
+    f_cols = ["power"]
+    split_xtf = lambda df: [df[c].values for c in [x_cols, t_cols, f_cols]]
     return split_xtf(df_train), split_xtf(df_valid), split_xtf(df_test)
 
 
@@ -177,7 +205,7 @@ def standardize_by_train(
     df_test: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     cols = df_train.columns
-    tx = StandardScaler()
+    tx = MinMaxScaler()
     x_train = tx.fit_transform(df_train)
     x_valid = tx.transform(df_valid)
     x_test = tx.transform(df_test)

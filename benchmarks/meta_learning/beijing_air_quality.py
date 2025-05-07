@@ -165,9 +165,7 @@ def load_data(rng: jax.Array):
     t_cols = ["t"]
     f_cols = ["PM2.5"]
     x_cols = list(set(df_train.columns) - set(s_cols + t_cols + f_cols))
-    split_xstf = jit(
-        lambda df: [df[c].values for c in [x_cols, s_cols, t_cols, f_cols]]
-    )
+    split_xstf = lambda df: [df[c].values for c in [x_cols, s_cols, t_cols, f_cols]]
     return split_xstf(df_train), split_xstf(df_valid), split_xstf(df_test)
 
 
