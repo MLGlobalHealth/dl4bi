@@ -79,7 +79,7 @@ def main(
     candidates = ["matheron", "gp", "gp_pointwise"]
     for candidate in candidates:
         if (candidate_path := true_run / candidate).exists():
-            true_dist = jnp.load(candidate_path / "predictions.npz")["theta"]
+            true_dist = jnp.load(candidate_path / "predictions.npz")[target_quantity]
             print(f"Using {candidate_path} as ground truth.")
             break
     else:
@@ -120,26 +120,30 @@ def main(
                 output_format = OmegaConf.load(outputs_path.parent / "config.yaml").get(
                     "output_format", "theta"
                 )
-                match (target_quantity, output_format):
+                match (output_format, target_quantity):
                     case ("theta", "theta") | ("z", "z"):
                         metrics = evaluate(true_dist, None, mean, std)
-                    case ("theta", "z"):
-                        metrics = evaluate(
-                            true_dist,
-                            jax.random.normal(
-                                rng, (n_samples_for_conversion, *mean.shape)
-                            )
-                            * std
-                            + mean,
-                        )
                     case ("z", "theta"):
                         metrics = evaluate(
                             true_dist,
-                            jax.random.normal(
-                                rng, (n_samples_for_conversion, *mean.shape)
-                            )
-                            * std
-                            + mean,
+                            jax.nn.sigmoid(
+                                jax.random.normal(
+                                    rng, (n_samples_for_conversion, *mean.shape)
+                                )
+                                * std
+                                + mean
+                            ),
+                        )
+                    case ("theta", "z"):
+                        metrics = evaluate(
+                            true_dist,
+                            jsp.special.logit(
+                                jax.random.normal(
+                                    rng, (n_samples_for_conversion, *mean.shape)
+                                )
+                                * std
+                                + mean
+                            ),
                         )
 
                 metrics["model"] = outputs_path.parent.name
@@ -175,7 +179,7 @@ if __name__ == "__main__":
     else:
         target_quantity = "theta"
 
-    result = main(args.runs)
+    result = main(args.runs, target_quantity)
 
     print(result)
     result.to_csv("results.csv")
