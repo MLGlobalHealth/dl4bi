@@ -1,4 +1,4 @@
-_target_: dl4bi.meta_learning.ScanTNPKR
+_target_: dl4bi.meta_learning.BSATNP
 num_blks: 6
 num_reps: 1
 embed_s:

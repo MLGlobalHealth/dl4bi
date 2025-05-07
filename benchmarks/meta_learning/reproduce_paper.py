@@ -23,7 +23,7 @@ from mnist import main as mnist_main
 from sir import main as sir_main
 
 
-def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
+def b_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     """Reproduces the Transformer Neural Process - Kernel Regresssion (TNP-KR) paper."""
     overrides = []
     if dry_run:
@@ -36,7 +36,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         ]
     gp_kernels_2d = ["rbf"]
     models = [
-        "tnp_kr_scan",
+        "bsa_tnp",
         "tnp_d",
         "te_tnp",
         "convcnp",
@@ -67,7 +67,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     # test_multiresolution(...)
 
     # SPACE & TIME & GENERALIZATION
-    # era5_models = ["tnp_d", "te_tnp", "tnp_kr_scan"]
+    # era5_models = ["tnp_d", "te_tnp", "bsa_tnp"]
     # era5_overrides = [
     #     "data.valid_region=northern_europe",
     #     "data.test_region=western_europe",
@@ -98,11 +98,11 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     # HIGH DIMENSIONAL
     # TODO(danj):
     # fixed + spatial effects:
-    tabular_models = ["tnp_kr_scan", "te_tnp"]
+    tabular_models = ["bsa_tnp", "te_tnp"]
     generic_benchmark(
         seeds,
         "configs/household_electric",
-        ["tnp_kr_scan"],  # add temporal bias
+        ["bsa_tnp"],  # add temporal bias
         # tabular_models,
         household_electric_main,
         overrides,
@@ -143,8 +143,8 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
 def gp_benchmark(
     seeds: jax.Array,
     data: str = "1d",
-    kernels: list[str] = ["rbf", "periodic", "tnp_kr"],
-    models: list[str] = ["1d/tnp_kr_scan"],
+    kernels: list[str] = ["rbf", "periodic", "b_tnp"],
+    models: list[str] = ["1d/bsa_tnp"],
     main_fn: Callable = gp_main,
     overrides: list = [],
     project: str = "",
@@ -177,7 +177,7 @@ def gp_benchmark(
 def generic_benchmark(
     seeds: jax.Array,
     cfg_dir: str = "configs/celeba",
-    models: list[str] = ["tnp_kr_scan"],
+    models: list[str] = ["bsa_tnp"],
     main_fn: Callable = celeba_main,
     overrides: list = [],
     project: str = "",
@@ -233,4 +233,4 @@ if __name__ == "__main__":
     args = parse_args(sys.argv)
     rng = random.key(args.seed)
     seeds = random.choice(rng, 100, (args.num_runs,), replace=False)
-    tnp_kr_paper(seeds, args.dry_run)
+    b_tnp_paper(seeds, args.dry_run)

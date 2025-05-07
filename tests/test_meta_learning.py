@@ -25,7 +25,7 @@ from dl4bi.meta_learning import (
     TNPD,
     TNPKR,
     ConvCNP,
-    ScanTNPKR,
+    BSATNP,
 )
 from dl4bi.meta_learning.data.spatial import SpatialData
 

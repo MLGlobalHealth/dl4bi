@@ -1,23 +1,23 @@
 # Reproduce all TNP-KR Paper Results
-`python reproduce_paper.py tnp_kr [--dry_run]`
+`python reproduce_paper.py [--dry_run]`
 
 # Gaussian Processes
-`python gp.py data=1d kernel=rbf model=1d/tnp_kr_scan seed=7 [wandb=False] [+name="Experiment name"]`
+`python gp.py data=1d kernel=rbf model=1d/bsa_tnp seed=7 [wandb=False] [+name="Experiment name"]`
 
 # Bayesian Optimization
-`python bayes_opt.py data=1d kernel=rbf model=1d/tnp_kr_scan seed=7 [wandb=False] [+name="Experiment name"]`
+`python bayes_opt.py data=1d kernel=rbf model=1d/bsa_tnp seed=7 [wandb=False] [+name="Experiment name"]`
 
 # Population Genetics
-`python popgen.py model=tnp_kr_scan seed=7 [wandb=False] [+name="Experiment name"]`
+`python popgen.py model=bsa_tnp seed=7 [wandb=False] [+name="Experiment name"]`
 
 # Outbreaks
-`python outbreaks.py model=tnp_kr_scan seed=7 [wandb=False] [+name="Experiment name"]`
+`python outbreaks.py model=bsa_tnp seed=7 [wandb=False] [+name="Experiment name"]`
 
 # MNIST
-`python mnist.py model=tnp_kr_scan seed=7 [wandb=False] [+name="Experiment name"]`
+`python mnist.py model=bsa_tnp seed=7 [wandb=False] [+name="Experiment name"]`
 
 # CelebA
-`python celeba.py model=tnp_kr_scan seed=7 [wandb=False] [+name="Experiment name"]`
+`python celeba.py model=bsa_tnp seed=7 [wandb=False] [+name="Experiment name"]`
 
 # TabPFN
 To run `hier_bayes_pfn.py`, you need to use a PyTorch (not JAX) environment. If you use pyenv, you can do this with:
@@ -39,7 +39,7 @@ all.sat.temps %>% write_csv(str_c(path, "sat.csv"))
 ```
 
 # Plotting Samples
-To compare models after running `python reproduce_paper.py tnp_kr`:
+To compare models after running `python reproduce_paper.py b_tnp`:
 ```bash
 # GP 1D on [-2, 2]
 python plot_samples.py --config-path=configs/gp project="TNP-KR - Gaussian Processes" data=1d kernel=rbf seed=20 +num_ctx=16
