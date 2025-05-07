@@ -2,7 +2,7 @@ defaults:
   - _self_ # use default global values below
   - data: 1d
   - infer: 1d
-  - model: 1d/tnp_kr
+  - model: 1d/b_tnp
 wandb: True
 seed: 42
 infer_seed: 42

@@ -45,7 +45,7 @@ def plot(
     num_samples: int = 16,
     num_points_per_unit: int = 16,
 ):
-    cfg = models["ScanTNPKR"]["cfg"]  # cfg.data, cfg.kernel should be the same for all
+    cfg = models["BSATNP"]["cfg"]  # cfg.data, cfg.kernel should be the same for all
     cfg.data.batch_size = 1
     half = scale / 2
     for axis in cfg.data.s:  # assumes coordinate axis is centered on origin

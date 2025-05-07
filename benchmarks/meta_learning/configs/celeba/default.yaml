@@ -1,6 +1,6 @@
 defaults:
   - _self_ # use default global values below
-  - model: tnp_kr_scan
+  - model: bsa_tnp
 seed: 42
 wandb: True
 project: CelebA
