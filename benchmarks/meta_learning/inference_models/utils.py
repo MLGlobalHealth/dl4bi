@@ -159,7 +159,7 @@ def plot_2d_posterior_predictive(
     axs[0, 2].imshow(to_img(f_mu_hmc), cmap=cmap, interpolation="none")
     axs[0, 3].set_title("Ground Truth", fontsize=fontsize)
     axs[0, 3].imshow(f, cmap=cmap, interpolation="none")
-    axs[1, 0].set_ylabel("TNP-KR", fontsize=fontsize)
+    axs[1, 0].set_ylabel("BSA-TNP", fontsize=fontsize)
     axs[1, 0].imshow(task, cmap=cmap, interpolation="none")
     axs[1, 1].imshow(
         to_img(f_std_model), cmap=cmap_std, norm=norm_std, interpolation="none"

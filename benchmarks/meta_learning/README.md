@@ -1,4 +1,4 @@
-# Reproduce all TNP-KR Paper Results
+# Reproduce all BSA-TNP Paper Results
 `python reproduce_paper.py [--dry_run]`
 
 # Gaussian Processes
@@ -42,21 +42,21 @@ all.sat.temps %>% write_csv(str_c(path, "sat.csv"))
 To compare models after running `python reproduce_paper.py b_tnp`:
 ```bash
 # GP 1D on [-2, 2]
-python plot_samples.py --config-path=configs/gp project="TNP-KR - Gaussian Processes" data=1d kernel=rbf seed=20 +num_ctx=16
-python plot_samples.py --config-path=configs/gp project="TNP-KR - Gaussian Processes" data=1d kernel=periodic seed=20 +num_ctx=16
-python plot_samples.py --config-path=configs/gp project="TNP-KR - Gaussian Processes" data=1d kernel=matern_3_2 seed=20 +num_ctx=16
+python plot_samples.py --config-path=configs/gp project="BSA-TNP - Gaussian Processes" data=1d kernel=rbf seed=20 +num_ctx=16
+python plot_samples.py --config-path=configs/gp project="BSA-TNP - Gaussian Processes" data=1d kernel=periodic seed=20 +num_ctx=16
+python plot_samples.py --config-path=configs/gp project="BSA-TNP - Gaussian Processes" data=1d kernel=matern_3_2 seed=20 +num_ctx=16
 # GP 2D
-python plot_samples.py --config-path=configs/gp project="TNP-KR - Gaussian Processes" data=2d kernel=rbf seed=20 +num_ctx=128
+python plot_samples.py --config-path=configs/gp project="BSA-TNP - Gaussian Processes" data=2d kernel=rbf seed=20 +num_ctx=128
 # CelebA
-python plot_samples.py --config-path=configs/celeba project="TNP-KR - CelebA" seed=20 +num_ctx=128
+python plot_samples.py --config-path=configs/celeba project="BSA-TNP - CelebA" seed=20 +num_ctx=128
 # MNIST
-python plot_samples.py --config-path=configs/mnist project="TNP-KR - MNIST" seed=20 +num_ctx=128
+python plot_samples.py --config-path=configs/mnist project="BSA-TNP - MNIST" seed=20 +num_ctx=128
 # Cifar 10
-python plot_samples.py --config-path=configs/cifar_10 project="TNP-KR - Cifar 10" seed=20 +num_ctx=128
+python plot_samples.py --config-path=configs/cifar_10 project="BSA-TNP - Cifar 10" seed=20 +num_ctx=128
 # SIR
-python plot_samples.py --config-path=configs/sir project="TNP-KR - SIR" seed=20 +num_ctx=128
+python plot_samples.py --config-path=configs/sir project="BSA-TNP - SIR" seed=20 +num_ctx=128
 # SIR with larger image size
-python plot_samples.py --config-path=configs/sir project="TNP-KR - SIR" seed=20 +num_ctx=128 data=space_128x128
+python plot_samples.py --config-path=configs/sir project="BSA-TNP - SIR" seed=20 +num_ctx=128 data=space_128x128
 ```
 
 Examples with options:

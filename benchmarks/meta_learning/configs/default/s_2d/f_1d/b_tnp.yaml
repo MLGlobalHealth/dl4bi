@@ -1,16 +1,19 @@
-_target_: dl4bi.meta_learning.TNPKR
+_target_: dl4bi.meta_learning.BTNP
 num_blks: 6
 num_reps: 1
-embed_x:
-  _target_: dl4bi.embed.IDEmbedding
-  num_ids: 50
-  num_features: 64
 embed_all:
   _target_: dl4bi.mlp.MLP
   dims: [256, 128, 64]
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
+s_sim:
+  _target_: dl4bi.sim.l2_dist
+  _partial_: true
+s_bias:
+  _target_: dl4bi.bias.Bias.build_rbf_network_bias
+  num_heads: 4
+  num_basis: 5
 blk:
   _target_: dl4bi.transformer.KRBlock
   attn:
@@ -27,6 +30,9 @@ blk:
     proj_vs:
       _target_: dl4bi.mlp.MLP
       dims: [128]
+    proj_out:
+      _target_: dl4bi.mlp.MLP
+      dims: [64]
   ffn:
     _target_: dl4bi.mlp.MLP
     dims: [256, 64]
@@ -39,6 +45,3 @@ head:
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
-output_fn:
-  _target_: dl4bi.core.model_output.BetaOutput.from_activations
-  _partial_: true
