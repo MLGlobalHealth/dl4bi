@@ -102,21 +102,22 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     generic_benchmark(
         seeds,
         "configs/household_electric",
-        tabular_models,
+        ["tnp_kr_scan"],  # add temporal bias
+        # tabular_models,
         household_electric_main,
         overrides,
         "NeurIPS TNP-KR - Household Electric",
         dry_run=dry_run,
     )
-    # generic_benchmark(
-    #     seeds,
-    #     "configs/beijing_air_quality",
-    #     tabular_models,
-    #     beijing_air_quality_main,
-    #     overrides,
-    #     "NeurIPS TNP-KR - Beijing Air Quality",
-    #     dry_run=dry_run,
-    # )
+    generic_benchmark(
+        seeds,
+        "configs/beijing_air_quality",
+        tabular_models,
+        beijing_air_quality_main,
+        overrides,
+        "NeurIPS TNP-KR - Beijing Air Quality",
+        dry_run=dry_run,
+    )
 
     # NON-STATIONARY DISTRIBUTIONS
     # generic_benchmark(
