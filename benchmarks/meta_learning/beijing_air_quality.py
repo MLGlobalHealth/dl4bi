@@ -8,22 +8,19 @@ import jax
 import jax.numpy as jnp
 import pandas as pd
 import wandb
+from flax.core.frozen_dict import FrozenDict
 from hydra.utils import instantiate
-from jax import random, vmap
+from jax import jit, random, vmap
 from omegaconf import DictConfig, OmegaConf
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from dl4bi.core.train import (
-    Callback,
     evaluate,
     save_ckpt,
     train,
 )
-from dl4bi.meta_learning.data.spatiotemporal import (
-    SpatiotemporalBatch,
-    SpatiotemporalData,
-)
+from dl4bi.meta_learning.data.tabular import TabularBatch, TabularData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
@@ -39,8 +36,10 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    rng_train, rng_test = random.split(rng)
-    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(**cfg.data)
+    rng_data, rng_train, rng_test = random.split(rng, 3)
+    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(
+        rng_data, **cfg.data
+    )
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     state = train(
@@ -69,12 +68,11 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-# TODO(danj): TaublarData needs to support space and time
 def build_dataloaders(
     rng: jax.Array,
-    batch_size: int = 16,
-    num_ctx_min: int = 16,
-    num_ctx_max: int = 128,
+    batch_size: int = 32,
+    num_ctx_min: int = 32,
+    num_ctx_max: int = 256,
     num_test: int = 256,
 ):
     train, valid, test = load_data(rng)
@@ -82,8 +80,8 @@ def build_dataloaders(
     x_valid, s_valid, t_valid, f_valid = valid
     x_test, s_valid, t_test, f_test = test
 
-    def build_dataloader(x, s, t, f):
-        N, L = X.shape[0], num_ctx_max + num_test
+    def build_dataloader(x: jax.Array, s: jax.Array, t: jax.Array, f: jax.Array):
+        N, L = x.shape[0], num_ctx_max + num_test
 
         def dataloader(rng: jax.Array):
             while True:
@@ -92,7 +90,8 @@ def build_dataloaders(
                 idx = vmap(lambda rng: random.choice(rng, N, (L,), replace=False))(
                     rng_bs
                 )  # [B, L]
-                yield SpatiotemporalData(x[idx], s[idx], t[idx], f[idx]).batch(
+                feature_groups = FrozenDict({"x": x[idx], "s": s[idx], "t": t[idx]})
+                yield TabularData(feature_groups, f[idx]).batch(
                     rng_i,
                     num_ctx_min,
                     num_ctx_max,
@@ -103,22 +102,35 @@ def build_dataloaders(
         return dataloader
 
     def test_dataloader(rng: jax.Array):
-        N = x_train.shape[0] + x_valid.shape[0]
-        yield TemporalBatch(
-            x_ctx=jnp.concat([x_train, x_valid], axis=0)[None, ...],
-            t_ctx=jnp.concat([t_train, f_train], axis=0)[None, ...],
-            f_ctx=jnp.concat([f_train, f_valid], axis=0)[None, ...],
-            mask_ctx=jnp.ones((1, N), dtype=bool),
-            x_test=x_test[None, ...],
-            t_test=t_test[None, ...],
-            f_test=f_test[None, ...],
-            mask_test=jnp.ones((1, f_test.shape[0]), dtype=bool),
-            inv_permute_idx=jnp.arange(N),
+        x_train, s_train, t_train, f_train = train
+        x_valid, s_valid, t_valid, f_valid = valid
+        x_test, s_test, t_test, f_test = test
+        Nc = x_train.shape[0] + x_valid.shape[0]
+        Nt = x_test.shape[0]
+        merge = jit(lambda a, b: jnp.concat([a, b])[None, ...])
+        ctx_d = {
+            "x_ctx": merge(x_train, x_valid),
+            "s_ctx": merge(s_train, s_valid),
+            "t_ctx": merge(t_train, t_valid),
+            "f_ctx": merge(f_train, f_valid),
+        }
+        test_d = {
+            "x_test": x_test[None, ...],
+            "s_test": s_test[None, ...],
+            "t_test": t_test[None, ...],
+            "f_test": f_test[None, ...],
+        }
+        yield TabularBatch(
+            ctx=FrozenDict(ctx_d),
+            mask_ctx=jnp.ones((1, Nc), dtype=bool),
+            test=FrozenDict(test_d),
+            mask_test=jnp.ones((1, Nt), dtype=bool),
+            inv_permute_idx=jnp.arange(Nc),
         )
 
     return (
-        build_dataloader(f_train, X_train),
-        build_dataloader(f_valid, X_valid),
+        build_dataloader(*train),
+        build_dataloader(*valid),
         test_dataloader,
     )
 
@@ -131,6 +143,8 @@ def load_data(rng: jax.Array):
         df_coords = load_coords()
         df = df.merge(df_coords, on="station", how="left")
         df = df.drop(columns=["No", "station"])
+        df["t"] = pd.to_datetime(df[["year", "month", "day", "hour"]])
+        df["t"] = (df.t - df.t.min()).dt.total_seconds()
     except FileNotFoundError:
         url = "https://archive.ics.uci.edu/dataset/501/beijing+multi+site+air+quality+data"
         msg = f"""
@@ -147,6 +161,12 @@ def load_data(rng: jax.Array):
     df = df.iloc[permute_idx]
     df_train, df_valid, df_test = df[:N_train], df[N_train:-N_test], df[-N_test:]
     df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
+    s_cols = ["Latitude", "Longitude"]
+    t_cols = ["t"]
+    f_cols = ["PM2.5"]
+    x_cols = list(set(df_train.columns) - set(s_cols + t_cols + f_cols))
+    split_xstf = lambda df: [df[c].values for c in [x_cols, s_cols, t_cols, f_cols]]
+    return split_xstf(df_train), split_xstf(df_valid), split_xstf(df_test)
 
 
 def load_coords():
@@ -175,7 +195,7 @@ def standardize_by_train(
     df_test: pd.DataFrame,
 ):
     num_feats = list(set(df_train.columns) - {"wd"})
-    cat_feats = ["wd"]
+    cat_feats = ["wd"]  # wind direction
     tx = ColumnTransformer(
         transformers=[
             ("num", StandardScaler(), num_feats),
