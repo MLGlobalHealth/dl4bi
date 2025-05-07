@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+from flax.core.frozen_dict import FrozenDict
 from jax import jit, random
 from sps.sir import LatticeSIR
 from sps.utils import build_grid
@@ -13,44 +14,72 @@ from dl4bi.meta_learning.data.temporal import TemporalData
 
 def test_tabular_data():
     rng = random.key(42)
-    B, L, D_x, D_f = 4, 37, 8, 1
+    B, L, D_x, D_z, D_f = 4, 37, 8, 3, 1
     num_ctx_min, num_ctx_max, num_test = 3, 10, 20
     x_shape = (B, L, D_x)
+    z_shape = (B, L, D_z)  # another random variable group
     f_shape = (B, L, D_f)
     x_ctx_shape = (B, num_ctx_max, D_x)
+    z_ctx_shape = (B, num_ctx_max, D_z)
     f_ctx_shape = (B, num_ctx_max, D_f)
     mask_ctx_shape = (B, num_ctx_max)
     x_test_shape = (B, num_test, D_x)
+    z_test_shape = (B, num_test, D_z)
     f_test_shape = (B, num_test, D_f)
     mask_test_shape = (B, num_test)
     x = random.normal(rng, x_shape)
+    z = random.normal(rng, z_shape)
     f = random.normal(rng, f_shape)
     # test basic instantiation
-    d = TabularData(x, f)
-    assert d.x.shape == x_shape
+    d = TabularData(FrozenDict({"x": x, "z": z}), f)
+    assert d.feature_groups["x"].shape == x_shape
+    assert d.feature_groups["z"].shape == z_shape
     assert d.f.shape == f_shape
     # test batching where test includes context
     test_includes_ctx = True
     b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
-    assert b.x_ctx.shape == x_ctx_shape
-    assert b.f_ctx.shape == f_ctx_shape
+    assert set(b) == {
+        "x_ctx",
+        "z_ctx",
+        "f_ctx",
+        "mask_ctx",
+        "x_test",
+        "z_test",
+        "f_test",
+        "mask_test",
+        "inv_permute_idx",
+    }
+    assert b.ctx["x_ctx"].shape == x_ctx_shape
+    assert b.ctx["z_ctx"].shape == z_ctx_shape
+    assert b.ctx["f_ctx"].shape == f_ctx_shape
     assert b.mask_ctx.shape == mask_ctx_shape
-    assert b.x_test.shape == x_test_shape
-    assert b.f_test.shape == f_test_shape
+    assert b.test["x_test"].shape == x_test_shape
+    assert b.test["z_test"].shape == z_test_shape
+    assert b.test["f_test"].shape == f_test_shape
     assert b.mask_test.shape == mask_test_shape
-    assert (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
-    assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
+    assert (b.ctx["x_ctx"][:, :num_ctx_max] == b.test["x_test"][:, :num_ctx_max]).all()
+    assert (b.ctx["z_ctx"][:, :num_ctx_max] == b.test["z_test"][:, :num_ctx_max]).all()
+    assert (b.ctx["f_ctx"][:, :num_ctx_max] == b.test["f_test"][:, :num_ctx_max]).all()
     # test batching where test does not include context
     test_includes_ctx = False
     b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
-    assert b.x_ctx.shape == x_ctx_shape
-    assert b.f_ctx.shape == f_ctx_shape
+    assert b.ctx["x_ctx"].shape == x_ctx_shape
+    assert b.ctx["z_ctx"].shape == z_ctx_shape
+    assert b.ctx["f_ctx"].shape == f_ctx_shape
     assert b.mask_ctx.shape == mask_ctx_shape
-    assert b.x_test.shape == x_test_shape
-    assert b.f_test.shape == f_test_shape
+    assert b.test["x_test"].shape == x_test_shape
+    assert b.test["z_test"].shape == z_test_shape
+    assert b.test["f_test"].shape == f_test_shape
     assert b.mask_test.shape == mask_test_shape
-    assert not (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
-    assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
+    assert not (
+        b.ctx["x_ctx"][:, :num_ctx_max] == b.test["x_test"][:, :num_ctx_max]
+    ).all()
+    assert not (
+        b.ctx["z_ctx"][:, :num_ctx_max] == b.test["z_test"][:, :num_ctx_max]
+    ).all()
+    assert not (
+        b.ctx["f_ctx"][:, :num_ctx_max] == b.test["f_test"][:, :num_ctx_max]
+    ).all()
 
 
 def test_spatial_data_with_x():

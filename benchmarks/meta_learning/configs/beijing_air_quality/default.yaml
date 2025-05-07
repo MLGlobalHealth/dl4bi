@@ -3,7 +3,7 @@ defaults:
   - model: tnp_kr_scan
 seed: 42
 wandb: True
-project: Household Electric
+project: Beijing Air Quality
 train_num_steps: 100000
 valid_num_steps: 5000 # set to null if using full valid set
 valid_interval: 10000

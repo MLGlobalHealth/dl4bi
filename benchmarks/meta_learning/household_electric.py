@@ -34,7 +34,9 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_data, rng_train, rng_test = random.split(rng, 3)
-    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(rng_data)
+    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(
+        rng_data, **cfg.data
+    )
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     state = train(
