@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# Example: python bayes_opt_summarize.py "TNP-KR - Gaussian Processes"
+# Example: python bayes_opt_summarize.py "BSA-TNP - Gaussian Processes"
 
 
 def main():

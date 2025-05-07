@@ -1,39 +1,22 @@
-_target_: dl4bi.meta_learning.TNPKR
+_target_: dl4bi.meta_learning.BTNP
 num_blks: 6
 num_reps: 1
-embed_s:
-  _target_: dl4bi.meta_learning.utils.x_to_none
-  _partial_: true
-embed_t:
-  _target_: dl4bi.meta_learning.utils.x_to_none
-  _partial_: true
 embed_all:
-  _target_: dl4bi.mlp.MLP
-  dims: [256, 128, 64]
+  _target_: dl4bi.mlpMLP
+  dims: [512, 128, 64]
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
-s_sim:
-  _target_: dl4bi.sim.l2_dist
-  _partial_: true
-s_bias:
-  _target_: dl4bi.bias.Bias.build_rbf_network_bias
-  num_heads: 4
-  num_basis: 5
-t_sim:
-  _target_: dl4bi.sim.l2_dist
-  _partial_: true
-t_bias:
-  _target_: dl4bi.bias.Bias.build_rbf_network_bias
-  num_heads: 4
-  num_basis: 3
+dist: null
+bias: null
 blk:
   _target_: dl4bi.transformer.KRBlock
   attn:
     _target_: dl4bi.attention.MultiHeadAttention
     num_heads: 4
     attn:
-      _target_: dl4bi.attention.Attention
+      _target_: dl4bi.attention.FastAttention
+      num_ortho_features: 128
     proj_qs:
       _target_: dl4bi.mlp.MLP
       dims: [128]

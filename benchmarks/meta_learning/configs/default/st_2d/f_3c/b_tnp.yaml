@@ -1,0 +1,54 @@
+_target_: dl4bi.meta_learning.BTNP
+num_blks: 6
+num_reps: 1
+embed_all:
+  _target_: dl4bi.mlp.MLP
+  dims: [256, 128, 64]
+  act_fn:
+    _target_: jax.nn.gelu
+    _partial_: true
+s_sim:
+  _target_: dl4bi.sim.l2_dist
+  _partial_: true
+s_bias:
+  _target_: dl4bi.bias.Bias.build_rbf_network_bias
+  num_basis: 5
+  num_heads: 4
+t_sim:
+  _target_: dl4bi.sim.delta_time
+  _partial_: true
+  causal: True
+t_bias:
+  _target_: dl4bi.bias.Bias.build_scalar_bias
+  num_heads: 4
+blk:
+  _target_: dl4bi.transformer.KRBlock
+  attn:
+    _target_: dl4bi.attention.MultiHeadAttention
+    num_heads: 4
+    attn:
+      _target_: dl4bi.attention.Attention
+    proj_qs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_ks:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_vs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+  ffn:
+    _target_: dl4bi.mlp.MLP
+    dims: [256, 64]
+    act_fn:
+      _target_: jax.nn.gelu
+      _partial_: true
+head:
+  _target_: dl4bi.mlp.MLP
+  dims: [256, 64, 3]
+  act_fn:
+    _target_: jax.nn.gelu
+    _partial_: true
+output_fn:
+  _target_: dl4bi.core.model_output.MultinomialOutput.from_activations
+  _partial_: true

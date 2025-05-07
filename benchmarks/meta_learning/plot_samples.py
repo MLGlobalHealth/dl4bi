@@ -113,12 +113,12 @@ def plot_1d_gp_samples(
 
 def shortened_run_name(name):
     match name:
-        case "Scan TNP-KR: TISABiasedScanAttention":
-            return "TNP-KR: SA"
-        case "TNP-KR: DeepKernelAttention":
-            return "TNP-KR: DKA"
-        case "TNP-KR: FastAttention":
-            return "TNP-KR: PERF"
+        case "BSA-TNP: TISABiasedScanAttention":
+            return "BSA-TNP: SA"
+        case "BSA-TNP: DeepKernelAttention":
+            return "BSA-TNP: DKA"
+        case "BSA-TNP: FastAttention":
+            return "BSA-TNP: PERF"
         case _:
             return name
 
@@ -229,7 +229,7 @@ def project_parameters(cfg: DictConfig):
     cmap_std = mpl.colormaps.get_cmap("plasma")
     cmap.set_bad("grey")
     shape = (32, 32, 3)
-    # example project names include "TNP-KR - MNIST", "MNIST", etc, so match
+    # example project names include "BSA-TNP - MNIST", "MNIST", etc, so match
     matches = lambda pattern: re.match(pattern, cfg.project, re.IGNORECASE)
     remap_colors = lambda x: x
     is_categorical = False

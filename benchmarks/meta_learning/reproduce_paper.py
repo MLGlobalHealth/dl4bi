@@ -24,7 +24,7 @@ from sir import main as sir_main
 
 
 def b_tnp_paper(seeds: jax.Array, dry_run: bool = False):
-    """Reproduces the Transformer Neural Process - Kernel Regresssion (TNP-KR) paper."""
+    """Reproduces the Transformer Neural Process - Kernel Regresssion (BSA-TNP) paper."""
     overrides = []
     if dry_run:
         seeds = seeds[:2]  # no need for more than 2 runs each in dry run
@@ -50,7 +50,7 @@ def b_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     #     [f"2d/{m}" for m in models],
     #     gp_main,
     #     overrides,
-    #     "NeurIPS TNP-KR - Gaussian Processes",
+    #     "NeurIPS BSA-TNP - Gaussian Processes",
     #     dry_run=dry_run,
     # )
     # generic_benchmark(
@@ -59,7 +59,7 @@ def b_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     #     models,
     #     sir_main,
     #     overrides,
-    #     "NeurIPS TNP-KR - SIR",
+    #     "NeurIPS BSA-TNP - SIR",
     #     dry_run=dry_run,
     # )
     # TODO(danj): look in plot_samples
@@ -78,7 +78,7 @@ def b_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     #     era5_models,
     #     era5_main,
     #     overrides + era5_overrides,
-    #     "NeurIPS TNP-KR - ERA5 - CNW",
+    #     "NeurIPS BSA-TNP - ERA5 - CNW",
     #     dry_run=dry_run,
     # )
     # era5_overrides = [
@@ -91,7 +91,7 @@ def b_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     #     era5_models,
     #     era5_main,
     #     overrides + era5_overrides,
-    #     "NeurIPS TNP-KR - ERA5 - CWN",
+    #     "NeurIPS BSA-TNP - ERA5 - CWN",
     #     dry_run=dry_run,
     # )
 
@@ -106,7 +106,7 @@ def b_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         # tabular_models,
         household_electric_main,
         overrides,
-        "NeurIPS TNP-KR - Household Electric",
+        "NeurIPS BSA-TNP - Household Electric",
         dry_run=dry_run,
     )
     generic_benchmark(
@@ -115,7 +115,7 @@ def b_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         tabular_models,
         beijing_air_quality_main,
         overrides,
-        "NeurIPS TNP-KR - Beijing Air Quality",
+        "NeurIPS BSA-TNP - Beijing Air Quality",
         dry_run=dry_run,
     )
 
@@ -126,7 +126,7 @@ def b_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     #     models,
     #     celeba_main,
     #     overrides,
-    #     "NeurIPS TNP-KR - CelebA",
+    #     "NeurIPS BSA-TNP - CelebA",
     #     dry_run=dry_run,
     # )
     # generic_benchmark(
@@ -135,7 +135,7 @@ def b_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     #     models,
     #     cifar_10_main,
     #     overrides,
-    #     "NeurIPS TNP-KR - Cifar 10",
+    #     "NeurIPS BSA-TNP - Cifar 10",
     #     dry_run=dry_run,
     # )
 
