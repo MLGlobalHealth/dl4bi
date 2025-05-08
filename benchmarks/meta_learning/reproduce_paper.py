@@ -23,8 +23,8 @@ from mnist import main as mnist_main
 from sir import main as sir_main
 
 
-def b_tnp_paper(seeds: jax.Array, dry_run: bool = False):
-    """Reproduces the Transformer Neural Process - Kernel Regresssion (BSA-TNP) paper."""
+def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
+    """Reproduces the BSA-TNP paper."""
     overrides = []
     if dry_run:
         seeds = seeds[:2]  # no need for more than 2 runs each in dry run
@@ -98,26 +98,25 @@ def b_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     # HIGH DIMENSIONAL
     # TODO(danj):
     # fixed + spatial effects:
-    tabular_models = ["bsa_tnp", "te_tnp"]
+    tabular_models = ["bsa_tnp", "te_tnp", "tnp_d"]
     generic_benchmark(
         seeds,
         "configs/household_electric",
-        ["bsa_tnp"],  # add temporal bias
-        # tabular_models,
+        tabular_models,
         household_electric_main,
         overrides,
         "NeurIPS BSA-TNP - Household Electric",
         dry_run=dry_run,
     )
-    generic_benchmark(
-        seeds,
-        "configs/beijing_air_quality",
-        tabular_models,
-        beijing_air_quality_main,
-        overrides,
-        "NeurIPS BSA-TNP - Beijing Air Quality",
-        dry_run=dry_run,
-    )
+    # generic_benchmark(
+    #     seeds,
+    #     "configs/beijing_air_quality",
+    #     tabular_models,
+    #     beijing_air_quality_main,
+    #     overrides,
+    #     "NeurIPS BSA-TNP - Beijing Air Quality",
+    #     dry_run=dry_run,
+    # )
 
     # NON-STATIONARY DISTRIBUTIONS
     # generic_benchmark(
