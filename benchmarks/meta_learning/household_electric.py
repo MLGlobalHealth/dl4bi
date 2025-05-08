@@ -57,7 +57,8 @@ def main(cfg: DictConfig):
         state,
         model.valid_step,
         test_dataloader,
-        num_steps=1,
+        cfg.valid_num_steps,
+        # num_steps=1,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
@@ -68,10 +69,11 @@ def main(cfg: DictConfig):
 def build_dataloaders(
     rng: jax.Array,
     batch_size: int = 32,
-    num_ctx_min: int = 32,
+    num_ctx_min: int = 256,
     num_ctx_max: int = 256,
-    num_test: int = 256,
+    num_test: int = 128,
 ):
+    B = batch_size
     train, valid, test = load_data(rng)
     x_train, t_train, f_train = train
     x_valid, t_valid, f_valid = valid
@@ -83,10 +85,8 @@ def build_dataloaders(
         def dataloader(rng: jax.Array):
             while True:
                 rng_b, rng_i, rng = random.split(rng, 3)
-                rng_bs = random.split(rng_b, batch_size)
-                idx = vmap(lambda rng: random.choice(rng, N, (L,), replace=False))(
-                    rng_bs
-                )  # [B, T]
+                idx = random.choice(rng_b, N - L, (B, 1), replace=False)
+                idx += jnp.arange(L)  # [B, L]
                 yield TemporalData(x[idx], t[idx].squeeze(), f[idx]).batch(
                     rng_i,
                     num_ctx_min,
@@ -94,7 +94,7 @@ def build_dataloaders(
                     num_test,
                     test_includes_ctx=False,
                     forecast=True,
-                    t_sorted=False,
+                    t_sorted=True,
                 )
 
         return dataloader
@@ -116,7 +116,8 @@ def build_dataloaders(
     return (
         build_dataloader(x_train, t_train, f_train),
         build_dataloader(x_valid, t_valid, f_valid),
-        test_dataloader,
+        build_dataloader(x_test, t_test, f_test),
+        # test_dataloader,
     )
 
 
@@ -133,7 +134,6 @@ def load_data(rng: jax.Array):
     df["month"] = df.dt.dt.month
     df["day"] = df.dt.dt.day
     df["hour"] = df.dt.dt.hour
-    df["minute"] = df.dt.dt.minute
     df["day_of_week"] = df.dt.dt.day_of_week
     df["is_weekend"] = (df.dt.dt.day_of_week >= 5).astype(int)
     df["power"] = df.Global_active_power
@@ -145,15 +145,7 @@ def load_data(rng: jax.Array):
     df_train, df_valid = extract_temporal_block(rng_valid, df, block_size)
     df_train, df_test = extract_temporal_block(rng_test, df_train, block_size)
     df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
-    x_cols = [
-        "year",
-        "month",
-        "day",
-        "hour",
-        "minute",
-        "day_of_week",
-        "is_weekend",
-    ]
+    x_cols = ["year", "month", "day", "hour", "day_of_week", "is_weekend"]
     t_cols = ["t"]
     f_cols = ["power"]
     split_xtf = lambda df: [df[c].values for c in [x_cols, t_cols, f_cols]]
