@@ -232,4 +232,4 @@ if __name__ == "__main__":
     args = parse_args(sys.argv)
     rng = random.key(args.seed)
     seeds = random.choice(rng, 100, (args.num_runs,), replace=False)
-    b_tnp_paper(seeds, args.dry_run)
+    bsa_tnp_paper(seeds, args.dry_run)
