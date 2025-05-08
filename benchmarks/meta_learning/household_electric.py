@@ -17,7 +17,7 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
-from dl4bi.meta_learning.data.temporal import TemporalBatch, TemporalData
+from dl4bi.meta_learning.data.temporal import TemporalData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
@@ -58,7 +58,6 @@ def main(cfg: DictConfig):
         model.valid_step,
         test_dataloader,
         cfg.valid_num_steps,
-        # num_steps=1,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
@@ -69,8 +68,8 @@ def main(cfg: DictConfig):
 def build_dataloaders(
     rng: jax.Array,
     batch_size: int = 32,
-    num_ctx_min: int = 256,
-    num_ctx_max: int = 256,
+    num_ctx_min: int = 384,
+    num_ctx_max: int = 384,
     num_test: int = 128,
 ):
     B = batch_size
@@ -99,25 +98,10 @@ def build_dataloaders(
 
         return dataloader
 
-    def test_dataloader(rng: jax.Array):
-        Nc, Nt = f_train.shape[0] + f_valid.shape[0], f_test.shape[0]
-        yield TemporalBatch(
-            x_ctx=jnp.concat([x_train, x_valid])[None, ...],
-            t_ctx=jnp.concat([t_train, t_valid])[None, ...],
-            f_ctx=jnp.concat([f_train, f_valid])[None, ...],
-            mask_ctx=jnp.ones((1, Nc), dtype=bool),
-            x_test=x_test[None, ...],
-            t_test=t_test[None, ...],
-            f_test=f_test[None, ...],
-            mask_test=jnp.ones((1, Nt), dtype=bool),
-            inv_permute_idx=jnp.arange(Nc),
-        )
-
     return (
         build_dataloader(x_train, t_train, f_train),
         build_dataloader(x_valid, t_valid, f_valid),
         build_dataloader(x_test, t_test, f_test),
-        # test_dataloader,
     )
 
 
