@@ -29,8 +29,10 @@ class TemporalData(MetaLearningData):
         num_ctx_max: int,
         num_test: int,
         test_includes_ctx: bool = False,
+        forecast: bool = True,
+        t_sorted: bool = False,
         obs_noise: Optional[float] = None,
-        batch_size: Optional[int] = None,
+        batch_size: Optional[int] = None,  # resamples B dim
     ):
         return _batch(
             rng,
@@ -41,6 +43,8 @@ class TemporalData(MetaLearningData):
             num_ctx_max,
             num_test,
             test_includes_ctx,
+            forecast,
+            t_sorted,
             obs_noise,
             batch_size,
         )
@@ -53,6 +57,8 @@ class TemporalData(MetaLearningData):
         "num_ctx_max",
         "num_test",
         "test_includes_ctx",
+        "forecast",
+        "t_sorted",
         "obs_noise",
         "batch_size",
     ),
@@ -66,6 +72,8 @@ def _batch(
     num_ctx_max: int,
     num_test: int,
     test_includes_ctx: bool,
+    forecast: bool = True,
+    t_sorted: bool = False,
     obs_noise: Optional[float] = None,
     batch_size: Optional[int] = None,
 ):
@@ -75,21 +83,32 @@ def _batch(
     broadcast_x = has_x and x.ndim == 2
     batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
     t = t[..., None]
+    prepare_L_in_BLD = permute_L_in_BLD
+    if forecast:
+        L = t.shape[1]
+        inv_permute_idx = jnp.arange(L)
+        prepare_L_in_BLD = jit(lambda _rng, arrays: (*arrays, inv_permute_idx))
+        if not t_sorted:
+            sort_idx = jnp.argsort(t, axis=1)
+            t = jnp.take_along_axis(t, sort_idx, axis=1)
+            f = jnp.take_along_axis(f, sort_idx, axis=1)
+            if has_x and not broadcast_x:
+                x = jnp.take_along_axis(x, sort_idx, axis=1)
     if batch_size is not None:
         idx = random.choice(rng_i, f.shape[0], (batch_size,), replace=False)
         x, t, f = x[idx] if has_x else None, t[idx], f[idx]
     if full_x:
-        x, t, f, inv_permute_idx = permute_L_in_BLD(rng_p, [x, t, f])
+        x, t, f, inv_permute_idx = prepare_L_in_BLD(rng_p, [x, t, f])
         args = batch_BLD(rng_b, [x, t, f], *batch_args)
     elif broadcast_x:
-        t, f, inv_permute_idx = permute_L_in_BLD(rng_p, [t, f])
+        t, f, inv_permute_idx = prepare_L_in_BLD(rng_p, [t, f])
         args = batch_BLD(rng_b, [t, f], *batch_args)
         t_ctx, f_ctx, m_ctx, *rest = args
         x_ctx = jnp.repeat(x[:, None], num_ctx_max, axis=1)
         x_test = jnp.repeat(x[:, None], num_test, axis=1)
         args = (x_ctx, t_ctx, f_ctx, m_ctx, x_test, *rest)
     else:
-        t, f, inv_permute_idx = permute_L_in_BLD(rng_p, [t, f])
+        t, f, inv_permute_idx = prepare_L_in_BLD(rng_p, [t, f])
         args = batch_BLD(rng_b, [t, f], *batch_args)
         t_ctx, f_ctx, m_ctx, *rest = args
         args = (None, t_ctx, f_ctx, m_ctx, None, *rest)

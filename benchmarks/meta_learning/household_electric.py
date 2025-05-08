@@ -11,6 +11,7 @@ from hydra.utils import instantiate
 from jax import random, vmap
 from omegaconf import DictConfig, OmegaConf
 from sklearn.preprocessing import MinMaxScaler
+from ucimlrepo import fetch_ucirepo
 
 from dl4bi.core.train import (
     evaluate,
@@ -93,16 +94,20 @@ def build_dataloaders(
                     num_ctx_max,
                     num_test,
                     test_includes_ctx=False,
+                    forecast=True,
+                    t_sorted=False,
                 )
 
         return dataloader
 
     def valid_dataloader(rng: jax.Array):
         Nc, Nt = f_train.shape[0], f_valid.shape[0]
+        # randomly sample 100k instead of full 1.x million
+        random_idx = random.choice(rng, Nc, (100000,))
         yield TemporalBatch(
-            x_ctx=x_train[None, ...],
-            t_ctx=t_train[None, ...],
-            f_ctx=f_train[None, ...],
+            x_ctx=x_train[random_idx][None, ...],
+            t_ctx=t_train[random_idx][None, ...],
+            f_ctx=f_train[random_idx][None, ...],
             mask_ctx=jnp.ones((1, Nc), dtype=bool),
             x_test=x_valid[None, ...],
             t_test=t_valid[None, ...],
@@ -127,41 +132,35 @@ def build_dataloaders(
 
     return (
         build_dataloader(x_train, t_train, f_train),
-        build_dataloader(x_valid, t_valid, f_valid),
+        # build_dataloader(x_valid, t_valid, f_valid),
+        valid_dataloader,
         test_dataloader,
     )
 
 
 def load_data(rng: jax.Array):
     rng_valid, rng_test = random.split(rng)
-    path = Path("cache/household_power_consumption.txt")
+    path = Path("cache/household_power_consumption.csv")
     try:
-        df = pd.read_csv(path, sep=";", na_values="?")
-        df["dt"] = pd.to_datetime(df.Date + " " + df.Time, dayfirst=True)
-        df["year"] = df.dt.dt.year
-        df["month"] = df.dt.dt.month
-        df["day"] = df.dt.dt.day
-        df["hour"] = df.dt.dt.hour
-        df["minute"] = df.dt.dt.minute
-        df["day_of_week"] = df.dt.dt.day_of_week
-        df["is_weekend"] = (df.dt.dt.day_of_week >= 5).astype(int)
-        df["power"] = df.Global_active_power
-        # NOTE: these won't be available for test points in temporal blocks
-        # df["power_lag_1"] = df.Global_active_power.shift(1)
-        # df["power_roll_5"] = df.Global_active_power.rolling(5).mean().shift(1)
-        df["t"] = (df.dt - df.dt.min()).dt.total_seconds()
-        df = df.sort_values(by="t").reset_index(drop=True)
-        df = df.drop(columns=["Date", "Time", "dt"]).dropna()
+        df = pd.read_csv(path)
     except FileNotFoundError:
-        url = (
-            "https://www.kaggle.com/datasets/uciml/electric-power-consumption-data-set"
-        )
-        msg = f"""
-        1. Download the dataset here: {url}
-        3. Move the file into the "cache" directory.
-        """
-        print(msg)
-        sys.exit("Dataset not available.")
+        df = fetch_ucirepo(id=235)["data"]["features"]
+        df.to_csv(path, index=False)
+    df["dt"] = pd.to_datetime(df.Date + " " + df.Time, dayfirst=True)
+    df["year"] = df.dt.dt.year
+    df["month"] = df.dt.dt.month
+    df["day"] = df.dt.dt.day
+    df["hour"] = df.dt.dt.hour
+    df["minute"] = df.dt.dt.minute
+    df["day_of_week"] = df.dt.dt.day_of_week
+    df["is_weekend"] = (df.dt.dt.day_of_week >= 5).astype(int)
+    df["power"] = df.Global_active_power
+    # NOTE: these won't be available for test points in temporal blocks
+    # df["power_lag_1"] = df.Global_active_power.shift(1)
+    # df["power_roll_5"] = df.Global_active_power.rolling(5).mean().shift(1)
+    df["t"] = (df.dt - df.dt.min()).dt.total_seconds()
+    df = df.sort_values(by="t").reset_index(drop=True)
+    df = df.drop(columns=["Date", "Time", "dt"]).dropna()
     N = df.shape[0]
     block_size = int(N * 0.1)
     df_train, df_valid = extract_temporal_block(rng_valid, df, block_size)

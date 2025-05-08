@@ -33,7 +33,7 @@ class SpatialData(MetaLearningData):
         num_test: int,
         test_includes_ctx: bool = False,
         obs_noise: Optional[float] = None,
-        batch_size: Optional[int] = None,
+        batch_size: Optional[int] = None,  # resamples B dim
     ):
         return _batch(
             rng,

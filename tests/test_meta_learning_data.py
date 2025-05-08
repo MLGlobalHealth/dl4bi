@@ -262,7 +262,17 @@ def test_temporal_data_with_x():
     assert d.f.shape == f_shape
     # test batching where test includes context
     test_includes_ctx = True
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    forecast = False
+    t_sorted = True
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
     assert b.x_ctx.shape == x_ctx_shape
     assert b.t_ctx.shape == t_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
@@ -275,8 +285,18 @@ def test_temporal_data_with_x():
     assert (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
     # test batching where test does not include context
+    forecast = True
+    t_sorted = True
     test_includes_ctx = False
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
     assert b.x_ctx.shape == x_ctx_shape
     assert b.t_ctx.shape == t_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
@@ -288,6 +308,19 @@ def test_temporal_data_with_x():
     assert not (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
     assert not (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
+    assert (b.t_test.min(axis=1) > b.t_ctx.max(axis=1)).all()
+    t = jnp.repeat(random.permutation(rng, jnp.arange(T))[None, ...], B, axis=0)
+    t_sorted = False
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
+    assert (b.t_test.min(axis=1) > b.t_ctx.max(axis=1)).all()
 
 
 def test_temporal_data_without_x():
@@ -310,8 +343,18 @@ def test_temporal_data_without_x():
     assert d.t.shape == t_shape
     assert d.f.shape == f_shape
     # test batching where test includes context
+    forecast = False
+    t_sorted = True
     test_includes_ctx = True
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
     assert b.x_ctx is None
     assert b.t_ctx.shape == t_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
@@ -323,8 +366,18 @@ def test_temporal_data_without_x():
     assert (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
     # test batching where test does not include context
+    forecast = True
+    t_sorted = True
     test_includes_ctx = False
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
     assert b.x_ctx is None
     assert b.t_ctx.shape == t_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
@@ -335,6 +388,19 @@ def test_temporal_data_without_x():
     assert b.mask_test.shape == mask_test_shape
     assert not (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
+    assert (b.t_test.min(axis=1) > b.t_ctx.max(axis=1)).all()
+    t = jnp.repeat(random.permutation(rng, jnp.arange(T))[None, ...], B, axis=0)
+    t_sorted = False
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
+    assert (b.t_test.min(axis=1) > b.t_ctx.max(axis=1)).all()
 
 
 def test_temporal_data_broadcast_x():
@@ -361,8 +427,18 @@ def test_temporal_data_broadcast_x():
     assert d.t.shape == t_shape
     assert d.f.shape == f_shape
     # test batching where test includes context
+    forecast = False
+    t_sorted = True
     test_includes_ctx = True
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
     assert b.x_ctx.shape == x_ctx_shape
     assert b.t_ctx.shape == t_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
@@ -375,7 +451,18 @@ def test_temporal_data_broadcast_x():
     assert (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
     # test batching where test does not include context
+    forecast = True
+    t_sorted = True
     test_includes_ctx = False
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
     b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
     assert b.x_ctx.shape == x_ctx_shape
     assert b.t_ctx.shape == t_ctx_shape
@@ -387,6 +474,19 @@ def test_temporal_data_broadcast_x():
     assert b.mask_test.shape == mask_test_shape
     assert not (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
+    assert (b.t_test.min(axis=1) > b.t_ctx.max(axis=1)).all()
+    t = jnp.repeat(random.permutation(rng, jnp.arange(T))[None, ...], B, axis=0)
+    t_sorted = False
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
+    assert (b.t_test.min(axis=1) > b.t_ctx.max(axis=1)).all()
 
 
 def test_spatiotemporal_data_with_x():
