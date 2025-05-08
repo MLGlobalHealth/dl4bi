@@ -21,6 +21,15 @@ from dl4bi.core.train import (
 from dl4bi.meta_learning.data.temporal import TemporalBatch, TemporalData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
+# TODO:
+# Partition the dataset into 24 hour windows
+# Divide 24 hour windows into train, valid, test
+# For training, sample random context, predict on a 24 hour window
+# For validation:
+#    1. Randomly sample 100k context points
+#    2. Predict on all 24 hour windows, restricting ctx.t < test.t
+# For testing, same procedure as validation except context points are all train + valid
+
 
 @hydra.main("configs/household_electric", config_name="default", version_base=None)
 def main(cfg: DictConfig):
@@ -142,7 +151,7 @@ def load_data(rng: jax.Array):
     rng_valid, rng_test = random.split(rng)
     path = Path("cache/household_power_consumption.csv")
     try:
-        df = pd.read_csv(path)
+        df = pd.read_csv(path, na_values="?")
     except FileNotFoundError:
         df = fetch_ucirepo(id=235)["data"]["features"]
         df.to_csv(path, index=False)
