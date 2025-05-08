@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import sys
 from pathlib import Path
 
 import hydra
@@ -20,15 +19,6 @@ from dl4bi.core.train import (
 )
 from dl4bi.meta_learning.data.temporal import TemporalBatch, TemporalData
 from dl4bi.meta_learning.utils import cfg_to_run_name
-
-# TODO:
-# Partition the dataset into 24 hour windows
-# Divide 24 hour windows into train, valid, test
-# For training, sample random context, predict on a 24 hour window
-# For validation:
-#    1. Randomly sample 100k context points
-#    2. Predict on all 24 hour windows, restricting ctx.t < test.t
-# For testing, same procedure as validation except context points are all train + valid
 
 
 @hydra.main("configs/household_electric", config_name="default", version_base=None)
@@ -66,8 +56,8 @@ def main(cfg: DictConfig):
         rng_test,
         state,
         model.valid_step,
-        valid_dataloader,
-        cfg.valid_num_steps,
+        test_dataloader,
+        num_steps=1,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
@@ -109,28 +99,12 @@ def build_dataloaders(
 
         return dataloader
 
-    def valid_dataloader(rng: jax.Array):
-        Nc, Nt = f_train.shape[0], f_valid.shape[0]
-        # randomly sample 100k instead of full 1.x million
-        random_idx = random.choice(rng, Nc, (100000,))
-        yield TemporalBatch(
-            x_ctx=x_train[random_idx][None, ...],
-            t_ctx=t_train[random_idx][None, ...],
-            f_ctx=f_train[random_idx][None, ...],
-            mask_ctx=jnp.ones((1, Nc), dtype=bool),
-            x_test=x_valid[None, ...],
-            t_test=t_valid[None, ...],
-            f_test=f_valid[None, ...],
-            mask_test=jnp.ones((1, Nt), dtype=bool),
-            inv_permute_idx=jnp.arange(Nc),
-        )
-
     def test_dataloader(rng: jax.Array):
         Nc, Nt = f_train.shape[0] + f_valid.shape[0], f_test.shape[0]
         yield TemporalBatch(
-            x_ctx=jnp.concat([x_train, x_valid], axis=0)[None, ...],
-            t_ctx=jnp.concat([t_train, f_train], axis=0)[None, ...],
-            f_ctx=jnp.concat([f_train, f_valid], axis=0)[None, ...],
+            x_ctx=jnp.concat([x_train, x_valid])[None, ...],
+            t_ctx=jnp.concat([t_train, t_valid])[None, ...],
+            f_ctx=jnp.concat([f_train, f_valid])[None, ...],
             mask_ctx=jnp.ones((1, Nc), dtype=bool),
             x_test=x_test[None, ...],
             t_test=t_test[None, ...],
@@ -141,8 +115,7 @@ def build_dataloaders(
 
     return (
         build_dataloader(x_train, t_train, f_train),
-        # build_dataloader(x_valid, t_valid, f_valid),
-        valid_dataloader,
+        build_dataloader(x_valid, t_valid, f_valid),
         test_dataloader,
     )
 
@@ -164,9 +137,6 @@ def load_data(rng: jax.Array):
     df["day_of_week"] = df.dt.dt.day_of_week
     df["is_weekend"] = (df.dt.dt.day_of_week >= 5).astype(int)
     df["power"] = df.Global_active_power
-    # NOTE: these won't be available for test points in temporal blocks
-    # df["power_lag_1"] = df.Global_active_power.shift(1)
-    # df["power_roll_5"] = df.Global_active_power.rolling(5).mean().shift(1)
     df["t"] = (df.dt - df.dt.min()).dt.total_seconds()
     df = df.sort_values(by="t").reset_index(drop=True)
     df = df.drop(columns=["Date", "Time", "dt"]).dropna()
