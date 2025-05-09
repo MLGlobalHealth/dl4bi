@@ -10,7 +10,7 @@ import pandas as pd
 import wandb
 from flax.core.frozen_dict import FrozenDict
 from hydra.utils import instantiate
-from jax import jit, random, vmap
+from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -20,7 +20,7 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
-from dl4bi.meta_learning.data.tabular import TabularBatch, TabularData
+from dl4bi.meta_learning.data.tabular import TabularData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
@@ -70,69 +70,36 @@ def main(cfg: DictConfig):
 
 def build_dataloaders(
     rng: jax.Array,
-    batch_size: int = 32,
-    num_ctx_min: int = 32,
-    num_ctx_max: int = 256,
-    num_test: int = 256,
+    batch_size: int = 64,
+    num_ctx_min: int = 384,
+    num_ctx_max: int = 384,
+    num_test: int = 128,
 ):
+    B = batch_size
     train, valid, test = load_data(rng)
-    x_train, s_train, t_train, f_train = train
-    x_valid, s_valid, t_valid, f_valid = valid
-    x_test, s_valid, t_test, f_test = test
 
     def build_dataloader(x: jax.Array, s: jax.Array, t: jax.Array, f: jax.Array):
         N, L = x.shape[0], num_ctx_max + num_test
 
         def dataloader(rng: jax.Array):
             while True:
-                rng_b, rng_i, rng = random.split(rng, 3)
-                rng_bs = random.split(rng_b, batch_size)
-                idx = vmap(lambda rng: random.choice(rng, N, (L,), replace=False))(
-                    rng_bs
-                )  # [B, L]
+                rng_i, rng_b, rng = random.split(rng, 3)
+                idx = random.choice(rng_i, N - L, (B, 1), replace=False)
+                idx += jnp.arange(L)  # [B, L]
                 feature_groups = FrozenDict({"x": x[idx], "s": s[idx], "t": t[idx]})
                 yield TabularData(feature_groups, f[idx]).batch(
-                    rng_i,
+                    rng_b,
                     num_ctx_min,
                     num_ctx_max,
                     num_test,
                     test_includes_ctx=False,
+                    forecast=True,
+                    t_sorted=True,
                 )
 
         return dataloader
 
-    def test_dataloader(rng: jax.Array):
-        x_train, s_train, t_train, f_train = train
-        x_valid, s_valid, t_valid, f_valid = valid
-        x_test, s_test, t_test, f_test = test
-        Nc = x_train.shape[0] + x_valid.shape[0]
-        Nt = x_test.shape[0]
-        merge = jit(lambda a, b: jnp.concat([a, b])[None, ...])
-        ctx_d = {
-            "x_ctx": merge(x_train, x_valid),
-            "s_ctx": merge(s_train, s_valid),
-            "t_ctx": merge(t_train, t_valid),
-            "f_ctx": merge(f_train, f_valid),
-        }
-        test_d = {
-            "x_test": x_test[None, ...],
-            "s_test": s_test[None, ...],
-            "t_test": t_test[None, ...],
-            "f_test": f_test[None, ...],
-        }
-        yield TabularBatch(
-            ctx=FrozenDict(ctx_d),
-            mask_ctx=jnp.ones((1, Nc), dtype=bool),
-            test=FrozenDict(test_d),
-            mask_test=jnp.ones((1, Nt), dtype=bool),
-            inv_permute_idx=jnp.arange(Nc),
-        )
-
-    return (
-        build_dataloader(*train),
-        build_dataloader(*valid),
-        test_dataloader,
-    )
+    return build_dataloader(*train), build_dataloader(*valid), build_dataloader(*test)
 
 
 def load_data(rng: jax.Array):
@@ -140,13 +107,8 @@ def load_data(rng: jax.Array):
     dir = Path("cache/beijing_air_quality")
     try:
         df = pd.concat([pd.read_csv(p) for p in dir.glob("*.csv")], ignore_index=True)
-        df = df.dropna()
         df_coords = load_coords()
         df = df.merge(df_coords, on="station", how="left")
-        df = df.drop(columns=["No", "station"])
-        df["t"] = pd.to_datetime(df[["year", "month", "day", "hour"]])
-        df["t"] = (df.t - df.t.min()).dt.total_seconds()
-        df = df.sort_values(by="t").reset_index(drop=True)
     except FileNotFoundError:
         url = "https://archive.ics.uci.edu/dataset/501/beijing+multi+site+air+quality+data"
         msg = f"""
@@ -156,15 +118,19 @@ def load_data(rng: jax.Array):
         """
         print(msg)
         sys.exit("Dataset not available.")
+    df["t"] = pd.to_datetime(df[["year", "month", "day", "hour"]])
+    df["t"] = (df.t - df.t.min()).dt.total_seconds()
+    s_cols = ["Latitude", "Longitude"]
+    t_cols = ["t"]
+    f_cols = ["PM2.5", "PM10", "SO2", "NO2", "CO", "O3"]
+    x_cols = list(set(df.columns) - set(s_cols + t_cols + f_cols))
+    df = df[x_cols + s_cols + t_cols + f_cols].dropna()
+    df = df.sort_values(by="t").reset_index(drop=True)
     N = df.shape[0]
     block_size = int(N * 0.1)
     df_train, df_valid = extract_temporal_block(rng_valid, df, block_size)
     df_train, df_test = extract_temporal_block(rng_test, df_train, block_size)
     df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
-    s_cols = ["Latitude", "Longitude"]
-    t_cols = ["t"]
-    f_cols = ["PM2.5", "PM10", "SO2", "NO2", "CO", "O3"]
-    x_cols = list(set(df_train.columns) - set(s_cols + t_cols + f_cols))
     split_xstf = lambda df: [df[c].values for c in [x_cols, s_cols, t_cols, f_cols]]
     return split_xstf(df_train), split_xstf(df_valid), split_xstf(df_test)
 

@@ -3,6 +3,7 @@ from functools import partial
 from typing import Optional
 
 import jax
+import jax.numpy as jnp
 from flax.core.frozen_dict import FrozenDict
 from jax import jit, random
 
@@ -40,6 +41,8 @@ class TabularData(MetaLearningData):
         num_ctx_max: int,
         num_test: int,
         test_includes_ctx: bool = False,
+        forecast: bool = False,  # requires a 't' feature group
+        t_sorted: bool = False,  # requires a 't' feature group
     ):
         return _batch(
             rng,
@@ -49,6 +52,8 @@ class TabularData(MetaLearningData):
             num_ctx_max,
             num_test,
             test_includes_ctx,
+            forecast,
+            t_sorted,
         )
 
 
@@ -59,6 +64,8 @@ class TabularData(MetaLearningData):
         "num_ctx_max",
         "num_test",
         "test_includes_ctx",
+        "forecast",
+        "t_sorted",
     ),
 )
 def _batch(
@@ -69,9 +76,24 @@ def _batch(
     num_ctx_max: int,
     num_test: int,
     test_includes_ctx: bool,
+    forecast: bool,
+    t_sorted: bool,
 ):
     rng_p, rng_b = random.split(rng)
-    *arrays, inv_permute_idx = permute_L_in_BLD(rng, [*feature_groups.values(), f])
+    prepare_L_in_BLD = permute_L_in_BLD
+    if forecast:
+        L = f.shape[1]
+        inv_permute_idx = jnp.arange(L)
+        prepare_L_in_BLD = jit(lambda _rng, arrays: (*arrays, inv_permute_idx))
+        if not t_sorted:
+            sort_idx = jnp.argsort(feature_groups["t"], axis=1)
+            d = {
+                k: jnp.take_along_axis(v, sort_idx, axis=1)
+                for k, v in feature_groups.items()
+            }
+            feature_groups = FrozenDict(d)
+            f = jnp.take_along_axis(f, sort_idx, axis=1)
+    *arrays, inv_permute_idx = prepare_L_in_BLD(rng, [*feature_groups.values(), f])
     batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
     args = batch_BLD(rng_b, arrays, *batch_args)
     num_ctx_args = len(args) // 2

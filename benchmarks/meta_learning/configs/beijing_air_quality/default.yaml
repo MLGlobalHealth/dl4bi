@@ -8,10 +8,10 @@ train_num_steps: 100000
 valid_num_steps: 5000 # set to null if using full valid set
 valid_interval: 10000
 data:
-  batch_size: 32
-  num_ctx_min: 32
-  num_ctx_max: 256
-  num_test: 256
+  batch_size: 64
+  num_ctx_min: 384
+  num_ctx_max: 384
+  num_test: 128
 optimizer:
   _target_: optax.chain
   _args_:

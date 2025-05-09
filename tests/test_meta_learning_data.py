@@ -14,61 +14,91 @@ from dl4bi.meta_learning.data.temporal import TemporalData
 
 def test_tabular_data():
     rng = random.key(42)
-    B, L, D_x, D_z, D_f = 4, 37, 8, 3, 1
+    B, L, D_x, D_z, D_t, D_f = 4, 37, 8, 3, 1, 1
     num_ctx_min, num_ctx_max, num_test = 3, 10, 20
     x_shape = (B, L, D_x)
     z_shape = (B, L, D_z)  # another random variable group
+    t_shape = (B, L, D_t)
     f_shape = (B, L, D_f)
     x_ctx_shape = (B, num_ctx_max, D_x)
     z_ctx_shape = (B, num_ctx_max, D_z)
+    t_ctx_shape = (B, num_ctx_max, D_t)
     f_ctx_shape = (B, num_ctx_max, D_f)
     mask_ctx_shape = (B, num_ctx_max)
     x_test_shape = (B, num_test, D_x)
     z_test_shape = (B, num_test, D_z)
+    t_test_shape = (B, num_test, D_t)
     f_test_shape = (B, num_test, D_f)
     mask_test_shape = (B, num_test)
     x = random.normal(rng, x_shape)
     z = random.normal(rng, z_shape)
     f = random.normal(rng, f_shape)
+    t = jnp.repeat(jnp.arange(L)[None, :, None], B, axis=0)
     # test basic instantiation
-    d = TabularData(FrozenDict({"x": x, "z": z}), f)
+    d = TabularData(FrozenDict({"x": x, "z": z, "t": t}), f)
     assert d.feature_groups["x"].shape == x_shape
     assert d.feature_groups["z"].shape == z_shape
     assert d.f.shape == f_shape
     # test batching where test includes context
     test_includes_ctx = True
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    forecast = False
+    t_sorted = True
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
     assert set(b) == {
         "x_ctx",
         "z_ctx",
+        "t_ctx",
         "f_ctx",
         "mask_ctx",
         "x_test",
         "z_test",
+        "t_test",
         "f_test",
         "mask_test",
         "inv_permute_idx",
     }
     assert b.ctx["x_ctx"].shape == x_ctx_shape
     assert b.ctx["z_ctx"].shape == z_ctx_shape
+    assert b.ctx["t_ctx"].shape == t_ctx_shape
     assert b.ctx["f_ctx"].shape == f_ctx_shape
     assert b.mask_ctx.shape == mask_ctx_shape
     assert b.test["x_test"].shape == x_test_shape
     assert b.test["z_test"].shape == z_test_shape
+    assert b.test["t_test"].shape == t_test_shape
     assert b.test["f_test"].shape == f_test_shape
     assert b.mask_test.shape == mask_test_shape
     assert (b.ctx["x_ctx"][:, :num_ctx_max] == b.test["x_test"][:, :num_ctx_max]).all()
     assert (b.ctx["z_ctx"][:, :num_ctx_max] == b.test["z_test"][:, :num_ctx_max]).all()
+    assert (b.ctx["t_ctx"][:, :num_ctx_max] == b.test["t_test"][:, :num_ctx_max]).all()
     assert (b.ctx["f_ctx"][:, :num_ctx_max] == b.test["f_test"][:, :num_ctx_max]).all()
     # test batching where test does not include context
     test_includes_ctx = False
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    forecast = True
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
     assert b.ctx["x_ctx"].shape == x_ctx_shape
     assert b.ctx["z_ctx"].shape == z_ctx_shape
+    assert b.ctx["t_ctx"].shape == t_ctx_shape
     assert b.ctx["f_ctx"].shape == f_ctx_shape
     assert b.mask_ctx.shape == mask_ctx_shape
     assert b.test["x_test"].shape == x_test_shape
     assert b.test["z_test"].shape == z_test_shape
+    assert b.test["t_test"].shape == t_test_shape
     assert b.test["f_test"].shape == f_test_shape
     assert b.mask_test.shape == mask_test_shape
     assert not (
@@ -78,8 +108,24 @@ def test_tabular_data():
         b.ctx["z_ctx"][:, :num_ctx_max] == b.test["z_test"][:, :num_ctx_max]
     ).all()
     assert not (
+        b.ctx["t_ctx"][:, :num_ctx_max] == b.test["t_test"][:, :num_ctx_max]
+    ).all()
+    assert not (
         b.ctx["f_ctx"][:, :num_ctx_max] == b.test["f_test"][:, :num_ctx_max]
     ).all()
+    assert (b["t_test"].min(axis=1) > b["t_ctx"].max(axis=1)).all()
+    t = jnp.repeat(random.permutation(rng, jnp.arange(L))[None, :, None], B, axis=0)
+    t_sorted = False
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
+    assert (b["t_test"].min(axis=1) > b["t_ctx"].max(axis=1)).all()
 
 
 def test_spatial_data_with_x():

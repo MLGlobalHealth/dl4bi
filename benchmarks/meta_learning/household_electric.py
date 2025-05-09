@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import pandas as pd
 import wandb
+from flax.core.frozen_dict import FrozenDict
 from hydra.utils import instantiate
 from jax import random
 from omegaconf import DictConfig, OmegaConf
@@ -17,7 +18,7 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
-from dl4bi.meta_learning.data.temporal import TemporalData
+from dl4bi.meta_learning.data.tabular import TabularData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
@@ -83,11 +84,12 @@ def build_dataloaders(
 
         def dataloader(rng: jax.Array):
             while True:
-                rng_b, rng_i, rng = random.split(rng, 3)
-                idx = random.choice(rng_b, N - L, (B, 1), replace=False)
+                rng_i, rng_b, rng = random.split(rng, 3)
+                idx = random.choice(rng_i, N - L, (B, 1), replace=False)
                 idx += jnp.arange(L)  # [B, L]
-                yield TemporalData(x[idx], t[idx].squeeze(), f[idx]).batch(
-                    rng_i,
+                feature_groups = FrozenDict({"x": x[idx], "t": t[idx]})
+                yield TabularData(feature_groups, f[idx]).batch(
+                    rng_b,
                     num_ctx_min,
                     num_ctx_max,
                     num_test,
@@ -122,16 +124,16 @@ def load_data(rng: jax.Array):
     df["is_weekend"] = (df.dt.dt.day_of_week >= 5).astype(int)
     df["power"] = df.Global_active_power
     df["t"] = (df.dt - df.dt.min()).dt.total_seconds()
+    x_cols = ["year", "month", "day", "hour", "day_of_week", "is_weekend"]
+    t_cols = ["t"]
+    f_cols = ["power"]
+    df = df[x_cols + t_cols + f_cols].dropna()
     df = df.sort_values(by="t").reset_index(drop=True)
-    df = df.drop(columns=["Date", "Time", "dt"]).dropna()
     N = df.shape[0]
     block_size = int(N * 0.1)
     df_train, df_valid = extract_temporal_block(rng_valid, df, block_size)
     df_train, df_test = extract_temporal_block(rng_test, df_train, block_size)
     df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
-    x_cols = ["year", "month", "day", "hour", "day_of_week", "is_weekend"]
-    t_cols = ["t"]
-    f_cols = ["power"]
     split_xtf = lambda df: [df[c].values for c in [x_cols, t_cols, f_cols]]
     return split_xtf(df_train), split_xtf(df_valid), split_xtf(df_test)
 
