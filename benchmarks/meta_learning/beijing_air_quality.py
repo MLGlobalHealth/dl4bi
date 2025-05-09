@@ -110,7 +110,7 @@ def load_data(rng: jax.Array):
         df_coords = load_coords()
         df = df.merge(df_coords, on="station", how="left")
         df = df.drop(columns=["station", "No"]).dropna()
-    except FileNotFoundError:
+    except Exception:
         url = "https://archive.ics.uci.edu/dataset/501/beijing+multi+site+air+quality+data"
         msg = f"""
         1. Download the dataset here: {url}
