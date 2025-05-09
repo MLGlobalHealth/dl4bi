@@ -145,7 +145,7 @@ def load_data(rng: jax.Array):
         df = df.merge(df_coords, on="station", how="left")
         df = df.drop(columns=["No", "station"])
         df["t"] = pd.to_datetime(df[["year", "month", "day", "hour"]])
-        df["t"] = (df.dt - df.dt.min()).dt.total_seconds()
+        df["t"] = (df.t - df.t.min()).dt.total_seconds()
         df = df.sort_values(by="t").reset_index(drop=True)
     except FileNotFoundError:
         url = "https://archive.ics.uci.edu/dataset/501/beijing+multi+site+air+quality+data"
@@ -163,7 +163,7 @@ def load_data(rng: jax.Array):
     df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
     s_cols = ["Latitude", "Longitude"]
     t_cols = ["t"]
-    f_cols = ["PM2.5"]
+    f_cols = ["PM2.5", "PM10", "SO2", "NO2", "CO", "O3"]
     x_cols = list(set(df_train.columns) - set(s_cols + t_cols + f_cols))
     split_xstf = lambda df: [df[c].values for c in [x_cols, s_cols, t_cols, f_cols]]
     return split_xstf(df_train), split_xstf(df_valid), split_xstf(df_test)
@@ -200,7 +200,7 @@ def extract_temporal_block(
         Assumes the data is temporally ordered.
     """
     N = df.shape[0]
-    i = random.choice(rng, N, (1,))
+    i = random.choice(rng, N, (1,)).item()
     df_block = df.iloc[i : i + block_size]
     df_sans_block = df.drop(df.index[i : i + block_size]).reset_index(drop=True)
     return df_sans_block, df_block

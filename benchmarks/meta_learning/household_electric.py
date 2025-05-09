@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import pandas as pd
 import wandb
 from hydra.utils import instantiate
-from jax import random, vmap
+from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sklearn.preprocessing import MinMaxScaler
 from ucimlrepo import fetch_ucirepo
