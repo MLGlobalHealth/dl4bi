@@ -109,6 +109,7 @@ def load_data(rng: jax.Array):
         df = pd.concat([pd.read_csv(p) for p in dir.glob("*.csv")], ignore_index=True)
         df_coords = load_coords()
         df = df.merge(df_coords, on="station", how="left")
+        df = df.drop(columns=["station", "No"]).dropna()
     except FileNotFoundError:
         url = "https://archive.ics.uci.edu/dataset/501/beijing+multi+site+air+quality+data"
         msg = f"""
@@ -120,17 +121,16 @@ def load_data(rng: jax.Array):
         sys.exit("Dataset not available.")
     df["t"] = pd.to_datetime(df[["year", "month", "day", "hour"]])
     df["t"] = (df.t - df.t.min()).dt.total_seconds()
-    s_cols = ["Latitude", "Longitude"]
-    t_cols = ["t"]
-    f_cols = ["PM2.5", "PM10", "SO2", "NO2", "CO", "O3"]
-    x_cols = list(set(df.columns) - set(s_cols + t_cols + f_cols))
-    df = df[x_cols + s_cols + t_cols + f_cols].dropna()
     df = df.sort_values(by="t").reset_index(drop=True)
     N = df.shape[0]
     block_size = int(N * 0.1)
     df_train, df_valid = extract_temporal_block(rng_valid, df, block_size)
     df_train, df_test = extract_temporal_block(rng_test, df_train, block_size)
     df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
+    s_cols = ["Latitude", "Longitude"]
+    t_cols = ["t"]
+    f_cols = ["PM2.5", "PM10", "SO2", "NO2", "CO", "O3"]
+    x_cols = list(set(df_train.columns) - set(s_cols + t_cols + f_cols))
     split_xstf = lambda df: [df[c].values for c in [x_cols, s_cols, t_cols, f_cols]]
     return split_xstf(df_train), split_xstf(df_valid), split_xstf(df_test)
 
