@@ -7,7 +7,7 @@ enc:
   num_blks: 6
   blk:
     _target_: dl4bi.transformer.TransformerEncoderBlock
-    pre_norm: True
+    pre_norm: False
     attn:
       _target_: dl4bi.attention.MultiHeadAttention
       proj_qs:
@@ -27,4 +27,4 @@ enc:
       dims: [256, 64]
 head:
   _target_: dl4bi.mlp.MLP
-  dims: [256, 64, 12]
+  dims: [256, 64, 4]

@@ -7,11 +7,12 @@ project: Beijing Air Quality
 train_num_steps: 10000
 valid_num_steps: 500
 valid_interval: 500
+test_num_steps: 5000
 data:
-  batch_size: 256
-  num_ctx_min: 72
-  num_ctx_max: 72
-  num_test: 6
+  batch_size: 32
+  num_ctx_min: 624 # ~= 48 hours * 12 locations + 12 for buffer
+  num_ctx_max: 624
+  num_test: 84 # ~= 6 hours * 12 locations + 12 for buffer
   pct_train: 0.8
   pct_valid: 0.1
   pct_test: 0.1
