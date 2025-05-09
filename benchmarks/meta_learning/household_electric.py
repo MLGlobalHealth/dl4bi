@@ -72,11 +72,12 @@ def build_dataloaders(
     num_ctx_min: int = 384,
     num_ctx_max: int = 384,
     num_test: int = 128,
-    pct_train: float = 0.3,
+    pct_train: float = 0.8,
+    pct_valid: float = 0.1,
     pct_test: float = 0.1,
 ):
     B = batch_size
-    train, valid, test = load_data(rng, pct_train, pct_test)
+    train, valid, test = load_data(rng, pct_train, pct_valid, pct_test)
     x_train, t_train, f_train = train
     x_valid, t_valid, f_valid = valid
     x_test, t_test, f_test = test
@@ -109,7 +110,12 @@ def build_dataloaders(
     )
 
 
-def load_data(rng: jax.Array, pct_train: float = 0.3, pct_test: float = 0.1):
+def load_data(
+    rng: jax.Array,
+    pct_train: float = 0.8,
+    pct_valid: float = 0.1,
+    pct_test: float = 0.1,
+):
     rng_valid, rng_test = random.split(rng)
     path = Path("cache/household_power_consumption.csv")
     try:
@@ -132,12 +138,13 @@ def load_data(rng: jax.Array, pct_train: float = 0.3, pct_test: float = 0.1):
     df = df[x_cols + t_cols + f_cols].dropna()
     df = df.sort_values(by="t").reset_index(drop=True)
     N = df.shape[0]
-    pct_test, pct_train = 0.1, 0.3
-    block_size = int(N * pct_test)
-    df_train, df_test = df[:-block_size], df[-block_size:]
-    df_train, df_valid = df_train[:-block_size], df_train[-block_size:]
+    num_train, num_valid, num_test = map(
+        lambda pct: int(N * pct), (pct_train, pct_valid, pct_test)
+    )
+    df_train, df_test = df[:-num_test], df[-num_test:]
+    df_train, df_valid = df_train[:-num_valid], df_train[-num_valid:]
+    df_train = df_train[:num_train]
     df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
-    df_train = df_train[df_train["t"] <= pct_train]
     split_xtf = lambda df: [df[c].values for c in [x_cols, t_cols, f_cols]]
     return split_xtf(df_train), split_xtf(df_valid), split_xtf(df_test)
 

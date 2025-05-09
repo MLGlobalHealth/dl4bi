@@ -12,6 +12,9 @@ data:
   num_ctx_min: 384
   num_ctx_max: 384
   num_test: 128
+  pct_train: 0.8
+  pct_valid: 0.1
+  pct_test: 0.1
 optimizer:
   _target_: optax.chain
   _args_:
