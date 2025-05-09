@@ -13,7 +13,7 @@ from hydra.utils import instantiate
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
 
 from dl4bi.core.train import (
     evaluate,
@@ -60,7 +60,7 @@ def main(cfg: DictConfig):
         state,
         model.valid_step,
         test_dataloader,
-        cfg.valid_num_steps,
+        cfg.test_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
@@ -70,10 +70,10 @@ def main(cfg: DictConfig):
 
 def build_dataloaders(
     rng: jax.Array,
-    batch_size: int = 64,
-    num_ctx_min: int = 72,
-    num_ctx_max: int = 72,
-    num_test: int = 6,
+    batch_size: int = 32,
+    num_ctx_min: int = 624,  # 48 hours * 12 locations + 12 buffer
+    num_ctx_max: int = 624,
+    num_test: int = 84,  # 6 hours * 12 locations + 12 buffer
     pct_train: float = 0.8,
     pct_valid: float = 0.1,
     pct_test: float = 0.1,
@@ -128,8 +128,28 @@ def load_data(
         print(msg)
         sys.exit("Dataset not available.")
     df["t"] = pd.to_datetime(df[["year", "month", "day", "hour"]])
+    df["day_of_week"] = df.t.dt.day_of_week
+    df["is_weekend"] = (df.t.dt.day_of_week >= 5).astype(int)
     df["t"] = (df.t - df.t.min()).dt.total_seconds()
     df = df.sort_values(by="t").reset_index(drop=True)
+    x_cols = [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "day_of_week",
+        "is_weekend",
+        "TEMP",
+        "PRES",
+        "DEWP",
+        "RAIN",
+        "wd",
+        "WSPM",
+    ]
+    s_cols = ["Latitude", "Longitude"]
+    t_cols = ["t"]
+    f_cols = ["PM2.5", "PM10"]
+    df = df[x_cols + s_cols + t_cols + f_cols]
     N = df.shape[0]
     num_train, num_valid, num_test = map(
         lambda pct: int(N * pct), (pct_train, pct_valid, pct_test)
@@ -138,10 +158,8 @@ def load_data(
     df_train, df_valid = df_train[:-num_valid], df_train[-num_valid:]
     df_train = df_train[:num_train]
     df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
-    s_cols = ["Latitude", "Longitude"]
-    t_cols = ["t"]
-    f_cols = ["PM2.5", "PM10", "SO2", "NO2", "CO", "O3"]
-    x_cols = list(set(df_train.columns) - set(s_cols + t_cols + f_cols))
+    x_cols.remove("wd")
+    x_cols += [c for c in df_train.columns if c.startswith("wd_")]
     split_xstf = lambda df: [df[c].values for c in [x_cols, s_cols, t_cols, f_cols]]
     return split_xstf(df_train), split_xstf(df_valid), split_xstf(df_test)
 
@@ -175,17 +193,16 @@ def standardize_by_train(
     cat_feats = ["wd"]  # wind direction
     tx = ColumnTransformer(
         transformers=[
-            ("num", StandardScaler(), num_feats),
+            ("num", MinMaxScaler(), num_feats),
             ("cat", OneHotEncoder(sparse_output=False), cat_feats),
         ],
         remainder="passthrough",
+        verbose_feature_names_out=False,
     )
     x_train = tx.fit_transform(df_train)
     x_valid = tx.transform(df_valid)
     x_test = tx.transform(df_test)
-    tx_onehot = tx.named_transformers_["cat"]
-    cat_feats = tx_onehot.get_feature_names_out(cat_feats).tolist()
-    cols = num_feats + cat_feats
+    cols = tx.get_feature_names_out().tolist()
     df_train = pd.DataFrame(x_train, columns=cols)
     df_valid = pd.DataFrame(x_valid, columns=cols)
     df_test = pd.DataFrame(x_test, columns=cols)
