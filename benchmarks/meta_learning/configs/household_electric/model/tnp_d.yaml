@@ -7,7 +7,7 @@ enc:
   num_blks: 6
   blk:
     _target_: dl4bi.transformer.TransformerEncoderBlock
-    pre_norm: False
+    pre_norm: True
     attn:
       _target_: dl4bi.attention.MultiHeadAttention
       proj_qs:
