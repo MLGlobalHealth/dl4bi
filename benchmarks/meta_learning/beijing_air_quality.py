@@ -124,8 +124,8 @@ def load_data(rng: jax.Array):
     df = df.sort_values(by="t").reset_index(drop=True)
     N = df.shape[0]
     block_size = int(N * 0.1)
-    df_train, df_valid = extract_temporal_block(rng_valid, df, block_size)
-    df_train, df_test = extract_temporal_block(rng_test, df_train, block_size)
+    df_train, df_test = df[:-block_size], df[-block_size:]
+    df_train, df_valid = df_train[:-block_size], df_train[-block_size:]
     df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
     s_cols = ["Latitude", "Longitude"]
     t_cols = ["t"]
@@ -153,23 +153,6 @@ Wanliu,39.987,116.287
 Wanshouxigong,39.878,116.352
     """)
     )
-
-
-def extract_temporal_block(
-    rng: jax.Array,
-    df: pd.DataFrame,
-    block_size: int,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Extracts a contiguous temporal block.
-
-    .. note::
-        Assumes the data is temporally ordered.
-    """
-    N = df.shape[0]
-    i = random.choice(rng, N, (1,)).item()
-    df_block = df.iloc[i : i + block_size]
-    df_sans_block = df.drop(df.index[i : i + block_size]).reset_index(drop=True)
-    return df_sans_block, df_block
 
 
 def standardize_by_train(
