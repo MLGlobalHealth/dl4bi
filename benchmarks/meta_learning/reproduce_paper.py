@@ -54,10 +54,9 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     #     "NeurIPS BSA-TNP - Gaussian Processes",
     #     dry_run=dry_run,
     # )
-    gp_benchmark(
+    generic_benchmark(
         seeds,
-        "2d",
-        gp_kernels_2d,
+        "configs/multiscale_2d_gp",
         ["bsa_tnp", "te_tnp"],
         multiscale_2d_gp_main,
         overrides,
