@@ -35,8 +35,7 @@ def main(cfg: DictConfig):
         reinit=True,  # allows reinitialization for multiple runs
     )
     print(OmegaConf.to_yaml(cfg))
-    kernel = cfg.kernel.kernel._target_.split(".")[-1]
-    path = f"results/{cfg.project}/{cfg.data.name}/{kernel}/{cfg.seed}/{run_name}"
+    path = f"results/{cfg.project}/{cfg.seed}/{run_name}"
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     rng = random.key(cfg.seed)
