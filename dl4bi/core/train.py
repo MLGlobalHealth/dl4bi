@@ -7,6 +7,7 @@ from typing import Callable, Optional, Union
 import flax
 import flax.linen as nn
 import jax
+import jax.numpy as jnp
 import numpy as np
 import optax
 import wandb
@@ -56,16 +57,6 @@ def train(
     batch = next(batches)
     rngs = {"params": rng_params, "extra": rng_extra}
     kwargs = model.init(rngs, **batch)
-    jit_fwd = jit(lambda **b: model.apply(kwargs, **b))
-    cost = jit_fwd.lower(**batch).compile().cost_analysis()
-    # TODO(danj): FLOPS returning 0 -- https://github.com/google/flax/issues/4023s
-    # Remove manual GFLOPS count below when fixed
-    param_count = nn.tabulate(model, rngs, compute_flops=True, compute_vjp_flops=True)(
-        **batch
-    )
-    print(param_count)
-    bold, reset = "\033[1m", "\033[0m"
-    print(f"{bold}Estimated GFLOPS: {cost['flops'] / 1.0e9:g}\n\n{reset}")
     params = kwargs.pop("params")
     state = TrainState.create(
         apply_fn=model.apply,
@@ -73,6 +64,16 @@ def train(
         kwargs=kwargs if state is None else state.kwargs,
         tx=optimizer,
     )
+    # TODO(danj): FLOPS returning 0 -- https://github.com/google/flax/issues/4023s
+    # Remove manual GFLOPS count below when fixed
+    param_count = nn.tabulate(model, rngs, compute_flops=True, compute_vjp_flops=True)(
+        **batch
+    )
+    infer_flops, train_flops = estimate_flops(rng_train, state, model.train_step, batch)
+    bold, reset = "\033[1m", "\033[0m"
+    print(param_count)
+    print(f"{bold}Estimated Infer GFLOPS: {infer_flops / 1.0e9:g}{reset}")
+    print(f"{bold}Estimated Train GFLOPS: {train_flops / 1.0e9:g}\n\n{reset}")
     losses = []
     patience = 0
     best_state = state
@@ -120,6 +121,22 @@ def train(
         pbar.set_postfix(postfix)
     both = (best_state, state)
     return {"best": best_state, "last": state, "both": both}[return_state]
+
+
+def estimate_flops(rng, state, train_step, batch):
+    infer_cost = jit(infer).lower(rng, state, batch).compile().cost_analysis()
+    train_cost = jit(train_step).lower(rng, state, batch).compile().cost_analysis()
+    return infer_cost["flops"], train_cost["flops"]
+
+
+@jit
+def infer(rng, state, batch):
+    return state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        **batch,
+        training=False,
+        rngs={"extra": rng},
+    )
 
 
 def evaluate(
