@@ -1,0 +1,61 @@
+defaults:
+  - _self_ # use default global values below
+  - model: bsa_tnp
+  - kernel: rbf
+seed: 42
+wandb: True
+project: Gaussian Processes
+train_num_steps: 100000
+valid_num_steps: 5000
+valid_interval: 10000
+plot_interval: 100000
+kernel:
+  _target_: sps.gp.GP
+  kernel:
+    _target_: sps.kernels.rbf
+    _partial_: true
+  var:
+    _target_: sps.priors.Prior
+    dist: fixed
+    kwargs:
+      value: 1.0
+  ls:
+    _target_: sps.priors.Prior
+    dist: uniform
+    kwargs:
+      a: 0.25
+      b: 0.75
+data:
+  s1: # 256 total points
+    - start: -0.5
+      stop: 0.5
+      num: 16
+    - start: -0.5
+      stop: 0.5
+      num: 16
+  s2: # 256 total points
+    - start: -2
+      stop: 2
+      num: 16
+    - start: -2
+      stop: 2
+      num: 16
+  num_ctx:
+    min: 64 # 12.5% of 512
+    max: 128 # 25.0% of 512
+  num_test: 128 # 25% of 512
+  obs_noise: 0.1
+optimizer:
+  _target_: optax.chain
+  _args_:
+    - _target_: optax.clip_by_global_norm
+      max_norm: 0.5
+    - _target_: optax.adamw
+      learning_rate:
+        _target_: optax.cosine_decay_schedule
+        init_value: 1.0e-4
+        decay_steps: ${train_num_steps}
+        alpha: 2.0e-5
+      b1: 0.9
+      b2: 0.999
+      weight_decay: 1.0e-4
