@@ -20,6 +20,7 @@ from household_electric import main as household_electric_main
 from hydra import compose, initialize
 from jax import random
 from mnist import main as mnist_main
+from multiscale_2d_gp import main as multiscale_2d_gp_main
 from sir import main as sir_main
 
 
@@ -53,6 +54,16 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     #     "NeurIPS BSA-TNP - Gaussian Processes",
     #     dry_run=dry_run,
     # )
+    gp_benchmark(
+        seeds,
+        "2d",
+        gp_kernels_2d,
+        ["bsa_tnp", "te_tnp"],
+        multiscale_2d_gp_main,
+        overrides,
+        "NeurIPS BSA-TNP - Multiscale Gaussian Processes",
+        dry_run=dry_run,
+    )
     # generic_benchmark(
     #     seeds,
     #     "configs/sir",
@@ -96,18 +107,17 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     # )
 
     # HIGH DIMENSIONAL
-    # TODO(danj):
     # fixed + spatial effects:
-    tabular_models = ["bsa_tnp", "te_tnp", "tnp_d"]
-    generic_benchmark(
-        seeds,
-        "configs/household_electric",
-        tabular_models,
-        household_electric_main,
-        overrides,
-        "NeurIPS BSA-TNP - Household Electric",
-        dry_run=dry_run,
-    )
+    # tabular_models = ["bsa_tnp", "te_tnp", "tnp_d"]
+    # generic_benchmark(
+    #     seeds,
+    #     "configs/household_electric",
+    #     tabular_models,
+    #     household_electric_main,
+    #     overrides,
+    #     "NeurIPS BSA-TNP - Household Electric",
+    #     dry_run=dry_run,
+    # )
     # generic_benchmark(
     #     seeds,
     #     "configs/beijing_air_quality",
