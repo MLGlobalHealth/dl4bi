@@ -21,6 +21,9 @@ from dl4bi.core.train import (
 from dl4bi.meta_learning.data.tabular import TabularData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
+# NOTE: this benchmark isn't very useful; almost all of the variation can be
+# explained by the fixed covariates, rending all methods comparable
+
 
 @hydra.main("configs/household_electric", config_name="default", version_base=None)
 def main(cfg: DictConfig):

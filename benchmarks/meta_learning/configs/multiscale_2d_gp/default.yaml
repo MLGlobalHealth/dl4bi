@@ -20,10 +20,10 @@ kernel:
       value: 1.0
   ls:
     _target_: sps.priors.Prior
-    dist: uniform
+    dist: beta
     kwargs:
-      minval: 0.25
-      maxval: 0.75
+      a: 3.0
+      b: 7.0
 data:
   s1: # 256 total points
     - start: -0.5
@@ -33,11 +33,11 @@ data:
       stop: 0.5
       num: 16
   s2: # 256 total points
-    - start: -2
-      stop: 2
+    - start: -1.5
+      stop: 1.5
       num: 16
-    - start: -2
-      stop: 2
+    - start: -1.5
+      stop: 1.5
       num: 16
   num_ctx:
     min: 64 # 12.5% of 512
