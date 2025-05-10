@@ -71,7 +71,6 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-# NOTE: output predictions are 64x64
 def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = False):
     """Generates batches of GP samples."""
     gp = instantiate(kernel)
@@ -108,6 +107,7 @@ def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = F
     return dataloader
 
 
+# NOTE: output predictions are 64x64
 def build_2d_grid_dataloader(data: DictConfig, kernel: DictConfig):
     """A custom 2D GP dataloader in which generated context and test points
         reside only on the 2d grid.
@@ -117,19 +117,19 @@ def build_2d_grid_dataloader(data: DictConfig, kernel: DictConfig):
         on a continuous domain, while this only uses points on a grid for
         visualization purposes.
     """
-    B = data.batch_size
+    B, D_s = data.batch_size, len(data.s1)
     gp = instantiate(kernel)
-    s1_g = build_grid(data.s1)
-    s2_g = build_grid(data.s2)
-    s1 = jnp.repeat(s1_g[None, ...], B, axis=0)
-    s2 = jnp.repeat(s2_g[None, ...], B, axis=0)
+    s1_g = build_grid(data.s1).reshape(-1, D_s)
+    s2_g = build_grid(data.s2).reshape(-1, D_s)
+    s_g = jnp.concat([s1_g, s2_g])
+    s = jnp.repeat(s_g[None, ...], B, axis=0)
     to_extra = lambda d: {k: v.item() for k, v in d.items() if v is not None}
 
+    # TODO(danj): build batches manually
     def dataloader(rng: jax.Array):
         while True:
             rng_gp, rng_b, rng = random.split(rng, 3)
             f, var, ls, period, *_ = gp.simulate(rng_gp, s_g, B)
-            f = f.reshape(*s.shape[:-1], f.shape[-1])
             d = SpatialData(x=None, s=s, f=f)
             b = d.batch(
                 rng_b,
