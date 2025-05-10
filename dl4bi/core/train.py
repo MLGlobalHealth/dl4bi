@@ -13,7 +13,7 @@ import wandb
 from flax.core import FrozenDict
 from flax.training import orbax_utils, train_state
 from hydra.utils import instantiate
-from jax import random
+from jax import jit, random
 from omegaconf import DictConfig, OmegaConf
 from orbax.checkpoint import PyTreeCheckpointer
 from tqdm import tqdm
@@ -56,12 +56,17 @@ def train(
     batch = next(batches)
     rngs = {"params": rng_params, "extra": rng_extra}
     kwargs = model.init(rngs, **batch)
-    params = kwargs.pop("params")
+    jit_fwd = jit(lambda **b: model.apply(kwargs, **b))
+    cost = jit_fwd.lower(**batch).compile().cost_analysis()
     # TODO(danj): FLOPS returning 0 -- https://github.com/google/flax/issues/4023s
+    # Remove manual GFLOPS count below when fixed
     param_count = nn.tabulate(model, rngs, compute_flops=True, compute_vjp_flops=True)(
         **batch
     )
     print(param_count)
+    bold, reset = "\033[1m", "\033[0m"
+    print(f"{bold}Estimated GFLOPS: {cost['flops'] / 1.0e9:g}\n\n{reset}")
+    params = kwargs.pop("params")
     state = TrainState.create(
         apply_fn=model.apply,
         params=params if state is None else state.params,
