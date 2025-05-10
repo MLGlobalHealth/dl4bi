@@ -2,7 +2,6 @@
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from matplotlib.colors import Normalize
 
 import hydra
 import jax
@@ -12,6 +11,8 @@ import matplotlib.pyplot as plt
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random
+from matplotlib import patches
+from matplotlib.colors import Normalize
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
@@ -235,6 +236,7 @@ def wandb_multires_2d_plots(
         for j in range(5):
             axs[i, j].set_xticks([])
             axs[i, j].set_yticks([])
+            plot_extent_border(axs[i, j], extent_s1)
         axs[i, 0].imshow(f_test_s2[i], extent=extent_s2, **kwargs)
         axs[i, 0].imshow(f_test_s1[i], extent=extent_s1, **kwargs_s1)
         axs[i, 0].set_xlim(*extent_s2[:2])
@@ -243,9 +245,9 @@ def wandb_multires_2d_plots(
         axs[i, 1].imshow(f_ctx_s1[i], extent=extent_s1, **kwargs_s1)
         axs[i, 1].set_xlim(*extent_s2[:2])
         axs[i, 1].set_ylim(*extent_s2[2:])
-        axs[i, 2].imshow(f_hires_std[i], cmap="plasma")
-        axs[i, 3].imshow(f_hires_pred[i], **kwargs)
-        axs[i, 4].imshow(f_hires[i], **kwargs)
+        axs[i, 2].imshow(f_hires_std[i], extent=extent_s2, cmap="plasma")
+        axs[i, 3].imshow(f_hires_pred[i], extent=extent_s2, **kwargs)
+        axs[i, 4].imshow(f_hires[i], extent=extent_s2, **kwargs)
     subtitle = ", ".join([f"{k}: {v:.2f}" for k, v in extra.items()])
     plt.suptitle(subtitle + "\n", fontsize=35)
     plt.tight_layout()
@@ -261,6 +263,22 @@ def to_extent(axes):
         axes[0]["start"],  # upper
         axes[0]["stop"],  # lower
     ]
+
+
+def plot_extent_border(ax, extent):
+    left, right, top, bottom = extent
+    W = right - left
+    H = top - bottom
+    rect = patches.Rectangle(
+        (left, bottom),
+        W,
+        H,
+        fill=False,
+        edgecolor="black",
+        linewidth=3,
+        linestyle="--",
+    )
+    ax.add_patch(rect)
 
 
 if __name__ == "__main__":
