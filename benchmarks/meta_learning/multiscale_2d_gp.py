@@ -75,9 +75,9 @@ def main(cfg: DictConfig):
 def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = False):
     """Generates batches of GP samples."""
     gp = instantiate(kernel)
-    B, L, D_s = data.batch_size, data.num_ctx.max + data.num_test, len(data.s)
-    get_min = jit(lambda axes: jnp.array([axis["start"] for axis in axes]))
-    get_max = jit(lambda axes: jnp.array([axis["stop"] for axis in axes]))
+    B, L, D_s = data.batch_size, data.num_ctx.max + data.num_test, len(data.s1)
+    get_min = lambda axes: jnp.array([axis["start"] for axis in axes])
+    get_max = lambda axes: jnp.array([axis["stop"] for axis in axes])
     s1_min, s1_max = get_min(data.s1), get_max(data.s1)
     s2_min, s2_max = get_min(data.s2), get_max(data.s2)
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
