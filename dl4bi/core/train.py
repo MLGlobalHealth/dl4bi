@@ -1,4 +1,3 @@
-import pickle
 import shutil
 from collections import defaultdict
 from dataclasses import dataclass
@@ -58,7 +57,10 @@ def train(
     rngs = {"params": rng_params, "extra": rng_extra}
     kwargs = model.init(rngs, **batch)
     params = kwargs.pop("params")
-    param_count = nn.tabulate(model, rngs)(**batch)
+    # TODO(danj): FLOPS returning 0 -- https://github.com/google/flax/issues/4023s
+    param_count = nn.tabulate(model, rngs, compute_flops=True, compute_vjp_flops=True)(
+        **batch
+    )
     print(param_count)
     state = TrainState.create(
         apply_fn=model.apply,
