@@ -44,6 +44,7 @@ data:
     max: 128 # 25.0% of 512
   num_test: 128 # 25% of 512
   obs_noise: 0.1
+  batch_size: 32
 optimizer:
   _target_: optax.chain
   _args_:
