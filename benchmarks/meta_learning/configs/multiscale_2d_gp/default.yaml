@@ -22,8 +22,8 @@ kernel:
     _target_: sps.priors.Prior
     dist: uniform
     kwargs:
-      a: 0.25
-      b: 0.75
+      minval: 0.25
+      maxval: 0.75
 data:
   s1: # 256 total points
     - start: -0.5
