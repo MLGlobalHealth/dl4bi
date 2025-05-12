@@ -6,10 +6,10 @@ from pathlib import Path
 import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from gp import build_2d_grid_dataloader
 from hydra.utils import instantiate
 from jax import jit, random
 from omegaconf import DictConfig
+from sir import build_spatial_dataloaders, remap_colors
 from tqdm import tqdm
 
 from dl4bi.core.train import load_ckpt
@@ -43,7 +43,7 @@ def plot(
     num_samples: int = 16,
     num_points_per_unit: int = 16,
 ):
-    cfg = models["BSATNP"]["cfg"]  # cfg.data, cfg.kernel should be the same for all
+    cfg = models["BSATNP"]["cfg"]  # cfg.data should be the same for all
     cfg.data.batch_size = 1
     half = scale / 2
     for axis in cfg.data.s:  # assumes coordinate axis is centered on origin
@@ -55,7 +55,7 @@ def plot(
     cfg.data.num_ctx.min = num_ctx
     cfg.data.num_ctx.max = num_ctx
     models["ConvCNP"] = update_convcnp_grid(models["ConvCNP"], cfg.data.s)
-    dataloader = build_2d_grid_dataloader(cfg.data, cfg.kernel)
+    _, dataloader = build_spatial_dataloaders(cfg.data, cfg.kernel)
     rng = random.key(cfg.seed)
     rng_data, rng = random.split(rng)
     batches = dataloader(rng_data)
@@ -63,9 +63,7 @@ def plot(
     Path("samples").mkdir(exist_ok=True)
     for i in tqdm(range(1, num_samples + 1)):
         rng_i, rng = random.split(rng)
-        batch, extra = next(batches)
-        f_std_min, f_std_max = jnp.inf, -jnp.inf
-        f_min, f_max = batch.f_test.min(), batch.f_test.max()
+        batch = next(batches)
         for j, (model_cls_name, d) in enumerate(models.items()):
             state = d["state"]
             output = state.apply_fn(
@@ -76,12 +74,6 @@ def plot(
             if isinstance(output, tuple):
                 output, _ = output  # latent output not used here
             models[model_cls_name]["output"] = output
-            f_std_min = min(f_std_min, output.std.min())
-            f_std_max = max(f_std_max, output.std.max())
-            f_max = max(f_max, output.mu.max())
-            f_min = min(f_max, output.mu.min())
-        f_norm = mpl.colors.Normalize(vmin=f_min, vmax=f_max)
-        f_std_norm = mpl.colors.Normalize(vmin=f_std_min, vmax=f_std_max)
         fig, axes = plt.subplots(3, len(models), figsize=(3 * num_models, 9))
         for ax in axes.flatten():
             ax.set_xticks([])
@@ -93,8 +85,7 @@ def plot(
                 output=d["output"],
                 f_pred_axis=axes[1, j],
                 f_std_axis=axes[2, j],
-                f_norm=f_norm,
-                f_std_norm=f_std_norm,
+                # plot task and ground truth only once
                 task_axis=None if j else axes[0, 1],
                 ground_truth_axis=None if j else axes[0, 2],
             )
@@ -104,9 +95,7 @@ def plot(
             if not ax.has_data():
                 ax.axis("off")
         plt.tight_layout()
-        plt.savefig(
-            f"samples/gp_scale_{scale:g}_shifted_{shift:g}_ls_{extra['ls']:0.2f}_{i}.png"
-        )
+        plt.savefig(f"samples/sir_scale_{scale:g}_shifted_{shift:g}_{i}.png")
         plt.clf()
 
 
@@ -116,8 +105,6 @@ def _plot(
     output,
     f_pred_axis,
     f_std_axis,
-    f_norm=None,
-    f_std_norm=None,
     task_axis=None,
     ground_truth_axis=None,
 ):
@@ -133,11 +120,9 @@ def _plot(
     arrays = inv_permute_L_in_BLD(arrays, batch.inv_permute_idx)
     reshape = jit(lambda v: v.reshape(*batch.s_shape[1:-1], v.shape[-1]).squeeze())
     f_ctx, f_test, f_pred, f_std = map(reshape, arrays)
-    cmap = mpl.colormaps.get_cmap("Spectral_r")
-    cmap.set_bad("grey")
-    cmap_std = mpl.colormaps.get_cmap("plasma")
-    kwargs = dict(cmap=cmap, norm=f_norm, interpolation="none")
-    kwargs_std = dict(cmap=cmap_std, norm=f_std_norm, interpolation="none")
+    f_ctx, f_test, f_pred = map(remap_colors, [f_ctx, f_test, f_pred])
+    kwargs = dict(interpolation="none")
+    kwargs_std = dict(cmap="plasma", interpolation="none")
     f_pred_axis.imshow(f_pred, **kwargs)
     f_std_axis.imshow(f_std, **kwargs_std)
     f_std_axis.set_xlabel(name, fontsize=20)

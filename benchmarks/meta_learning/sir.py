@@ -42,9 +42,9 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    build = build_spatial_dataloader
+    build = build_spatial_dataloaders
     if cfg.data.type == "spatiotemporal":
-        build = build_spatiotemporal_dataloader
+        build = build_spatiotemporal_dataloaders
     dataloader, clbk_dataloader = build(cfg.data, cfg.sim)
     train_dataloader = valid_dataloader = dataloader
     optimizer = instantiate(cfg.optimizer)
@@ -83,7 +83,7 @@ def main(cfg: DictConfig):
     save_batches_for_tabpfn(rng_test, valid_dataloader, cfg.valid_num_steps, eval_path)
 
 
-def build_spatial_dataloader(data: DictConfig, priors: DictConfig):
+def build_spatial_dataloaders(data: DictConfig, priors: DictConfig):
     """A 2D Lattice SIR dataloader over space only."""
     B = data.batch_size
     sir = instantiate(priors)
@@ -113,7 +113,7 @@ def build_spatial_dataloader(data: DictConfig, priors: DictConfig):
     return dataloader, partial(dataloader, is_callback=True)
 
 
-def build_spatiotemporal_dataloader(data: DictConfig, priors: DictConfig):
+def build_spatiotemporal_dataloaders(data: DictConfig, priors: DictConfig):
     """A 2D Lattice SIR dataloader over space and time."""
     B = data.batch_size
     sir = instantiate(priors)
