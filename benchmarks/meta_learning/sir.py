@@ -73,6 +73,8 @@ def main(cfg: DictConfig):
         dataloader,
         cfg.valid_num_steps,
     )
+    eval_path = path.parent / f"eval_data.npy"
+    save_batches_for_tabpfn(rng_test, valid_dataloader, cfg.valid_num_steps, eval_path)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
