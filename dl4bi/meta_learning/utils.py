@@ -87,6 +87,7 @@ def save_batches_for_tabpfn(
     path: Path,
 ):
     rng_data, rng = random.split(rng)
+    print("Saving batches for TabPFN")
     pbar = tqdm(
         dataloader(rng_data),
         total=num_steps,
