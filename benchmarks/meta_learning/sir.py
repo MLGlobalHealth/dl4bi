@@ -20,7 +20,11 @@ from dl4bi.core.train import (
 )
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData
-from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
+from dl4bi.meta_learning.utils import (
+    cfg_to_run_name,
+    save_batches_for_tabpfn,
+    wandb_2d_img_callback,
+)
 
 
 @hydra.main("configs/sir", config_name="default", version_base=None)
@@ -73,10 +77,10 @@ def main(cfg: DictConfig):
         dataloader,
         cfg.valid_num_steps,
     )
-    eval_path = path.parent / f"eval_data.npy"
-    save_batches_for_tabpfn(rng_test, valid_dataloader, cfg.valid_num_steps, eval_path)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
+    eval_path = path.parent / f"eval_data.npy"
+    save_batches_for_tabpfn(rng_test, valid_dataloader, cfg.valid_num_steps, eval_path)
 
 
 def build_spatial_dataloader(data: DictConfig, priors: DictConfig):
