@@ -99,5 +99,5 @@ def save_batches_for_tabpfn(
     for i, batch in enumerate(pbar):
         if i >= num_steps:  # for infinite dataloaders
             break
-        samples.append(batch.to_xy())
+        samples.append({k: np.array(v) for k, v in batch.to_xy().items()})
     np.save(path, samples, allow_pickle=True)
