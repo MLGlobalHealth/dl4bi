@@ -28,7 +28,7 @@ from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
 
 
-@hydra.main("configs/generic_spatiotemporal", config_name="default", version_base=None)
+@hydra.main("configs/generic_spatial", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
     wandb.init(
@@ -80,40 +80,36 @@ def build_dataloaders(data: DictConfig):
     s_flat = s_grid.reshape(-1, D_s)
     s_batch = jnp.repeat(s_grid[None, ...], B, axis=0)
     # NOTE: pure JAX version is faster
-    # prior_pred = jit(Predictive(generic_spatiotemporal_model, num_samples=B))
+    # prior_pred = jit(Predictive(generic_spatial_model, num_samples=B))
     prior_pred = partial(jax_prior_pred, batch_size=B)
 
     def dataloader(rng: jax.Array, is_callback: bool = False):
         L = s_flat.shape[0]
         while True:
-            # reuse x for several batches to avoid too much
-            # noise in early training
-            rng_x, rng = random.split(rng)
+            rng_x, rng_p, rng_b, rng = random.split(rng, 4)
             x = random.normal(rng_x, (L, D_x))
             x_batch = jnp.repeat(x[None, ...], B, axis=0)
-            for i in range(data.num_x_batches):
-                rng_p, rng_b, rng = random.split(rng, 3)
-                samples = prior_pred(rng_p, x, s_flat)
-                f = samples["f"][..., None]  # [B, L, 1]
-                yield SpatialData(x_batch, s_batch, f).batch(
-                    rng_b,
-                    data.num_ctx_min,
-                    data.num_ctx_max,
-                    L if is_callback else data.num_test,
-                    data.num_test,
-                )
+            samples = prior_pred(rng_p, x, s_flat)
+            f = samples["f"][..., None]  # [B, L, 1]
+            yield SpatialData(x_batch, s_batch, f).batch(
+                rng_b,
+                data.num_ctx_min,
+                data.num_ctx_max,
+                L if is_callback else data.num_test,
+                data.num_test,
+            )
 
     return dataloader, partial(dataloader, is_callback=True)
 
 
-def generic_spatiotemporal_model(
+def generic_spatial_model(
     x: jax.Array,  # [L, D_x]
     s: jax.Array,  # [L, D_s]
     f: Optional[jax.Array] = None,  # [L, 1]
     jitter: float = 1e-5,
     **kwargs,
 ):
-    """Generic Spatiotemporal model with fixed and random spatial effects.
+    """Generic spatial model with fixed and random spatial effects.
 
     Args:
         x: Array of input covariates, `[L, D]`.
@@ -140,7 +136,7 @@ def jax_prior_pred(
     batch_size: int,
     jitter: float = 1e-5,
 ):
-    """A pure JAX spatiotemporal model with fixed and random spatial effects.
+    """A pure JAX spatial model with fixed and random spatial effects.
 
     Relative to the numpyro model, this is a faster implementation because it
     amortizes the Cholesky decomposition by fixing lengthscale and variance

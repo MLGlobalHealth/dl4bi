@@ -3,14 +3,13 @@ defaults:
   - model: bsa_tnp
 seed: 42
 wandb: True
-project: Generic Spatiotemporal
+project: Generic Spatial
 train_num_steps: 100000
 valid_num_steps: 5000
 valid_interval: 10000
 plot_interval: 50000
 data:
   num_features: 10
-  num_x_batches: 50
   batch_size: 32
   num_ctx_min: 128 # ~5% of locations
   num_ctx_max: 256 # ~12.5% of locations
@@ -30,11 +29,11 @@ optimizer:
     - _target_: optax.clip_by_global_norm
       max_norm: 1.0
     - _target_: optax.adamw
-      learning_rate:
-        _target_: optax.cosine_decay_schedule
-        init_value: 2.0e-3
-        decay_steps: ${train_num_steps}
-        alpha: 2.0e-5
+      learning_rate: 1.0e-4
+        # _target_: optax.cosine_decay_schedule
+        # init_value: 2.0e-3
+        # decay_steps: ${train_num_steps}
+        # alpha: 2.0e-5
       b1: 0.9
       b2: 0.999
       weight_decay: 1.0e-4

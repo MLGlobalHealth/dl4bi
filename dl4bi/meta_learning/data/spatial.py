@@ -127,6 +127,9 @@ class SpatialBatch(MetaLearningBatch):
     inv_permute_idx: jax.Array  # [L]
     s_shape: tuple
 
+    def to_xy(self):
+        x = jnp.concat([])
+
     def plot_1d(
         self,
         f_pred: jax.Array,  # [B, L_test, 1]
