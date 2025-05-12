@@ -87,8 +87,14 @@ def plot(
             ax.set_xticks([])
             ax.set_yticks([])
         for j, (model_cls_name, d) in enumerate(models.items()):
+            name = {
+                "ConvCNP": "ConvCNP",
+                "BSATNP": "BSA-TNP",
+                "TNPD": "TNP-D",
+                "TETNP": "PT-TE-TNP",
+            }
             _plot(
-                name=model_cls_name,
+                name=name[model_cls_name],
                 batch=batch,
                 output=d["output"],
                 f_pred_axis=axes[1, j],

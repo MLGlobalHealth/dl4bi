@@ -79,8 +79,14 @@ def plot(
             ax.set_xticks([])
             ax.set_yticks([])
         for j, (model_cls_name, d) in enumerate(models.items()):
+            name = {
+                "ConvCNP": "ConvCNP",
+                "BSATNP": "BSA-TNP",
+                "TNPD": "TNP-D",
+                "TETNP": "PT-TE-TNP",
+            }
             _plot(
-                name=model_cls_name,
+                name=name[model_cls_name],
                 batch=batch,
                 output=d["output"],
                 f_pred_axis=axes[1, j],
@@ -111,7 +117,7 @@ def _plot(
     inv_p = batch.inv_permute_idx
     L = inv_p.shape[0] if inv_p.ndim == 1 else inv_p.shape[1]
     f_ctx = jnp.where(batch.mask_ctx[..., None], batch.f_ctx, jnp.nan)
-    f_pred, f_std, f_test = output.mu, output.std, batch.f_test
+    f_pred, f_std, f_test = output.p, output.std, batch.f_test
     if f_std.shape[-1] > 1:  # e.g. uncertainty per RGB channel
         f_std = f_std.mean(axis=-1, keepdims=True)
     if batch.mask_test is not None:
@@ -121,6 +127,7 @@ def _plot(
     reshape = jit(lambda v: v.reshape(*batch.s_shape[1:-1], v.shape[-1]).squeeze())
     f_ctx, f_test, f_pred, f_std = map(reshape, arrays)
     f_ctx, f_test, f_pred = map(remap_colors, [f_ctx, f_test, f_pred])
+    f_ctx, f_test, f_pred = f_ctx[0], f_test[0], f_pred[0]
     kwargs = dict(interpolation="none")
     kwargs_std = dict(cmap="plasma", interpolation="none")
     f_pred_axis.imshow(f_pred, **kwargs)
