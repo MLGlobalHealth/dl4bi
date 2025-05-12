@@ -812,7 +812,15 @@ def plot_on_map(
 ):
     ax.set_title(title)
     gdf["TEMP"] = values
-    gdf.plot(column="TEMP", cmap=cmap, ax=ax, legend=legend, vmin=vmin, vmax=vmax)
+    gdf.plot(
+        column="TEMP",
+        cmap=cmap,
+        ax=ax,
+        legend=legend,
+        vmin=vmin,
+        vmax=vmax,
+        missing_kwds={"color": "lightgrey"},
+    )
 
 
 def plot_locations_map(

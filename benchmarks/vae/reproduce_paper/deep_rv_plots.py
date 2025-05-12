@@ -354,7 +354,6 @@ def plot_posterior_predictive_comparisons(
     var_names: list[str],
     save_prefix: Path,
 ):
-    baseline_index = model_names.index("Baseline_GP")
     for var_name in var_names:
         actual_val = conditionals.get(var_name, None)
         fig, ax = plt.subplots(figsize=(4, 4))
@@ -369,7 +368,11 @@ def plot_posterior_predictive_comparisons(
                 sns.kdeplot(model_samples, label=model_n, linewidth=2, alpha=0.7)
         prior_dist = priors.get(var_name, None)
         if prior_dist is not None:
-            baseline_samples = samples[baseline_index].get(str(var_name), None)
+            try:
+                baseline_index = model_names.index("Baseline_GP")
+                baseline_samples = samples[baseline_index].get(str(var_name), None)
+            except ValueError:
+                baseline_samples = None
             if baseline_samples is not None:
                 x_vals = jnp.linspace(min_val, max_val, 200)
                 prior_pdf = jnp.exp(prior_dist.log_prob(x_vals))
@@ -395,8 +398,12 @@ def plot_models_predictive_means(f_hats, map_data, save_path: Path, log=True):
     if log:
         f_hats = [jnp.log(f_mean + 1) for f_mean in f_hats]
     f_hat_means = [f_hats[0]] + [f_mean.mean(axis=0) for f_mean in f_hats[1:]]
-    vmin = jnp.min(jnp.array([f_mean.min() for f_mean in f_hat_means])).item()
-    vmax = jnp.max(jnp.array([f_mean.max() for f_mean in f_hat_means])).item()
+    vmin = jnp.min(
+        jnp.array([f_mean[~jnp.isnan(f_mean)].min() for f_mean in f_hat_means])
+    ).item()
+    vmax = jnp.max(
+        jnp.array([f_mean[~jnp.isnan(f_mean)].max() for f_mean in f_hat_means])
+    ).item()
     fig, ax = plt.subplots(
         1, len(f_hat_means), figsize=(6 * len(f_hat_means), 7), constrained_layout=True
     )
