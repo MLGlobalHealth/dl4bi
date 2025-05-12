@@ -1,8 +1,10 @@
+from dataclasses import field
 from typing import Callable, Optional
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from sps.utils import build_grid
 
 from ..core.mlp import MLP
 from ..core.model_output import DiagonalMVNOutput
@@ -27,8 +29,8 @@ class HLNP(nn.Module):
         An instance of the `HLNP` model.
     """
 
-    s_lower: List[float] = field(default_factory=lambda: [-2.5])
-    s_upper: List[float] = field(default_factory=lambda: [2.5])
+    s_lower: list[float] = field(default_factory=lambda: [-2.5])
+    s_upper: list[float] = field(default_factory=lambda: [2.5])
     points_per_unit: int = 128
     embed_x: Callable = lambda x: x
     embed_s: Callable = lambda x: x
@@ -104,6 +106,7 @@ class HLNP(nn.Module):
         # qs = self.param("latents", init.truncated_normal(), (1, Z, D))
         # qs = jnp.repeat(qs, B, axis=0)
         # TODO(danj): add positional embeddings to distill blocks
+        # TODO(danj): this is a KRBlock if you put latents in this class
         ks_1 = DistillBlock(64)(ks_0, mask_ctx, training)
         ks_2 = DistillBlock(16)(ks_1, None, training)
         ks_3 = DistillBlock(4)(ks_2, None, training)
