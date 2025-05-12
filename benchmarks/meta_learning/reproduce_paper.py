@@ -15,6 +15,7 @@ from beijing_air_quality import main as beijing_air_quality_main
 from celeba import main as celeba_main
 from cifar_10 import main as cifar_10_main
 from era5 import main as era5_main
+from generic_spatial import main as generic_spatial_main
 from gp import main as gp_main
 from household_electric import main as household_electric_main
 from hydra import compose, initialize
@@ -54,13 +55,22 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     #     "NeurIPS BSA-TNP - Gaussian Processes",
     #     dry_run=dry_run,
     # )
+    # generic_benchmark(
+    #     seeds,
+    #     "configs/multiscale_2d_gp",
+    #     ["bsa_tnp", "te_tnp"],
+    #     multiscale_2d_gp_main,
+    #     overrides,
+    #     "NeurIPS BSA-TNP - Multiscale Gaussian Processes",
+    #     dry_run=dry_run,
+    # )
     generic_benchmark(
         seeds,
-        "configs/multiscale_2d_gp",
-        ["bsa_tnp", "te_tnp"],
-        multiscale_2d_gp_main,
+        "configs/generic_spatial",
+        ["bsa_tnp", "te_tnp", "tnp_d"],
+        generic_spatial_main,
         overrides,
-        "NeurIPS BSA-TNP - Multiscale Gaussian Processes",
+        "NeurIPS BSA-TNP - Generic Spatial",
         dry_run=dry_run,
     )
     # generic_benchmark(
