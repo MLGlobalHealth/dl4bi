@@ -13,7 +13,9 @@ from hydra.utils import instantiate
 from jax import jit, random, vmap
 from numpyro.infer import MCMC, NUTS, Predictive
 from omegaconf import DictConfig, OmegaConf
+from sps.gp import GP
 from sps.kernels import rbf
+from sps.priors import Prior
 from sps.utils import build_grid
 
 from dl4bi.core.train import (
@@ -73,7 +75,9 @@ def build_dataloader(data: DictConfig):
     s_grid = build_grid(data.s)
     s_flat = s_grid.reshape(-1, D_s)
     s_batch = jnp.repeat(s_grid[None, ...], B, axis=0)
-    prior_pred = jit(Predictive(generic_spatiotemporal_model, num_samples=B))
+    # NOTE: pure JAX version is faster
+    # prior_pred = jit(Predictive(generic_spatiotemporal_model, num_samples=B))
+    prior_pred = partial(jax_prior_pred, batch_size=B)
 
     def dataloader(rng: jax.Array):
         L = s_flat.shape[0]
@@ -112,16 +116,59 @@ def generic_spatiotemporal_model(
         f: Observed function values, `[L, 1]`.
     """
 
-    L, D = x.shape
+    L, D_x = x.shape
     var = numpyro.deterministic("var", 1.0)
-    ls = numpyro.sample("ls", dist.Beta(3, 7))
+    ls = numpyro.sample("ls", dist.Beta(3.0, 7.0))
     k = rbf(s, s, var, ls) + jitter * jnp.eye(L)
-    beta = numpyro.sample("beta", dist.Normal(jnp.zeros(D), jnp.ones(D)))
+    beta = numpyro.sample("beta", dist.Normal(jnp.zeros(D_x), jnp.ones(D_x)))
     f_mu_x = x @ beta
     f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(0, k))
     f_mu = f_mu_x + f_mu_s
     f_obs_noise = numpyro.sample("f_obs_noise", dist.HalfNormal(0.1))
     numpyro.sample("f", dist.Normal(f_mu, f_obs_noise), obs=f)
+
+
+def jax_prior_pred(
+    rng: jax.Array,
+    x: jax.Array,
+    s: jax.Array,
+    batch_size: int,
+    jitter: float = 1e-5,
+):
+    """A pure JAX spatiotemporal model with fixed and random spatial effects.
+
+    Relative to the numpyro model, this is a faster implementation because it
+    amortizes the Cholesky decomposition by fixing lengthscale and variance
+    per batch.
+    """
+    rng_gp, rng_rest = random.split(rng)
+    var = Prior("fixed", {"value": 1.0})
+    ls = Prior("beta", {"a": 3.0, "b": 7.0})
+    # can't jit; hlo lowering fails on cholesky
+    f_mu_s, var, ls, *_ = GP(rbf, var, ls, jitter=jitter).simulate(
+        rng_gp, s, batch_size
+    )
+    f_mu_s = f_mu_s[..., 0]  # [B, L]
+    f, beta, f_obs_noise = _jax_prior_pred_helper(rng_rest, x, f_mu_s)
+    return {
+        "var": var,  # [1]
+        "ls": ls,  # [1]
+        "beta": beta,  # [B, D_x]
+        "f_mu_s": f_mu_s,  # [B, L]
+        "f_obs_noise": f_obs_noise,
+        "f": f,
+    }
+
+
+@jit
+def _jax_prior_pred_helper(rng: jax.Array, x: jax.Array, f_mu_s: jax.Array):
+    B, (L, D_x) = f_mu_s.shape[0], x.shape
+    rng_beta, rng_sigma, rng_noise = random.split(rng, 3)
+    beta = random.normal(rng_beta, (B, D_x))
+    f_mu_x = beta @ x.T  # beta: [B, D_x], x: [L, D_x], x.T: [D_x, L], f_mu_x: [B, L]
+    f_obs_noise = 0.1 * jnp.abs(random.normal(rng_sigma, (B,)))  # HalfNormal(0.1)
+    f = f_mu_x + f_mu_s + f_obs_noise[:, None] * random.normal(rng_noise, (B, L))
+    return f, beta, f_obs_noise
 
 
 @partial(jit, static_argnames=("jitter",))

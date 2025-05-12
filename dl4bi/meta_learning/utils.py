@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import wandb
 from jax import random
 from omegaconf import DictConfig
+from tqdm import tqdm
 
 from ..core.train import TrainState, load_ckpt
 from .data.spatial import SpatialBatch
@@ -76,3 +77,24 @@ def wandb_2d_img_callback(
 
 def x_to_none(x: jax.Array):
     return None
+
+
+def save_batches_for_tabpfn(
+    rng: jax.Array,
+    dataloader: Callable,
+    num_steps: int,
+):
+    rng_data, rng = random.split(rng)
+    pbar = tqdm(
+        dataloader(rng_data),
+        total=num_steps,
+        unit=" batches",
+        leave=False,
+        dynamic_ncols=True,
+    )
+    samples = []
+    for i, batch in enumerate(pbar):
+        if i >= num_steps:  # for infinite dataloaders
+            break
+        samples.append((batch, output))
+    return samples

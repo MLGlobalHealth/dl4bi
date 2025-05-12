@@ -166,35 +166,6 @@ def evaluate(
     return {k: np.mean(v) for k, v in metrics.items()}
 
 
-def collect_samples(
-    rng: jax.Array,
-    state: TrainState,
-    dataloader: Callable,
-    num_steps: int,
-):
-    rng_data, rng = random.split(rng)
-    pbar = tqdm(
-        dataloader(rng_data),
-        total=num_steps,
-        unit=" batches",
-        leave=False,
-        dynamic_ncols=True,
-    )
-    samples = []
-    for i, batch in enumerate(pbar):
-        rng_step, rng = random.split(rng)
-        if i >= num_steps:  # for infinite dataloaders
-            break
-        output = state.apply_fn(
-            {"params": state.params, **state.kwargs},
-            **batch,
-            training=False,
-            rngs={"extra": rng_step},
-        )
-        samples.append((batch, output))
-    return samples
-
-
 def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
     "Save a checkpoint."
     shutil.rmtree(path, ignore_errors=True)
