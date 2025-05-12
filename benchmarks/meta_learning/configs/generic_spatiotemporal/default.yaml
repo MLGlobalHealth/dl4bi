@@ -10,9 +10,12 @@ valid_interval: 10000
 plot_interval: 50000
 data:
   num_features: 10
+  num_x_batches: 50
   batch_size: 32
-  num_ctx_min: 52 # ~5% of locations
-  num_ctx_max: 128 # ~12.5% of locations
+  num_ctx_min: 128 # ~5% of locations
+  num_ctx_max: 256 # ~12.5% of locations
+  # num_ctx_min: 52 # ~5% of locations
+  # num_ctx_max: 128 # ~12.5% of locations
   num_test: 256 # ~25% of locations
   s:
   - start: -2

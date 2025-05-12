@@ -78,17 +78,21 @@ def build_dataloader(data: DictConfig):
     def dataloader(rng: jax.Array):
         L = s_flat.shape[0]
         while True:
-            rng_x, rng_p, rng_b, rng = random.split(rng, 4)
+            # reuse x for several batches to avoid too much
+            # noise in early training
+            rng_x, rng = random.split(rng)
             x = random.normal(rng_x, (L, D_x))
             x_batch = jnp.repeat(x[None, ...], B, axis=0)
-            samples = prior_pred(rng_p, x, s_flat)
-            f = samples["f"][..., None]  # [B, L, 1]
-            yield SpatialData(x_batch, s_batch, f).batch(
-                rng_b,
-                data.num_ctx_min,
-                data.num_ctx_max,
-                data.num_test,
-            )
+            for i in range(data.num_x_batches):
+                rng_p, rng_b, rng = random.split(rng, 3)
+                samples = prior_pred(rng_p, x, s_flat)
+                f = samples["f"][..., None]  # [B, L, 1]
+                yield SpatialData(x_batch, s_batch, f).batch(
+                    rng_b,
+                    data.num_ctx_min,
+                    data.num_ctx_max,
+                    data.num_test,
+                )
 
     return dataloader
 
