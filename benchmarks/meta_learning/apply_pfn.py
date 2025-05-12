@@ -8,13 +8,15 @@ from tabpfn import TabPFNRegressor
 
 def main(path):
     d = np.load(path, allow_pickle=True).item()
+    mask = d["train_mask"]
     x_train, x_test = d["x_train"], d["x_test"]
     y_train, y_test = d["y_train"], d["y_test"]
     B = x_train.shape[0]
     reg = TabPFNRegressor(random_state=42)
     output = []
     for i in range(B):
-        reg.fit(x_train[i], y_train[i])
+        m = mask[i]
+        reg.fit(x_train[i][m], y_train[i][m])
         f_lower, f_mu, f_upper = reg.predict(
             x_test[i],
             output_type="quantiles",

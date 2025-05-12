@@ -96,5 +96,6 @@ def save_batches_for_tabpfn(
     for i, batch in enumerate(pbar):
         if i >= num_steps:  # for infinite dataloaders
             break
-        samples.append((batch, output))
+
+        samples.append(batch)
     return samples

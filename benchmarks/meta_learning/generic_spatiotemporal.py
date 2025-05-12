@@ -19,12 +19,13 @@ from sps.priors import Prior
 from sps.utils import build_grid
 
 from dl4bi.core.train import (
+    Callback,
     evaluate,
     save_ckpt,
     train,
 )
 from dl4bi.meta_learning.data.spatial import SpatialData
-from dl4bi.meta_learning.utils import cfg_to_run_name
+from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
 
 
 @hydra.main("configs/generic_spatiotemporal", config_name="default", version_base=None)
@@ -40,11 +41,12 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    dataloader = build_dataloader(cfg.data)
+    dataloader, clbk_dataloader = build_dataloaders(cfg.data)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     output_fn = model.output_fn
     model = model.copy(output_fn=lambda x: output_fn(x, min_std=0.05))
+    clbk = partial(wandb_2d_img_callback, num_plots=4)
     state = train(
         rng_train,
         model,
@@ -56,6 +58,8 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         cfg.valid_num_steps,
         dataloader,
+        callbacks=[Callback(clbk, cfg.plot_interval)],
+        callback_dataloader=clbk_dataloader,
     )
     metrics = evaluate(
         rng_test,
@@ -70,7 +74,7 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def build_dataloader(data: DictConfig):
+def build_dataloaders(data: DictConfig):
     B, D_x, D_s = data.batch_size, data.num_features, len(data.s)
     s_grid = build_grid(data.s)
     s_flat = s_grid.reshape(-1, D_s)
@@ -79,7 +83,7 @@ def build_dataloader(data: DictConfig):
     # prior_pred = jit(Predictive(generic_spatiotemporal_model, num_samples=B))
     prior_pred = partial(jax_prior_pred, batch_size=B)
 
-    def dataloader(rng: jax.Array):
+    def dataloader(rng: jax.Array, is_callback: bool = False):
         L = s_flat.shape[0]
         while True:
             # reuse x for several batches to avoid too much
@@ -95,10 +99,11 @@ def build_dataloader(data: DictConfig):
                     rng_b,
                     data.num_ctx_min,
                     data.num_ctx_max,
+                    L if is_callback else data.num_test,
                     data.num_test,
                 )
 
-    return dataloader
+    return dataloader, partial(dataloader, is_callback=True)
 
 
 def generic_spatiotemporal_model(
