@@ -5,29 +5,23 @@ import hydra
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-import optax
 import pandas as pd
 import wandb
+from hydra.utils import instantiate
 from inference_models.utils import collect_infer_funcs, run_hmc
 from jax import jit, random
 from jax.experimental import enable_x64
 from omegaconf import DictConfig, OmegaConf
 
-from dl4bi.meta_learning.train_utils import (
-    cfg_to_run_name,
-    cosine_annealing_lr,
+from dl4bi.core.metrics import compute_inference_metrics
+from dl4bi.core.train import (
     evaluate,
-    instantiate,
     load_ckpt,
     save_ckpt,
-    select_steps,
     train,
 )
-from dl4bi.metrics import compute_inference_metrics
-
-# TODO:
-# Can you use distance bias on covariates too??
-# Can we do House Electricity Consumption dataset?? (one million point GP paper)
+from dl4bi.meta_learning.data.tabular import TabularData
+from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
 @hydra.main("configs/hier_bayes", config_name="default", version_base=None)
@@ -49,29 +43,24 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     dataloader, *_ = collect_infer_funcs(cfg.infer_model, cfg.data)
     rng_train, rng_test = random.split(rng)
-    lr_schedule = cosine_annealing_lr(cfg.train_num_steps, cfg.lr_max, cfg.lr_min)
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(cfg.clip_max_norm),
-        optax.yogi(lr_schedule),
-    )
+    optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
-    train_step, valid_step = select_steps(model)
     state = train(
         rng_train,
         model,
         optimizer,
-        train_step,
-        valid_step,
-        dataloader,
-        dataloader,
+        model.train_step,
         cfg.train_num_steps,
-        cfg.valid_num_steps,
+        dataloader,
+        model.valid_step,
         cfg.valid_interval,
+        cfg.valid_num_steps,
+        dataloader,
     )
     metrics = evaluate(
         rng_test,
         state,
-        valid_step,
+        model.valid_step,
         dataloader,
         cfg.valid_num_steps,
     )

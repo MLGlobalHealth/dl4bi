@@ -125,7 +125,7 @@ def compute_inference_metrics(
             sr.crps_normal(f, f_mu, f_std)
         )
         m["Coverage (CVG)"][method] = ((f >= f_lower) & (f <= f_upper)).mean()
-        m["Mean Absolute Error (RMSE)"][method] = np.abs(f - f_mu).sum()
+        m["Mean Absolute Error (MAE)"][method] = np.abs(f - f_mu).sum()
         m["Root Mean Squared Error (RMSE)"][method] = np.sqrt(
             np.square(f - f_mu).mean()
         )

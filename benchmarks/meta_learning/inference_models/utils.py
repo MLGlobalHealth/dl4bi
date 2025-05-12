@@ -27,7 +27,6 @@ def collect_infer_funcs(infer_model_name: str, data: DictConfig):
     )
 
 
-# TODO(danj): verify this formula
 @partial(jit, static_argnames=("jitter", "kernel"))
 def condition_gp(
     rng: jax.Array,
