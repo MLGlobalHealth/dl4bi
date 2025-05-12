@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from flax.core.frozen_dict import FrozenDict
 from jax import jit, random
 
+from ...core.utils import safe_stack
 from .utils import (
     MetaLearningBatch,
     MetaLearningData,
@@ -140,6 +141,16 @@ class TabularBatch(MetaLearningBatch):
         if key in ["mask_ctx", "mask_test", "inv_permute_idx"]:
             return getattr(self, key)
         return self.ctx[key] if "ctx" in key else self.test[key]
+
+    def to_xy(self):
+        return {
+            "x_train": safe_stack([g for name, g in self.ctx if name != "f_ctx"]),
+            "y_train": self.ctx["f_ctx"],
+            "mask_train": self.mask_ctx,
+            "x_test": safe_stack([g for name, g in self.test if name != "f_test"]),
+            "y_test": self.test["f_test"],
+            "mask_test": self.mask_test,
+        }
 
 
 # register to use in jitted functions

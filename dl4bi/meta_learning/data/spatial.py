@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from jax import jit, random
 from jax.scipy.stats import norm
 
+from ...core.utils import safe_stack
 from .utils import (
     MetaLearningBatch,
     MetaLearningData,
@@ -128,7 +129,14 @@ class SpatialBatch(MetaLearningBatch):
     s_shape: tuple
 
     def to_xy(self):
-        x = jnp.concat([])
+        return {
+            "x_train": safe_stack(self.x_ctx, self.s_ctx),
+            "y_train": self.f_ctx,
+            "mask_train": self.mask_ctx,
+            "x_test": safe_stack(self.x_test, self.s_test),
+            "y_test": self.f_test,
+            "mask_test": self.mask_test,
+        }
 
     def plot_1d(
         self,

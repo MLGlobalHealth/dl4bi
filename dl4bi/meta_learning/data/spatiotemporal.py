@@ -8,7 +8,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from jax import jit, random, vmap
 
-from ...core.utils import mask_from_valid_lens, nan_pad
+from ...core.utils import mask_from_valid_lens, nan_pad, safe_stack
 from .utils import (
     MetaLearningBatch,
     MetaLearningData,
@@ -277,6 +277,16 @@ class SpatiotemporalBatch(MetaLearningBatch):
     inv_permute_idx: jax.Array  # [T_b, L]
     s_dims: tuple
     forecast: bool
+
+    def to_xy(self):
+        return {
+            "x_train": safe_stack(self.x_ctx, self.s_ctx, self.t_ctx),
+            "y_train": self.f_ctx,
+            "mask_train": self.mask_ctx,
+            "x_test": safe_stack(self.x_test, self.s_test, self.t_test),
+            "y_test": self.f_test,
+            "mask_test": self.mask_test,
+        }
 
     def plot_2d(
         self,

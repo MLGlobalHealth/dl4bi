@@ -6,6 +6,7 @@ from typing import Callable, Optional, Sequence, Union
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
 import wandb
 from jax import random
 from omegaconf import DictConfig
@@ -83,6 +84,7 @@ def save_batches_for_tabpfn(
     rng: jax.Array,
     dataloader: Callable,
     num_steps: int,
+    path: Path,
 ):
     rng_data, rng = random.split(rng)
     pbar = tqdm(
@@ -96,5 +98,5 @@ def save_batches_for_tabpfn(
     for i, batch in enumerate(pbar):
         if i >= num_steps:  # for infinite dataloaders
             break
-        samples.append(batch)
-    return samples
+        samples.append(batch.to_xy())
+    np.save(path, samples, allow_pickle=True)
