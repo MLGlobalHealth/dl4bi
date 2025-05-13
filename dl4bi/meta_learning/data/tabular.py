@@ -145,10 +145,14 @@ class TabularBatch(MetaLearningBatch):
     def to_xy(self):
         """Converts to an Xy dataset for traditional supervised learning."""
         return {
-            "x_train": safe_stack([g for name, g in self.ctx if name != "f_ctx"]),
+            "x_train": safe_stack(
+                *[g for name, g in self.ctx.items() if name != "f_ctx"]
+            ),
             "y_train": self.ctx["f_ctx"],
             "mask_train": self.mask_ctx,
-            "x_test": safe_stack([g for name, g in self.test if name != "f_test"]),
+            "x_test": safe_stack(
+                *[g for name, g in self.test.items() if name != "f_test"]
+            ),
             "y_test": self.test["f_test"],
             "mask_test": self.mask_test,
         }
