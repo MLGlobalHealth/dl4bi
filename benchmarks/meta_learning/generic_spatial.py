@@ -24,10 +24,8 @@ from scipy.stats import norm
 from sps.gp import GP
 from sps.kernels import rbf
 from sps.priors import Prior
-from sps.utils import build_grid
 
 from dl4bi.core.train import (
-    Callback,
     TrainState,
     evaluate,
     load_ckpt,
@@ -35,7 +33,7 @@ from dl4bi.core.train import (
     train,
 )
 from dl4bi.meta_learning.data.spatial import SpatialData
-from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
+from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
 @hydra.main("configs/generic_spatial", config_name="default", version_base=None)
@@ -58,15 +56,14 @@ def main(cfg: DictConfig):
     model = instantiate(cfg.model)
     output_fn = model.output_fn
     model = model.copy(output_fn=lambda x: output_fn(x, min_std=0.05))
-    clbk = partial(wandb_2d_img_callback, num_plots=4)
     if cfg.infer_with_model or cfg.infer_with_mcmc:
         rng_b, rng_i, rng = random.split(rng, 3)
         batch, extra = next(clbk_dataloader(rng_b))
         idx, sample = batch.sample_for_inference(rng_i, num_samples=1)[0]
         true_params = {k: v for k, v in extra.items() if k in ["beta", "var", "ls"]}
         if cfg.infer_with_model:
-            state = load_ckpt(path.with_suffix(".ckpt"))
-            metrics = infer_with_model(rng_i, true_params, sample, state)
+            state, _ = load_ckpt(path.with_suffix(".ckpt"))
+            metrics = infer_with_model(rng_i, sample, state)
         if cfg.infer_with_mcmc:
             metrics = infer_with_mcmc(rng_i, true_params, sample, cfg.mcmc)
         pprint(metrics)
@@ -82,8 +79,6 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         cfg.valid_num_steps,
         dataloader,
-        callbacks=[Callback(clbk, cfg.plot_interval)],
-        callback_dataloader=clbk_dataloader,
     )
     metrics = evaluate(
         rng_test,
@@ -98,28 +93,27 @@ def main(cfg: DictConfig):
 
 def build_dataloaders(data: DictConfig):
     B, D_x, D_s = data.batch_size, data.num_features, len(data.s)
-    s_grid = build_grid(data.s)
-    s_flat = s_grid.reshape(-1, D_s)
-    s_batch = jnp.repeat(s_grid[None, ...], B, axis=0)
+    L = data.num_ctx_min + data.num_test
+    s_min = jnp.array([axis["start"] for axis in data.s])
+    s_max = jnp.array([axis["stop"] for axis in data.s])
     # NOTE: pure JAX version is faster
     # prior_pred = jit(Predictive(generic_spatial_model, num_samples=B))
     prior_pred = partial(jax_prior_pred, batch_size=B)
+    batchify = jit(lambda v: jnp.repeat(v[None, ...], B, axis=0))
 
     def dataloader(rng: jax.Array, is_callback: bool = False):
-        L = s_flat.shape[0]
         while True:
-            rng_x, rng_p, rng_b, rng = random.split(rng, 4)
+            rng_s, rng_x, rng_p, rng_b, rng = random.split(rng, 5)
+            s = random.uniform(rng_s, (L, D_s), jnp.float32, s_min, s_max)
             x = random.normal(rng_x, (L, D_x))
-            x_batch = jnp.repeat(x[None, ...], B, axis=0)
-            x_batch = x_batch.reshape(*s_batch.shape[:-1], D_x)
-            samples = prior_pred(rng_p, x, s_flat)
-            f = samples["f"][..., None].reshape(*s_batch.shape[:-1], 1)
-            b = SpatialData(x_batch, s_batch, f).batch(
+            samples = prior_pred(rng_p, x, s)
+            f = samples["f"][..., None]  # [L, 1]
+            b = SpatialData(x=batchify(x), s=batchify(s), f=f).batch(
                 rng_b,
                 data.num_ctx_min,
                 data.num_ctx_max,
                 L if is_callback else data.num_test,
-                data.num_test,
+                test_includes_ctx=False,
             )
             yield (b, samples) if is_callback else b
 
@@ -171,7 +165,6 @@ def _jax_prior_pred_helper(rng: jax.Array, x: jax.Array, f_mu_s: jax.Array):
 
 def infer_with_model(
     rng: jax.Array,
-    true_params: dict,
     sample: dict,
     state: TrainState,
 ):
@@ -274,6 +267,9 @@ def compute_inference_metrics(
     f_std: jax.Array,  # [L_test]
     hdi_prob: float = 0.95,
 ):
+    assert f.shape == f_mu.shape
+    assert f.shape == f_std.shape
+    print(f_std)
     alpha = 1 - hdi_prob
     z_score = jnp.abs(norm.ppf(alpha / 2))
     f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
