@@ -67,7 +67,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     generic_benchmark(
         seeds,
         "configs/generic_spatial",
-        ["bsa_tnp", "te_tnp"],
+        ["bsa_tnp", "te_tnp", "tnp_d"],
         generic_spatial_main,
         overrides,
         "NeurIPS BSA-TNP - Generic Spatial",
