@@ -143,6 +143,7 @@ class TabularBatch(MetaLearningBatch):
         return self.ctx[key] if "ctx" in key else self.test[key]
 
     def to_xy(self):
+        """Converts to an Xy dataset for traditional supervised learning."""
         return {
             "x_train": safe_stack([g for name, g in self.ctx if name != "f_ctx"]),
             "y_train": self.ctx["f_ctx"],
@@ -151,6 +152,31 @@ class TabularBatch(MetaLearningBatch):
             "y_test": self.test["f_test"],
             "mask_test": self.mask_test,
         }
+
+    def feature_groups(self):
+        return [k.replace("_ctx", "") for k in self if k.endswith("_ctx")]
+
+    def sample_for_inference(
+        self,
+        rng: jax.Array,
+        num_samples: int = 1,
+        allow_repeats: bool = False,
+    ):
+        """Samples elements from the batch and formats for inference, e.g. in Numpyro."""
+        B = self["f_test"].shape[0]
+        mask_ctx = jnp.array([True]) if self.mask_ctx is None else self.mask_ctx
+        mask_test = jnp.array([True]) if self.mask_test is None else self.mask_test
+        idxs = random.choice(rng, B, (num_samples,), replace=allow_repeats)
+        samples = []
+        for idx in idxs:
+            d = {}
+            for fg in self.feature_groups():
+                ctx_key = f"{fg}_ctx"
+                test_key = f"{fg}_test"
+                d[ctx_key] = self[ctx_key][idx][mask_ctx[idx]]
+                d[test_key] = self[test_key][idx][mask_test[idx]]
+            samples += [(idx, d)]
+        return samples
 
 
 # register to use in jitted functions

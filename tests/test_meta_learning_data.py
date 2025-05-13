@@ -65,6 +65,15 @@ def test_tabular_data():
         "mask_test",
         "inv_permute_idx",
     }
+    samples = b.sample_for_inference(rng, num_samples=1)
+    assert len(samples) == 1
+    samples = b.sample_for_inference(rng, num_samples=2)
+    assert samples[0][1]["f_ctx"].shape[0] < num_ctx_max
+    assert len(samples) == 2
+    # assert that they have been masked and extracted differently
+    # this could fail if they just so happen to have the same number
+    # of valid lengths for each sequence although this is p=1/37
+    assert samples[0][1]["f_ctx"].shape != samples[1][1]["f_ctx"].shape
     assert b.ctx["x_ctx"].shape == x_ctx_shape
     assert b.ctx["z_ctx"].shape == z_ctx_shape
     assert b.ctx["t_ctx"].shape == t_ctx_shape
@@ -155,6 +164,15 @@ def test_spatial_data_with_x():
     # test batching where test includes context
     test_includes_ctx = True
     b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    samples = b.sample_for_inference(rng, num_samples=1)
+    assert len(samples) == 1
+    samples = b.sample_for_inference(rng, num_samples=2)
+    assert samples[0][1]["f_ctx"].shape[0] < num_ctx_max
+    assert len(samples) == 2
+    # assert that they have been masked and extracted differently
+    # this could fail if they just so happen to have the same number
+    # of valid lengths for each sequence although this is p=1/37
+    assert samples[0][1]["f_ctx"].shape != samples[1][1]["f_ctx"].shape
     assert b.x_ctx.shape == x_ctx_shape
     assert b.s_ctx.shape == s_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
@@ -205,6 +223,15 @@ def test_spatial_data_without_x():
     # test batching where test includes context
     test_includes_ctx = True
     b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    samples = b.sample_for_inference(rng, num_samples=1)
+    assert len(samples) == 1
+    samples = b.sample_for_inference(rng, num_samples=2)
+    assert samples[0][1]["f_ctx"].shape[0] < num_ctx_max
+    assert len(samples) == 2
+    # assert that they have been masked and extracted differently
+    # this could fail if they just so happen to have the same number
+    # of valid lengths for each sequence although this is p=1/37
+    assert samples[0][1]["f_ctx"].shape != samples[1][1]["f_ctx"].shape
     assert b.x_ctx is None
     assert b.s_ctx.shape == s_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
@@ -257,6 +284,15 @@ def test_spatial_data_broadcast_x():
     # test batching where test includes context
     test_includes_ctx = True
     b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    samples = b.sample_for_inference(rng, num_samples=1)
+    assert len(samples) == 1
+    samples = b.sample_for_inference(rng, num_samples=2)
+    assert samples[0][1]["f_ctx"].shape[0] < num_ctx_max
+    assert len(samples) == 2
+    # assert that they have been masked and extracted differently
+    # this could fail if they just so happen to have the same number
+    # of valid lengths for each sequence although this is p=1/37
+    assert samples[0][1]["f_ctx"].shape != samples[1][1]["f_ctx"].shape
     assert b.x_ctx.shape == x_ctx_shape
     assert b.s_ctx.shape == s_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
@@ -326,6 +362,14 @@ def test_spatiotemporal_data_with_x():
                     forecast,
                     B,
                 )
+                samples = b.sample_for_inference(rng, num_samples=1)
+                assert len(samples) == 1
+                assert samples[0][1]["f_ctx"].shape[0] < num_ctx_max_per_t * (T_b - 1)
+                samples = b.sample_for_inference(rng, num_samples=2)
+                assert len(samples) == 2
+                # assert that they have been masked and extracted differently
+                # this could fail if they just so happen to have the same number
+                # of valid lengths for each sequence although this is p=1/37
                 assert b.x_ctx.shape == x_ctx_shape
                 assert b.s_ctx.shape == s_ctx_shape
                 assert b.t_ctx.shape == t_ctx_shape
@@ -514,21 +558,6 @@ def test_spatial_data_plot_1d():
     b = SpatialData(x, s, f).batch(rng, num_ctx_min, num_ctx_max, num_test, True)
     fig = b.plot_1d(f_pred, f_std)
     fig.savefig("/tmp/test_spatial_data_plot_1d.png")
-
-
-def test_temporal_data_plot_1d():
-    B, T, D_f = 4, 128, 1
-    num_ctx_min, num_ctx_max, num_test = 3, 10, 128
-    rng = random.key(42)
-    rng_f, rng_f_pred, rng_b = random.split(rng, 3)
-    x = None
-    f = random.normal(rng_f, (B, num_test, D_f))
-    f_pred = f + 0.01 * random.normal(rng_f_pred, (B, num_test, D_f))
-    f_std = jnp.zeros((B, num_test, 1)) + 0.1
-    t = jnp.repeat(jnp.arange(T)[None, :], B, axis=0)
-    b = TemporalData(x, t, f).batch(rng, num_ctx_min, num_ctx_max, num_test, True)
-    fig = b.plot_1d(f_pred, f_std)
-    fig.savefig("/tmp/test_temporal_data_plot_1d.png")
 
 
 def test_spatial_data_plot_2d():

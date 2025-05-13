@@ -6,13 +6,17 @@ from typing import Callable, Optional
 import hydra
 import jax
 import jax.numpy as jnp
+import numpy as np
 import numpyro
 import numpyro.distributions as dist
+import scoringrules as sr
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random, vmap
-from numpyro.infer import MCMC, NUTS, Predictive
+from jax.experimental import enable_x64
+from numpyro.infer import MCMC, NUTS
 from omegaconf import DictConfig, OmegaConf
+from scipy.stats import norm
 from sps.gp import GP
 from sps.kernels import rbf
 from sps.priors import Prior
@@ -40,13 +44,23 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    rng_train, rng_test = random.split(rng)
+    rng_train, rng_test, rng = random.split(rng, 3)
     dataloader, clbk_dataloader = build_dataloaders(cfg.data)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     output_fn = model.output_fn
     model = model.copy(output_fn=lambda x: output_fn(x, min_std=0.05))
     clbk = partial(wandb_2d_img_callback, num_plots=4)
+    if cfg.infer_with_model or cfg.infer_with_mcmc:
+        rng_b, rng_i, rng = random.split(rng, 3)
+        batch, extra = next(clbk_dataloader(rng_b))
+        idx, sample = batch.sample_for_inference(rng_i, num_samples=1)[0]
+        true_params = {k: v for k, v in extra.items() if k in ["beta", "var", "ls"]}
+        if cfg.infer_with_model:
+            metrics = infer_with_model(rng_i, true_params, sample)
+        if cfg.infer_with_mcmc:
+            metrics = infer_with_mcmc(rng_i, true_params, sample, cfg.mcmc)
+        return
     state = train(
         rng_train,
         model,
@@ -89,44 +103,19 @@ def build_dataloaders(data: DictConfig):
             rng_x, rng_p, rng_b, rng = random.split(rng, 4)
             x = random.normal(rng_x, (L, D_x))
             x_batch = jnp.repeat(x[None, ...], B, axis=0)
+            x_batch = x_batch.reshape(*s_batch.shape[:-1], D_x)
             samples = prior_pred(rng_p, x, s_flat)
-            f = samples["f"][..., None]  # [B, L, 1]
-            yield SpatialData(x_batch, s_batch, f).batch(
+            f = samples["f"][..., None].reshape(*s_batch.shape[:-1], 1)
+            b = SpatialData(x_batch, s_batch, f).batch(
                 rng_b,
                 data.num_ctx_min,
                 data.num_ctx_max,
                 L if is_callback else data.num_test,
                 data.num_test,
             )
+            yield (b, samples) if is_callback else b
 
     return dataloader, partial(dataloader, is_callback=True)
-
-
-def generic_spatial_model(
-    x: jax.Array,  # [L, D_x]
-    s: jax.Array,  # [L, D_s]
-    f: Optional[jax.Array] = None,  # [L, 1]
-    jitter: float = 1e-5,
-    **kwargs,
-):
-    """Generic spatial model with fixed and random spatial effects.
-
-    Args:
-        x: Array of input covariates, `[L, D]`.
-        s: Array of input locations, `[L, S]`.
-        f: Observed function values, `[L, 1]`.
-    """
-
-    L, D_x = x.shape
-    var = numpyro.deterministic("var", 1.0)
-    ls = numpyro.sample("ls", dist.Beta(3.0, 7.0))
-    k = rbf(s, s, var, ls) + jitter * jnp.eye(L)
-    beta = numpyro.sample("beta", dist.Normal(jnp.zeros(D_x), jnp.ones(D_x)))
-    f_mu_x = x @ beta
-    f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(0, k))
-    f_mu = f_mu_x + f_mu_s
-    f_obs_noise = numpyro.sample("f_obs_noise", dist.HalfNormal(0.1))
-    numpyro.sample("f", dist.Normal(f_mu, f_obs_noise), obs=f)
 
 
 def jax_prior_pred(
@@ -172,6 +161,97 @@ def _jax_prior_pred_helper(rng: jax.Array, x: jax.Array, f_mu_s: jax.Array):
     return f, beta, f_obs_noise
 
 
+def infer_with_model(rng: jax.Array, true_params: dict, sample: dict):
+    pass
+
+
+def infer_with_mcmc(
+    rng: jax.Array,
+    true_params: dict,
+    sample: dict,
+    mcmc_cfg: DictConfig,
+):
+    rng_h, rng_p, rng = random.split(rng, 3)
+    mcmc_kwargs = {
+        "x": sample["x_ctx"],  # [L_ctx, D_x]
+        "s": sample["s_ctx"],  # [L_ctx, D_s]
+        "f": sample["f_ctx"][..., 0],  # [L_ctx]
+    }
+    with enable_x64():
+        mcmc = MCMC(
+            NUTS(generic_spatial_model),
+            num_warmup=mcmc_cfg.num_warmup,
+            num_samples=mcmc_cfg.num_samples,
+            num_chains=mcmc_cfg.num_chains,
+        )
+        mcmc.run(rng_h, **mcmc_kwargs)
+    mcmc.print_summary()
+    true_params_str = "\n".join([f"{k}: {v}" for k, v in true_params.items()])
+    print(f"\n\nTrue Parameters:\n{true_params_str}")
+    post_samples = mcmc.get_samples()
+    pp_kwargs = {
+        "s_ctx": sample["s_ctx"],  # [L_ctx, D_s]
+        "s_test": sample["s_test"],  # [L_test, D_s]
+        "x_test": sample["x_test"],  # [L_test, D_x]
+    }
+    f_mu_mcmc, f_std_mcmc = pointwise_post_pred(
+        rng_p,
+        **pp_kwargs,
+        **post_samples,
+    )
+    return compute_inference_metrics(
+        sample["f_test"][..., 0],  # [L_test]
+        f_mu_mcmc[..., 0],  # [L_test]
+        f_std_mcmc[..., 0],  # [L_test]
+    )
+
+
+def generic_spatial_model(
+    x: jax.Array,  # [L, D_x]
+    s: jax.Array,  # [L, D_s]
+    f: Optional[jax.Array] = None,  # [L, 1]
+    jitter: float = 1e-5,
+):
+    """Generic spatial model with fixed and random spatial effects.
+
+    Args:
+        x: Array of input covariates, `[L, D]`.
+        s: Array of input locations, `[L, S]`.
+        f: Observed function values, `[L, 1]`.
+    """
+
+    L, D_x = x.shape
+    var = numpyro.deterministic("var", 1.0)
+    ls = numpyro.sample("ls", dist.Beta(3.0, 7.0))
+    k = rbf(s, s, var, ls) + jitter * jnp.eye(L)
+    beta = numpyro.sample("beta", dist.Normal(jnp.zeros(D_x), jnp.ones(D_x)))
+    f_mu_x = x @ beta
+    f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(0, k))
+    f_mu = f_mu_x + f_mu_s
+    f_obs_noise = numpyro.sample("f_obs_noise", dist.HalfNormal(0.1))
+    numpyro.sample("f", dist.Normal(f_mu, f_obs_noise), obs=f)
+
+
+def compute_inference_metrics(
+    f: jax.Array,  # [L_test]
+    f_mu: jax.Array,  # [L_test]
+    f_std: jax.Array,  # [L_test]
+    hdi_prob: float = 0.95,
+):
+    alpha = 1 - hdi_prob
+    z_score = jnp.abs(norm.ppf(alpha / 2))
+    f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
+    m = {}
+    m["Log Likelihood (LL)"] = np.sum(norm.logpdf(f, f_mu, f_std))
+    m["Interval Score (IS)"] = np.mean(sr.interval_score(f, f_lower, f_upper, alpha))
+    m["Continuous Ranked Probability Score (CRPS)"] = np.mean(
+        sr.crps_normal(f, f_mu, f_std)
+    )
+    m["Coverage (CVG)"] = ((f >= f_lower) & (f <= f_upper)).mean()
+    m["Root Mean Squared Error (RMSE)"] = np.sqrt(np.square(f - f_mu).mean())
+    return m
+
+
 @partial(jit, static_argnames=("jitter",))
 def pointwise_post_pred(
     rng: jax.Array,
@@ -184,7 +264,6 @@ def pointwise_post_pred(
     f_mu_s: jax.Array,  # [N, L_ctx]
     f_obs_noise: jax.Array,  # [N]
     jitter: float = 1e-5,
-    **kwargs,
 ):
     """Calculates the pointwise posterior predictive."""
     N = ls.shape[0]
@@ -252,17 +331,6 @@ def condition_gp(
     mu = k_tc @ jax.scipy.linalg.cho_solve(K_cc_cho, f_ctx)
     noise = jnp.sqrt(jnp.clip(jnp.diag(K), 0.0)) * random.normal(rng, L_test)
     return mu + noise
-
-
-def run_hmc(rng: jax.Array, model: Callable, infer: DictConfig, **kwargs):
-    mcmc = MCMC(
-        NUTS(model),
-        num_warmup=infer.num_warmup,
-        num_samples=infer.num_samples,
-        num_chains=infer.num_chains,
-    )
-    mcmc.run(rng, **kwargs)
-    return mcmc
 
 
 if __name__ == "__main__":
