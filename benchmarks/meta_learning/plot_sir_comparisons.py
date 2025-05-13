@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 import jax.numpy as jnp
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 from hydra.utils import instantiate
 from jax import jit, random
@@ -43,7 +42,8 @@ def plot(
     num_samples: int = 16,
     num_points_per_unit: int = 16,
 ):
-    cfg = models["BSATNP"]["cfg"]  # cfg.data should be the same for all
+    key = list(models.keys())[0]
+    cfg = models[key]["cfg"]  # cfg.data should be the same for all
     cfg.data.batch_size = 1
     half = scale / 2
     for axis in cfg.data.s:  # assumes coordinate axis is centered on origin
