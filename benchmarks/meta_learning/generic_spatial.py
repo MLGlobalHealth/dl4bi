@@ -28,7 +28,9 @@ from sps.utils import build_grid
 
 from dl4bi.core.train import (
     Callback,
+    TrainState,
     evaluate,
+    load_ckpt,
     save_ckpt,
     train,
 )
@@ -47,6 +49,8 @@ def main(cfg: DictConfig):
         reinit=True,  # allows reinitialization for multiple runs
     )
     print(OmegaConf.to_yaml(cfg))
+    path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
+    path.parent.mkdir(parents=True, exist_ok=True)
     rng = random.key(cfg.seed)
     rng_train, rng_test, rng = random.split(rng, 3)
     dataloader, clbk_dataloader = build_dataloaders(cfg.data)
@@ -61,7 +65,8 @@ def main(cfg: DictConfig):
         idx, sample = batch.sample_for_inference(rng_i, num_samples=1)[0]
         true_params = {k: v for k, v in extra.items() if k in ["beta", "var", "ls"]}
         if cfg.infer_with_model:
-            metrics = infer_with_model(rng_i, true_params, sample)
+            state = load_ckpt(path.with_suffix(".ckpt"))
+            metrics = infer_with_model(rng_i, true_params, sample, state)
         if cfg.infer_with_mcmc:
             metrics = infer_with_mcmc(rng_i, true_params, sample, cfg.mcmc)
         pprint(metrics)
@@ -88,8 +93,6 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
-    path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
@@ -166,8 +169,27 @@ def _jax_prior_pred_helper(rng: jax.Array, x: jax.Array, f_mu_s: jax.Array):
     return f, beta, f_obs_noise
 
 
-def infer_with_model(rng: jax.Array, true_params: dict, sample: dict):
-    pass
+def infer_with_model(
+    rng: jax.Array,
+    true_params: dict,
+    sample: dict,
+    state: TrainState,
+):
+    batch = {k: v[None, ...] for k, v in sample.items()}
+    output = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        **batch,
+        training=False,
+        rngs={"extra": rng},
+    )
+    if isinstance(output, tuple):
+        output, _ = output  # latent output not used here
+    f_mu, f_std = output.mu, output.std  # [B=1, L_test, D_f=1]
+    return compute_inference_metrics(
+        sample["f_test"][..., 0],  # [L_test]
+        f_mu[0, :, 0],  # [L_test]
+        f_std[0, :, 0],  # [L_test]
+    )
 
 
 def infer_with_mcmc(
@@ -199,15 +221,15 @@ def infer_with_mcmc(
         "s_test": sample["s_test"],  # [L_test, D_s]
         "x_test": sample["x_test"],  # [L_test, D_x]
     }
-    f_mu_mcmc, f_std_mcmc = pointwise_post_pred(
+    f_mu, f_std = pointwise_post_pred(
         rng_p,
         **pp_kwargs,
         **post_samples,
     )
     return compute_inference_metrics(
         sample["f_test"][..., 0],  # [L_test]
-        f_mu_mcmc[..., 0],  # [L_test]
-        f_std_mcmc[..., 0],  # [L_test]
+        f_mu,  # [L_test]
+        f_std,  # [L_test]
     )
 
 

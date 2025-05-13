@@ -11,19 +11,19 @@ plot_interval: 50000
 data:
   num_features: 10
   batch_size: 32
-  num_ctx_min: 128 # ~12.5% of locations
-  num_ctx_max: 256 # ~25% of locations
-  num_test: 256 # ~25% of locations
+  num_ctx_min: 13 # ~5% of locations
+  num_ctx_max: 64  # ~12.5% of locations
+  num_test: 64 # ~25% of locations
   s:
   - start: -2
     stop: 2
-    num: 32
+    num: 16
   - start: -2
     stop: 2
-    num: 32
+    num: 16
 mcmc:
-  num_warmup: 1000
-  num_samples: 1000
+  num_warmup: 2000
+  num_samples: 2000
   num_chains: 4
 infer_with_model: False
 infer_with_mcmc: False
