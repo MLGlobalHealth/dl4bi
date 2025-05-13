@@ -18,6 +18,11 @@ warnings.filterwarnings(
     message="The y_pred values do not sum to one.*",
     category=UserWarning,
 )
+warnings.filterwarnings(
+    "ignore",
+    message="Found unknown categories in columns.*",
+    category=UserWarning,
+)
 
 
 def main(path, use_classifier):
@@ -34,19 +39,28 @@ def regress(path):
         x_train, x_test = b["x_train"], b["x_test"]
         y_train, y_test = b["y_train"], b["y_test"]
         mask_train, mask_test = b["mask_train"], b["mask_test"]
+        y_dim = y_train.shape[-1]
         for i in range(x_train.shape[0]):  # iterate over batch tasks
-            y_train_i = y_train[i][mask_train[i]].flatten()
-            y_test_i = y_test[i][mask_test[i]].flatten()
-            model.fit(x_train[i][mask_train[i]], y_train_i)
-            f_lower, f_mu, f_upper = model.predict(
-                x_test[i][mask_test[i]],
-                output_type="quantiles",
-                quantiles=[0.025, 0.5, 0.975],
-            )
-            rmse = np.sqrt(np.square(f_mu - y_test_i).mean())
-            mae = np.abs(f_mu - y_test_i).mean()
-            cvg = ((y_test_i >= f_lower) & (y_test_i <= f_upper)).mean()
-            output += [{"rmse": rmse, "mae": mae, "cvg": cvg}]
+            mses, maes, cvgs = 0, 0, 0
+            for j in range(y_dim):
+                y_train_ij = y_train[i][mask_train[i]][:, j]
+                y_test_ij = y_test[i][mask_test[i]][:, j]
+                model.fit(x_train[i][mask_train[i]], y_train_ij)
+                f_lower, f_mu, f_upper = model.predict(
+                    x_test[i][mask_test[i]],
+                    output_type="quantiles",
+                    quantiles=[0.025, 0.5, 0.975],
+                )
+                mses += np.square(f_mu - y_test_ij).mean()
+                maes += np.abs(f_mu - y_test_ij).mean()
+                cvgs += ((y_test_ij >= f_lower) & (y_test_ij <= f_upper)).mean()
+            output += [
+                {
+                    "rmse": np.sqrt(np.mean(mses)),
+                    "mae": np.mean(maes),
+                    "cvg": np.mean(cvgs),
+                }
+            ]
     with open(Path(path).parent / "pfn_results.json", "w") as f:
         json.dump(pd.DataFrame(output).mean().to_dict(), f)
 
