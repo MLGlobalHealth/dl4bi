@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
+import re
+from contextlib import redirect_stdout
 from functools import partial
+from io import StringIO
 from pathlib import Path
+from pprint import pprint
 from typing import Callable, Optional
 
 import hydra
@@ -60,6 +64,7 @@ def main(cfg: DictConfig):
             metrics = infer_with_model(rng_i, true_params, sample)
         if cfg.infer_with_mcmc:
             metrics = infer_with_mcmc(rng_i, true_params, sample, cfg.mcmc)
+        pprint(metrics)
         return
     state = train(
         rng_train,
@@ -154,8 +159,8 @@ def jax_prior_pred(
 def _jax_prior_pred_helper(rng: jax.Array, x: jax.Array, f_mu_s: jax.Array):
     B, (L, D_x) = f_mu_s.shape[0], x.shape
     rng_beta, rng_sigma, rng_noise = random.split(rng, 3)
-    beta = random.normal(rng_beta, (B, D_x))
-    f_mu_x = beta @ x.T  # beta: [B, D_x], x: [L, D_x], x.T: [D_x, L], f_mu_x: [B, L]
+    beta = random.normal(rng_beta, (D_x,))
+    f_mu_x = beta @ x.T  # beta: [D_x], x: [L, D_x], x.T: [D_x, L], f_mu_x: [L]
     f_obs_noise = 0.1 * jnp.abs(random.normal(rng_sigma, (B,)))  # HalfNormal(0.1)
     f = f_mu_x + f_mu_s + f_obs_noise[:, None] * random.normal(rng_noise, (B, L))
     return f, beta, f_obs_noise
@@ -185,7 +190,7 @@ def infer_with_mcmc(
             num_chains=mcmc_cfg.num_chains,
         )
         mcmc.run(rng_h, **mcmc_kwargs)
-    mcmc.print_summary()
+    print_summary(mcmc, r"^\s+mean|^\s+beta|\s+var|^\s+ls")
     true_params_str = "\n".join([f"{k}: {v}" for k, v in true_params.items()])
     print(f"\n\nTrue Parameters:\n{true_params_str}")
     post_samples = mcmc.get_samples()
@@ -204,6 +209,15 @@ def infer_with_mcmc(
         f_mu_mcmc[..., 0],  # [L_test]
         f_std_mcmc[..., 0],  # [L_test]
     )
+
+
+def print_summary(mcmc, pattern):
+    buf = StringIO()
+    with redirect_stdout(buf):
+        mcmc.print_summary()
+    text = buf.getvalue()
+    filtered = "\n".join(line for line in text.splitlines() if re.match(pattern, line))
+    print(filtered)
 
 
 def generic_spatial_model(
@@ -242,7 +256,7 @@ def compute_inference_metrics(
     z_score = jnp.abs(norm.ppf(alpha / 2))
     f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
     m = {}
-    m["Log Likelihood (LL)"] = np.sum(norm.logpdf(f, f_mu, f_std))
+    m["Log Likelihood (LL)"] = np.mean(norm.logpdf(f, f_mu, f_std))
     m["Interval Score (IS)"] = np.mean(sr.interval_score(f, f_lower, f_upper, alpha))
     m["Continuous Ranked Probability Score (CRPS)"] = np.mean(
         sr.crps_normal(f, f_mu, f_std)

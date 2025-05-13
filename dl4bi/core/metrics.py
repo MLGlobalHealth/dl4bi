@@ -95,38 +95,3 @@ def mean_absolute_calibration_error(
     covered = jnp.logical_and(z >= lower, z <= upper)
     p_covered = jnp.mean(covered, axis=range(1, covered.ndim - 2))
     return jnp.mean(jnp.abs(p - p_covered), axis=-1)
-
-
-def compute_inference_metrics(
-    data: dict,
-    predictions: dict,
-    hdi_prob: float = 0.95,
-    **kwargs,
-):
-    alpha = 1 - hdi_prob
-    z_score = jnp.abs(norm.ppf(alpha / 2))
-    Nc = data["valid_lens_ctx"]
-    f = data["f"][Nc:]
-    m = defaultdict(dict)
-    for method, d in predictions.items():
-        f_mu = d["f_mu"][Nc:]
-        if "f_std" in d:
-            f_std = d["f_std"][Nc:]
-            f_lower = f_mu - z_score * f_std
-            f_upper = f_mu + z_score * f_std
-        else:  # tabpfn
-            f_lower = d["f_lower"][Nc:]
-            f_upper = d["f_upper"][Nc:]
-        m["Log Likelihood (LL)"][method] = np.sum(norm.logpdf(f, f_mu, f_std))
-        m["Interval Score (IS)"][method] = np.mean(
-            sr.interval_score(f, f_lower, f_upper, alpha)
-        )
-        m["Continuous Ranked Probability Score (CRPS)"][method] = np.mean(
-            sr.crps_normal(f, f_mu, f_std)
-        )
-        m["Coverage (CVG)"][method] = ((f >= f_lower) & (f <= f_upper)).mean()
-        m["Mean Absolute Error (MAE)"][method] = np.abs(f - f_mu).sum()
-        m["Root Mean Squared Error (RMSE)"][method] = np.sqrt(
-            np.square(f - f_mu).mean()
-        )
-    return dict(m)
