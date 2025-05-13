@@ -21,7 +21,7 @@ from dl4bi.core.train import (
     train,
 )
 from dl4bi.meta_learning.data.tabular import TabularData
-from dl4bi.meta_learning.utils import cfg_to_run_name
+from dl4bi.meta_learning.utils import cfg_to_run_name, save_batches_for_tabpfn
 
 
 @hydra.main("configs/beijing_air_quality", config_name="default", version_base=None)
@@ -66,6 +66,8 @@ def main(cfg: DictConfig):
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
+    eval_path = path.parent / f"eval_data.npy"
+    save_batches_for_tabpfn(rng_test, valid_dataloader, cfg.valid_num_steps, eval_path)
 
 
 def build_dataloaders(

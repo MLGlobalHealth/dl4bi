@@ -93,7 +93,7 @@ def main(cfg: DictConfig):
 
 def build_dataloaders(data: DictConfig):
     B, D_x, D_s = data.batch_size, data.num_features, len(data.s)
-    L = data.num_ctx_min + data.num_test
+    L = data.num_ctx_max + data.num_test
     s_min = jnp.array([axis["start"] for axis in data.s])
     s_max = jnp.array([axis["stop"] for axis in data.s])
     # NOTE: pure JAX version is faster
@@ -112,7 +112,7 @@ def build_dataloaders(data: DictConfig):
                 rng_b,
                 data.num_ctx_min,
                 data.num_ctx_max,
-                L if is_callback else data.num_test,
+                data.num_test,
                 test_includes_ctx=False,
             )
             yield (b, samples) if is_callback else b
