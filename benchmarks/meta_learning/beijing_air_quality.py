@@ -35,6 +35,8 @@ def main(cfg: DictConfig):
         reinit=True,  # allows reinitialization for multiple runs
     )
     print(OmegaConf.to_yaml(cfg))
+    path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
+    path.parent.mkdir(parents=True, exist_ok=True)
     rng = random.key(cfg.seed)
     rng_data, rng_train, rng_test = random.split(rng, 3)
     train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(
@@ -63,8 +65,6 @@ def main(cfg: DictConfig):
         cfg.test_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
-    path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
     eval_path = path.parent / f"eval_data.npy"
     save_batches_for_tabpfn(rng_test, valid_dataloader, cfg.valid_num_steps, eval_path)
