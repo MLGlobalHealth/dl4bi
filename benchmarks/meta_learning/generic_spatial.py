@@ -39,9 +39,12 @@ from dl4bi.meta_learning.utils import cfg_to_run_name
 @hydra.main("configs/generic_spatial", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
+    run_mode = "online" if cfg.wandb else "disabled"
+    if cfg.infer_with_model or cfg.infer_with_mcmc:
+        run_mode = "disabled"
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
-        mode="online" if cfg.wandb else "disabled",
+        mode=run_mode,
         name=run_name,
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
@@ -65,7 +68,8 @@ def main(cfg: DictConfig):
             state, _ = load_ckpt(path.with_suffix(".ckpt"))
             metrics = infer_with_model(rng_i, sample, state)
         if cfg.infer_with_mcmc:
-            metrics = infer_with_mcmc(rng_i, true_params, sample, cfg.mcmc)
+            metrics = infer_with_mcmc(rng_i, sample, cfg.mcmc)
+        pprint(true_params)
         pprint(metrics)
         return
     state = train(
@@ -187,7 +191,6 @@ def infer_with_model(
 
 def infer_with_mcmc(
     rng: jax.Array,
-    true_params: dict,
     sample: dict,
     mcmc_cfg: DictConfig,
 ):
@@ -206,8 +209,6 @@ def infer_with_mcmc(
         )
         mcmc.run(rng_h, **mcmc_kwargs)
     print_summary(mcmc, r"^\s+mean|^\s+beta|\s+var|^\s+ls")
-    true_params_str = "\n".join([f"{k}: {v}" for k, v in true_params.items()])
-    print(f"\n\nTrue Parameters:\n{true_params_str}")
     post_samples = mcmc.get_samples()
     pp_kwargs = {
         "s_ctx": sample["s_ctx"],  # [L_ctx, D_s]
@@ -269,7 +270,6 @@ def compute_inference_metrics(
 ):
     assert f.shape == f_mu.shape
     assert f.shape == f_std.shape
-    print(f_std)
     alpha = 1 - hdi_prob
     z_score = jnp.abs(norm.ppf(alpha / 2))
     f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
