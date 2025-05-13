@@ -82,9 +82,9 @@ def main(cfg: DictConfig):
 
 def build_dataloaders(
     batch_size: int = 16,
-    num_ctx_min_per_t: int = 12,  # ~5% of 225 = 15 * 15
-    num_ctx_max_per_t: int = 56,  # ~25% of 225 = 15 * 15
-    num_test: int = 225,  # 225 = 15 * 15 = predicted frame
+    num_ctx_min_per_t: int = 45,
+    num_ctx_max_per_t: int = 225,
+    num_test: int = 900,
     train_region: str = "central_europe",
     valid_region: str = "northern_europe",
     test_region: str = "western_europe",

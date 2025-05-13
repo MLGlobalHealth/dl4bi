@@ -4,10 +4,9 @@ defaults:
 seed: 42
 wandb: True
 project: Generic Spatial
-train_num_steps: 250000
+train_num_steps: 150000
 valid_num_steps: 1000
 valid_interval: 10000
-plot_interval: 50000
 data:
   num_features: 10
   batch_size: 32
@@ -33,7 +32,11 @@ optimizer:
     - _target_: optax.clip_by_global_norm
       max_norm: 1.0
     - _target_: optax.adamw
-      learning_rate: 1.0e-4
+      learning_rate:
+        _target_: optax.cosine_decay_schedule
+        init_value: 1.0e-3
+        decay_steps: ${train_num_steps}
+        alpha: 5.0e-5
       b1: 0.9
       b2: 0.999
       weight_decay: 1.0e-4
