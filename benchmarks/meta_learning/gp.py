@@ -48,7 +48,7 @@ def main(cfg: DictConfig):
     model = instantiate(cfg.model)
     if cfg.evaluate_only:
         # NOTE: pass override_cfg=cfg in case attributes have been updated,
-        # e.g. CovnCNP needs updated bounds for its latent grid
+        # e.g. ConvCNP needs updated bounds for its latent grid
         state, _ = load_ckpt(path.with_suffix(".ckpt"), cfg)
         metrics = evaluate(
             rng_test,
