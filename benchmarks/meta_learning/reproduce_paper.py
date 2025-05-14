@@ -49,8 +49,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     #     seeds,
     #     "2d",
     #     gp_kernels_2d,
-    #     ["2d/bsa_tnp"],
-    #     # [f"2d/{m}" for m in models],
+    #     [f"2d/{m}" for m in models],
     #     gp_main,
     #     overrides,
     #     "NeurIPS BSA-TNP - Gaussian Processes",
@@ -98,43 +97,42 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     #     "NeurIPS BSA-TNP - Generic Spatial",
     #     dry_run=dry_run,
     # )
-    # generic_benchmark(
-    #     seeds,
-    #     "configs/sir",
-    #     ["bsa_tnp"],
-    #     # models,
-    #     sir_main,
-    #     overrides,
-    #     "NeurIPS BSA-TNP - SIR",
-    #     dry_run=dry_run,
-    # )
-    # generic_benchmark(
-    #     seeds,
-    #     "configs/sir",
-    #     ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_shifted_10"],
-    #     sir_main,
-    #     [
-    #         "project_suffix=' - Shifted 10'",
-    #         "evaluate_only=True",
-    #         "data=spatial_64x64_shifted_10.yaml",
-    #     ],
-    #     "NeurIPS BSA-TNP - SIR",
-    #     dry_run=dry_run,
-    # )
-    # generic_benchmark(
-    #     seeds,
-    #     "configs/sir",
-    #     ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_scaled_2x"],
-    #     sir_main,
-    #     [
-    #         "project_suffix=' - Scaled 2x'",
-    #         "evaluate_only=True",
-    #         "valid_num_steps=1000",
-    #         "data=spatial_128x128",
-    #     ],
-    #     "NeurIPS BSA-TNP - SIR",
-    #     dry_run=dry_run,
-    # )
+    generic_benchmark(
+        seeds,
+        "configs/sir",
+        models,
+        sir_main,
+        overrides,
+        "NeurIPS BSA-TNP - SIR",
+        dry_run=dry_run,
+    )
+    generic_benchmark(
+        seeds,
+        "configs/sir",
+        ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_shifted_10"],
+        sir_main,
+        [
+            "project_suffix=' - Shifted 10'",
+            "evaluate_only=True",
+            "data=spatial_64x64_shifted_10.yaml",
+        ],
+        "NeurIPS BSA-TNP - SIR",
+        dry_run=dry_run,
+    )
+    generic_benchmark(
+        seeds,
+        "configs/sir",
+        ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_scaled_2x"],
+        sir_main,
+        [
+            "project_suffix=' - Scaled 2x'",
+            "evaluate_only=True",
+            "valid_num_steps=1000",
+            "data=spatial_128x128",
+        ],
+        "NeurIPS BSA-TNP - SIR",
+        dry_run=dry_run,
+    )
     # SPACE & TIME & GENERALIZATION
     # era5_models = ["tnp_d", "te_tnp", "bsa_tnp"]
     # era5_overrides = [
