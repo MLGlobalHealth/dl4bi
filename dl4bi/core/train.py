@@ -175,13 +175,15 @@ def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
     ckptr.save(path.absolute(), ckpt, save_args=save_args)
 
 
-def load_ckpt(path: Union[str, Path]):
+def load_ckpt(path: Union[str, Path], override_cfg: Optional[DictConfig] = None):
     "Load a checkpoint."
     if not isinstance(path, Path):
         path = Path(path)
     ckptr = PyTreeCheckpointer()
     ckpt = ckptr.restore(path.absolute())
     cfg = OmegaConf.create(ckpt["config"])
+    if override_cfg is not None:
+        cfg = override_cfg
     model = instantiate(cfg.model)
     state = TrainState.create(
         apply_fn=model.apply,

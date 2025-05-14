@@ -47,7 +47,9 @@ def main(cfg: DictConfig):
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     if cfg.evaluate_only:
-        state, _ = load_ckpt(path.with_suffix(".ckpt"))
+        # NOTE: pass override_cfg=cfg in case attributes have been updated,
+        # e.g. CovnCNP needs updated bounds for its latent grid
+        state, _ = load_ckpt(path.with_suffix(".ckpt"), cfg)
         metrics = evaluate(
             rng_test,
             state,
@@ -56,6 +58,7 @@ def main(cfg: DictConfig):
             cfg.valid_num_steps,
         )
         wandb.log({f"Test {m}": v for m, v in metrics.items()})
+        return
     clbk = wandb_1d_plots
     if cfg.data.name == "2d":
         clbk = wandb_2d_plots

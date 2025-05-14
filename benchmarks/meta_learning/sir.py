@@ -15,6 +15,7 @@ from sps.utils import build_grid
 from dl4bi.core.train import (
     Callback,
     evaluate,
+    load_ckpt,
     save_ckpt,
     train,
 )
@@ -34,7 +35,7 @@ def main(cfg: DictConfig):
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
         name=run_name,
-        project=cfg.project,
+        project=cfg.project + cfg.project_suffix,
         reinit=True,  # allows reinitialization for multiple runs
     )
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
@@ -49,6 +50,19 @@ def main(cfg: DictConfig):
     train_dataloader = valid_dataloader = dataloader
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
+    if cfg.evaluate_only:
+        # NOTE: pass override_cfg=cfg in case attributes have been updated,
+        # e.g. CovnCNP needs updated bounds for its latent grid
+        state, _ = load_ckpt(path.with_suffix(".ckpt"), cfg)
+        metrics = evaluate(
+            rng_test,
+            state,
+            model.valid_step,
+            dataloader,
+            cfg.valid_num_steps,
+        )
+        wandb.log({f"Test {m}": v for m, v in metrics.items()})
+        return
     clbk = partial(
         wandb_2d_img_callback,
         filename_prefix="sir",

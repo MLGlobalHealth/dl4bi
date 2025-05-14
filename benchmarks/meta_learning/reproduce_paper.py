@@ -45,16 +45,37 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     ]
 
     # TRANSLATION INVARIANCE
-    # gp_benchmark(
-    #     seeds,
-    #     "2d",
-    #     gp_kernels_2d,
-    #     [f"2d/{m}" for m in models],
-    #     gp_main,
-    #     overrides,
-    #     "NeurIPS BSA-TNP - Gaussian Processes",
-    #     dry_run=dry_run,
-    # )
+    gp_benchmark(
+        seeds,
+        "2d",
+        gp_kernels_2d,
+        ["2d/bsa_tnp"],
+        # [f"2d/{m}" for m in models],
+        gp_main,
+        overrides,
+        "NeurIPS BSA-TNP - Gaussian Processes",
+        dry_run=dry_run,
+    )
+    gp_benchmark(
+        seeds,
+        "2d_shifted_10",
+        gp_kernels_2d,
+        [f"2d/{m}" for m in ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_shifted_10"]],
+        gp_main,
+        ["evaluate_only=True"],
+        "NeurIPS BSA-TNP - Gaussian Processes - Shifted 10",
+        dry_run=dry_run,
+    )
+    gp_benchmark(
+        seeds,
+        "2d_scaled_2x",
+        gp_kernels_2d,
+        [f"2d/{m}" for m in ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_scaled_2x"]],
+        gp_main,
+        ["evaluate_only=True", "valid_num_steps=1000"],
+        "NeurIPS BSA-TNP - Gaussian Processes - Scaled 2x",
+        dry_run=dry_run,
+    )
     # generic_benchmark(
     #     seeds,
     #     "configs/multiscale_2d_gp",
@@ -64,28 +85,43 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     #     "NeurIPS BSA-TNP - Multiscale Gaussian Processes",
     #     dry_run=dry_run,
     # )
-    generic_benchmark(
-        seeds,
-        "configs/generic_spatial",
-        ["bsa_tnp", "te_tnp", "tnp_d"],
-        generic_spatial_main,
-        overrides,
-        "NeurIPS BSA-TNP - Generic Spatial",
-        dry_run=dry_run,
-    )
     # generic_benchmark(
     #     seeds,
-    #     "configs/sir",
-    #     models,
-    #     sir_main,
+    #     "configs/generic_spatial",
+    #     ["bsa_tnp", "te_tnp", "tnp_d"],
+    #     generic_spatial_main,
     #     overrides,
-    #     "NeurIPS BSA-TNP - SIR",
+    #     "NeurIPS BSA-TNP - Generic Spatial",
     #     dry_run=dry_run,
     # )
-    # TODO(danj): look in plot_samples
-    # test_translation(...)
-    # test_multiresolution(...)
-
+    generic_benchmark(
+        seeds,
+        "configs/sir",
+        ["bsa_tnp"],
+        # models,
+        sir_main,
+        overrides,
+        "NeurIPS BSA-TNP - SIR",
+        dry_run=dry_run,
+    )
+    generic_benchmark(
+        seeds,
+        "configs/sir",
+        ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_shifted_10"],
+        sir_main,
+        ["evaluate_only=True"],
+        "NeurIPS BSA-TNP - SIR - Shift 10",
+        dry_run=dry_run,
+    )
+    generic_benchmark(
+        seeds,
+        "configs/sir",
+        ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_scaled_2x"],
+        sir_main,
+        ["evaluate_only=True", "valid_num_steps=1000"],
+        "NeurIPS BSA-TNP - SIR - Scaled 2x",
+        dry_run=dry_run,
+    )
     # SPACE & TIME & GENERALIZATION
     # era5_models = ["tnp_d", "te_tnp", "bsa_tnp"]
     # era5_overrides = [
