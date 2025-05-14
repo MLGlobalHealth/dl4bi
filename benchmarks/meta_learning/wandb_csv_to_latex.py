@@ -19,7 +19,10 @@ from scipy.stats import sem
 def main(args):
     df = pd.read_csv(args.path)
     if "Runtime" in df.columns:
-        df["Runtime"] = df.Runtime / 60  # to minutes
+        if args.runtime_numerator:
+            df["Runtime"] = args.runtime_numerator / df.Runtime
+        elif args.runtime_denominator:
+            df["Runtime"] = df.Runtime / args.runtime_denominator
     if args.filter:
         df = df.query(args.filter)
     func = lambda x: f"${np.mean(x):.2f}\\pm{sem(x):0.2f}$"
@@ -76,6 +79,18 @@ def parse_args(argv):
         "--name",
         default="My Experiment",
         help="Name to use for caption and label.",
+    )
+    parser.add_argument(
+        "--runtime_numerator",
+        type=float,
+        default=None,
+        help="Runtime = Numerator / Runtime.",
+    )
+    parser.add_argument(
+        "--runtime_denominator",
+        type=float,
+        default=None,
+        help="Runtime = Runtime / Denominator.",
     )
     return parser.parse_args(argv[1:])
 
