@@ -45,58 +45,53 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     ]
 
     # TRANSLATION INVARIANCE
-    # gp_benchmark(
-    #     seeds,
-    #     "2d",
-    #     gp_kernels_2d,
-    #     [f"2d/{m}" for m in models],
-    #     gp_main,
-    #     overrides,
-    #     "NeurIPS BSA-TNP - Gaussian Processes",
-    #     dry_run=dry_run,
-    # )
-    # gp_benchmark(
-    #     seeds,
-    #     "2d_shifted_10",
-    #     gp_kernels_2d,
-    #     [f"2d/{m}" for m in ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_shifted_10"]],
-    #     gp_main,
-    #     ["project_suffix=' - Shifted 10'", "evaluate_only=True"],
-    #     "NeurIPS BSA-TNP - Gaussian Processes",
-    #     dry_run=dry_run,
-    # )
-    # gp_benchmark(
-    #     seeds,
-    #     "2d_scaled_2x",
-    #     gp_kernels_2d,
-    #     [f"2d/{m}" for m in ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_scaled_2x"]],
-    #     gp_main,
-    #     [
-    #         "project_suffix=' - Scaled 2x'",
-    #         "evaluate_only=True",
-    #         "valid_num_steps=1000",
-    #     ],
-    #     "NeurIPS BSA-TNP - Gaussian Processes",
-    #     dry_run=dry_run,
-    # )
-    # generic_benchmark(
-    #     seeds,
-    #     "configs/multiscale_2d_gp",
-    #     ["bsa_tnp", "te_tnp"],
-    #     multiscale_2d_gp_main,
-    #     overrides,
-    #     "NeurIPS BSA-TNP - Multiscale Gaussian Processes",
-    #     dry_run=dry_run,
-    # )
-    # generic_benchmark(
-    #     seeds,
-    #     "configs/generic_spatial",
-    #     ["bsa_tnp", "te_tnp", "tnp_d"],
-    #     generic_spatial_main,
-    #     overrides,
-    #     "NeurIPS BSA-TNP - Generic Spatial",
-    #     dry_run=dry_run,
-    # )
+    gp_benchmark(
+        seeds,
+        "2d",
+        gp_kernels_2d,
+        [f"2d/{m}" for m in models],
+        gp_main,
+        overrides,
+        "NeurIPS BSA-TNP - Gaussian Processes",
+        dry_run=dry_run,
+    )
+    gp_benchmark(
+        seeds,
+        "2d_shifted_10",
+        gp_kernels_2d,
+        [f"2d/{m}" for m in ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_shifted_10"]],
+        gp_main,
+        ["project_suffix=' - Shifted 10'", "evaluate_only=True"],
+        "NeurIPS BSA-TNP - Gaussian Processes",
+        dry_run=dry_run,
+    )
+    gp_benchmark(
+        seeds,
+        "2d_scaled_2x",
+        gp_kernels_2d,
+        [f"2d/{m}" for m in ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_scaled_2x"]],
+        gp_main,
+        [
+            "project_suffix=' - Scaled 2x'",
+            "evaluate_only=True",
+            "valid_num_steps=1000",
+        ],
+        "NeurIPS BSA-TNP - Gaussian Processes",
+        dry_run=dry_run,
+    )
+
+    # MULTIRESOLUTION
+    generic_benchmark(
+        seeds,
+        "configs/multiscale_2d_gp",
+        ["bsa_tnp", "te_tnp"],
+        multiscale_2d_gp_main,
+        overrides,
+        "NeurIPS BSA-TNP - Multiscale Gaussian Processes",
+        dry_run=dry_run,
+    )
+
+    # EPIDEMIOLOGY
     generic_benchmark(
         seeds,
         "configs/sir",
@@ -133,56 +128,56 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "NeurIPS BSA-TNP - SIR",
         dry_run=dry_run,
     )
-    # SPACE & TIME & GENERALIZATION
-    # era5_models = ["tnp_d", "te_tnp", "bsa_tnp"]
-    # era5_overrides = [
-    #     "data.valid_region=northern_europe",
-    #     "data.test_region=western_europe",
-    # ]
-    # generic_benchmark(
-    #     seeds,
-    #     "configs/era5",
-    #     era5_models,
-    #     era5_main,
-    #     overrides + era5_overrides,
-    #     "NeurIPS BSA-TNP - ERA5 - CNW",
-    #     dry_run=dry_run,
-    # )
-    # era5_overrides = [
-    #     "data.valid_region=western_europe",
-    #     "data.test_region=northern_europe",
-    # ]
-    # generic_benchmark(
-    #     seeds,
-    #     "configs/era5",
-    #     era5_models,
-    #     era5_main,
-    #     overrides + era5_overrides,
-    #     "NeurIPS BSA-TNP - ERA5 - CWN",
-    #     dry_run=dry_run,
-    # )
 
-    # HIGH DIMENSIONAL
-    # fixed + spatial effects:
-    # tabular_models = ["bsa_tnp", "te_tnp", "tnp_d"]
-    # generic_benchmark(
-    #     seeds,
-    #     "configs/household_electric",
-    #     tabular_models,
-    #     household_electric_main,
-    #     overrides,
-    #     "NeurIPS BSA-TNP - Household Electric",
-    #     dry_run=dry_run,
-    # )
-    # generic_benchmark(
-    #     seeds,
-    #     "configs/beijing_air_quality",
-    #     tabular_models,
-    #     beijing_air_quality_main,
-    #     overrides,
-    #     "NeurIPS BSA-TNP - Beijing Air Quality",
-    #     dry_run=dry_run,
-    # )
+    # SPACE & TIME
+    era5_models = ["tnp_d", "te_tnp", "bsa_tnp"]
+    era5_overrides = [
+        "data.valid_region=northern_europe",
+        "data.test_region=western_europe",
+    ]
+    generic_benchmark(
+        seeds,
+        "configs/era5",
+        era5_models,
+        era5_main,
+        overrides + era5_overrides,
+        "NeurIPS BSA-TNP - ERA5 - CNW",
+        dry_run=dry_run,
+    )
+    era5_overrides = [
+        "data.valid_region=western_europe",
+        "data.test_region=northern_europe",
+    ]
+    generic_benchmark(
+        seeds,
+        "configs/era5",
+        era5_models,
+        era5_main,
+        overrides + era5_overrides,
+        "NeurIPS BSA-TNP - ERA5 - CWN",
+        dry_run=dry_run,
+    )
+
+    # HIGH DIMENSIONAL FIXED EFFECTS
+    tabular_models = ["bsa_tnp", "te_tnp", "tnp_d"]
+    generic_benchmark(
+        seeds,
+        "configs/beijing_air_quality",
+        tabular_models,
+        beijing_air_quality_main,
+        overrides,
+        "NeurIPS BSA-TNP - Beijing Air Quality",
+        dry_run=dry_run,
+    )
+    generic_benchmark(
+        seeds,
+        "configs/generic_spatial",
+        tabular_models,
+        generic_spatial_main,
+        overrides,
+        "NeurIPS BSA-TNP - Generic Spatial",
+        dry_run=dry_run,
+    )
 
     # NON-STATIONARY DISTRIBUTIONS
     # generic_benchmark(
