@@ -17,6 +17,7 @@ from dl4bi.core.train import (
     Callback,
     TrainState,
     evaluate,
+    load_ckpt,
     save_ckpt,
     train,
 )
@@ -31,7 +32,7 @@ def main(cfg: DictConfig):
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
         name=run_name,
-        project=cfg.project,
+        project=cfg.project + cfg.project_suffix,
         reinit=True,  # allows reinitialization for multiple runs
     )
     print(OmegaConf.to_yaml(cfg))
@@ -45,6 +46,16 @@ def main(cfg: DictConfig):
     clbk_dataloader = build_dataloader(cfg.data, cfg.kernel, is_callback=True)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
+    if cfg.evaluate_only:
+        state, _ = load_ckpt(path.with_suffix(".ckpt"))
+        metrics = evaluate(
+            rng_test,
+            state,
+            model.valid_step,
+            valid_dataloader,
+            cfg.valid_num_steps,
+        )
+        wandb.log({f"Test {m}": v for m, v in metrics.items()})
     clbk = wandb_1d_plots
     if cfg.data.name == "2d":
         clbk = wandb_2d_plots
