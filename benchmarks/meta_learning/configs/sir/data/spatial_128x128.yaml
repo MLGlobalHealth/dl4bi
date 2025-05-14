@@ -10,6 +10,6 @@ s:
 num_ctx:
   min: 512 # ~3%
   max: 2048 # 12.5%
-num_test: 16384 # 100%
+num_test: 4096 # 100%
 num_steps: 50
-batch_size: 1
+batch_size: 8
