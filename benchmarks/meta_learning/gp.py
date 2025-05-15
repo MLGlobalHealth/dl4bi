@@ -46,6 +46,9 @@ def main(cfg: DictConfig):
     clbk_dataloader = build_dataloader(cfg.data, cfg.kernel, is_callback=True)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
+    if cfg.data.name == "2d":
+        clbk = wandb_2d_plots
+        clbk_dataloader = build_2d_grid_dataloader(cfg.data, cfg.kernel)
     if cfg.evaluate_only:
         # NOTE: pass override_cfg=cfg in case attributes have been updated,
         # e.g. ConvCNP needs updated bounds for its latent grid
@@ -56,13 +59,12 @@ def main(cfg: DictConfig):
             model.valid_step,
             valid_dataloader,
             cfg.valid_num_steps,
+            callbacks=[Callback(clbk, cfg.valid_num_steps)],
+            callback_dataloader=clbk_dataloader,
         )
         wandb.log({f"Test {m}": v for m, v in metrics.items()})
         return
     clbk = wandb_1d_plots
-    if cfg.data.name == "2d":
-        clbk = wandb_2d_plots
-        clbk_dataloader = build_2d_grid_dataloader(cfg.data, cfg.kernel)
     state = train(
         rng_train,
         model,
