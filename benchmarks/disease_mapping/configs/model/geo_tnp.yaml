@@ -1,4 +1,4 @@
-_target_: dl4bi.meta_learning.ScanTNPKR
+_target_: dl4bi.meta_learning.BSATNP
 num_blks: 6
 num_reps: 1
 embed_s:
@@ -16,11 +16,12 @@ blk:
     _target_: dl4bi.attention.MultiHeadAttention
     attn:
       _target_: dl4bi.attention.BiasedScanAttention
-      s_bias:
-        _target_: dl4bi.bias.Bias.build_geodesic_rbf_network_bias
-        # _target_: dl4bi.bias.Bias.build_geodesic_network_bias
-        num_heads: 4
-        num_basis: 5
+      bias:
+        _target_: builtins.dict
+        s:
+          _target_: dl4bi.bias.Bias.build_geodesic_rbf_network_bias
+          num_heads: 4
+          num_basis: 5
     proj_qs:
       _target_: dl4bi.mlp.MLP
       dims: [128]
