@@ -25,7 +25,7 @@ python = "^3.11"
 scikit-learn = "^1.6.1"
 scipy = "^1.14.1"
 scoringrules = "^0.7.1"
-sps = {git = "ssh://git@github.com/MLGlobalHealth/sps.git"}
+sps = { git = "ssh://git@github.com/MLGlobalHealth/sps.git", branch = "geodesic-kernel" }
 tensorflow = "^2.18.0"
 tensorflow-datasets = "^4.9.7"
 tiktoken = "^0.8.0"
