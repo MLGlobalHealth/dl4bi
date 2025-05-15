@@ -1,8 +1,7 @@
 defaults:
   - _self_ # use default global values below
-  - data: tza
-  # - model: spatial/tnp_kr_scan
-  - model:  geo_tnp
+  - data: generic
+  - model: spatial/geo_bsa_tnp
   # kernel specified in code
   # - kernel: rbf 
 seed: 42
@@ -31,7 +30,7 @@ optimizer:
     - _target_: optax.adamw
       learning_rate:
         _target_: optax.cosine_decay_schedule
-        init_value: 1.0e-4
+        init_value: 1.0e-4 # isn't this too small? try 1e-3, or disabling the scheduler
         decay_steps: ${train_num_steps}
         alpha: 2.0e-5
       b1: 0.9
