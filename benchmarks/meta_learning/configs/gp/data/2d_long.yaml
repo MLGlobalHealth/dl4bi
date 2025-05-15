@@ -1,0 +1,14 @@
+name: 2d
+s:
+  - start: -10
+    stop: 10
+    num: 64
+  - start: -10
+    stop: 10
+    num: 64
+num_ctx:
+  min: 128 # ~3%
+  max: 512 # 12.5%
+num_test: 1024  # 25%
+batch_size: 8
+obs_noise: 0.1
