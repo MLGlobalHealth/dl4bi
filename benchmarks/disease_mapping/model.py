@@ -6,9 +6,8 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from sps.kernels import _prepare_dims
+from sps.kernels import _prepare_dims, geo_exponential, great_circle_dist
 
-from benchmarks.disease_mapping.utils import great_circle_distance
 from dl4bi.core.utils import make_pairwise
 
 # TODO @pgrynfelder:
@@ -20,12 +19,7 @@ def kernel(x, y, /, *, var, ls, **_):
     """
     Geodesic Laplace (also Exponential, Matern 1/2) kernel.
     """
-
-    x, y = _prepare_dims(x, y)
-    assert x.shape[-1] == y.shape[-1] == 2
-
-    d = make_pairwise(great_circle_distance)(x, y)
-    return var * jnp.exp(-d / ls)
+    return geo_exponential(x, y, var, ls)
 
 
 jitter = 1e-4  # note this is in fact N(0, s2=jitter) independent noise

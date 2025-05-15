@@ -26,53 +26,6 @@ def unbatch(x: jax.Array):
     return x
 
 
-def haversine_distance(x, y):
-    """Haversine distance.
-
-    x, y: two (Long, Lat) pairs in degrees
-    """
-
-    # based on https://scikit-learn.org/stable/modules/generated/sklearn.metrics.pairwise.haversine_distances.html
-    x_lon, x_lat = x
-    y_lon, y_lat = y
-    x_lon, x_lat, y_lon, y_lat = map(jnp.deg2rad, (x_lon, x_lat, y_lon, y_lat))
-
-    arc_length = 2 * jnp.arcsin(
-        jnp.sqrt(
-            jnp.sin((x_lat - y_lat) / 2) ** 2
-            + jnp.cos(x_lat) * jnp.cos(y_lat) * jnp.sin((x_lon - y_lon) / 2) ** 2
-        )
-    )
-
-    return jnp.rad2deg(arc_length)
-
-
-def great_circle_distance(x, y):
-    """
-    Given two (longitude, latitude) pairs in degrees,
-    returns the great circle distance in degrees.
-    """
-    # based on https://en.wikipedia.org/wiki/Great-circle_distance#Computational_formulae
-    x_lon, x_lat = x
-    y_lon, y_lat = y
-    x_lon, x_lat, y_lon, y_lat = map(jnp.deg2rad, (x_lon, x_lat, y_lon, y_lat))
-
-    d_lon = jnp.abs(x_lon - y_lon)
-
-    sin = jnp.sin
-    cos = jnp.cos
-
-    arc_length = jnp.atan2(
-        jnp.sqrt(
-            (cos(y_lat) * sin(d_lon)) ** 2
-            + (cos(x_lat) * sin(y_lat) - sin(x_lat) * cos(y_lat) * cos(d_lon)) ** 2
-        ),
-        sin(x_lat) * sin(y_lat) + cos(x_lat) * cos(y_lat) * cos(d_lon),
-    )
-
-    return jnp.rad2deg(arc_length)
-
-
 def cartesian_product(*xs):
     n = len(xs)
     return jnp.stack(jnp.meshgrid(*xs), axis=-1).reshape(-1, n)
