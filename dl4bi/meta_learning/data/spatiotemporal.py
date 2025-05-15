@@ -8,7 +8,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from jax import jit, random, vmap
 
-from ...core.utils import mask_from_valid_lens, nan_pad
+from ...core.utils import mask_from_valid_lens, nan_pad, safe_stack
 from .utils import (
     MetaLearningBatch,
     MetaLearningData,
@@ -277,6 +277,44 @@ class SpatiotemporalBatch(MetaLearningBatch):
     inv_permute_idx: jax.Array  # [T_b, L]
     s_dims: tuple
     forecast: bool
+
+    def to_xy(self):
+        """Converts to an Xy dataset for traditional supervised learning."""
+        return {
+            "x_train": safe_stack(self.x_ctx, self.s_ctx, self.t_ctx),
+            "y_train": self.f_ctx,
+            "mask_train": self.mask_ctx,
+            "x_test": safe_stack(self.x_test, self.s_test, self.t_test),
+            "y_test": self.f_test,
+            "mask_test": self.mask_test,
+        }
+
+    def sample_for_inference(
+        self,
+        rng: jax.Array,
+        num_samples: int = 1,
+        allow_repeats: bool = False,
+    ):
+        """Samples elements from the batch and formats for inference, e.g. in Numpyro."""
+        B = self["f_test"].shape[0]
+        mask_ctx = jnp.array([True]) if self.mask_ctx is None else self.mask_ctx
+        mask_test = jnp.array([True]) if self.mask_test is None else self.mask_test
+        idxs = random.choice(rng, B, (num_samples,), replace=allow_repeats)
+        samples = []
+        for idx in idxs:
+            d = {
+                "s_ctx": self.s_ctx[idx][mask_ctx[idx]],
+                "t_ctx": self.t_ctx[idx][mask_ctx[idx]],
+                "f_ctx": self.f_ctx[idx][mask_ctx[idx]],
+                "s_test": self.s_test[idx][mask_test[idx]],
+                "t_test": self.t_test[idx][mask_test[idx]],
+                "f_test": self.f_test[idx][mask_test[idx]],
+            }
+            if self.x_ctx is not None:
+                d["x_ctx"] = self.x_ctx[idx][mask_ctx[idx]]
+                d["x_test"] = self.x_test[idx][mask_test[idx]]
+            samples += [(idx, d)]
+        return samples
 
     def plot_2d(
         self,

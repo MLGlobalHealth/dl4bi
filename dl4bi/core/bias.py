@@ -188,10 +188,10 @@ class Bias(nn.Module):
     """A generic bias module that is defined through its attribute functions.
 
     The reason this class exists instead of separate Bias modules is so that
-    it can be used for both standard and scan attention. For standard attention,
-    recalculating the pairwise similarities each time is redundant, and it can
-    be calculated once outside the bias module and passed in; this results
-    in non-trivial compute savings for large datasets.
+    it can be used for both standard and Biased Scan Attention. For standard
+    attention, recalculating the pairwise similarities each time is redundant,
+    and it can be calculated once outside the bias module and passed in; this
+    results in non-trivial compute savings for large datasets.
     """
 
     init_params: Callable = init_rbf_network_bias_params

@@ -7,13 +7,14 @@ from typing import Callable, Optional, Union
 import flax
 import flax.linen as nn
 import jax
+import jax.numpy as jnp
 import numpy as np
 import optax
 import wandb
 from flax.core import FrozenDict
 from flax.training import orbax_utils, train_state
 from hydra.utils import instantiate
-from jax import random
+from jax import jit, random
 from omegaconf import DictConfig, OmegaConf
 from orbax.checkpoint import PyTreeCheckpointer
 from tqdm import tqdm
@@ -57,14 +58,22 @@ def train(
     rngs = {"params": rng_params, "extra": rng_extra}
     kwargs = model.init(rngs, **batch)
     params = kwargs.pop("params")
-    param_count = nn.tabulate(model, rngs)(**batch)
-    print(param_count)
     state = TrainState.create(
         apply_fn=model.apply,
         params=params if state is None else state.params,
         kwargs=kwargs if state is None else state.kwargs,
         tx=optimizer,
     )
+    # TODO(danj): FLOPS returning 0 -- https://github.com/google/flax/issues/4023s
+    # Remove manual GFLOPS count below when fixed
+    param_count = nn.tabulate(model, rngs, compute_flops=True, compute_vjp_flops=True)(
+        **batch
+    )
+    infer_flops, train_flops = estimate_flops(rng_train, state, model.train_step, batch)
+    bold, reset = "\033[1m", "\033[0m"
+    print(param_count)
+    print(f"{bold}Estimated Infer GFLOPS: {infer_flops / 1.0e9:g}{reset}")
+    print(f"{bold}Estimated Train GFLOPS: {train_flops / 1.0e9:g}\n\n{reset}")
     losses = []
     patience = 0
     best_state = state
@@ -114,6 +123,22 @@ def train(
     return {"best": best_state, "last": state, "both": both}[return_state]
 
 
+def estimate_flops(rng, state, train_step, batch):
+    infer_cost = jit(infer).lower(rng, state, batch).compile().cost_analysis()
+    train_cost = jit(train_step).lower(rng, state, batch).compile().cost_analysis()
+    return infer_cost["flops"], train_cost["flops"]
+
+
+@jit
+def infer(rng, state, batch):
+    return state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        **batch,
+        training=False,
+        rngs={"extra": rng},
+    )
+
+
 def evaluate(
     rng: jax.Array,
     state: TrainState,
@@ -150,13 +175,15 @@ def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
     ckptr.save(path.absolute(), ckpt, save_args=save_args)
 
 
-def load_ckpt(path: Union[str, Path]):
+def load_ckpt(path: Union[str, Path], override_cfg: Optional[DictConfig] = None):
     "Load a checkpoint."
     if not isinstance(path, Path):
         path = Path(path)
     ckptr = PyTreeCheckpointer()
     ckpt = ckptr.restore(path.absolute())
     cfg = OmegaConf.create(ckpt["config"])
+    if override_cfg is not None:
+        cfg = override_cfg
     model = instantiate(cfg.model)
     state = TrainState.create(
         apply_fn=model.apply,

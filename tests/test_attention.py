@@ -128,9 +128,8 @@ def test_biased_scan_attention_impl():
     scalar_bias = Bias.build_scalar_bias()
     tisa_bias = Bias.build_tisa_bias()
     rbf_bias = Bias.build_rbf_network_bias()
-    for bias in [rbf_bias]:
-        # for bias in [scalar_bias, tisa_bias, rbf_bias]:
-        (ctx_scan, _), _ = BiasedScanAttention(s_bias=bias).init_with_output(
+    for bias in [scalar_bias, tisa_bias, rbf_bias]:
+        (ctx_scan, _), _ = BiasedScanAttention(bias={"s": bias}).init_with_output(
             rng_init,
             qs,
             ks,
@@ -219,7 +218,7 @@ def test_biased_scan_attention_speed():
     tisa_bias = Bias.build_tisa_bias()
     rbf_bias = Bias.build_rbf_network_bias()
     for bias in [scalar_bias, tisa_bias, rbf_bias]:
-        scan_attn = BiasedScanAttention(s_bias=bias)
+        scan_attn = BiasedScanAttention(bias={"s": bias})
         _, params = scan_attn.init_with_output(
             rng_init, qs, ks, vs, mask, qs_s=qs_s, ks_s=ks_s
         )
@@ -262,9 +261,9 @@ def test_biased_scan_attention_speed():
         max_t, factor = 5e-5, 1.1
         # NOTE: can use the following assert for benchmarking
         # assert t_scan_diff < max_t, f"Scan takes longer than {max_t}s!"
-        assert (
-            t_scan_diff < factor * t_true_diff
-        ), f"Scan is more than {factor}x slower!"
+        assert t_scan_diff < factor * t_true_diff, (
+            f"Scan is more than {factor}x slower!"
+        )
 
 
 def test_fast_softmax_attention_scale():
@@ -323,7 +322,7 @@ def test_biased_scan_attention_scale():
     tisa_bias = Bias.build_tisa_bias()
     rbf_bias = Bias.build_rbf_network_bias()
     for bias in [scalar_bias, tisa_bias, rbf_bias]:
-        scan_attn = BiasedScanAttention(s_bias=bias)
+        scan_attn = BiasedScanAttention(bias={"s": bias})
         (ctx_scan_init, _), params = scan_attn.init_with_output(
             rng_init, qs, kvs, kvs, qs_s=qs_s, ks_s=ks_s
         )

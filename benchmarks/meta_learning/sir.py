@@ -2,7 +2,6 @@
 import math
 from functools import partial
 from pathlib import Path
-from time import time
 
 import hydra
 import jax
@@ -22,16 +21,11 @@ from dl4bi.core.train import (
 )
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData
-from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
-
-# Example command to evaluate only:
-# python sir.py \
-#   model=icml/tnp_kr_scan \
-#   data=space_128x128 \
-#   data.batch_size=1 \
-#   valid_num_steps=100 \
-#   wandb=False \
-#   evaluate_only=True
+from dl4bi.meta_learning.utils import (
+    cfg_to_run_name,
+    save_batches_for_tabpfn,
+    wandb_2d_img_callback,
+)
 
 
 @hydra.main("configs/sir", config_name="default", version_base=None)
@@ -41,34 +35,34 @@ def main(cfg: DictConfig):
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
         name=run_name,
-        project=cfg.project,
+        project=cfg.project + cfg.project_suffix,
         reinit=True,  # allows reinitialization for multiple runs
     )
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
+    path.parent.mkdir(parents=True, exist_ok=True)
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    build = build_spatial_dataloader
+    build = build_spatial_dataloaders
     if cfg.data.type == "spatiotemporal":
-        build = build_spatiotemporal_dataloader
-    train_dataloader, valid_dataloader, clbk_dataloader = build(cfg.data, cfg.sim)
+        build = build_spatiotemporal_dataloaders
+    dataloader, clbk_dataloader = build(cfg.data, cfg.sim)
+    train_dataloader = valid_dataloader = dataloader
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     if cfg.evaluate_only:
-        state, _ = load_ckpt(path.with_suffix(".ckpt"))
-        # run once to compile
-        evaluate(rng_test, state, model.valid_step, dataloader, num_steps=1)
-        start = time()
+        # NOTE: pass override_cfg=cfg in case attributes have been updated,
+        # e.g. ConvCNP needs updated bounds for its latent grid
+        state, _ = load_ckpt(path.with_suffix(".ckpt"), cfg)
         metrics = evaluate(
             rng_test,
             state,
             model.valid_step,
-            valid_dataloader,
+            dataloader,
             cfg.valid_num_steps,
         )
-        end = time()
-        metrics["time_elapsed_s"] = end - start
-        return print(metrics)
+        wandb.log({f"Test {m}": v for m, v in metrics.items()})
+        return
     clbk = partial(
         wandb_2d_img_callback,
         filename_prefix="sir",
@@ -88,20 +82,22 @@ def main(cfg: DictConfig):
         valid_dataloader,
         callbacks=[Callback(clbk, cfg.plot_interval)],
         callback_dataloader=clbk_dataloader,
+        return_state="last",
     )
     metrics = evaluate(
         rng_test,
         state,
         model.valid_step,
-        valid_dataloader,
+        dataloader,
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
+    eval_path = path.parent / f"eval_data.npy"
+    save_batches_for_tabpfn(rng_test, valid_dataloader, cfg.valid_num_steps, eval_path)
 
 
-def build_spatial_dataloader(data: DictConfig, priors: DictConfig):
+def build_spatial_dataloaders(data: DictConfig, priors: DictConfig):
     """A 2D Lattice SIR dataloader over space only."""
     B = data.batch_size
     sir = instantiate(priors)
@@ -128,10 +124,10 @@ def build_spatial_dataloader(data: DictConfig, priors: DictConfig):
                     batch_size=B,
                 )
 
-    return dataloader, dataloader, partial(dataloader, is_callback=True)
+    return dataloader, partial(dataloader, is_callback=True)
 
 
-def build_spatiotemporal_dataloader(data: DictConfig, priors: DictConfig):
+def build_spatiotemporal_dataloaders(data: DictConfig, priors: DictConfig):
     """A 2D Lattice SIR dataloader over space and time."""
     B = data.batch_size
     sir = instantiate(priors)
@@ -162,7 +158,7 @@ def build_spatiotemporal_dataloader(data: DictConfig, priors: DictConfig):
                     data.batch_size,
                 )
 
-    return dataloader, dataloader, partial(dataloader, is_callback=True)
+    return dataloader, partial(dataloader, is_callback=True)
 
 
 @jit

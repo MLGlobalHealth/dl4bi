@@ -17,11 +17,12 @@ from dl4bi.core.train import (
     Callback,
     TrainState,
     evaluate,
+    load_ckpt,
     save_ckpt,
     train,
 )
 from dl4bi.meta_learning.data.spatial import SpatialBatch, SpatialData
-from dl4bi.meta_learning.utils import cfg_to_run_name
+from dl4bi.meta_learning.utils import cfg_to_run_name, save_batches_for_tabpfn
 
 
 @hydra.main("configs/gp", config_name="default", version_base=None)
@@ -31,16 +32,33 @@ def main(cfg: DictConfig):
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
         name=run_name,
-        project=cfg.project,
+        project=cfg.project + cfg.project_suffix,
         reinit=True,  # allows reinitialization for multiple runs
     )
     print(OmegaConf.to_yaml(cfg))
+    kernel = cfg.kernel.kernel._target_.split(".")[-1]
+    path = f"results/{cfg.project}/{cfg.data.name}/{kernel}/{cfg.seed}/{run_name}"
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader = valid_dataloader = build_dataloader(cfg.data, cfg.kernel)
     clbk_dataloader = build_dataloader(cfg.data, cfg.kernel, is_callback=True)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
+    if cfg.evaluate_only:
+        # NOTE: pass override_cfg=cfg in case attributes have been updated,
+        # e.g. ConvCNP needs updated bounds for its latent grid
+        state, _ = load_ckpt(path.with_suffix(".ckpt"), cfg)
+        metrics = evaluate(
+            rng_test,
+            state,
+            model.valid_step,
+            valid_dataloader,
+            cfg.valid_num_steps,
+        )
+        wandb.log({f"Test {m}": v for m, v in metrics.items()})
+        return
     clbk = wandb_1d_plots
     if cfg.data.name == "2d":
         clbk = wandb_2d_plots
@@ -58,6 +76,7 @@ def main(cfg: DictConfig):
         valid_dataloader,
         callbacks=[Callback(clbk, cfg.plot_interval)],
         callback_dataloader=clbk_dataloader,
+        return_state="last",
     )
     metrics = evaluate(
         rng_test,
@@ -67,17 +86,15 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    kernel = cfg.kernel._target_.split(".")[-1]
-    path = f"results/{cfg.project}/{cfg.data.name}/{kernel}/{cfg.seed}/{run_name}"
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
+    eval_path = path.parent / f"eval_data.npy"
+    save_batches_for_tabpfn(rng_test, valid_dataloader, cfg.valid_num_steps, eval_path)
 
 
 def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = False):
     """Generates batches of GP samples."""
     gp = instantiate(kernel)
-    B, L, D_s = data.batch_size, data.num_test, len(data.s)
+    B, L, D_s = data.batch_size, data.num_ctx.max + data.num_test, len(data.s)
     s_min = jnp.array([axis["start"] for axis in data.s])
     s_max = jnp.array([axis["stop"] for axis in data.s])
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
@@ -94,8 +111,8 @@ def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = F
                 rng_b,
                 data.num_ctx.min,
                 data.num_ctx.max,
-                num_test=L,
-                test_includes_ctx=True,
+                num_test=data.num_test,
+                test_includes_ctx=False,
                 obs_noise=data.obs_noise,
             )
             if is_callback:

@@ -18,9 +18,14 @@ from scipy.stats import sem
 
 def main(args):
     df = pd.read_csv(args.path)
+    if "Runtime" in df.columns:
+        if args.runtime_numerator:
+            df["Runtime"] = args.runtime_numerator / df.Runtime
+        elif args.runtime_denominator:
+            df["Runtime"] = df.Runtime / args.runtime_denominator
     if args.filter:
         df = df.query(args.filter)
-    func = lambda x: f"${np.mean(x):.3f}\\pm{sem(x):0.3f}$"
+    func = lambda x: f"${np.mean(x):.2f}\\pm{sem(x):0.2f}$"
     x = df[[*args.group_by, *args.metrics]].groupby(args.group_by).agg(func)
     x = x.reset_index()
     if args.pivot:
@@ -31,7 +36,7 @@ def main(args):
         index=False,
         caption=args.name,
         label=args.name.lower().replace(" ", "-"),
-        float_format="{:0.4f}".format,
+        float_format="{:.2f}".format,
         column_format="l" + "r" * (len(x.columns) - 1),
     )
     print(x_tex)
@@ -47,7 +52,7 @@ def parse_args(argv):
         "-m",
         "--metrics",
         nargs="+",
-        default=["Test NLL", "Test Coverage", "Test RMSE", "Test MAE", "Runtime"],
+        default=["Test NLL", "Test MAE", "Test RMSE", "Test Coverage", "Runtime"],
         help="Metric columns to apply mean/std to.",
     )
     parser.add_argument(
@@ -74,6 +79,18 @@ def parse_args(argv):
         "--name",
         default="My Experiment",
         help="Name to use for caption and label.",
+    )
+    parser.add_argument(
+        "--runtime_numerator",
+        type=float,
+        default=None,
+        help="Runtime = Numerator / Runtime.",
+    )
+    parser.add_argument(
+        "--runtime_denominator",
+        type=float,
+        default=None,
+        help="Runtime = Runtime / Denominator.",
     )
     return parser.parse_args(argv[1:])
 

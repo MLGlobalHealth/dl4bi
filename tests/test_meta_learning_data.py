@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+from flax.core.frozen_dict import FrozenDict
 from jax import jit, random
 from sps.sir import LatticeSIR
 from sps.utils import build_grid
@@ -8,49 +9,132 @@ from sps.utils import build_grid
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData
 from dl4bi.meta_learning.data.tabular import TabularData
-from dl4bi.meta_learning.data.temporal import TemporalData
 
 
 def test_tabular_data():
     rng = random.key(42)
-    B, L, D_x, D_f = 4, 37, 8, 1
+    B, L, D_x, D_z, D_t, D_f = 4, 37, 8, 3, 1, 1
     num_ctx_min, num_ctx_max, num_test = 3, 10, 20
     x_shape = (B, L, D_x)
+    z_shape = (B, L, D_z)  # another random variable group
+    t_shape = (B, L, D_t)
     f_shape = (B, L, D_f)
     x_ctx_shape = (B, num_ctx_max, D_x)
+    z_ctx_shape = (B, num_ctx_max, D_z)
+    t_ctx_shape = (B, num_ctx_max, D_t)
     f_ctx_shape = (B, num_ctx_max, D_f)
     mask_ctx_shape = (B, num_ctx_max)
     x_test_shape = (B, num_test, D_x)
+    z_test_shape = (B, num_test, D_z)
+    t_test_shape = (B, num_test, D_t)
     f_test_shape = (B, num_test, D_f)
     mask_test_shape = (B, num_test)
     x = random.normal(rng, x_shape)
+    z = random.normal(rng, z_shape)
     f = random.normal(rng, f_shape)
+    t = jnp.repeat(jnp.arange(L)[None, :, None], B, axis=0)
     # test basic instantiation
-    d = TabularData(x, f)
-    assert d.x.shape == x_shape
+    d = TabularData(FrozenDict({"x": x, "z": z, "t": t}), f)
+    assert d.feature_groups["x"].shape == x_shape
+    assert d.feature_groups["z"].shape == z_shape
+    assert d.feature_groups["t"].shape == t_shape
     assert d.f.shape == f_shape
     # test batching where test includes context
     test_includes_ctx = True
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
-    assert b.x_ctx.shape == x_ctx_shape
-    assert b.f_ctx.shape == f_ctx_shape
+    forecast = False
+    t_sorted = True
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
+    assert set(b) == {
+        "x_ctx",
+        "z_ctx",
+        "t_ctx",
+        "f_ctx",
+        "mask_ctx",
+        "x_test",
+        "z_test",
+        "t_test",
+        "f_test",
+        "mask_test",
+        "inv_permute_idx",
+    }
+    samples = b.sample_for_inference(rng, num_samples=1)
+    assert len(samples) == 1
+    samples = b.sample_for_inference(rng, num_samples=2)
+    assert samples[0][1]["f_ctx"].shape[0] < num_ctx_max
+    assert len(samples) == 2
+    # assert that they have been masked and extracted differently
+    # this could fail if they just so happen to have the same number
+    # of valid lengths for each sequence although this is p=1/37
+    assert samples[0][1]["f_ctx"].shape != samples[1][1]["f_ctx"].shape
+    assert b.ctx["x_ctx"].shape == x_ctx_shape
+    assert b.ctx["z_ctx"].shape == z_ctx_shape
+    assert b.ctx["t_ctx"].shape == t_ctx_shape
+    assert b.ctx["f_ctx"].shape == f_ctx_shape
     assert b.mask_ctx.shape == mask_ctx_shape
-    assert b.x_test.shape == x_test_shape
-    assert b.f_test.shape == f_test_shape
+    assert b.test["x_test"].shape == x_test_shape
+    assert b.test["z_test"].shape == z_test_shape
+    assert b.test["t_test"].shape == t_test_shape
+    assert b.test["f_test"].shape == f_test_shape
     assert b.mask_test.shape == mask_test_shape
-    assert (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
-    assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
+    assert (b.ctx["x_ctx"][:, :num_ctx_max] == b.test["x_test"][:, :num_ctx_max]).all()
+    assert (b.ctx["z_ctx"][:, :num_ctx_max] == b.test["z_test"][:, :num_ctx_max]).all()
+    assert (b.ctx["t_ctx"][:, :num_ctx_max] == b.test["t_test"][:, :num_ctx_max]).all()
+    assert (b.ctx["f_ctx"][:, :num_ctx_max] == b.test["f_test"][:, :num_ctx_max]).all()
     # test batching where test does not include context
     test_includes_ctx = False
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
-    assert b.x_ctx.shape == x_ctx_shape
-    assert b.f_ctx.shape == f_ctx_shape
+    forecast = True
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
+    assert b.ctx["x_ctx"].shape == x_ctx_shape
+    assert b.ctx["z_ctx"].shape == z_ctx_shape
+    assert b.ctx["t_ctx"].shape == t_ctx_shape
+    assert b.ctx["f_ctx"].shape == f_ctx_shape
     assert b.mask_ctx.shape == mask_ctx_shape
-    assert b.x_test.shape == x_test_shape
-    assert b.f_test.shape == f_test_shape
+    assert b.test["x_test"].shape == x_test_shape
+    assert b.test["z_test"].shape == z_test_shape
+    assert b.test["t_test"].shape == t_test_shape
+    assert b.test["f_test"].shape == f_test_shape
     assert b.mask_test.shape == mask_test_shape
-    assert not (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
-    assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
+    assert not (
+        b.ctx["x_ctx"][:, :num_ctx_max] == b.test["x_test"][:, :num_ctx_max]
+    ).all()
+    assert not (
+        b.ctx["z_ctx"][:, :num_ctx_max] == b.test["z_test"][:, :num_ctx_max]
+    ).all()
+    assert not (
+        b.ctx["t_ctx"][:, :num_ctx_max] == b.test["t_test"][:, :num_ctx_max]
+    ).all()
+    assert not (
+        b.ctx["f_ctx"][:, :num_ctx_max] == b.test["f_test"][:, :num_ctx_max]
+    ).all()
+    assert (b["t_test"].min(axis=1) > b["t_ctx"].max(axis=1)).all()
+    t = jnp.repeat(random.permutation(rng, jnp.arange(L))[None, :, None], B, axis=0)
+    t_sorted = False
+    b = d.batch(
+        rng,
+        num_ctx_min,
+        num_ctx_max,
+        num_test,
+        test_includes_ctx,
+        forecast,
+        t_sorted,
+    )
+    assert (b["t_test"].min(axis=1) > b["t_ctx"].max(axis=1)).all()
 
 
 def test_spatial_data_with_x():
@@ -80,6 +164,15 @@ def test_spatial_data_with_x():
     # test batching where test includes context
     test_includes_ctx = True
     b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    samples = b.sample_for_inference(rng, num_samples=1)
+    assert len(samples) == 1
+    samples = b.sample_for_inference(rng, num_samples=2)
+    assert samples[0][1]["f_ctx"].shape[0] < num_ctx_max
+    assert len(samples) == 2
+    # assert that they have been masked and extracted differently
+    # this could fail if they just so happen to have the same number
+    # of valid lengths for each sequence although this is p=1/37
+    assert samples[0][1]["f_ctx"].shape != samples[1][1]["f_ctx"].shape
     assert b.x_ctx.shape == x_ctx_shape
     assert b.s_ctx.shape == s_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
@@ -130,6 +223,15 @@ def test_spatial_data_without_x():
     # test batching where test includes context
     test_includes_ctx = True
     b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    samples = b.sample_for_inference(rng, num_samples=1)
+    assert len(samples) == 1
+    samples = b.sample_for_inference(rng, num_samples=2)
+    assert samples[0][1]["f_ctx"].shape[0] < num_ctx_max
+    assert len(samples) == 2
+    # assert that they have been masked and extracted differently
+    # this could fail if they just so happen to have the same number
+    # of valid lengths for each sequence although this is p=1/37
+    assert samples[0][1]["f_ctx"].shape != samples[1][1]["f_ctx"].shape
     assert b.x_ctx is None
     assert b.s_ctx.shape == s_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
@@ -182,6 +284,15 @@ def test_spatial_data_broadcast_x():
     # test batching where test includes context
     test_includes_ctx = True
     b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    samples = b.sample_for_inference(rng, num_samples=1)
+    assert len(samples) == 1
+    samples = b.sample_for_inference(rng, num_samples=2)
+    assert samples[0][1]["f_ctx"].shape[0] < num_ctx_max
+    assert len(samples) == 2
+    # assert that they have been masked and extracted differently
+    # this could fail if they just so happen to have the same number
+    # of valid lengths for each sequence although this is p=1/37
+    assert samples[0][1]["f_ctx"].shape != samples[1][1]["f_ctx"].shape
     assert b.x_ctx.shape == x_ctx_shape
     assert b.s_ctx.shape == s_ctx_shape
     assert b.f_ctx.shape == f_ctx_shape
@@ -205,158 +316,6 @@ def test_spatial_data_broadcast_x():
     assert b.f_test.shape == f_test_shape
     assert b.mask_test.shape == mask_test_shape
     assert not (b.s_ctx[:, :num_ctx_max] == b.s_test[:, :num_ctx_max]).all()
-    assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-
-
-def test_temporal_data_with_x():
-    rng = random.key(42)
-    B, T, D_x, D_f = 4, 64, 8, 2
-    num_ctx_min, num_ctx_max, num_test = 3, 10, 20
-    x_shape = (B, T, D_x)
-    t_shape = (B, T)
-    f_shape = (B, T, D_f)
-    x_ctx_shape = (B, num_ctx_max, D_x)
-    t_ctx_shape = (B, num_ctx_max, 1)
-    f_ctx_shape = (B, num_ctx_max, D_f)
-    mask_ctx_shape = (B, num_ctx_max)
-    x_test_shape = (B, num_test, D_x)
-    t_test_shape = (B, num_test, 1)
-    f_test_shape = (B, num_test, D_f)
-    mask_test_shape = (B, num_test)
-    x = random.normal(rng, x_shape)
-    f = random.normal(rng, f_shape)
-    t = jnp.repeat(jnp.arange(T)[None, :], B, axis=0)
-    # test basic instantiation
-    d = TemporalData(x, t, f)
-    assert d.x.shape == x_shape
-    assert d.t.shape == t_shape
-    assert d.f.shape == f_shape
-    # test batching where test includes context
-    test_includes_ctx = True
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
-    assert b.x_ctx.shape == x_ctx_shape
-    assert b.t_ctx.shape == t_ctx_shape
-    assert b.f_ctx.shape == f_ctx_shape
-    assert b.mask_ctx.shape == mask_ctx_shape
-    assert b.x_test.shape == x_test_shape
-    assert b.t_test.shape == t_test_shape
-    assert b.f_test.shape == f_test_shape
-    assert b.mask_test.shape == mask_test_shape
-    assert (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
-    assert (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
-    assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-    # test batching where test does not include context
-    test_includes_ctx = False
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
-    assert b.x_ctx.shape == x_ctx_shape
-    assert b.t_ctx.shape == t_ctx_shape
-    assert b.f_ctx.shape == f_ctx_shape
-    assert b.mask_ctx.shape == mask_ctx_shape
-    assert b.x_test.shape == x_test_shape
-    assert b.t_test.shape == t_test_shape
-    assert b.f_test.shape == f_test_shape
-    assert b.mask_test.shape == mask_test_shape
-    assert not (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
-    assert not (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
-    assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-
-
-def test_temporal_data_without_x():
-    rng = random.key(42)
-    B, T, D_f = 4, 64, 2
-    num_ctx_min, num_ctx_max, num_test = 3, 10, 20
-    t_shape = (B, T)
-    f_shape = (B, T, D_f)
-    t_ctx_shape = (B, num_ctx_max, 1)
-    f_ctx_shape = (B, num_ctx_max, D_f)
-    mask_ctx_shape = (B, num_ctx_max)
-    t_test_shape = (B, num_test, 1)
-    f_test_shape = (B, num_test, D_f)
-    mask_test_shape = (B, num_test)
-    f = random.normal(rng, f_shape)
-    t = jnp.repeat(jnp.arange(T)[None, :], B, axis=0)
-    # test basic instantiation
-    d = TemporalData(None, t, f)
-    assert d.x is None
-    assert d.t.shape == t_shape
-    assert d.f.shape == f_shape
-    # test batching where test includes context
-    test_includes_ctx = True
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
-    assert b.x_ctx is None
-    assert b.t_ctx.shape == t_ctx_shape
-    assert b.f_ctx.shape == f_ctx_shape
-    assert b.mask_ctx.shape == mask_ctx_shape
-    assert b.x_test is None
-    assert b.t_test.shape == t_test_shape
-    assert b.f_test.shape == f_test_shape
-    assert b.mask_test.shape == mask_test_shape
-    assert (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
-    assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-    # test batching where test does not include context
-    test_includes_ctx = False
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
-    assert b.x_ctx is None
-    assert b.t_ctx.shape == t_ctx_shape
-    assert b.f_ctx.shape == f_ctx_shape
-    assert b.mask_ctx.shape == mask_ctx_shape
-    assert b.x_test is None
-    assert b.t_test.shape == t_test_shape
-    assert b.f_test.shape == f_test_shape
-    assert b.mask_test.shape == mask_test_shape
-    assert not (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
-    assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-
-
-def test_temporal_data_broadcast_x():
-    rng = random.key(42)
-    B, T, D_x, D_f = 4, 64, 8, 2
-    num_ctx_min, num_ctx_max, num_test = 3, 10, 20
-    x_shape = (B, D_x)
-    t_shape = (B, T)
-    f_shape = (B, T, D_f)
-    x_ctx_shape = (B, num_ctx_max, D_x)
-    t_ctx_shape = (B, num_ctx_max, 1)
-    f_ctx_shape = (B, num_ctx_max, D_f)
-    mask_ctx_shape = (B, num_ctx_max)
-    x_test_shape = (B, num_test, D_x)
-    t_test_shape = (B, num_test, 1)
-    f_test_shape = (B, num_test, D_f)
-    mask_test_shape = (B, num_test)
-    x = random.normal(rng, x_shape)
-    f = random.normal(rng, f_shape)
-    t = jnp.repeat(jnp.arange(T)[None, :], B, axis=0)
-    # test basic instantiation
-    d = TemporalData(x, t, f)
-    assert d.x.shape == x_shape
-    assert d.t.shape == t_shape
-    assert d.f.shape == f_shape
-    # test batching where test includes context
-    test_includes_ctx = True
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
-    assert b.x_ctx.shape == x_ctx_shape
-    assert b.t_ctx.shape == t_ctx_shape
-    assert b.f_ctx.shape == f_ctx_shape
-    assert b.mask_ctx.shape == mask_ctx_shape
-    assert b.x_test.shape == x_test_shape
-    assert b.t_test.shape == t_test_shape
-    assert b.f_test.shape == f_test_shape
-    assert b.mask_test.shape == mask_test_shape
-    assert (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
-    assert (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
-    assert (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-    # test batching where test does not include context
-    test_includes_ctx = False
-    b = d.batch(rng, num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
-    assert b.x_ctx.shape == x_ctx_shape
-    assert b.t_ctx.shape == t_ctx_shape
-    assert b.f_ctx.shape == f_ctx_shape
-    assert b.mask_ctx.shape == mask_ctx_shape
-    assert b.x_test.shape == x_test_shape
-    assert b.t_test.shape == t_test_shape
-    assert b.f_test.shape == f_test_shape
-    assert b.mask_test.shape == mask_test_shape
-    assert not (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
 
 
@@ -403,6 +362,14 @@ def test_spatiotemporal_data_with_x():
                     forecast,
                     B,
                 )
+                samples = b.sample_for_inference(rng, num_samples=1)
+                assert len(samples) == 1
+                assert samples[0][1]["f_ctx"].shape[0] < num_ctx_max_per_t * (T_b - 1)
+                samples = b.sample_for_inference(rng, num_samples=2)
+                assert len(samples) == 2
+                # assert that they have been masked and extracted differently
+                # this could fail if they just so happen to have the same number
+                # of valid lengths for each sequence although this is p=1/37
                 assert b.x_ctx.shape == x_ctx_shape
                 assert b.s_ctx.shape == s_ctx_shape
                 assert b.t_ctx.shape == t_ctx_shape
@@ -591,21 +558,6 @@ def test_spatial_data_plot_1d():
     b = SpatialData(x, s, f).batch(rng, num_ctx_min, num_ctx_max, num_test, True)
     fig = b.plot_1d(f_pred, f_std)
     fig.savefig("/tmp/test_spatial_data_plot_1d.png")
-
-
-def test_temporal_data_plot_1d():
-    B, T, D_f = 4, 128, 1
-    num_ctx_min, num_ctx_max, num_test = 3, 10, 128
-    rng = random.key(42)
-    rng_f, rng_f_pred, rng_b = random.split(rng, 3)
-    x = None
-    f = random.normal(rng_f, (B, num_test, D_f))
-    f_pred = f + 0.01 * random.normal(rng_f_pred, (B, num_test, D_f))
-    f_std = jnp.zeros((B, num_test, 1)) + 0.1
-    t = jnp.repeat(jnp.arange(T)[None, :], B, axis=0)
-    b = TemporalData(x, t, f).batch(rng, num_ctx_min, num_ctx_max, num_test, True)
-    fig = b.plot_1d(f_pred, f_std)
-    fig.savefig("/tmp/test_temporal_data_plot_1d.png")
 
 
 def test_spatial_data_plot_2d():

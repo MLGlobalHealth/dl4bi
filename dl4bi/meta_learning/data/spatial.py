@@ -9,7 +9,8 @@ import matplotlib.pyplot as plt
 from jax import jit, random
 from jax.scipy.stats import norm
 
-from .utils import (
+from dl4bi.core.utils import safe_stack
+from dl4bi.meta_learning.data.utils import (
     MetaLearningBatch,
     MetaLearningData,
     batch_BLD,
@@ -34,7 +35,7 @@ class SpatialData(MetaLearningData):
         test_includes_ctx: bool = False,
         obs_noise: Optional[float] = None,
         test_includes_noise: bool = False,
-        batch_size: Optional[int] = None,
+        batch_size: Optional[int] = None,  # resamples B dim
     ):
         return _batch(
             rng,
@@ -135,6 +136,42 @@ class SpatialBatch(MetaLearningBatch):
     mask_test: Optional[jax.Array]  # [B, L_test] or None
     inv_permute_idx: jax.Array  # [L]
     s_shape: tuple
+
+    def to_xy(self):
+        """Converts to an Xy dataset for traditional supervised learning."""
+        return {
+            "x_train": safe_stack(self.x_ctx, self.s_ctx),
+            "y_train": self.f_ctx,
+            "mask_train": self.mask_ctx,
+            "x_test": safe_stack(self.x_test, self.s_test),
+            "y_test": self.f_test,
+            "mask_test": self.mask_test,
+        }
+
+    def sample_for_inference(
+        self,
+        rng: jax.Array,
+        num_samples: int = 1,
+        allow_repeats: bool = False,
+    ):
+        """Samples elements from the batch and formats for inference, e.g. in Numpyro."""
+        B = self["f_test"].shape[0]
+        mask_ctx = jnp.array([True]) if self.mask_ctx is None else self.mask_ctx
+        mask_test = jnp.array([True]) if self.mask_test is None else self.mask_test
+        idxs = random.choice(rng, B, (num_samples,), replace=allow_repeats)
+        samples = []
+        for idx in idxs:
+            d = {
+                "s_ctx": self.s_ctx[idx][mask_ctx[idx]],
+                "f_ctx": self.f_ctx[idx][mask_ctx[idx]],
+                "s_test": self.s_test[idx][mask_test[idx]],
+                "f_test": self.f_test[idx][mask_test[idx]],
+            }
+            if self.x_ctx is not None:
+                d["x_ctx"] = self.x_ctx[idx][mask_ctx[idx]]
+                d["x_test"] = self.x_test[idx][mask_test[idx]]
+            samples += [(idx, d)]
+        return samples
 
     def plot_1d(
         self,

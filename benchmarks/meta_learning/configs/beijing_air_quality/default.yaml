@@ -1,0 +1,32 @@
+defaults:
+  - _self_ # use default global values below
+  - model: bsa_tnp
+seed: 42
+wandb: True
+project: Beijing Air Quality
+train_num_steps: 10000
+valid_num_steps: 500
+valid_interval: 500
+test_num_steps: 5000
+data:
+  batch_size: 32
+  num_ctx_min: 624 # ~= 48 hours * 12 locations + 12 for buffer
+  num_ctx_max: 624
+  num_test: 84 # ~= 6 hours * 12 locations + 12 for buffer
+  pct_train: 0.8
+  pct_valid: 0.1
+  pct_test: 0.1
+optimizer:
+  _target_: optax.chain
+  _args_:
+    - _target_: optax.clip_by_global_norm
+      max_norm: 0.5
+    - _target_: optax.adamw
+      learning_rate:
+        _target_: optax.cosine_decay_schedule
+        init_value: 1.0e-3
+        decay_steps: ${train_num_steps}
+        alpha: 1.0e-5
+      b1: 0.9
+      b2: 0.999
+      weight_decay: 1.0e-4

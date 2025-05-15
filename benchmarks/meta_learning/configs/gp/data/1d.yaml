@@ -4,8 +4,8 @@ s:
     stop: 2
     num: 128
 num_ctx:
-  min: 3
-  max: 32
-num_test: 128 
+  min: 3 # ~2%
+  max: 32 # 25%
+num_test: 32 # 25%
 batch_size: 32
 obs_noise: 0.1

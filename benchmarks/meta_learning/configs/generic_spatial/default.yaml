@@ -1,0 +1,42 @@
+defaults:
+  - _self_ # use default global values below
+  - model: bsa_tnp
+seed: 42
+wandb: True
+project: Generic Spatial
+train_num_steps: 150000
+valid_num_steps: 1000
+valid_interval: 10000
+data:
+  num_features: 10
+  batch_size: 32
+  num_ctx_min: 13 # ~5% of locations
+  num_ctx_max: 64  # ~12.5% of locations
+  num_test: 64 # ~25% of locations
+  s:
+  - start: -2
+    stop: 2
+    num: 16
+  - start: -2
+    stop: 2
+    num: 16
+mcmc:
+  num_warmup: 2000
+  num_samples: 2000
+  num_chains: 4
+infer_with_model: False
+infer_with_mcmc: False
+optimizer:
+  _target_: optax.chain
+  _args_:
+    - _target_: optax.clip_by_global_norm
+      max_norm: 0.5
+    - _target_: optax.adamw
+      learning_rate:
+        _target_: optax.cosine_decay_schedule
+        init_value: 1.0e-4
+        decay_steps: ${train_num_steps}
+        alpha: 5.0e-5
+      b1: 0.9
+      b2: 0.999
+      weight_decay: 1.0e-4
