@@ -4,7 +4,7 @@ defaults:
 seed: 42
 wandb: True
 project: Generic Spatial
-train_num_steps: 150000
+train_num_steps: 500000
 valid_num_steps: 1000
 valid_interval: 10000
 data:
@@ -36,7 +36,7 @@ optimizer:
         _target_: optax.cosine_decay_schedule
         init_value: 1.0e-4
         decay_steps: ${train_num_steps}
-        alpha: 5.0e-5
+        alpha: 2.0e-5
       b1: 0.9
       b2: 0.999
       weight_decay: 1.0e-4
