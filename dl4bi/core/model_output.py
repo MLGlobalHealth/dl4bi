@@ -62,7 +62,7 @@ class DiagonalMVNOutput(DistributionOutput):
         rmse = jnp.sqrt(jnp.square(x - self.mu).mean(where=mask))
         mae = jnp.abs(x - self.mu).mean(where=mask)
         f_lower, f_upper = self.mu - z_score * self.std, self.mu + z_score * self.std
-        cvg = (x >= f_lower) & (x <= f_upper)
+        cvg = ((x >= f_lower) & (x <= f_upper)).mean(where=mask)
         return {"NLL": self.nll(x, mask), "RMSE": rmse, "MAE": mae, "Coverage": cvg}
 
     def forward_kl_div(self, p: "DiagonalMVNOutput"):

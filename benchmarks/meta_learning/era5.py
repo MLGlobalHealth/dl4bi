@@ -47,7 +47,7 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader, valid_dataloader, test_dataloader, callback_dataloader = (
-        build_dataloaders()
+        build_dataloaders(**cfg.data)
     )
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
@@ -65,6 +65,7 @@ def main(cfg: DictConfig):
         valid_dataloader,
         callbacks=[clbk],
         callback_dataloader=callback_dataloader,
+        return_state="best",
     )
     metrics = evaluate(
         rng_test,
@@ -81,17 +82,24 @@ def main(cfg: DictConfig):
 
 def build_dataloaders(
     batch_size: int = 16,
-    num_ctx_min_per_t: int = 12,  # ~5% of 225 = 15 * 15
-    num_ctx_max_per_t: int = 56,  # ~25% of 225 = 15 * 15
-    num_test: int = 225,  # 225 = 15 * 15 = predicted frame
+    num_ctx_min_per_t: int = 45,
+    num_ctx_max_per_t: int = 225,
+    num_test: int = 900,
     train_region: str = "central_europe",
-    test_region: str = "western_europe",  # western_europe, northern_europe
+    valid_region: str = "northern_europe",
+    test_region: str = "western_europe",
     num_batches_per_subset: int = 50,
 ):
-    grid_res, H_deg, W_deg, T_hrs, T_hrs_delta = 0.5, 7.5, 7.5, 30, 6
+    grid_res, H_deg, W_deg, T_hrs, T_hrs_delta = 0.25, 7.5, 7.5, 30, 6
     H, W = int(H_deg / grid_res), int(W_deg / grid_res)
-    df_train, df_test, revert = load_data(train_region, test_region)
-    data_cols = ["hour_std", "lat_std", "lng_std", "elev_std", "temp_std"]
+    df_train, df_valid, df_test, revert = load_data(
+        train_region, valid_region, test_region
+    )
+    x_cols = ["elev_std", "hour_of_day_norm"]
+    s_cols = ["lat_std", "lng_std"]
+    t_cols = ["hour_std"]
+    f_cols = ["temp_std"]
+    data_cols = x_cols + s_cols + t_cols + f_cols
 
     def build_dataloader(df: pd.DataFrame, is_callback: bool = False):
         lat_uniq, lng_uniq = df.latitude.unique(), df.longitude.unique()
@@ -118,10 +126,10 @@ def build_dataloaders(
                 values = dft[data_cols].values.reshape(shape)
                 # 4. Separate out x, s, t, and f
                 subset = SpatiotemporalData(
-                    x=values[..., [3]],  # [T, H, W, 1]
-                    s=values[..., 1:3],  # [T, H, W, 2]
-                    t=values[:, 0, 0, 0],  # [T]
-                    f=values[..., [-1]],  # [T, H, W, 1]
+                    x=values[..., :2],  # [T, H, W, 2]
+                    s=values[..., 2:4],  # [T, H, W, 2]
+                    t=values[:, 0, 0, 4],  # [T]
+                    f=values[..., [5]],  # [T, H, W, 1]
                 )
                 # 5. Create a number of batches from this filtered subset
                 for _ in range(num_batches_per_subset):
@@ -143,19 +151,21 @@ def build_dataloaders(
 
     return (
         build_dataloader(df_train),  # train
-        build_dataloader(df_test),  # valid
+        build_dataloader(df_valid),  # valid
         build_dataloader(df_test),  # test
-        build_dataloader(df_test, is_callback=True),  # callback
+        build_dataloader(df_valid, is_callback=True),  # callback
     )
 
 
 def load_data(
     train_region: str = "central_europe",
+    valid_region: str = "northern_europe",
     test_region: str = "western_europe",
 ):
     df_train = load_cached(train_region)
+    df_valid = load_cached(valid_region)
     df_test = load_cached(test_region)
-    return standardize_using_train(df_train, df_test)
+    return standardize_using_train(df_train, df_valid, df_test)
 
 
 def load_cached(region: str = "central_europe"):
@@ -178,7 +188,7 @@ def download_if_not_cached():
     central_europe = [53, 8, 42, 28]  # N, W, S, E
     western_europe = [53, -4, 42, 8]
     northern_europe = [62, 8, 53, 28]
-    grid = [0.5, 0.5]
+    grid = [0.25, 0.25]
 
     for region, area in [
         ("central_europe", central_europe),
@@ -209,7 +219,11 @@ def download_if_not_cached():
                 )
 
 
-def standardize_using_train(df_train: pd.DataFrame, df_test: pd.DataFrame):
+def standardize_using_train(
+    df_train: pd.DataFrame,
+    df_valid: pd.DataFrame,
+    df_test: pd.DataFrame,
+):
     t_min = df_train.valid_time.min()
     df_train["hour"] = (df_train.valid_time - t_min) / pd.Timedelta(hours=1)
     hour_mu, hour_std = df_train.hour.mean(), df_train.hour.std()
@@ -219,6 +233,7 @@ def standardize_using_train(df_train: pd.DataFrame, df_test: pd.DataFrame):
     temp_mu, temp_std = df_train.t2m.mean(), df_train.t2m.std()
 
     def standardize(df: pd.DataFrame):
+        df["hour_of_day_norm"] = df.valid_time.dt.hour / 23.0
         df["hour"] = (df.valid_time - t_min) / pd.Timedelta(hours=1)
         df["hour_std"] = (df.hour - hour_mu) / hour_std
         df["lat_std"] = (df.latitude - lat_mu) / lat_std
@@ -243,6 +258,7 @@ def standardize_using_train(df_train: pd.DataFrame, df_test: pd.DataFrame):
 
     return (
         standardize(df_train),
+        standardize(df_valid),
         standardize(df_test),
         {"t": revert_t, "s": revert_s},
     )
@@ -276,15 +292,15 @@ def plot(
     f_max = max(batch.f_ctx.max(), batch.f_test.max(), f_pred.max())
     norm = Normalize(f_min, f_max)
     norm_std = Normalize(f_std.min(), f_std.max())
-    cmap = mpl.colormaps.get_cmap("viridis")
+    cmap = mpl.colormaps.get_cmap("Spectral_r")
     cmap.set_bad("grey")
     path = f"/tmp/era5_{step}_{datetime.now().isoformat()}.png"
     fig = batch.plot_2d(
         f_pred,
         f_std,
         cmap=cmap,
-        norm=norm,
-        norm_std=norm_std,
+        # norm=norm,
+        # norm_std=norm_std,
         **kwargs,
     )
     # TODO(danj): add tick labels for lat/lng

@@ -82,7 +82,7 @@ class TransformerEncoder(nn.Module):
         **kwargs,
     ):
         for _ in range(self.num_blks):
-            x, _ = self.blk.copy()(x, mask, training, **kwargs)
+            x, *_ = self.blk.copy()(x, mask, training, **kwargs)
         if self.blk.pre_norm:
             x = self.norm(x)
         return x
@@ -259,7 +259,11 @@ class TEISTEncoder(nn.Module):
         ps = self.param("pseudo_tokens", init.normal(stddev=1.0), (1, Z, E))
         ps_s = self.param("pseudo_locs", init.normal(stddev=1.0), (1, Z, D_s))
         ps, ps_s = batchify(ps), batchify(ps_s)
-        ps_s += ks_s.mean(axis=1, keepdims=True)  # shift to mean key location
+        # shift ps_s to mean ks_s location
+        if mask is None:
+            ps_s += ks_s.mean(axis=1, keepdims=True)
+        else:
+            ps_s += ks_s.mean(axis=1, keepdims=True, where=mask[..., None])
         for _ in range(self.num_blks):
             ps, ps_s, _ = self.ps_to_ks_blk.copy()(
                 ps, ks, ps_s, ks_s, mask, training, **kwargs

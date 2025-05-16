@@ -6,9 +6,11 @@ from typing import Callable, Optional, Sequence, Union
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
 import wandb
 from jax import random
 from omegaconf import DictConfig
+from tqdm import tqdm
 
 from ..core.train import TrainState, load_ckpt
 from .data.spatial import SpatialBatch
@@ -76,3 +78,26 @@ def wandb_2d_img_callback(
 
 def x_to_none(x: jax.Array):
     return None
+
+
+def save_batches_for_tabpfn(
+    rng: jax.Array,
+    dataloader: Callable,
+    num_steps: int,
+    path: Path,
+):
+    rng_data, rng = random.split(rng)
+    print("Saving batches for TabPFN")
+    pbar = tqdm(
+        dataloader(rng_data),
+        total=num_steps,
+        unit=" batches",
+        leave=False,
+        dynamic_ncols=True,
+    )
+    samples = []
+    for i, batch in enumerate(pbar):
+        if i >= num_steps:  # for infinite dataloaders
+            break
+        samples.append({k: np.array(v) for k, v in batch.to_xy().items()})
+    np.save(path, samples, allow_pickle=True)

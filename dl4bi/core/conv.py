@@ -66,7 +66,7 @@ def _deep_set(
 ):
     B, L_ctx, _ = f_ctx.shape
     d_sq = vmap(l2_dist_sq)(s_test, s_ctx)[..., None]  # [B, L_test, L_ctx, 1]
-    ls = jnp.exp(log_ls)[None, None, None, :]  # [1, 1, 1, d_in]
+    ls = 1e-6 + jnp.exp(log_ls)[None, None, None, :]  # [1, 1, 1, d_in]
     rbf_w = jnp.exp(-d_sq / (2 * ls**2))  # [B, L_test, L_ctx, d_in]
     f_test = f_ctx
     if use_density:

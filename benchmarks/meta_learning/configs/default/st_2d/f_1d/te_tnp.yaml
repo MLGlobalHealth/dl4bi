@@ -2,7 +2,7 @@ _target_: dl4bi.meta_learning.TETNP
 encoder:
   _target_: dl4bi.transformer.TEISTEncoder
   num_blks: 5
-  num_latents: 128
+  num_latents: 32
   embed_dim: 128
   ps_to_ks_blk:
     _target_: dl4bi.transformer.TEBlock

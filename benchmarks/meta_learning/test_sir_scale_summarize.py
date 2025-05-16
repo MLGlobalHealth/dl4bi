@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-# Example: python test_sir_scale_summarize.py "TNP-KR - SIR"
+# Example: python test_sir_scale_summarize.py "BSA-TNP - SIR"
 
 
 def main():

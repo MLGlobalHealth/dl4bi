@@ -21,10 +21,11 @@ from dl4bi.meta_learning import (
     CNP,
     NP,
     SGNP,
+    TETNP,
     TNPD,
-    TNPKR,
+    BTNP,
     ConvCNP,
-    ScanTNPKR,
+    BSATNP,
 )
 from dl4bi.meta_learning.data.spatial import SpatialData
 
@@ -38,8 +39,9 @@ def test_models():
     valid_lens = jnp.array([22, 44, 97, 32])
     mask_ctx = mask_from_valid_lens(L, valid_lens)
     f = random.normal(rng_data, s.shape)
-    kr_block = KRBlock(
-        MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
+    bias = Bias.build_rbf_network_bias()
+    scanned_kr_block = KRBlock(
+        MultiHeadAttention(BiasedScanAttention(bias={"s": bias}))
     )
     for model in [
         NP,
@@ -48,11 +50,13 @@ def test_models():
         CANP,
         ConvCNP,
         TNPD,
-        TNPKR,
-        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
-        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
-        lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
-        lambda: ScanTNPKR(blk=kr_block),
+        TETNP,
+        BTNP,
+        lambda: BTNP(blk=KRBlock(MultiHeadAttention(Attention()))),
+        lambda: BTNP(blk=KRBlock(MultiHeadAttention(FastAttention()))),
+        lambda: BTNP(blk=KRBlock(DeepKernelAttention())),
+        lambda: BTNP(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
+        lambda: BSATNP(blk=scanned_kr_block),
         lambda: SGNP(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
     ]:
         m = model()
@@ -82,7 +86,7 @@ def test_tnp_kr_fast_scale():
     s_test = jnp.linspace(0, 1.0, L_test)[None, :, None]  # [1, L_test, 1]
     f_init = random.normal(rng_init, (B, L_init, D_f))
     f_ctx = random.normal(rng_ctx, (B, L_ctx, D_f))
-    m = TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention())))
+    m = BTNP(blk=KRBlock(MultiHeadAttention(FastAttention())))
     params = m.init(rng_init, s_ctx=s_init, f_ctx=f_init, s_test=s_init)
     jit_m = jit(lambda **kwargs: m.apply(params, **kwargs))
     jit_m(s_ctx=s_init, f_ctx=f_init, s_test=s_init)  # dummy run to compile
@@ -103,9 +107,11 @@ def test_context_data_leaks():
     s = 4 * (random.uniform(rng_s, (B, L, 1)) - 0.5)  # [0, 1] -> [-0.5, 0.5] -> [-2, 2]
     f = random.normal(rng_f, s.shape)
     # set second half to large value (different from using half the array because of attn)
+    s2 = s.at[:, V:, :].set(jnp.full((B, L - V, 1), 10000))
     f2 = f.at[:, V:, :].set(jnp.full((B, L - V, 1), 10000))
-    kr_block = KRBlock(
-        MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
+    bias = Bias.build_rbf_network_bias()
+    scanned_kr_block = KRBlock(
+        MultiHeadAttention(BiasedScanAttention(bias={"s": bias}))
     )
     for model in [
         NP,
@@ -113,11 +119,13 @@ def test_context_data_leaks():
         ANP,
         CANP,
         ConvCNP,
+        TETNP,
         TNPD,
-        lambda: ScanTNPKR(blk=kr_block),
-        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
-        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
-        lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
+        lambda: BTNP(blk=KRBlock(MultiHeadAttention(Attention()))),
+        lambda: BTNP(blk=KRBlock(MultiHeadAttention(FastAttention()))),
+        lambda: BTNP(blk=KRBlock(DeepKernelAttention())),
+        lambda: BSATNP(blk=scanned_kr_block),
+        lambda: BTNP(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
         lambda: SGNP(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
     ]:
         m = model()
@@ -143,7 +151,7 @@ def test_context_data_leaks():
         # with jax.profiler.trace("/tmp/tensorboard"):
         output_half = jit_m(
             params,
-            s_ctx=s,
+            s_ctx=s2,
             f_ctx=f2,
             s_test=s,
             mask_ctx=mask_ctx,
@@ -180,8 +188,9 @@ def test_train_step_loss():
     batch_1 = d.batch(rng_b1, 1, N, L, True)
     batch_2 = d.batch(rng_b2, 1, N, L, True)
     rng_init, rng_drop, rng_extra, rng_step = random.split(rng, 4)
-    kr_block = KRBlock(
-        MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
+    bias = Bias.build_rbf_network_bias()
+    scanned_kr_block = KRBlock(
+        MultiHeadAttention(BiasedScanAttention(bias={"s": bias}))
     )
     for model in [
         NP,
@@ -189,9 +198,11 @@ def test_train_step_loss():
         ANP,
         CANP,
         TNPD,
-        TNPKR,
+        TETNP,
+        BTNP,
         ConvCNP,
-        lambda: ScanTNPKR(blk=kr_block),
+        lambda: BTNP(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
+        lambda: BSATNP(blk=scanned_kr_block),
         lambda: SGNP(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
     ]:
         m = model()

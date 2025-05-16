@@ -1,0 +1,14 @@
+name: 2d
+s:
+  - start: -4
+    stop: 4
+    num: 128
+  - start: -4
+    stop: 4
+    num: 128
+num_ctx:
+  min: 492
+  max: 2048
+num_test: 4096
+batch_size: 8
+obs_noise: 0.1

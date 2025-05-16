@@ -7,23 +7,26 @@ so an account is necessary to log and collect the results from these runs.
 """
 
 import argparse
-import itertools as it
 import sys
 from collections.abc import Callable
 
 import jax
-from bayes_opt import main as bayes_opt_main
+from beijing_air_quality import main as beijing_air_quality_main
 from celeba import main as celeba_main
 from cifar_10 import main as cifar_10_main
+from era5 import main as era5_main
+from generic_spatial import main as generic_spatial_main
 from gp import main as gp_main
+from household_electric import main as household_electric_main
 from hydra import compose, initialize
 from jax import random
 from mnist import main as mnist_main
+from multiscale_2d_gp import main as multiscale_2d_gp_main
 from sir import main as sir_main
 
 
-def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
-    """Reproduces the Transformer Neural Process - Kernel Regresssion (TNP-KR) paper."""
+def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
+    """Reproduces the BSA-TNP paper."""
     overrides = []
     if dry_run:
         seeds = seeds[:2]  # no need for more than 2 runs each in dry run
@@ -33,42 +36,15 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
             "valid_num_steps=50",
             "plot_interval=50",
         ]
-    overrides = [overrides]  # expects list[list[str]]
-    gp_kernels_1d = ["periodic", "rbf", "matern_3_2"]
     gp_kernels_2d = ["rbf"]
     models = [
+        "bsa_tnp",
         "tnp_d",
-        "tnp_kr_scan",
-        "tnp_kr_dka",
-        "tnp_kr_performer",
+        "te_tnp",
         "convcnp",
-        "np",
-        "cnp",
-        "anp",
-        "canp",
     ]
-    models = [f"icml/{m}" for m in models]
-    gp_benchmark(
-        seeds,
-        "1d",
-        gp_kernels_1d,
-        [f"1d/{m}" for m in models],
-        gp_main,
-        overrides,
-        "ICML TNP-KR - Gaussian Processes",
-        dry_run=dry_run,
-    )
-    gp_benchmark(
-        seeds,
-        "1d",
-        gp_kernels_1d,
-        [f"1d/{m}" for m in models],
-        bayes_opt_main,
-        overrides,
-        "ICML TNP-KR - Bayesian Optimization",
-        "ICML TNP-KR - Gaussian Processes",
-        dry_run=dry_run,
-    )
+
+    # TRANSLATION INVARIANCE
     gp_benchmark(
         seeds,
         "2d",
@@ -76,115 +52,161 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         [f"2d/{m}" for m in models],
         gp_main,
         overrides,
-        "ICML TNP-KR - Gaussian Processes",
+        "NeurIPS BSA-TNP - Gaussian Processes",
         dry_run=dry_run,
     )
-    img_benchmark(
+    gp_benchmark(
         seeds,
-        "configs/mnist",
-        models,
-        mnist_main,
-        overrides,
-        "ICML TNP-KR - MNIST",
+        "2d_shifted_10",
+        gp_kernels_2d,
+        [f"2d/{m}" for m in ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_shifted_10"]],
+        gp_main,
+        ["project_suffix=' - Shifted 10'", "evaluate_only=True"],
+        "NeurIPS BSA-TNP - Gaussian Processes",
         dry_run=dry_run,
     )
-    img_benchmark(
+    gp_benchmark(
         seeds,
-        "configs/celeba",
-        models,
-        celeba_main,
-        overrides,
-        "ICML TNP-KR - CelebA",
+        "2d_scaled_2x",
+        gp_kernels_2d,
+        [f"2d/{m}" for m in ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_scaled_2x"]],
+        gp_main,
+        [
+            "project_suffix=' - Scaled 2x'",
+            "evaluate_only=True",
+            "valid_num_steps=1000",
+        ],
+        "NeurIPS BSA-TNP - Gaussian Processes",
         dry_run=dry_run,
     )
-    img_benchmark(
+
+    # MULTIRESOLUTION
+    generic_benchmark(
         seeds,
-        "configs/cifar_10",
-        models,
-        cifar_10_main,
+        "configs/multiscale_2d_gp",
+        ["bsa_tnp", "te_tnp"],
+        multiscale_2d_gp_main,
         overrides,
-        "ICML TNP-KR - Cifar 10",
+        "NeurIPS BSA-TNP - Multiscale Gaussian Processes",
         dry_run=dry_run,
     )
-    img_benchmark(
+
+    # EPIDEMIOLOGY
+    generic_benchmark(
         seeds,
         "configs/sir",
         models,
         sir_main,
         overrides,
-        "ICML TNP-KR - SIR",
+        "NeurIPS BSA-TNP - SIR",
+        dry_run=dry_run,
+    )
+    generic_benchmark(
+        seeds,
+        "configs/sir",
+        ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_shifted_10"],
+        sir_main,
+        [
+            "project_suffix=' - Shifted 10'",
+            "evaluate_only=True",
+            "data=spatial_64x64_shifted_10.yaml",
+        ],
+        "NeurIPS BSA-TNP - SIR",
+        dry_run=dry_run,
+    )
+    generic_benchmark(
+        seeds,
+        "configs/sir",
+        ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_scaled_2x"],
+        sir_main,
+        [
+            "project_suffix=' - Scaled 2x'",
+            "evaluate_only=True",
+            "valid_num_steps=1000",
+            "data=spatial_128x128",
+        ],
+        "NeurIPS BSA-TNP - SIR",
         dry_run=dry_run,
     )
 
+    # SPACE & TIME
+    era5_models = ["tnp_d", "te_tnp", "bsa_tnp"]
+    era5_overrides = [
+        "data.valid_region=northern_europe",
+        "data.test_region=western_europe",
+    ]
+    generic_benchmark(
+        seeds,
+        "configs/era5",
+        era5_models,
+        era5_main,
+        overrides + era5_overrides,
+        "NeurIPS BSA-TNP - ERA5 - CNW",
+        dry_run=dry_run,
+    )
+    era5_overrides = [
+        "data.valid_region=western_europe",
+        "data.test_region=northern_europe",
+    ]
+    generic_benchmark(
+        seeds,
+        "configs/era5",
+        era5_models,
+        era5_main,
+        overrides + era5_overrides,
+        "NeurIPS BSA-TNP - ERA5 - CWN",
+        dry_run=dry_run,
+    )
 
-def lore_paper(seeds: jax.Array, dry_run: bool = False):
-    """Reproduces the LoRe: Local Refinement with Tranformers paper."""
-    if dry_run:
-        seeds = seeds[:2]  # no need for more than 2 runs each in dry run
-    gp_kernels_1d = ["rbf", "periodic", "matern_3_2"]
-    gp_kernels_2d = ["rbf"]
-    models = ["tnp_kr"]
-    overrides = []
-    nums = [1, 2, 3, 6]
-    for num_blks, num_reps in it.product(nums, nums):
-        blk_str = f"model.kwargs.dec.kwargs.num_blks={num_blks}"
-        rep_str = f"model.kwargs.dec.kwargs.num_reps={num_reps}"
-        override = [blk_str, rep_str]
-        if dry_run:
-            override += [
-                "wandb=False",
-                "train_num_steps=100",
-                "valid_num_steps=50",
-                "plot_interval=50",
-            ]
-        overrides += [override]
-    gp_benchmark(
+    # HIGH DIMENSIONAL FIXED EFFECTS
+    tabular_models = ["bsa_tnp", "te_tnp", "tnp_d"]
+    generic_benchmark(
         seeds,
-        "1d",
-        gp_kernels_1d,
-        models,
-        gp_main,
+        "configs/beijing_air_quality",
+        tabular_models,
+        beijing_air_quality_main,
         overrides,
-        "LoRe - Gaussian Processes",
+        "NeurIPS BSA-TNP - Beijing Air Quality",
         dry_run=dry_run,
     )
-    gp_benchmark(
+    generic_benchmark(
         seeds,
-        "2d",
-        gp_kernels_2d,
-        models,
-        gp_main,
+        "configs/generic_spatial",
+        tabular_models,
+        generic_spatial_main,
         overrides,
-        "LoRe - Gaussian Processes",
+        "NeurIPS BSA-TNP - Generic Spatial",
         dry_run=dry_run,
     )
-    img_benchmark(
-        seeds,
-        "configs/mnist",
-        models,
-        mnist_main,
-        overrides,
-        "LoRe - MNIST",
-        dry_run=dry_run,
-    )
-    img_benchmark(
-        seeds,
-        "configs/celeba",
-        models,
-        celeba_main,
-        overrides,
-        "LoRe - CelebA",
-        dry_run=dry_run,
-    )
+
+    # NON-STATIONARY DISTRIBUTIONS
+    # generic_benchmark(
+    #     seeds,
+    #     "configs/celeba",
+    #     models,
+    #     celeba_main,
+    #     overrides,
+    #     "NeurIPS BSA-TNP - CelebA",
+    #     dry_run=dry_run,
+    # )
+    # generic_benchmark(
+    #     seeds,
+    #     "configs/cifar_10",
+    #     models,
+    #     cifar_10_main,
+    #     overrides,
+    #     "NeurIPS BSA-TNP - Cifar 10",
+    #     dry_run=dry_run,
+    # )
 
 
 def gp_benchmark(
     seeds: jax.Array,
     data: str = "1d",
-    kernels: list[str] = ["rbf", "periodic", "tnp_kr"],
-    models: list[str] = ["1d/tnp_kr_scan"],
+    kernels: list[str] = ["rbf", "periodic", "b_tnp"],
+    models: list[str] = ["1d/bsa_tnp"],
     main_fn: Callable = gp_main,
-    overrides: list[list[str]] = [[]],
+    overrides: list = [],
     project: str = "",
     project_parent: str = "None",
     dry_run: bool = False,
@@ -195,30 +217,29 @@ def gp_benchmark(
     for kernel in kernels:
         for seed in seeds:
             for model in models:
-                for overrides_i in overrides:
-                    with initialize(config_path="configs/gp", version_base=None):
-                        cfg = compose(
-                            "default",
-                            overrides=[
-                                f"project={project}",
-                                f"data={data}",
-                                f"model={model}",
-                                f"kernel={kernel}",
-                                f"seed={seed}",
-                                f"+project_parent={project_parent}",
-                            ]
-                            + overrides_i,
-                        )
-                        print("=" * 100)
-                        main_fn(cfg)
+                with initialize(config_path="configs/gp", version_base=None):
+                    cfg = compose(
+                        "default",
+                        overrides=[
+                            f"project={project}",
+                            f"data={data}",
+                            f"model={model}",
+                            f"kernel={kernel}",
+                            f"seed={seed}",
+                            f"+project_parent={project_parent}",
+                        ]
+                        + overrides,
+                    )
+                    print("=" * 100)
+                    main_fn(cfg)
 
 
-def img_benchmark(
+def generic_benchmark(
     seeds: jax.Array,
-    cfg_dir: str = "configs/mnist",
-    models: list[str] = ["tnp_kr_fast"],
-    main_fn: Callable = mnist_main,
-    overrides: list[list[str]] = [[]],
+    cfg_dir: str = "configs/celeba",
+    models: list[str] = ["bsa_tnp"],
+    main_fn: Callable = celeba_main,
+    overrides: list = [],
     project: str = "",
     dry_run: bool = False,
 ):
@@ -226,31 +247,24 @@ def img_benchmark(
         project = "__DRY RUN__ " + project
     for seed in seeds:
         for model in models:
-            for overrides_i in overrides:
-                with initialize(config_path=cfg_dir, version_base=None):
-                    cfg = compose(
-                        "default",
-                        overrides=[
-                            f"project={project}",
-                            f"model={model}",
-                            f"seed={seed}",
-                        ]
-                        + overrides_i,
-                    )
-                    print("=" * 100)
-                    main_fn(cfg)
+            with initialize(config_path=cfg_dir, version_base=None):
+                cfg = compose(
+                    "default",
+                    overrides=[
+                        f"project={project}",
+                        f"model={model}",
+                        f"seed={seed}",
+                    ]
+                    + overrides,
+                )
+                print("=" * 100)
+                main_fn(cfg)
 
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         prog=argv[0],
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        "paper",
-        choices=["tnp_kr", "lore"],
-        default="tnp_kr",
-        help="Select which paper to reproduce.",
     )
     parser.add_argument(
         "-s",
@@ -279,10 +293,4 @@ if __name__ == "__main__":
     args = parse_args(sys.argv)
     rng = random.key(args.seed)
     seeds = random.choice(rng, 100, (args.num_runs,), replace=False)
-    match args.paper:
-        case "tnp_kr":
-            tnp_kr_paper(seeds, args.dry_run)
-        case "lore":
-            lore_paper(seeds, args.dry_run)
-        case _:
-            pass
+    bsa_tnp_paper(seeds, args.dry_run)

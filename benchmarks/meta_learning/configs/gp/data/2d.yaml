@@ -2,13 +2,13 @@ name: 2d
 s:
   - start: -2
     stop: 2
-    num: 16
+    num: 64
   - start: -2
     stop: 2
-    num: 16
+    num: 64
 num_ctx:
-  min: 12 # ~5%
-  max: 128 # ~50%
-num_test: 256
-batch_size: 16
+  min: 128 # ~3%
+  max: 512 # 12.5%
+num_test: 1024  # 25%
+batch_size: 8
 obs_noise: 0.1

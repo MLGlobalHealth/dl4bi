@@ -41,9 +41,9 @@ class TETNP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        (B, L_ctx, _D_f), L_test = f_ctx.shape, s_test.shape[1]
-        obs_ind, unobs_ind = jnp.ones((B, L_ctx, 1)), jnp.zeros((B, L_test, 1))
         test_shape = first_shape([x_test, s_test, t_test])
+        (B, L_ctx, _D_f), L_test = f_ctx.shape, test_shape[1]
+        obs_ind, unobs_ind = jnp.ones((B, L_ctx, 1)), jnp.zeros((B, L_test, 1))
         f_test = jnp.zeros((*test_shape[:-1], f_ctx.shape[-1]))
         f_ctx = jnp.concat([f_ctx, obs_ind], axis=-1)
         f_test = jnp.concat([f_test, unobs_ind], axis=-1)
