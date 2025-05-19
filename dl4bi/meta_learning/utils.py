@@ -26,7 +26,10 @@ def first_shape(arrays: Sequence[Union[jax.Array, None]]) -> tuple:
 
 
 def cfg_to_run_name(cfg: DictConfig):
-    return cfg.model._target_.split(".")[-1]
+    if cfg.model.get("name", None) is not None:
+        return cfg.model.name
+    else:
+        return cfg.model._target_.split(".")[-1]
 
 
 def load_ckpts(
