@@ -44,6 +44,19 @@ def so3_experiment(seeds: jax.Array, dry_run: bool = False):
         models,
         gp_main,
         [
+            "project_suffix=' - Rotated 0'",
+            "evaluate_only=True",
+        ],
+        project,
+        dry_run=dry_run,
+    )
+    gp_benchmark(
+        seeds,
+        "so3",
+        kernels,
+        models,
+        gp_main,
+        [
             "project_suffix=' - Rotated zyx 70, 30, 10'",
             "evaluate_only=True",
             "'data.zyx=[70,30,10]'",
