@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import wandb
 from jax import random
+from jax.scipy.spatial.transform import Rotation as R
 from omegaconf import DictConfig
 from tqdm import tqdm
 
@@ -101,3 +102,33 @@ def save_batches_for_tabpfn(
             break
         samples.append({k: np.array(v) for k, v in batch.to_xy().items()})
     np.save(path, samples, allow_pickle=True)
+
+
+# https://stackoverflow.com/a/1185413
+def so3_rotate(s):
+    """
+    Performs a rotation of a sphere given a rotation matrix.
+    Args:
+        s: [..., 2] longitude,latitude pairs in degrees
+        rotation_matrix: [3, 3] rotation matrix
+    """
+    # convert to R3
+    s = jnp.deg2rad(s)
+    s = jnp.stack(
+        [
+            jnp.cos(s[..., 1]) * jnp.cos(s[..., 0]),
+            jnp.cos(s[..., 1]) * jnp.sin(s[..., 0]),
+            jnp.sin(s[..., 1]),
+        ],
+        axis=-1,
+    )
+
+    # rotate 30 degrees north and then 30 degrees east
+    rotation = R.from_euler("zyx", [30, 30, 0], degrees=True)  # [3,3]
+    s = rotation.apply(s)
+
+    # convert back to lon,lat
+    lon = jnp.arctan2(s[..., 1], s[..., 0])
+    lat = jnp.arcsin(s[..., 2])
+    s = jnp.stack([lon, lat], axis=-1)
+    return jnp.rad2deg(s)
