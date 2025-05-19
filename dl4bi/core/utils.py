@@ -66,3 +66,18 @@ def breakpoint_if_nonfinite(x):
         jax.debug.breakpoint()
 
     lax.cond(is_finite, true_fn, false_fn, x)
+
+
+def to_native(x):
+    """Convert NumPy values to native python values."""
+    if isinstance(x, jax.Array):
+        x = np.array(x)
+    if isinstance(x, np.generic):
+        return x.item()
+    elif isinstance(x, np.ndarray):
+        return x.tolist()
+    elif isinstance(x, dict):
+        return {k: to_native(v) for k, v in x.items()}
+    elif isinstance(x, (list, tuple, set)):
+        return [to_native(v) for v in x]
+    return x
