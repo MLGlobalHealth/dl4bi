@@ -22,7 +22,7 @@ from dl4bi.core.train import (
     train,
 )
 from dl4bi.meta_learning.data.spatial import SpatialBatch, SpatialData
-from dl4bi.meta_learning.utils import (  # , save_batches_for_tabpfn  # , save_batches_for_tabpfn
+from dl4bi.meta_learning.utils import (  # , save_batches_for_tabpfn
     cfg_to_run_name,
     so3_rotate,
 )
