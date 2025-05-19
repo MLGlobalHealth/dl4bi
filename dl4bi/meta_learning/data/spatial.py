@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 from jax import jit, random
 from jax.scipy.stats import norm
 
-from ...core.utils import safe_stack
-from .utils import (
+from dl4bi.core.utils import safe_stack
+from dl4bi.meta_learning.data.utils import (
     MetaLearningBatch,
     MetaLearningData,
     batch_BLD,
@@ -34,6 +34,7 @@ class SpatialData(MetaLearningData):
         num_test: int,
         test_includes_ctx: bool = False,
         obs_noise: Optional[float] = None,
+        test_includes_noise: bool = False,
         batch_size: Optional[int] = None,  # resamples B dim
     ):
         return _batch(
@@ -46,6 +47,7 @@ class SpatialData(MetaLearningData):
             num_test,
             test_includes_ctx,
             obs_noise,
+            test_includes_noise,
             batch_size,
         )
 
@@ -58,6 +60,7 @@ class SpatialData(MetaLearningData):
         "num_test",
         "test_includes_ctx",
         "obs_noise",
+        "test_includes_noise",
         "batch_size",
     ),
 )
@@ -71,6 +74,7 @@ def _batch(
     num_test: int,
     test_includes_ctx: bool = False,
     obs_noise: Optional[float] = None,
+    test_includes_noise: bool = False,
     batch_size: Optional[int] = None,
 ):
     rng_i, rng_p, rng_b, rng_eps = random.split(rng, 4)
@@ -101,9 +105,14 @@ def _batch(
         s_ctx, f_ctx, m_ctx, *rest = args
         args = (None, s_ctx, f_ctx, m_ctx, None, *rest)
     if obs_noise:
-        x_ctx, s_ctx, f_ctx, *rest = args
+        if test_includes_noise:
+            rng_eps, rng_test_eps = random.split(rng_eps)
+        x_ctx, s_ctx, f_ctx, m_ctx, x_test, s_test, f_test, *rest = args
         f_ctx += obs_noise * random.normal(rng_eps, f_ctx.shape)
-        args = (x_ctx, s_ctx, f_ctx, *rest)
+        if test_includes_noise:
+            f_test += obs_noise * random.normal(rng_test_eps, f_test.shape)
+        args = (x_ctx, s_ctx, f_ctx, m_ctx, x_test, s_test, f_test, *rest)
+
     return SpatialBatch(*args, inv_permute_idx=inv_permute_idx, s_shape=s_shape)
 
 

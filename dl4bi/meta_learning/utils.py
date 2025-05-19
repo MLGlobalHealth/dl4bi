@@ -130,12 +130,12 @@ def xyz_to_lonlat(xyz: jax.Array):
     return jnp.rad2deg(jnp.stack((lon, lat), axis=-1))
 
 
+# https://stackoverflow.com/a/1185413
 @partial(jit, static_argnames=["north", "east", "tilt"])
 def so3_rotate(s, north: int = 0, east: int = 0, tilt: int = 0):
     """
     Rotates the points in s (given as pairs of longitude, latitude in degrees)
     the following way:
-
     0. Look at the sphere from the (lon,lat) = (0,0) point,
        i.e. facing the equator and the prime meridian.
        The system of coordinates is now fixed from this perspective.
@@ -144,6 +144,7 @@ def so3_rotate(s, north: int = 0, east: int = 0, tilt: int = 0):
     3. Tilt the sphere by `tilt` degrees counterclockwise.
     """
     r = Rotation.from_euler("yzx", (-north, east, tilt), degrees=True)
+
     s = lonlat_to_xyz(s)
     s = r.apply(s)
     s = xyz_to_lonlat(s)

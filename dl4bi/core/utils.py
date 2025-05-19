@@ -1,7 +1,10 @@
+from functools import wraps
+from typing import Callable, Literal
+
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import jit, lax
+from jax import jit, lax, vmap
 from jax.tree_util import Partial
 
 
