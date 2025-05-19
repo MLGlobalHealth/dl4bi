@@ -12,4 +12,4 @@ ls:
   dist: inverse_gamma
   kwargs:
     alpha: 3.0
-    beta: 3.0
+    beta: 30.0
