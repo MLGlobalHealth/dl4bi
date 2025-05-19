@@ -6,9 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from sps.kernels import _prepare_dims, geo_exponential, great_circle_dist
-
-from dl4bi.core.utils import make_pairwise
+from sps.kernels import geo_exponential, great_circle_dist
 
 # TODO @pgrynfelder:
 # perhaps use this kernel? https://github.com/malaria-atlas-project/st-cov-fun/blob/master/st_cov_fun.py

@@ -5,8 +5,6 @@ import jax.numpy as jnp
 from jax import jit
 from sps.kernels import _prepare_dims, great_circle_dist, l2_dist
 
-from dl4bi.core.utils import make_pairwise
-
 
 @partial(jit, static_argnames=("causal",))
 def delta_time(
