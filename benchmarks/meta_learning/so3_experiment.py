@@ -4,7 +4,7 @@ import jax
 from gp import main as gp_main
 from jax import random
 
-from .reproduce_paper import gp_benchmark, parse_args
+from benchmarks.meta_learning.reproduce_paper import gp_benchmark, parse_args
 
 
 def so3_experiment(seeds: jax.Array, dry_run: bool = False):
