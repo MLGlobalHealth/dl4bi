@@ -21,7 +21,7 @@ def so3_experiment(seeds: jax.Array, dry_run: bool = False):
     models = [
         "bsa_tnp",
         "geo_bsa_tnp",
-        "vanilla_bsa_tnp",
+        "sa_tnp",
     ]
     models = [f"2d/{m}" for m in models]
     kernels = ["geo"]

@@ -1,5 +1,5 @@
 _target_: dl4bi.meta_learning.BSATNP
-name: SA-TNP
+name: SA-TNP (no bias)
 num_blks: 6
 num_reps: 1
 embed_all:
