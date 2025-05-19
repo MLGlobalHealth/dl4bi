@@ -22,7 +22,10 @@ from dl4bi.core.train import (
     train,
 )
 from dl4bi.meta_learning.data.spatial import SpatialBatch, SpatialData
-from dl4bi.meta_learning.utils import cfg_to_run_name  # , save_batches_for_tabpfn
+from dl4bi.meta_learning.utils import (  # , save_batches_for_tabpfn
+    cfg_to_run_name,
+    so3_rotate,
+)
 
 
 @hydra.main("configs/gp", config_name="default", version_base=None)
@@ -44,6 +47,9 @@ def main(cfg: DictConfig):
     rng_train, rng_test = random.split(rng)
     train_dataloader = valid_dataloader = build_dataloader(cfg.data, cfg.kernel)
     clbk_dataloader = build_dataloader(cfg.data, cfg.kernel, is_callback=True)
+    if cfg.data.name == "2d":
+        clbk = wandb_2d_plots
+        clbk_dataloader = build_2d_grid_dataloader(cfg.data, cfg.kernel)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     if cfg.evaluate_only:
@@ -59,12 +65,9 @@ def main(cfg: DictConfig):
         )
         wandb.log({f"Test {m}": v for m, v in metrics.items()})
         if cfg.data.name == "2d":
-            data = next(build_2d_grid_dataloader(cfg.data, cfg.kernel)(rng_test))
-            wandb_2d_plots(0, rng_test, state, *data)
+            data = next(clbk_dataloader(rng_test))
+            clbk(0, rng_test, state, *data)
         return
-    if cfg.data.name == "2d":
-        clbk = wandb_2d_plots
-        clbk_dataloader = build_2d_grid_dataloader(cfg.data, cfg.kernel)
     clbk = wandb_1d_plots
     state = train(
         rng_train,
@@ -102,11 +105,14 @@ def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = F
     s_max = jnp.array([axis["stop"] for axis in data.s])
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
     to_extra = lambda d: {k: v.item() for k, v in d.items() if v is not None}
+    so3_experiment = data.get("so3", False)
 
     def dataloader(rng: jax.Array):
         while True:
             rng_s, rng_gp, rng_b, rng = random.split(rng, 4)
             s = random.uniform(rng_s, (L, D_s), jnp.float32, s_min, s_max)
+            if so3_experiment:
+                s = so3_rotate(s)
             f, var, ls, period, *_ = gp.simulate(rng_gp, s, B)
             s = batchify(s)
             d = SpatialData(x=None, s=s, f=f)
@@ -135,9 +141,12 @@ def build_2d_grid_dataloader(data: DictConfig, kernel: DictConfig):
         on a continuous domain, while this only uses points on a grid for
         visualization purposes.
     """
+    so3_experiment = data.get("so3", False)
     B = data.batch_size
     gp = instantiate(kernel)
     s_g = build_grid(data.s)
+    if so3_experiment:
+        s_g = so3_rotate(s_g)
     s = jnp.repeat(s_g[None, ...], B, axis=0)
     to_extra = lambda d: {k: v.item() for k, v in d.items() if v is not None}
 

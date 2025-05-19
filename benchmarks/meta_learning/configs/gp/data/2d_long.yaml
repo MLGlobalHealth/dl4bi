@@ -12,3 +12,4 @@ num_ctx:
 num_test: 1024  # 25%
 batch_size: 8
 obs_noise: 0.1
+so3: false
