@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import wandb
-from jax import random
+from jax import jit, random
 from jax.scipy.spatial.transform import Rotation as R
 from omegaconf import DictConfig
 from tqdm import tqdm
@@ -105,6 +105,7 @@ def save_batches_for_tabpfn(
 
 
 # https://stackoverflow.com/a/1185413
+@jit
 def so3_rotate(s):
     """
     Performs a rotation of a sphere given a rotation matrix.
