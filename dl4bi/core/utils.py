@@ -71,6 +71,7 @@ def breakpoint_if_nonfinite(x):
     lax.cond(is_finite, true_fn, false_fn, x)
 
 
+
 def make_pairwise(
     fn: Callable, method: Literal["sequential", "vectorized"] = "vectorized"
 ):
@@ -86,3 +87,18 @@ def make_pairwise(
                 return jax.lax.map(lambda y: f_over_xs(xs, y), ys)
 
     return wraps(fn)(f)
+
+def to_native(x):
+    """Convert NumPy values to native python values."""
+    if isinstance(x, jax.Array):
+        x = np.array(x)
+    if isinstance(x, np.generic):
+        return x.item()
+    elif isinstance(x, np.ndarray):
+        return x.tolist()
+    elif isinstance(x, dict):
+        return {k: to_native(v) for k, v in x.items()}
+    elif isinstance(x, (list, tuple, set)):
+        return [to_native(v) for v in x]
+    return x
+
