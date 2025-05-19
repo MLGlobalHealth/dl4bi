@@ -68,7 +68,7 @@ class TNPD(nn.Module):
         Returns:
             `ModelOutput`.
         """
-        ctx_shape = first_shape([x_test, s_test, t_test])
+        ctx_shape = first_shape([x_ctx, s_ctx, t_ctx])
         test_shape = first_shape([x_test, s_test, t_test])
         (B, L_ctx, _), L_test = ctx_shape, test_shape[1]
         f_test = jnp.zeros((*test_shape[:-1], f_ctx.shape[-1]))
