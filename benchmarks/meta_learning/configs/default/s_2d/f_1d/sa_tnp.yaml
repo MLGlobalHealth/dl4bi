@@ -1,10 +1,7 @@
 _target_: dl4bi.meta_learning.BSATNP
-name: Geo-BSATNP
+name: SA-TNP
 num_blks: 6
 num_reps: 1
-embed_s:
-  _target_: dl4bi.core.utils.to_none
-  _partial_: true
 embed_all:
   _target_: dl4bi.mlp.MLP
   dims: [256, 128, 64]
@@ -16,15 +13,7 @@ blk:
   attn:
     _target_: dl4bi.attention.MultiHeadAttention
     attn:
-      _target_: dl4bi.attention.BiasedScanAttention
-      bias:
-        _target_: builtins.dict
-        s:
-          # geo rbf is not a positive-definite kernel on a sphere but it doesnt matter when it's just the bias
-          _target_: dl4bi.bias.Bias.build_geodesic_rbf_network_bias 
-          # _target_: dl4bi.bias.Bias.build_geodesic_network_bias
-          num_heads: 4
-          num_basis: 5
+      _target_: dl4bi.attention.ScanAttention
     proj_qs:
       _target_: dl4bi.mlp.MLP
       dims: [128]

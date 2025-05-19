@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Callable, Optional, Sequence, Union
 
@@ -25,7 +26,10 @@ def first_shape(arrays: Sequence[Union[jax.Array, None]]) -> tuple:
 
 
 def cfg_to_run_name(cfg: DictConfig):
-    return cfg.model._target_.split(".")[-1]
+    if cfg.model.get("name", None) is not None:
+        return cfg.model.name
+    else:
+        return cfg.model._target_.split(".")[-1]
 
 
 def load_ckpts(
@@ -105,13 +109,13 @@ def save_batches_for_tabpfn(
 
 
 # https://stackoverflow.com/a/1185413
-@jit
-def so3_rotate(s):
+@partial(jit, static_argnames=["zyx"])
+def so3_rotate(s, zyx=tuple[int, int, int]):
     """
     Performs a rotation of a sphere given a rotation matrix.
     Args:
         s: [..., 2] longitude,latitude pairs in degrees
-        rotation_matrix: [3, 3] rotation matrix
+        zyx: [3] zyx rotation angles (Euler, degrees)
     """
     # convert to R3
     s = jnp.deg2rad(s)
@@ -124,8 +128,8 @@ def so3_rotate(s):
         axis=-1,
     )
 
-    # rotate 30 degrees north and then 30 degrees east
-    rotation = R.from_euler("zyx", [30, 30, 0], degrees=True)  # [3,3]
+    # rotate 60 degrees north and then 30 degrees east and then 15 to the side
+    rotation = R.from_euler("zyx", zyx, degrees=True)
     s = rotation.apply(s)
 
     # convert back to lon,lat

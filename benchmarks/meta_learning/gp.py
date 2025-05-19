@@ -22,7 +22,7 @@ from dl4bi.core.train import (
     train,
 )
 from dl4bi.meta_learning.data.spatial import SpatialBatch, SpatialData
-from dl4bi.meta_learning.utils import (  # , save_batches_for_tabpfn
+from dl4bi.meta_learning.utils import (  # , save_batches_for_tabpfn  # , save_batches_for_tabpfn
     cfg_to_run_name,
     so3_rotate,
 )
@@ -105,14 +105,14 @@ def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = F
     s_max = jnp.array([axis["stop"] for axis in data.s])
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
     to_extra = lambda d: {k: v.item() for k, v in d.items() if v is not None}
-    so3_experiment = data.get("so3", False)
+    so3_zyx = tuple(data.get("zyx", []))
 
     def dataloader(rng: jax.Array):
         while True:
             rng_s, rng_gp, rng_b, rng = random.split(rng, 4)
             s = random.uniform(rng_s, (L, D_s), jnp.float32, s_min, s_max)
-            if so3_experiment:
-                s = so3_rotate(s)
+            if so3_zyx:
+                s = so3_rotate(s, so3_zyx)
             f, var, ls, period, *_ = gp.simulate(rng_gp, s, B)
             s = batchify(s)
             d = SpatialData(x=None, s=s, f=f)
@@ -141,12 +141,12 @@ def build_2d_grid_dataloader(data: DictConfig, kernel: DictConfig):
         on a continuous domain, while this only uses points on a grid for
         visualization purposes.
     """
-    so3_experiment = data.get("so3", False)
+
     B = data.batch_size
     gp = instantiate(kernel)
     s_g = build_grid(data.s)
-    if so3_experiment:
-        s_g = so3_rotate(s_g)
+    if so3_zyx := tuple(data.get("zyx", [])):
+        s_g = so3_rotate(s_g, so3_zyx)
     s = jnp.repeat(s_g[None, ...], B, axis=0)
     to_extra = lambda d: {k: v.item() for k, v in d.items() if v is not None}
 
