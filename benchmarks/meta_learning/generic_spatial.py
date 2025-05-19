@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import json
+import pickle
 import re
 from contextlib import redirect_stdout
 from functools import partial
@@ -32,6 +34,7 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
+from dl4bi.core.utils import to_native
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
@@ -69,8 +72,16 @@ def main(cfg: DictConfig):
             metrics = infer_with_model(rng_i, sample, state)
         if cfg.infer_with_mcmc:
             metrics = infer_with_mcmc(rng_i, sample, cfg.mcmc)
-        pprint(true_params)
+            run_name = "MCMC"
+        metrics_path = path.parent / f"{run_name}_metrics.json"
+        metrics["true_params"] = true_params
+        metrics = to_native(metrics)
+        metrics["model"] = run_name
         pprint(metrics)
+        with open(metrics_path, "w") as fp:
+            json.dump(metrics, fp, indent=2)
+        with open(path.parent / "MCMC_sample.pkl", "wb") as fp:
+            pickle.dump(sample, fp)
         return
     state = train(
         rng_train,
@@ -274,13 +285,12 @@ def compute_inference_metrics(
     z_score = jnp.abs(norm.ppf(alpha / 2))
     f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
     m = {}
-    m["Log Likelihood (LL)"] = np.mean(norm.logpdf(f, f_mu, f_std))
-    m["Interval Score (IS)"] = np.mean(sr.interval_score(f, f_lower, f_upper, alpha))
-    m["Continuous Ranked Probability Score (CRPS)"] = np.mean(
-        sr.crps_normal(f, f_mu, f_std)
-    )
-    m["Coverage (CVG)"] = ((f >= f_lower) & (f <= f_upper)).mean()
-    m["Root Mean Squared Error (RMSE)"] = np.sqrt(np.square(f - f_mu).mean())
+    m["NLL"] = -np.mean(norm.logpdf(f, f_mu, f_std))
+    m["IS"] = np.mean(sr.interval_score(f, f_lower, f_upper, alpha))
+    m["CRPS"] = np.mean(sr.crps_normal(f, f_mu, f_std))
+    m["CVG"] = np.array(((f >= f_lower) & (f <= f_upper))).mean()
+    m["MAE"] = np.abs(f - f_mu).mean()
+    m["RMSE"] = np.sqrt(np.square(f - f_mu).mean())
     return m
 
 
