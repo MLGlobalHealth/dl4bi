@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import pickle
 import re
 from contextlib import redirect_stdout
 from functools import partial
@@ -71,13 +72,16 @@ def main(cfg: DictConfig):
             metrics = infer_with_model(rng_i, sample, state)
         if cfg.infer_with_mcmc:
             metrics = infer_with_mcmc(rng_i, sample, cfg.mcmc)
-            run_name = "mcmc"
-        path = path.parent / f"{run_name}_metrics.json"
+            run_name = "MCMC"
+        metrics_path = path.parent / f"{run_name}_metrics.json"
         metrics["true_params"] = true_params
         metrics = to_native(metrics)
+        metrics["model"] = run_name
         pprint(metrics)
-        with open(path, "w") as fp:
+        with open(metrics_path, "w") as fp:
             json.dump(metrics, fp, indent=2)
+        with open(path.parent / "MCMC_sample.pkl", "wb") as fp:
+            pickle.dump(sample, fp)
         return
     state = train(
         rng_train,
