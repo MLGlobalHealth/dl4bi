@@ -77,7 +77,7 @@ def main(cfg: DictConfig):
         wandb.log({f"Infer {m}": v for m, v in to_native(metrics).items()})
         wandb.log({f"Infer {p}": v for p, v in to_native(true_params).items()})
         with open(path.parent / "MCMC_sample.pkl", "wb") as fp:
-            pickle.dump(sample, fp)
+            pickle.dump({k: np.array(v) for k, v in sample.items()}, fp)
         return
     state = train(
         rng_train,
