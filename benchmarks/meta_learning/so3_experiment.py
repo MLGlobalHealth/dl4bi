@@ -26,7 +26,14 @@ def so3_experiment(seeds: jax.Array, dry_run: bool = False):
     models = [f"2d/{m}" for m in models]
     kernels = ["geo"]
     project = "Gaussian Processes - SO3"
-    # SO3 invariance
+    # north, east, tilt
+    rotations = [
+        "",
+        "60, 30, 0",
+        "60, 30, 20",
+    ]
+
+    # Train
     gp_benchmark(
         seeds,
         "so3",
@@ -37,47 +44,22 @@ def so3_experiment(seeds: jax.Array, dry_run: bool = False):
         project,
         dry_run=dry_run,
     )
-    gp_benchmark(
-        seeds,
-        "so3",
-        kernels,
-        models,
-        gp_main,
-        [
-            "project_suffix=' - Rotated 0'",
-            "evaluate_only=True",
-        ],
-        project,
-        dry_run=dry_run,
-    )
-    gp_benchmark(
-        seeds,
-        "so3",
-        kernels,
-        models,
-        gp_main,
-        [
-            "project_suffix=' - Rotated zyx 70, 30, 10'",
-            "evaluate_only=True",
-            "'data.zyx=[70,30,10]'",
-        ],
-        project,
-        dry_run=dry_run,
-    )
-    gp_benchmark(
-        seeds,
-        "so3",
-        kernels,
-        models,
-        gp_main,
-        [
-            "project_suffix=' - Rotated zy 70, 30'",
-            "evaluate_only=True",
-            "'data.zyx=[70,30,0]'",
-        ],
-        project,
-        dry_run=dry_run,
-    )
+    # Evaluate SO3 invariance
+    for rotation in rotations:
+        gp_benchmark(
+            seeds,
+            "so3",
+            kernels,
+            models,
+            gp_main,
+            [
+                f"project_suffix=' - Rotated {rotation}'",
+                "evaluate_only=True",
+                f"data.rotate=[{rotation}]",
+            ],
+            project,
+            dry_run=dry_run,
+        )
 
 
 if __name__ == "__main__":
