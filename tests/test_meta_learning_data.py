@@ -9,6 +9,16 @@ from sps.utils import build_grid
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData
 from dl4bi.meta_learning.data.tabular import TabularData
+from dl4bi.meta_learning.utils import so3_rotate
+
+
+def test_rotations():
+    s = jnp.array([[0, 0]])
+    # 90 north, 20 ccw tilt should give -90, 70
+    assert jnp.allclose(so3_rotate(s, 90, 0, 20), jnp.array([[-90, 70]]))
+    assert jnp.allclose(so3_rotate(s, 0, 0, 0), jnp.array(s))
+    assert jnp.allclose(so3_rotate(s, 0, 90, 0), jnp.array([[90, 0]]))
+    assert jnp.allclose(so3_rotate(s, 25, 0, 0), jnp.array([[0, 25]]))
 
 
 def test_tabular_data():

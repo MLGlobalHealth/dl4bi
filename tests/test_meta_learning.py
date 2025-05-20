@@ -28,7 +28,6 @@ from dl4bi.meta_learning import (
     ConvCNP,
 )
 from dl4bi.meta_learning.data.spatial import SpatialData
-from dl4bi.meta_learning.utils import so3_rotate
 
 
 def test_models():
@@ -223,14 +222,3 @@ def test_train_step_loss():
         _, loss_1 = m.train_step(rng_step, state, batch_1)
         _, loss_2 = m.train_step(rng_step, state, batch_2)
         assert jnp.not_equal(loss_1, loss_2)
-
-
-def test_rotations():
-    s = jnp.array([[0, 0]])
-
-    # 90 north, 20 ccw tilt should give -90, 70
-    assert jnp.allclose(so3_rotate(s, 90, 0, 20), jnp.array([[-90, 70]]))
-
-    assert jnp.allclose(so3_rotate(s, 0, 0, 0), jnp.array(s))
-    assert jnp.allclose(so3_rotate(s, 0, 90, 0), jnp.array([[90, 0]]))
-    assert jnp.allclose(so3_rotate(s, 25, 0, 0), jnp.array([[0, 25]]))
