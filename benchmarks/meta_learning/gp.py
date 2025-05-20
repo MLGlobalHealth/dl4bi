@@ -107,14 +107,14 @@ def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = F
     s_max = jnp.array([axis["stop"] for axis in data.s])
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
     to_extra = lambda d: {k: v.item() for k, v in d.items() if v is not None}
-    so3_zyx = tuple(data.get("zyx", []))
+    rotate = data.get("rotate")
 
     def dataloader(rng: jax.Array):
         while True:
             rng_s, rng_gp, rng_b, rng = random.split(rng, 4)
             s = random.uniform(rng_s, (L, D_s), jnp.float32, s_min, s_max)
-            if so3_zyx:
-                s = so3_rotate(s, so3_zyx)
+            if rotate:
+                s = so3_rotate(s, *rotate)
             f, var, ls, period, *_ = gp.simulate(rng_gp, s, B)
             s = batchify(s)
             d = SpatialData(x=None, s=s, f=f)
@@ -147,8 +147,8 @@ def build_2d_grid_dataloader(data: DictConfig, kernel: DictConfig):
     B = data.batch_size
     gp = instantiate(kernel)
     s_g = build_grid(data.s)
-    if so3_zyx := tuple(data.get("zyx", [])):
-        s_g = so3_rotate(s_g, so3_zyx)
+    if rotate := data.get("rotate"):
+        s_g = so3_rotate(s_g, *rotate)
     s = jnp.repeat(s_g[None, ...], B, axis=0)
     to_extra = lambda d: {k: v.item() for k, v in d.items() if v is not None}
 
