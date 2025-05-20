@@ -47,10 +47,12 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader = valid_dataloader = build_dataloader(cfg.data, cfg.kernel)
-    clbk_dataloader = build_dataloader(cfg.data, cfg.kernel, is_callback=True)
     if cfg.data.name == "2d":
         clbk = wandb_2d_plots
         clbk_dataloader = build_2d_grid_dataloader(cfg.data, cfg.kernel)
+    else:
+        clbk = wandb_1d_plots
+        clbk_dataloader = build_dataloader(cfg.data, cfg.kernel, is_callback=True)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     if cfg.evaluate_only:
@@ -69,7 +71,6 @@ def main(cfg: DictConfig):
             data = next(clbk_dataloader(rng_test))
             clbk(0, rng_test, state, *data)
         return
-    clbk = wandb_1d_plots
     state = train(
         rng_train,
         model,
