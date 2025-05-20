@@ -241,6 +241,8 @@ class Bias(nn.Module):
             scanned_bias_func=scanned_tisa_bias,
         )
 
+    # NOTE: when using regular BTNP, you need to manually specify great_circle_dist
+    # as your `sim` function
     @classmethod
     def build_geodesic_network_bias(cls, num_heads: int = 4, num_basis: int = 5):
         return Bias(

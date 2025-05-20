@@ -205,6 +205,16 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "60, 30, 0",
         "60, 30, 20",
     ]
+    gp_benchmark(
+        seeds,
+        "so3",
+        rot_kernels,
+        rot_models,
+        gp_main,
+        overrides,
+        "Neurips BSA-TNP - Gaussian Processes",
+        dry_run=dry_run,
+    )
     for rot in rots:
         gp_benchmark(
             seeds,
@@ -219,6 +229,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
                 f"data.rotate=[{rot}]",
             ],
             "Neurips BSA-TNP - Gaussian Processes",
+            dry_run=dry_run,
         )
 
 
