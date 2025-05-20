@@ -12,4 +12,6 @@ num_ctx:
 num_test: 1024  # 25%
 batch_size: 8
 obs_noise: 0.1
-zyx: [0,0,0]
+# set to a three-element list of degrees[int] [north, east, tilt] to specify a rotation, 
+# details in dl4bi.meta_learning.utils.so3_rotate
+rotate: null

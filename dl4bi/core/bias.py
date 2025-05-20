@@ -8,7 +8,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap
 
-from dl4bi.core.sim import great_circle_dist, l2_dist
+from .sim import great_circle_dist, l2_dist
 
 
 def init_scalar_bias_params(mod: nn.Module, name: str, num_heads: int):
@@ -97,7 +97,6 @@ def scanned_rbf_network_bias(
     return rbf_network_bias(d, mask, a, b)
 
 
-# copied from rbf but changed d_m**2 to d_m
 @jit
 def exponential_network_bias(
     d: jax.Array,  # [B, Q, K] or [E]
@@ -105,7 +104,12 @@ def exponential_network_bias(
     a: jax.Array,  # [H, F]
     b: jax.Array,  # [H, F]
 ):
-    """Returns an attention bias matrix of shape `[B, H, Q, K]`."""
+    """Returns an attention bias matrix of shape `[B, H, Q, K]`.
+
+    .. note::
+        This is nearly identical to `rbf_network_bias` except the distance
+        is not squared.
+    """
     is_edges = d.ndim == 1
     if is_edges:  # GNN edges to attention map format
         d, mask = d[:, None, None], mask[:, None, None]  # [B, Q=1, K=1]
@@ -115,12 +119,12 @@ def exponential_network_bias(
     b = b[None, :, None, None, :]  # [1, H, 1, 1, F]
     # double `jnp.where` to avoid NaN gradients: http://bit.ly/4aNgBjw
     d_m = jnp.where(mask, d, 0)
-    d_rbf = a * jnp.exp(-b * d_m)  # [B, H, Q, K, F]
-    d_rbf = jnp.where(mask, d_rbf, -jnp.inf)
-    d_rbf = d_rbf.sum(axis=-1)  # [B, H, Q, K]
+    d_exp = a * jnp.exp(-b * d_m)  # [B, H, Q, K, F]
+    d_exp = jnp.where(mask, d_exp, -jnp.inf)
+    d_exp = d_exp.sum(axis=-1)  # [B, H, Q, K]
     if is_edges:
-        return d_rbf.squeeze()  # [B=E, H, Q=1, K=1] -> [E, H]
-    return d_rbf  # [B, H, Q, K]
+        return d_exp.squeeze()  # [B=E, H, Q=1, K=1] -> [E, H]
+    return d_exp  # [B, H, Q, K]
 
 
 @partial(jit, static_argnames=("func",))
@@ -237,7 +241,8 @@ class Bias(nn.Module):
             scanned_bias_func=scanned_tisa_bias,
         )
 
-    # NOTE: set s_sim in the config to great_circle_dist to use this with non-scan TNP-KR
+    # NOTE: when using regular BTNP, you need to manually specify great_circle_dist
+    # as your `sim` function
     @classmethod
     def build_geodesic_network_bias(cls, num_heads: int = 4, num_basis: int = 5):
         return Bias(

@@ -22,7 +22,6 @@ blk:
         s:
           # geo rbf is not a positive-definite kernel on a sphere but it doesnt matter when it's just the bias
           _target_: dl4bi.bias.Bias.build_geodesic_rbf_network_bias 
-          # _target_: dl4bi.bias.Bias.build_geodesic_network_bias
           num_heads: 4
           num_basis: 5
     proj_qs:

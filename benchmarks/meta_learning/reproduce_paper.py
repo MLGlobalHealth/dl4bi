@@ -190,12 +190,47 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     generic_benchmark(
         seeds,
         "configs/generic_spatial",
-        tabular_models,
+        ["bsa_tnp"],  # dummy model - unused
         generic_spatial_main,
         overrides + ["infer_with_mcmc=True"],
         "NeurIPS BSA-TNP - Generic Spatial",
         dry_run=dry_run,
     )
+
+    # ROTATIONAL INVARIANCE
+    rot_models = ["2d/bsa_tnp", "2d/geo_bsa_tnp", "2d/sa_tnp"]
+    rot_kernels = ["geo"]
+    rots = [  # north, east, tilt
+        "",
+        "60, 30, 0",
+        "60, 30, 20",
+    ]
+    gp_benchmark(
+        seeds,
+        "so3",
+        rot_kernels,
+        rot_models,
+        gp_main,
+        overrides,
+        "Neurips BSA-TNP - Gaussian Processes - Rotated",
+        dry_run=dry_run,
+    )
+    for rot in rots:
+        gp_benchmark(
+            seeds,
+            "so3",
+            rot_kernels,
+            rot_models,
+            gp_main,
+            overrides
+            + [
+                f"project_suffix=' - {rot}'",
+                "evaluate_only=True",
+                f"data.rotate=[{rot}]",
+            ],
+            "Neurips BSA-TNP - Gaussian Processes - Rotated",
+            dry_run=dry_run,
+        )
 
 
 def gp_benchmark(

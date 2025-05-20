@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import wandb
 from jax import jit, random
-from jax.scipy.spatial.transform import Rotation as R
+from jax.scipy.spatial.transform import Rotation
 from omegaconf import DictConfig
 from tqdm import tqdm
 
@@ -26,10 +26,7 @@ def first_shape(arrays: Sequence[Union[jax.Array, None]]) -> tuple:
 
 
 def cfg_to_run_name(cfg: DictConfig):
-    if cfg.model.get("name", None) is not None:
-        return cfg.model.name
-    else:
-        return cfg.model._target_.split(".")[-1]
+    return cfg.model.get("name") or cfg.model._target_.split(".")[-1]
 
 
 def load_ckpts(
@@ -108,32 +105,46 @@ def save_batches_for_tabpfn(
     np.save(path, samples, allow_pickle=True)
 
 
-# https://stackoverflow.com/a/1185413
-@partial(jit, static_argnames=["zyx"])
-def so3_rotate(s, zyx=tuple[int, int, int]):
+@jit
+def lonlat_to_xyz(lonlat: jax.Array):
     """
-    Performs a rotation of a sphere given a rotation matrix.
-    Args:
-        s: [..., 2] longitude,latitude pairs in degrees
-        zyx: [3] zyx rotation angles (Euler, degrees)
+    Convert longitude and latitude to Cartesian coordinates.
     """
-    # convert to R3
-    s = jnp.deg2rad(s)
-    s = jnp.stack(
-        [
-            jnp.cos(s[..., 1]) * jnp.cos(s[..., 0]),
-            jnp.cos(s[..., 1]) * jnp.sin(s[..., 0]),
-            jnp.sin(s[..., 1]),
-        ],
-        axis=-1,
-    )
+    lonlat = jnp.deg2rad(lonlat)
+    lon, lat = jnp.rollaxis(lonlat, -1)
+    x = jnp.cos(lat) * jnp.cos(lon)
+    y = jnp.cos(lat) * jnp.sin(lon)
+    z = jnp.sin(lat)
+    return jnp.stack((x, y, z), axis=-1)
 
-    # rotate 60 degrees north and then 30 degrees east and then 15 to the side
-    rotation = R.from_euler("zyx", zyx, degrees=True)
-    s = rotation.apply(s)
 
-    # convert back to lon,lat
-    lon = jnp.arctan2(s[..., 1], s[..., 0])
-    lat = jnp.arcsin(s[..., 2])
-    s = jnp.stack([lon, lat], axis=-1)
-    return jnp.rad2deg(s)
+@jit
+def xyz_to_lonlat(xyz: jax.Array):
+    """
+    Convert Cartesian coordinates to longitude and latitude.
+    """
+    r = jnp.linalg.norm(xyz, axis=-1)
+    x, y, z = jnp.rollaxis(xyz, -1)
+    lon = jnp.arctan2(y, x)
+    lat = jnp.arcsin(z / r)
+    return jnp.rad2deg(jnp.stack((lon, lat), axis=-1))
+
+
+@partial(jit, static_argnames=["north", "east", "tilt"])
+def so3_rotate(s, north: int = 0, east: int = 0, tilt: int = 0):
+    """
+    Rotates the points in s (given as pairs of longitude, latitude in degrees)
+    the following way:
+
+    0. Look at the sphere from the (lon,lat) = (0,0) point,
+       i.e. facing the equator and the prime meridian.
+       The system of coordinates is now fixed from this perspective.
+    1. Rotate the sphere north by `north` degrees.
+    2. Rotate the sphere east by `east` degrees.
+    3. Tilt the sphere by `tilt` degrees counterclockwise.
+    """
+    r = Rotation.from_euler("yzx", (-north, east, tilt), degrees=True)
+    s = lonlat_to_xyz(s)
+    s = r.apply(s)
+    s = xyz_to_lonlat(s)
+    return s

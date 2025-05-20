@@ -21,7 +21,7 @@ from dl4bi.core.train import (
     train,
 )
 from dl4bi.meta_learning.data.tabular import TabularData
-from dl4bi.meta_learning.utils import cfg_to_run_name, save_batches_for_tabpfn
+from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
 @hydra.main("configs/beijing_air_quality", config_name="default", version_base=None)
@@ -66,8 +66,6 @@ def main(cfg: DictConfig):
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
-    eval_path = path.parent / f"eval_data.npy"
-    save_batches_for_tabpfn(rng_test, valid_dataloader, cfg.valid_num_steps, eval_path)
 
 
 def build_dataloaders(
