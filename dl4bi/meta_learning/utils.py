@@ -127,7 +127,6 @@ def xyz_to_lonlat(xyz: jax.Array):
     """
     Convert Cartesian coordinates to longitude and latitude.
     """
-    xyz = jnp.deg2rad(xyz)
     r = jnp.linalg.norm(xyz, axis=-1)
     x, y, z = jnp.rollaxis(xyz, -1)
 
