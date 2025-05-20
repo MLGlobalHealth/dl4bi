@@ -190,7 +190,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     generic_benchmark(
         seeds,
         "configs/generic_spatial",
-        tabular_models,
+        ["bsa_tnp"],  # dummy model - unused
         generic_spatial_main,
         overrides + ["infer_with_mcmc=True"],
         "NeurIPS BSA-TNP - Generic Spatial",

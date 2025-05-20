@@ -42,9 +42,11 @@ from dl4bi.meta_learning.utils import cfg_to_run_name
 @hydra.main("configs/generic_spatial", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
+    if cfg.infer_with_mcmc:
+        run_name = "MCMC"
+    if cfg.infer_with_model:
+        run_name += " - Infer"
     run_mode = "online" if cfg.wandb else "disabled"
-    if cfg.infer_with_model or cfg.infer_with_mcmc:
-        run_mode = "disabled"
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode=run_mode,
@@ -72,7 +74,6 @@ def main(cfg: DictConfig):
             metrics = infer_with_model(rng_i, sample, state)
         if cfg.infer_with_mcmc:
             metrics = infer_with_mcmc(rng_i, sample, cfg.mcmc)
-            run_name = "MCMC"
         metrics_path = path.parent / f"{run_name}_metrics.json"
         metrics["true_params"] = true_params
         metrics = to_native(metrics)
