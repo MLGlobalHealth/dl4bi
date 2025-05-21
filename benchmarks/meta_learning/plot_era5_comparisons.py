@@ -80,7 +80,6 @@ def plot(
         reshape_s = jit(lambda v: v.reshape(*v.shape[:2], *batch.s_dims, v.shape[-1]))
         f_ctx, f_test = map(reshape_s, [f_ctx, f_test])
         name = {
-            "ScanTNPKR": "BSA-TNP",
             "BSATNP": "BSA-TNP",
             "TNPD": "TNP-D",
             "TETNP": "PT-TE-TNP",
