@@ -14,7 +14,7 @@ import jax.numpy as jnp
 import jax.scipy as jsp
 import wandb
 from hydra.utils import instantiate
-from jax import jit, random
+from jax import jit, random, vmap
 from numpyro.infer import Predictive
 from omegaconf import DictConfig, OmegaConf
 
@@ -160,22 +160,23 @@ def build_dataloader(cfg: DictConfig):
     Generates samples from the provided prior numpyro model.
     """
 
-    B, L, D = cfg.data.batch_size, cfg.data.num_test, len(cfg.s)
-    s_min = jnp.array([axis["start"] for axis in cfg.s])
-    s_max = jnp.array([axis["stop"] for axis in cfg.s])
+    B, L, D = cfg.data.batch_size, cfg.data.num_test, len(cfg.data.s)
+    s_min = jnp.array([axis["start"] for axis in cfg.data.s])
+    s_max = jnp.array([axis["stop"] for axis in cfg.data.s])
     has_x = cfg.data.urban_rural
     numpyro_model = importlib.import_module(cfg.numpyro)
 
     @jit
     def sample_prior(rng, s, n, x=None):
+        rng = random.split(rng, B)
         prior = Predictive(
             numpyro_model.model,
             posterior_samples=None,
             num_samples=1,
-            batch_ndims=1,
+            batch_ndims=0,
             return_sites=["z", "n_pos"],
         )
-        samples = prior(rng, s, n, None, x)
+        samples = vmap(prior)(rng, s, n, None, x)
         return samples["z"], samples["n_pos"]
 
     def sample_n(rng, sample_shape):
