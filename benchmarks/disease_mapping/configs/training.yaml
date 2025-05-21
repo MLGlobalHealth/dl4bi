@@ -2,8 +2,7 @@ defaults:
   - _self_ # use default global values below
   - data: generic
   - model: spatial/geo_bsa_tnp
-  # kernel specified in code
-  # - kernel: rbf 
+numpyro: survey_model
 seed: 42
 wandb: True
 project: Disease Mapping
@@ -29,8 +28,8 @@ optimizer:
 # The following input formats are available, with the last two useful for evaluation.
 # survey -> [n_pos, n] 
 # theta -> [n_pos / n] 
-# z -> expit(n_pos / n)
-# z_cheat -> z, 
-# theta_cheat -> theta
+# z -> logit(n_pos / n)
+# theta_n -> [theta, n]
+# z_n -> [z, n]
 input_format: "survey" 
 output_format: "z" # theta or z

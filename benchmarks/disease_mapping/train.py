@@ -4,20 +4,20 @@ Learns the map
 (s, N, N+)_ctx, s_test -> distribution over logit(theta)_test
 """
 
+import importlib
 from inspect import getsourcefile
 from pathlib import Path
-from typing import Literal
 
 import hydra
 import jax
 import jax.numpy as jnp
+import jax.scipy as jsp
 import wandb
 from hydra.utils import instantiate
-from jax import jit, random, vmap
-from numpyro import handlers
+from jax import jit, random
+from numpyro.infer import Predictive
 from omegaconf import DictConfig, OmegaConf
 
-from benchmarks.disease_mapping import survey_model
 from dl4bi.core.train import evaluate, save_ckpt, train
 from dl4bi.meta_learning.data.spatial import SpatialBatch
 from dl4bi.meta_learning.data.utils import batch_BLD, permute_L_in_BLD
@@ -35,13 +35,12 @@ def main(cfg: DictConfig):
         reinit=True,  # allows reinitialization for multiple runs,
         group="gnp",
     )
-    wandb.log_artifact(getsourcefile(survey_model), "model.py")
+    numpyro_model = importlib.import_module(cfg.numpyro)
+    wandb.log_artifact(getsourcefile(numpyro_model))
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader = valid_dataloader = build_dataloader(
-        cfg.data, cfg.input_format, cfg.output_format
-    )
+    train_dataloader = valid_dataloader = build_dataloader(cfg)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     state = train(
@@ -70,39 +69,6 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def sample_prior(
-    rng,
-    s: jax.Array,
-    n: jax.Array,
-    x: jax.Array | None = None,
-    sample_shape: tuple[int, ...] = (),
-):
-    # note that s, n, x, and the kernel parameters will be shared across the batch
-    trace = handlers.trace(handlers.seed(survey_model.model, rng)).get_trace(
-        s, n, None, x, sample_shape=sample_shape
-    )
-    z = trace["z"]["value"]
-    n_pos = trace["n_pos"]["value"]
-    return z, n_pos
-
-
-batch_sample_prior = vmap(sample_prior)
-
-
-def sample_n(rng, sample_shape):
-    return random.geometric(rng, 0.02, sample_shape)
-
-
-def sample_x(rng, sample_shape):
-    # TODO: might need to sample this per context/target, but that messes with the batch generation
-    # about 30% of surveys are urban but <1% of the country grid is
-    # p = 0.2
-    p = 0.5  # does this even matter or can it learn either way?
-    urban = random.bernoulli(rng, p, sample_shape).astype(jnp.float32)
-    rural = 1 - urban
-    return jnp.stack([urban, rural], axis=-1)
-
-
 def make_batch(
     rng,
     s: jax.Array,
@@ -115,8 +81,8 @@ def make_batch(
     num_ctx_max,
     num_test,
     test_includes_ctx,
-    input_format: Literal["survey", "theta"],
-    output_format: Literal["theta", "z"],
+    input_format,
+    output_format,
 ):
     """
     Adapted from `meta_learning.data.spatial._batch`,
@@ -153,14 +119,21 @@ def make_batch(
         )
 
     # Various options for feeding the context
-    # f_c = z_c_obs
-    # f_c = jnp.concat([z_c_obs, n_c], axis=-1)
-    # f_c = jnp.concat([n_pos_c / n_c, n_c], axis=-1)
     match input_format:
         case "survey":
             f_c = jnp.concat([n_pos_c, n_c], axis=-1)
         case "theta":
+            # empirical theta
             f_c = n_pos_c / n_c
+        case "z":
+            # emprirical z
+            f_c = jsp.special.logit(n_pos_c / n_c)
+        case "z_n":
+            # emprirical z + survey size
+            f_c = jnp.concat([jsp.special.logit(n_pos_c / n_c), z_c], axis=-1)
+        case "theta_n":
+            # emprirical theta + survey size
+            f_c = jnp.concat([n_pos_c / n_c, z_c], axis=-1)
 
     match output_format:
         case "theta":
@@ -182,15 +155,40 @@ def make_batch(
     )
 
 
-def build_dataloader(cfg: DictConfig, input_format, output_format):
+def build_dataloader(cfg: DictConfig):
     """
-    Generates samples from `model.spatial_effect`.
+    Generates samples from the provided prior numpyro model.
     """
 
-    B, L, D = cfg.batch_size, cfg.num_test, len(cfg.s)
+    B, L, D = cfg.data.batch_size, cfg.data.num_test, len(cfg.s)
     s_min = jnp.array([axis["start"] for axis in cfg.s])
     s_max = jnp.array([axis["stop"] for axis in cfg.s])
-    has_x = cfg.urban_rural
+    has_x = cfg.data.urban_rural
+    numpyro_model = importlib.import_module(cfg.numpyro)
+
+    @jit
+    def sample_prior(rng, s, n, x=None):
+        prior = Predictive(
+            numpyro_model.model,
+            posterior_samples=None,
+            num_samples=1,
+            batch_ndims=1,
+            return_sites=["z", "n_pos"],
+        )
+        samples = prior(rng, s, n, None, x)
+        return samples["z"], samples["n_pos"]
+
+    def sample_n(rng, sample_shape):
+        return random.geometric(rng, 0.02, sample_shape)
+
+    def sample_x(rng, sample_shape):
+        # TODO: might need to sample this per context/target, but that messes with the batch generation
+        # about 30% of surveys are urban but <1% of the country grid is
+        # p = 0.2
+        p = 0.5  # does this even matter or can it learn either way?
+        urban = random.bernoulli(rng, p, sample_shape).astype(jnp.float32)
+        rural = 1 - urban
+        return jnp.stack([urban, rural], axis=-1)
 
     @jit
     def sample_batch(rng):
@@ -201,7 +199,7 @@ def build_dataloader(cfg: DictConfig, input_format, output_format):
             x = sample_x(rng_x, (B, L))
         else:
             x = None
-        z, n_pos = batch_sample_prior(random.split(rng_sp, B), s, n, x)
+        z, n_pos = sample_prior(rng, s, n, x)
         return make_batch(
             rng_b,
             s,
@@ -209,12 +207,12 @@ def build_dataloader(cfg: DictConfig, input_format, output_format):
             x,
             z,
             n_pos,
-            num_ctx_min=cfg.num_ctx.min,
-            num_ctx_max=cfg.num_ctx.max,
-            num_test=cfg.num_test,
+            num_ctx_min=cfg.data.num_ctx.min,
+            num_ctx_max=cfg.data.num_ctx.max,
+            num_test=cfg.data.num_test,
             test_includes_ctx=True,
-            input_format=input_format,
-            output_format=output_format,
+            input_format=cfg.input_format,
+            output_format=cfg.output_format,
         )
 
     def dataloader(rng: jax.Array):
@@ -223,36 +221,6 @@ def build_dataloader(cfg: DictConfig, input_format, output_format):
             yield sample_batch(rng_i)
 
     return dataloader
-
-
-# def build_grid_dataloader(cfg: DictConfig):
-#     # broken
-#     # TODO fix
-#     B = cfg.batch_size
-#     to_extra = lambda d: {k: v.item() for k, v in d.items() if v is not None}
-
-#     s = build_grid(cfg.s)
-#     s = jnp.repeat(s[None, ...], B, axis=0)
-#     L_test = s.shape[1] * s.shape[2]
-
-#     def dataloader(rng: jax.Array):
-#         while True:
-#             rng_sp, rng_b, rng = random.split(rng, 3)
-#             n = sample_n(rng_n, (L, D))
-#             z, n_pos = sample_prior(rng_sp, s[0], n, B)
-#             y = y.reshape(*s.shape[:-1], y.shape[-1])
-#             d = SpatialData(None, s, y)
-#             b = d.batch(
-#                 rng_b,
-#                 cfg.num_ctx.min,
-#                 cfg.num_ctx.max,
-#                 num_test=L_test,
-#                 test_includes_ctx=True,
-#                 obs_noise=None,
-#             )
-#             yield b, to_extra(dict())
-
-#     return dataloader
 
 
 if __name__ == "__main__":
