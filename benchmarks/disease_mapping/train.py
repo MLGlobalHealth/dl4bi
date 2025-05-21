@@ -119,6 +119,9 @@ def make_batch(
         )
 
     # Various options for feeding the context
+    empirical_z = jnp.clip(
+        jsp.special.logit(n_pos_c / n_c), -1e6, 1e6
+    )  # need to guard against inf
     match input_format:
         case "survey":
             f_c = jnp.concat([n_pos_c, n_c], axis=-1)
@@ -127,10 +130,10 @@ def make_batch(
             f_c = n_pos_c / n_c
         case "z":
             # emprirical z
-            f_c = jsp.special.logit(n_pos_c / n_c)
+            f_c = empirical_z
         case "z_n":
             # emprirical z + survey size
-            f_c = jnp.concat([jsp.special.logit(n_pos_c / n_c), z_c], axis=-1)
+            f_c = jnp.concat([empirical_z, z_c], axis=-1)
         case "theta_n":
             # emprirical theta + survey size
             f_c = jnp.concat([n_pos_c / n_c, z_c], axis=-1)
