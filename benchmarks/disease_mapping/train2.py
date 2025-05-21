@@ -19,8 +19,8 @@ from numpyro import handlers
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
-from benchmarks.disease_mapping import model as numpyro_model
-from benchmarks.meta_learning.gp import wandb_2d_plots
+from benchmarks.disease_mapping import survey_model
+from benchmarks.meta_learning.gp import wandb_1d_plots
 from dl4bi.core.train import Callback, evaluate, save_ckpt, train
 from dl4bi.meta_learning.data.spatial import SpatialBatch, SpatialData
 from dl4bi.meta_learning.data.utils import batch_BLD, permute_L_in_BLD
@@ -38,7 +38,7 @@ def main(cfg: DictConfig):
         reinit=True,  # allows reinitialization for multiple runs,
         group="gnp",
     )
-    wandb.log_artifact(getsourcefile(numpyro_model), "model.py")
+    wandb.log_artifact(getsourcefile(survey_model), "model.py")
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
@@ -87,7 +87,7 @@ def sample_prior(
     sample_shape: tuple[int, ...] = (),
 ):
     # note that s, n, x, and the kernel parameters will be shared across the batch
-    trace = handlers.trace(handlers.seed(numpyro_model.survey_model, rng)).get_trace(
+    trace = handlers.trace(handlers.seed(survey_model.survey_model, rng)).get_trace(
         s, n, None, x, sample_shape=sample_shape
     )
     z = trace["z"]["value"]
@@ -105,7 +105,8 @@ def sample_n(rng, sample_shape):
 def sample_x(rng, sample_shape):
     # TODO: might need to sample this per context/target, but that messes with the batch generation
     # about 30% of surveys are urban but <1% of the country grid is
-    p = 0.2
+    # p = 0.2
+    p = 0.5  # does this even matter or can it learn either way?
     urban = random.bernoulli(rng, p, sample_shape).astype(jnp.float32)
     rural = 1 - urban
     return jnp.stack([urban, rural], axis=-1)

@@ -11,8 +11,8 @@ from numpyro import handlers
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
-from benchmarks.disease_mapping import model as numpyro_model
-from benchmarks.disease_mapping.model import spatial_effect
+from benchmarks.disease_mapping import survey_model
+from benchmarks.disease_mapping.survey_model import spatial_effect
 from benchmarks.meta_learning.gp import wandb_2d_plots
 from dl4bi.core.train import Callback, evaluate, save_ckpt, train
 from dl4bi.meta_learning.data.spatial import SpatialData
@@ -30,7 +30,7 @@ def main(cfg: DictConfig):
         reinit=True,  # allows reinitialization for multiple runs
         group="gp",
     )
-    wandb.log_artifact(getsourcefile(numpyro_model), "model.py")
+    wandb.log_artifact(getsourcefile(survey_model), "model.py")
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
