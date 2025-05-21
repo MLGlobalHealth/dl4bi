@@ -4,7 +4,7 @@ import jax.scipy as jsp
 from jax import jit, vmap
 from numpyro.handlers import condition, seed
 
-from benchmarks.disease_mapping.model import jitter, kernel, prevalence
+from benchmarks.disease_mapping.survey_model import jitter, kernel, prevalence
 from benchmarks.disease_mapping.utils import rng_vmap
 from dl4bi.core.model_output import DiagonalMVNOutput
 from dl4bi.core.train import TrainState
