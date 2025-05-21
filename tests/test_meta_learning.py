@@ -17,15 +17,15 @@ from dl4bi.core.transformer import KRBlock
 from dl4bi.core.utils import mask_from_valid_lens
 from dl4bi.meta_learning import (
     ANP,
+    BSATNP,
+    BTNP,
     CANP,
     CNP,
     NP,
     SGNP,
     TETNP,
     TNPD,
-    BTNP,
     ConvCNP,
-    BSATNP,
 )
 from dl4bi.meta_learning.data.spatial import SpatialData
 

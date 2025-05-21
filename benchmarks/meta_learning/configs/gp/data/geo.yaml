@@ -1,0 +1,15 @@
+_target_: sps.gp.GP
+kernel:
+  _target_: sps.kernels.geo_exponential
+  _partial_: true
+var:
+  _target_: sps.priors.Prior
+  dist: fixed
+  kwargs:
+    value: 1.0
+ls:
+  _target_: sps.priors.Prior
+  dist: inverse_gamma
+  kwargs:
+    alpha: 3.0
+    beta: 30.0

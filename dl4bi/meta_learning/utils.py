@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Callable, Optional, Sequence, Union
 
@@ -8,7 +9,8 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import wandb
-from jax import random
+from jax import jit, random
+from jax.scipy.spatial.transform import Rotation
 from omegaconf import DictConfig
 from tqdm import tqdm
 
@@ -24,7 +26,7 @@ def first_shape(arrays: Sequence[Union[jax.Array, None]]) -> tuple:
 
 
 def cfg_to_run_name(cfg: DictConfig):
-    return cfg.model._target_.split(".")[-1]
+    return cfg.model.get("name") or cfg.model._target_.split(".")[-1]
 
 
 def load_ckpts(
@@ -101,3 +103,48 @@ def save_batches_for_tabpfn(
             break
         samples.append({k: np.array(v) for k, v in batch.to_xy().items()})
     np.save(path, samples, allow_pickle=True)
+
+
+@jit
+def lonlat_to_xyz(lonlat: jax.Array):
+    """
+    Convert longitude and latitude to Cartesian coordinates.
+    """
+    lonlat = jnp.deg2rad(lonlat)
+    lon, lat = jnp.rollaxis(lonlat, -1)
+    x = jnp.cos(lat) * jnp.cos(lon)
+    y = jnp.cos(lat) * jnp.sin(lon)
+    z = jnp.sin(lat)
+    return jnp.stack((x, y, z), axis=-1)
+
+
+@jit
+def xyz_to_lonlat(xyz: jax.Array):
+    """
+    Convert Cartesian coordinates to longitude and latitude.
+    """
+    r = jnp.linalg.norm(xyz, axis=-1)
+    x, y, z = jnp.rollaxis(xyz, -1)
+    lon = jnp.arctan2(y, x)
+    lat = jnp.arcsin(z / r)
+    return jnp.rad2deg(jnp.stack((lon, lat), axis=-1))
+
+
+@partial(jit, static_argnames=["north", "east", "tilt"])
+def so3_rotate(s, north: int = 0, east: int = 0, tilt: int = 0):
+    """
+    Rotates the points in s (given as pairs of longitude, latitude in degrees)
+    the following way:
+
+    0. Look at the sphere from the (lon,lat) = (0,0) point,
+       i.e. facing the equator and the prime meridian.
+       The system of coordinates is now fixed from this perspective.
+    1. Rotate the sphere north by `north` degrees.
+    2. Rotate the sphere east by `east` degrees.
+    3. Tilt the sphere by `tilt` degrees counterclockwise.
+    """
+    r = Rotation.from_euler("yzx", (-north, east, tilt), degrees=True)
+    s = lonlat_to_xyz(s)
+    s = r.apply(s)
+    s = xyz_to_lonlat(s)
+    return s

@@ -12,15 +12,11 @@ from collections.abc import Callable
 
 import jax
 from beijing_air_quality import main as beijing_air_quality_main
-from celeba import main as celeba_main
-from cifar_10 import main as cifar_10_main
 from era5 import main as era5_main
 from generic_spatial import main as generic_spatial_main
 from gp import main as gp_main
-from household_electric import main as household_electric_main
 from hydra import compose, initialize
 from jax import random
-from mnist import main as mnist_main
 from multiscale_2d_gp import main as multiscale_2d_gp_main
 from sir import main as sir_main
 
@@ -61,7 +57,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         gp_kernels_2d,
         [f"2d/{m}" for m in ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_shifted_10"]],
         gp_main,
-        ["project_suffix=' - Shifted 10'", "evaluate_only=True"],
+        overrides + ["project_suffix=' - Shifted 10'", "evaluate_only=True"],
         "NeurIPS BSA-TNP - Gaussian Processes",
         dry_run=dry_run,
     )
@@ -106,7 +102,8 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "configs/sir",
         ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_shifted_10"],
         sir_main,
-        [
+        overrides
+        + [
             "project_suffix=' - Shifted 10'",
             "evaluate_only=True",
             "data=spatial_64x64_shifted_10.yaml",
@@ -119,7 +116,8 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "configs/sir",
         ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_scaled_2x"],
         sir_main,
-        [
+        overrides
+        + [
             "project_suffix=' - Scaled 2x'",
             "evaluate_only=True",
             "valid_num_steps=1000",
@@ -178,26 +176,60 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "NeurIPS BSA-TNP - Generic Spatial",
         dry_run=dry_run,
     )
+    # run models on examples for comparison to MCMC
+    generic_benchmark(
+        seeds,
+        "configs/generic_spatial",
+        tabular_models,
+        generic_spatial_main,
+        overrides + ["infer_with_model=True"],
+        "NeurIPS BSA-TNP - Generic Spatial",
+        dry_run=dry_run,
+    )
+    # run MCMC on examples
+    generic_benchmark(
+        seeds,
+        "configs/generic_spatial",
+        ["bsa_tnp"],  # dummy model - unused
+        generic_spatial_main,
+        overrides + ["infer_with_mcmc=True"],
+        "NeurIPS BSA-TNP - Generic Spatial",
+        dry_run=dry_run,
+    )
 
-    # NON-STATIONARY DISTRIBUTIONS
-    # generic_benchmark(
-    #     seeds,
-    #     "configs/celeba",
-    #     models,
-    #     celeba_main,
-    #     overrides,
-    #     "NeurIPS BSA-TNP - CelebA",
-    #     dry_run=dry_run,
-    # )
-    # generic_benchmark(
-    #     seeds,
-    #     "configs/cifar_10",
-    #     models,
-    #     cifar_10_main,
-    #     overrides,
-    #     "NeurIPS BSA-TNP - Cifar 10",
-    #     dry_run=dry_run,
-    # )
+    # ROTATIONAL INVARIANCE
+    rot_models = ["2d/bsa_tnp", "2d/geo_bsa_tnp", "2d/sa_tnp"]
+    rot_kernels = ["geo"]
+    rots = [  # north, east, tilt
+        "60, 30, 0",
+        "60, 30, 20",
+    ]
+    gp_benchmark(
+        seeds,
+        "so3",
+        rot_kernels,
+        rot_models,
+        gp_main,
+        overrides,
+        "Neurips BSA-TNP - Gaussian Processes - Rotated",
+        dry_run=dry_run,
+    )
+    for rot in rots:
+        gp_benchmark(
+            seeds,
+            "so3",
+            rot_kernels,
+            rot_models,
+            gp_main,
+            overrides
+            + [
+                f"project_suffix=' - {rot}'",
+                "evaluate_only=True",
+                f"data.rotate=[{rot}]",
+            ],
+            "Neurips BSA-TNP - Gaussian Processes - Rotated",
+            dry_run=dry_run,
+        )
 
 
 def gp_benchmark(
@@ -238,7 +270,7 @@ def generic_benchmark(
     seeds: jax.Array,
     cfg_dir: str = "configs/celeba",
     models: list[str] = ["bsa_tnp"],
-    main_fn: Callable = celeba_main,
+    main_fn: Callable = gp_main,
     overrides: list = [],
     project: str = "",
     dry_run: bool = False,

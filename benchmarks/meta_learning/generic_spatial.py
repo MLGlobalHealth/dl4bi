@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import json
+import pickle
 import re
 from contextlib import redirect_stdout
 from functools import partial
@@ -32,6 +34,7 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
+from dl4bi.core.utils import to_native
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
@@ -39,9 +42,13 @@ from dl4bi.meta_learning.utils import cfg_to_run_name
 @hydra.main("configs/generic_spatial", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
+    path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if cfg.infer_with_mcmc:
+        run_name = "MCMC - Infer"
+    if cfg.infer_with_model:
+        run_name += " - Infer"
     run_mode = "online" if cfg.wandb else "disabled"
-    if cfg.infer_with_model or cfg.infer_with_mcmc:
-        run_mode = "disabled"
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode=run_mode,
@@ -50,8 +57,6 @@ def main(cfg: DictConfig):
         reinit=True,  # allows reinitialization for multiple runs
     )
     print(OmegaConf.to_yaml(cfg))
-    path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
-    path.parent.mkdir(parents=True, exist_ok=True)
     rng = random.key(cfg.seed)
     rng_train, rng_test, rng = random.split(rng, 3)
     dataloader, clbk_dataloader = build_dataloaders(cfg.data)
@@ -69,8 +74,10 @@ def main(cfg: DictConfig):
             metrics = infer_with_model(rng_i, sample, state)
         if cfg.infer_with_mcmc:
             metrics = infer_with_mcmc(rng_i, sample, cfg.mcmc)
-        pprint(true_params)
-        pprint(metrics)
+        wandb.log({f"Infer {m}": v for m, v in to_native(metrics).items()})
+        wandb.log({f"Infer {p}": v for p, v in to_native(true_params).items()})
+        with open(path.parent / "MCMC_sample.pkl", "wb") as fp:
+            pickle.dump({k: np.array(v) for k, v in sample.items()}, fp)
         return
     state = train(
         rng_train,
@@ -274,13 +281,12 @@ def compute_inference_metrics(
     z_score = jnp.abs(norm.ppf(alpha / 2))
     f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
     m = {}
-    m["Log Likelihood (LL)"] = np.mean(norm.logpdf(f, f_mu, f_std))
-    m["Interval Score (IS)"] = np.mean(sr.interval_score(f, f_lower, f_upper, alpha))
-    m["Continuous Ranked Probability Score (CRPS)"] = np.mean(
-        sr.crps_normal(f, f_mu, f_std)
-    )
-    m["Coverage (CVG)"] = ((f >= f_lower) & (f <= f_upper)).mean()
-    m["Root Mean Squared Error (RMSE)"] = np.sqrt(np.square(f - f_mu).mean())
+    m["NLL"] = -np.mean(norm.logpdf(f, f_mu, f_std))
+    m["IS"] = np.mean(sr.interval_score(f, f_lower, f_upper, alpha))
+    m["CRPS"] = np.mean(sr.crps_normal(f, f_mu, f_std))
+    m["CVG"] = np.array(((f >= f_lower) & (f <= f_upper))).mean()
+    m["MAE"] = np.abs(f - f_mu).mean()
+    m["RMSE"] = np.sqrt(np.square(f - f_mu).mean())
     return m
 
 
