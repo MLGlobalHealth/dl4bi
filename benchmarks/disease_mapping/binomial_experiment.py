@@ -34,7 +34,7 @@ def binomial_experiment(seeds: jax.Array, dry_run: bool = False):
                             f"seed={seed}",
                             f"input_format={input_format}",
                             f"output_format={output_format}",
-                            f"++name=binomial-{input_format}-{output_format}",
+                            f"+name=binomial-{input_format}-{output_format}",
                         ]
                         + overrides,
                     )
