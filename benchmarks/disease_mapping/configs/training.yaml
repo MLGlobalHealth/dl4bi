@@ -10,18 +10,7 @@ project: Disease Mapping
 train_num_steps: 100000
 valid_num_steps: 5000
 valid_interval: 10000
-plot_interval: 10000
-# optimizer:
-#   _target_: optax.chain
-#   _args_:
-#     - _target_: optax.clip_by_global_norm
-#       max_norm: 3.0
-#     - _target_: optax.yogi
-#       learning_rate:
-#         _target_: optax.cosine_decay_schedule
-#         init_value: 1.0e-3
-#         decay_steps: ${train_num_steps}
-#         alpha: 1.0e-4
+plot_interval: 100000
 optimizer:
   _target_: optax.chain
   _args_:
@@ -30,12 +19,18 @@ optimizer:
     - _target_: optax.adamw
       learning_rate:
         _target_: optax.cosine_decay_schedule
-        init_value: 1.0e-4 # isn't this too small? try 1e-3, or disabling the scheduler
+        init_value: 1.0e-4
         decay_steps: ${train_num_steps}
         alpha: 2.0e-5
       b1: 0.9
       b2: 0.999
       weight_decay: 1.0e-4
 
-input_format: "survey" # survey -> [n_pos, n], or theta -> [n_pos / n]
+# The following input formats are available, with the last two useful for evaluation.
+# survey -> [n_pos, n] 
+# theta -> [n_pos / n] 
+# z -> expit(n_pos / n)
+# z_cheat -> z, 
+# theta_cheat -> theta
+input_format: "survey" 
 output_format: "z" # theta or z
