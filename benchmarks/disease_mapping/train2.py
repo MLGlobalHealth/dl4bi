@@ -11,18 +11,15 @@ from typing import Literal
 import hydra
 import jax
 import jax.numpy as jnp
-import jax.scipy as jsp
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random, vmap
 from numpyro import handlers
 from omegaconf import DictConfig, OmegaConf
-from sps.utils import build_grid
 
 from benchmarks.disease_mapping import survey_model
-from benchmarks.meta_learning.gp import wandb_1d_plots
-from dl4bi.core.train import Callback, evaluate, save_ckpt, train
-from dl4bi.meta_learning.data.spatial import SpatialBatch, SpatialData
+from dl4bi.core.train import evaluate, save_ckpt, train
+from dl4bi.meta_learning.data.spatial import SpatialBatch
 from dl4bi.meta_learning.data.utils import batch_BLD, permute_L_in_BLD
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
@@ -45,10 +42,6 @@ def main(cfg: DictConfig):
     train_dataloader = valid_dataloader = build_dataloader(
         cfg.data, cfg.input_format, cfg.output_format
     )
-    # TODO: fix this
-    # callbacks = [Callback(wandb_2d_plots, cfg.plot_interval)]
-    # callback_dataloader = build_grid_dataloader(cfg.data)
-    callbacks, callback_dataloader = [], None
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     state = train(
@@ -62,8 +55,6 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         cfg.valid_num_steps,
         valid_dataloader,
-        callbacks=callbacks,
-        callback_dataloader=callback_dataloader,
     )
     metrics = evaluate(
         rng_test,
@@ -87,7 +78,7 @@ def sample_prior(
     sample_shape: tuple[int, ...] = (),
 ):
     # note that s, n, x, and the kernel parameters will be shared across the batch
-    trace = handlers.trace(handlers.seed(survey_model.survey_model, rng)).get_trace(
+    trace = handlers.trace(handlers.seed(survey_model.model, rng)).get_trace(
         s, n, None, x, sample_shape=sample_shape
     )
     z = trace["z"]["value"]

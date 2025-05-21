@@ -68,7 +68,7 @@ def prevalence(y, x=None):
     return z
 
 
-def survey_model(
+def model(
     s: jax.Array,  # [L, Ds]
     n: jax.Array,  # [L]
     n_pos: jax.Array | None,  # [L]
@@ -101,7 +101,7 @@ def render():
     n = jax.random.randint(rng, (L,), 0, 100)
     n_pos = jax.random.randint(rng, (L,), 0, n)
     return numpyro.render_model(
-        survey_model,
+        model,
         (s, n, n_pos, x),
         model_kwargs=dict(sample_shape=(16,)),
         render_distributions=True,
