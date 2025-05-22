@@ -49,7 +49,7 @@ def main(cfg: DictConfig):
     rng_train, rng_test = random.split(rng)
     train_dataloader = valid_dataloader = build_dataloader(cfg)
     if cfg.do_mcmc:
-        evaluate_mcmc(rng_test, cfg, train_dataloader)
+        evaluate_mcmc(rng_test, cfg, valid_dataloader)
         return
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
@@ -248,7 +248,7 @@ def evaluate_mcmc(rng, cfg, dataloader):
         "MCMC only supports z output format, will convert to theta as needed."
     )
 
-    num_steps = cfg.mcmc.num_steps
+    num_steps = cfg.valid_num_steps
     numpyro_model = importlib.import_module(cfg.numpyro)
     rng_data, rng = random.split(rng)  # this matches the evaluate function
     dataloader = dataloader(rng_data)
