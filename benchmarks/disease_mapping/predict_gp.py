@@ -79,7 +79,12 @@ def main(s, mcmc_path, batch_size=8, res=150):
     results_path = mcmc_path / "gp_pointwise"
     results_path.mkdir(parents=True, exist_ok=True)
     jnp.savez(
-        results_path / "predictions.npz", s=s_t, y=y_t, theta=theta_t, z=z_t, x=x_t
+        results_path / "predictions.npz",
+        s=s_t,
+        y=y_t,
+        theta=theta_t,
+        z=z_t,
+        x=x_t,
     )
     (results_path / "time.txt").write_text(f"{end_time - start_time:.2f} seconds")
 

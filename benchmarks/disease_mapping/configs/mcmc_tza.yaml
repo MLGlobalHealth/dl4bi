@@ -1,0 +1,15 @@
+# data
+iso: "tza" # `null` for all of Africa
+region: null
+query: "YY==2015" # extra data filtering
+urban_rural: false
+time: false
+
+# mcmc parameters
+seed: 42
+num_warmup: 2000
+num_samples: 2000
+num_chains: 4
+chain_method: "vectorized" # can be parallel, sequential, vectorized (experimental), or vmap
+progress_bar: True
+ 
