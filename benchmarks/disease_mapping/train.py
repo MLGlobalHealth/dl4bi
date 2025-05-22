@@ -5,6 +5,7 @@ Learns the map
 """
 
 import importlib
+from collections import defaultdict
 from contextlib import redirect_stdout
 from functools import partial
 from inspect import getsourcefile
@@ -21,6 +22,7 @@ from hydra.utils import instantiate
 from jax import jit, random, vmap
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig, OmegaConf
+from traitlets import default
 
 from benchmarks.disease_mapping.samplers import sample_gp_pointwise_generic
 from benchmarks.disease_mapping.utils import rng_vmap
@@ -256,59 +258,68 @@ def evaluate_mcmc(rng, cfg, dataloader):
     dataloader = dataloader(rng_data)
     assert numpyro_model.__name__ == "binomial_model"
 
+    batch: SpatialBatch
     for i, batch in enumerate(dataloader):
+        B = batch.f_test.shape[0]
         rng, rng_mcmc, rng_d, rng_condition = random.split(rng, 4)
         if i >= num_steps:
             break
-        ((idx, sample),) = batch.sample_for_inference(rng_d)
 
-        s_c = sample["s_ctx"]
-        s_t = sample["s_test"]
-        n_pos, n = jnp.rollaxis(sample["f_ctx"], -1)
+        metrics = defaultdict(list)
+        for j in range(B):
+            s_c = batch.s_ctx[j]
+            s_t = batch.s_test[j]
+            n_pos, n = jnp.rollaxis(batch.f_ctx[j], -1)
 
-        sampler = NUTS(numpyro_model.model)
-        mcmc = MCMC(
-            sampler,
-            num_warmup=cfg.mcmc.num_warmup,
-            num_samples=cfg.mcmc.num_samples,
-            num_chains=cfg.mcmc.num_chains,
-            chain_method="vectorized",
-            progress_bar=True,
-        )
-        mcmc.run(rng_mcmc, s_c, n, n_pos)
-        samples = mcmc.get_samples(group_by_chain=False)
-        y_c = samples.pop("y")
-        sample_gp_pointwise = lambda x: sample_gp_pointwise_generic(
-            x[0], s_c, x[1], s_t, kernel=numpyro_model.kernel, **x[2]
-        )
-        N = y_c.shape[0]
-        y_t = jax.lax.map(
-            sample_gp_pointwise,
-            (random.split(rng_condition, N), y_c, samples),
-            # batch_size=32,
-        )
-        z_t = y_t
+            sampler = NUTS(numpyro_model.model)
+            mcmc = MCMC(
+                sampler,
+                num_warmup=cfg.mcmc.num_warmup,
+                num_samples=cfg.mcmc.num_samples,
+                num_chains=cfg.mcmc.num_chains,
+                chain_method="vectorized",
+                progress_bar=True,
+            )
+            mcmc.run(rng_mcmc, s_c, n, n_pos)
+            samples = mcmc.get_samples(group_by_chain=False)
+            y_c = samples.pop("y")
+            sample_gp_pointwise = lambda x: sample_gp_pointwise_generic(  # noqa: E731
+                x[0], s_c, x[1], s_t, kernel=numpyro_model.kernel, **x[2]
+            )
+            N = y_c.shape[0]
+            y_t = jax.lax.map(
+                sample_gp_pointwise,
+                (random.split(rng_condition, N), y_c, samples),
+                # batch_size=32,
+            )
+            z_t = y_t
 
-        metrics = {}
-        # z
-        mean = jnp.mean(z_t, axis=0)
-        std = jnp.std(z_t, axis=0)
-        true_z_t = sample["f_test"]
-        nll = -jsp.stats.norm.logpdf(true_z_t, loc=mean, scale=std).mean()
-        metrics["MCMC z NLL"] = nll
-        # theta
-        theta_t = jax.nn.sigmoid(z_t)
-        true_theta_t = jax.nn.sigmoid(true_z_t)
-        mean = jnp.mean(theta_t, axis=0)
-        std = jnp.std(theta_t, axis=0)
-        nll = -jsp.stats.norm.logpdf(true_theta_t, loc=mean, scale=std).mean()
-        metrics["MCMC theta NLL"] = nll
+            # z
+            mean = jnp.mean(z_t, axis=0)
+            std = jnp.std(z_t, axis=0)
+            true_z_t = batch.f_test[j]
+            nll = -jsp.stats.norm.logpdf(true_z_t, loc=mean, scale=std).mean()
+            metrics["MCMC z NLL"] += [nll]
+            metrics["MCMC z rmse"] += [jnp.sqrt(jnp.mean((true_z_t - mean) ** 2))]
+            metrics["MCMC z mae"] += [jnp.mean(jnp.abs(true_z_t - mean))]
+            # theta
+            theta_t = jax.nn.sigmoid(z_t)
+            true_theta_t = jax.nn.sigmoid(true_z_t)
+            mean = jnp.mean(theta_t, axis=0)
+            std = jnp.std(theta_t, axis=0)
+            nll = -jsp.stats.norm.logpdf(true_theta_t, loc=mean, scale=std).mean()
+            metrics["MCMC theta NLL"] += [nll]
+            metrics["MCMC theta rmse"] += [
+                jnp.sqrt(jnp.mean((true_theta_t - mean) ** 2))
+            ]
+            metrics["MCMC theta mae"] += [jnp.mean(jnp.abs(true_theta_t - mean))]
 
-        f = StringIO()
-        with redirect_stdout(f):
-            mcmc.print_summary()
-            metrics["MCMC summary"] = f.getvalue()
+            # f = StringIO()
+            # with redirect_stdout(f):
+            #     mcmc.print_summary()
+            #     metrics["MCMC summary"] = f.getvalue()
 
+        metrics = {k: jnp.mean(jnp.stack(v)) for k, v in metrics.items()}
         wandb.log(metrics)
 
 
