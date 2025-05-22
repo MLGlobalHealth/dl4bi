@@ -1,3 +1,5 @@
+from typing import Literal
+
 import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
@@ -110,6 +112,7 @@ def sample_gp_pointwise_generic(
     s_t: jax.Array,  # [L_test, D]
     *,
     kernel,
+    method: Literal["vmap", "map"] = "vmap",
     **params,  # passes params to gp mean and kernel
 ):
     """Sample pointwise posterior of a mean-0 GP given by params and observations y_c at s_c.
@@ -142,7 +145,12 @@ def sample_gp_pointwise_generic(
 
         return conditional_mean.squeeze(), conditional_cov.squeeze()
 
-    mean, var = vmap(calculate_single)(s_t)
+    if method == "vmap":
+        mean, var = vmap(calculate_single)(s_t)
+    elif method == "map":
+        mean, var = jax.lax.map(
+            calculate_single, s_t, batch_size=1024
+        )  # compute in blocks
     z = jax.random.normal(rng, (L_test,))
 
     return mean + jnp.sqrt(var) * z
