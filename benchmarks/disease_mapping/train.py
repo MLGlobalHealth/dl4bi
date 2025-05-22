@@ -256,7 +256,6 @@ def evaluate_mcmc(rng, cfg, dataloader):
     dataloader = dataloader(rng_data)
     assert numpyro_model.__name__ == "binomial_model"
 
-    sampler = NUTS(numpyro_model.model)
     for i, batch in enumerate(dataloader):
         rng, rng_mcmc, rng_d, rng_condition = random.split(rng, 4)
         if i >= num_steps:
@@ -267,6 +266,7 @@ def evaluate_mcmc(rng, cfg, dataloader):
         s_t = sample["s_test"]
         n_pos, n = jnp.rollaxis(sample["f_ctx"], -1)
 
+        sampler = NUTS(numpyro_model.model)
         mcmc = MCMC(
             sampler,
             num_warmup=cfg.mcmc.num_warmup,
@@ -278,7 +278,6 @@ def evaluate_mcmc(rng, cfg, dataloader):
         mcmc.run(rng_mcmc, s_c, n, n_pos)
         samples = mcmc.get_samples(group_by_chain=False)
         y_c = samples.pop("y")
-        print(samples["ls"].shape)
         sample_gp_pointwise = lambda x: sample_gp_pointwise_generic(
             x[0], s_c, x[1], s_t, kernel=numpyro_model.kernel, **x[2]
         )
@@ -286,7 +285,7 @@ def evaluate_mcmc(rng, cfg, dataloader):
         y_t = jax.lax.map(
             sample_gp_pointwise,
             (random.split(rng_condition, N), y_c, samples),
-            batch_size=32,
+            # batch_size=32,
         )
 
         metrics = {}
