@@ -54,7 +54,7 @@ def main(s, mcmc_path, batch_size=8, res=150):
         z_t = seed(condition(survey_model.prevalence, params), rng_z)(y_t, x_t)
         return y_t, z_t
 
-    print(f"Running predictions with pointwise gp: {batch_size}")
+    print(f"Running predictions with pointwise gp - batch size {batch_size}")
     start_time = timer()
     results = []
     assert N % batch_size == 0, f"Batch size {batch_size} does not divide {N}"
