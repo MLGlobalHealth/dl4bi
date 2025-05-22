@@ -9,7 +9,7 @@ time: false
 seed: 42
 num_warmup: 1000
 num_samples: 1000
-num_chains: 4
-chain_method: "parallel" # can be parallel, sequential, vectorized (experimental), or vmap
+num_chains: 8
+chain_method: "vectorized" # can be parallel, sequential, vectorized (experimental), or vmap
 progress_bar: True
  
