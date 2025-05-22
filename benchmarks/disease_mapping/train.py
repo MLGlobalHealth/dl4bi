@@ -15,9 +15,10 @@ import jax.scipy as jsp
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random, vmap
-from numpyro.infer import Predictive
+from numpyro.infer import MCMC, NUTS, Predictive
 from omegaconf import DictConfig, OmegaConf
 
+from benchmarks.disease_mapping.samplers import sample_gp_pointwise
 from dl4bi.core.train import evaluate, save_ckpt, train
 from dl4bi.meta_learning.data.spatial import SpatialBatch
 from dl4bi.meta_learning.data.utils import batch_BLD, permute_L_in_BLD
@@ -26,7 +27,12 @@ from dl4bi.meta_learning.utils import cfg_to_run_name
 
 @hydra.main("configs", "training", None)
 def main(cfg: DictConfig):
-    run_name = cfg.get("name", cfg_to_run_name(cfg))
+    if cfg.do_mcmc:
+        run_name = "MCMC baseline"
+        config_exclude_keys = ["optimizer", "model"]
+    else:
+        run_name = cfg.get("name", cfg_to_run_name(cfg))
+        config_exclude_keys = ["mcmc"]
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
@@ -34,6 +40,7 @@ def main(cfg: DictConfig):
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs,
         group="gnp",
+        config_exclude_keys=config_exclude_keys,
     )
     numpyro_model = importlib.import_module(cfg.numpyro)
     wandb.log_artifact(getsourcefile(numpyro_model))
@@ -41,6 +48,9 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader = valid_dataloader = build_dataloader(cfg)
+    if cfg.do_mcmc:
+        evaluate_mcmc(rng_test, cfg, train_dataloader)
+        return
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     state = train(
@@ -183,6 +193,7 @@ def build_dataloader(cfg: DictConfig):
         return samples["z"], samples["n_pos"]
 
     def sample_n(rng, sample_shape):
+        # mean 50 geometric
         return random.geometric(rng, 0.02, sample_shape)
 
     def sample_x(rng, sample_shape):
@@ -225,6 +236,61 @@ def build_dataloader(cfg: DictConfig):
             yield sample_batch(rng_i)
 
     return dataloader
+
+
+def evaluate_mcmc(rng, cfg, dataloader):
+    """
+    Only works with the simple binomial model for now, i.e. z=y, no bias or
+    covariates.
+    """
+    assert cfg.input_format == "survey", "MCMC only supports survey input format"
+    assert cfg.output_format == "z", (
+        "MCMC only supports z output format, will convert to theta as needed."
+    )
+
+    num_steps = cfg.mcmc.num_steps
+    numpyro_model = importlib.import_module(cfg.numpyro)
+    rng_data, rng = random.split(rng)  # this matches the evaluate function
+    dataloader = dataloader(rng_data)
+    mcmc = MCMC(
+        NUTS(numpyro_model.model),
+        num_warmup=cfg.mcmc.num_warmup,
+        num_samples=cfg.mcmc.num_samples,
+        num_chains=cfg.mcmc.num_chains,
+        chain_method="vectorized",
+    )
+
+    for i, batch in enumerate(dataloader):
+        rng, rng_mcmc, rng_d, rng_condition = random.split(rng, 4)
+        if i >= num_steps:
+            break
+        ((idx, sample),) = batch.sample_for_inference(rng_d)
+
+        s_c = sample.items["s_ctx"]
+        s_t = sample.items["s_test"]
+        n, n_pos = jnp.rollaxis(sample.items["f_ctx"], -1)
+        mcmc.run(rng_mcmc, s_c, n, n_pos)
+        samples = mcmc.get_samples(group_by_chain=True)
+        y_c = samples.pop("y")
+        y_t = sample_gp_pointwise(rng_condition, s_c[None], y_c, s_t[None], **samples)
+        y_t = jnp.reshape(y_t, (-1, *y_t.shape[2:]))
+
+        metrics = {}
+        # z
+        mean = jnp.mean(y_t, axis=0)
+        std = jnp.std(y_t, axis=0)
+        true_z_t = sample.items["f_test"]
+        nll = -jsp.stats.norm.logpdf(y_t, loc=mean, scale=std).mean()
+        metrics["MCMC z NLL"] = nll
+        # theta
+        theta_t = jax.nn.sigmoid(y_t)
+        true_theta_t = true_z_t
+        mean = jnp.mean(theta_t, axis=0)
+        std = jnp.std(theta_t, axis=0)
+        nll = -jsp.stats.norm.logpdf(true_theta_t, loc=mean, scale=std).mean()
+        metrics["MCMC theta NLL"] = nll
+
+        wandb.log(metrics)
 
 
 if __name__ == "__main__":

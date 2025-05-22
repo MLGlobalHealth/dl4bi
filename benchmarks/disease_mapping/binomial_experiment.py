@@ -20,10 +20,12 @@ def binomial_experiment(seeds: jax.Array, dry_run: bool = False):
         ]
     project = "Disease Mapping - Binomial Observations"
 
+    paths = []
     for seed in seeds:
         for input_format in ["survey", "theta", "theta_n", "z", "z_n"]:
             for output_format in ["z", "theta"]:
                 with initialize(config_path="configs", version_base=None):
+                    name = f"binomial-{input_format}-{output_format}"
                     cfg = compose(
                         "training",
                         overrides=[
@@ -34,10 +36,12 @@ def binomial_experiment(seeds: jax.Array, dry_run: bool = False):
                             f"seed={seed}",
                             f"input_format={input_format}",
                             f"output_format={output_format}",
-                            f"+name=binomial-{input_format}-{output_format}",
+                            f"+name={name}",
                         ]
                         + overrides,
                     )
+                    path = f"results/{cfg.project}/{cfg.data.name}/{cfg.seed}/{name}"
+                    paths.append(path)
                     print("=" * 100)
                     main(cfg)
 
