@@ -293,7 +293,7 @@ def evaluate_mcmc(rng, cfg, dataloader):
         mean = jnp.mean(y_t, axis=0)
         std = jnp.std(y_t, axis=0)
         true_z_t = sample["f_test"]
-        nll = -jsp.stats.norm.logpdf(y_t, loc=mean, scale=std).mean()
+        nll = -jsp.stats.norm.logpdf(true_z_t, loc=mean, scale=std).mean()
         metrics["MCMC z NLL"] = nll
         # theta
         theta_t = jax.nn.sigmoid(y_t)
