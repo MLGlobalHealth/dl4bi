@@ -17,11 +17,6 @@ jitter = 1e-4  # note this is in fact N(0, s2=jitter) independent noise
 
 
 def spatial_effect(s: jax.Array):
-    """
-    Definition of the spatial effect underlying the observation model.
-
-    If sample_shape is not (), the kernel parameters are shared across samples.
-    """
     ls = numpyro.sample("ls", dist.InverseGamma(3, 3))
     var = numpyro.sample("var", dist.InverseGamma(3, 3))
 

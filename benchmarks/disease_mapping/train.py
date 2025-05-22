@@ -5,20 +5,25 @@ Learns the map
 """
 
 import importlib
+from contextlib import redirect_stdout
+from functools import partial
 from inspect import getsourcefile
+from io import StringIO
 from pathlib import Path
 
 import hydra
 import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
+import numpyro
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random, vmap
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig, OmegaConf
 
-from benchmarks.disease_mapping.samplers import sample_gp_pointwise
+from benchmarks.disease_mapping.samplers import sample_gp_pointwise_generic
+from benchmarks.disease_mapping.utils import rng_vmap
 from dl4bi.core.train import evaluate, save_ckpt, train
 from dl4bi.meta_learning.data.spatial import SpatialBatch
 from dl4bi.meta_learning.data.utils import batch_BLD, permute_L_in_BLD
@@ -250,8 +255,8 @@ def evaluate_mcmc(rng, cfg, dataloader):
     rng_data, rng = random.split(rng)  # this matches the evaluate function
     dataloader = dataloader(rng_data)
     assert numpyro_model.__name__ == "binomial_model"
-    sampler = NUTS(numpyro_model.model, init_strategy=init_to_median)
 
+    sampler = (NUTS(numpyro_model.model),)
     for i, batch in enumerate(dataloader):
         rng, rng_mcmc, rng_d, rng_condition = random.split(rng, 4)
         if i >= num_steps:
@@ -260,21 +265,29 @@ def evaluate_mcmc(rng, cfg, dataloader):
 
         s_c = sample["s_ctx"]
         s_t = sample["s_test"]
-        n, n_pos = jnp.rollaxis(sample["f_ctx"], -1)
+        n_pos, n = jnp.rollaxis(sample["f_ctx"], -1)
+
         mcmc = MCMC(
             sampler,
             num_warmup=cfg.mcmc.num_warmup,
             num_samples=cfg.mcmc.num_samples,
             num_chains=cfg.mcmc.num_chains,
             chain_method="vectorized",
-            progress_bar=False,
+            progress_bar=True,
         )
-        print(s_c.shape, n.shape, n_pos.shape)
         mcmc.run(rng_mcmc, s_c, n, n_pos)
-        samples = mcmc.get_samples(group_by_chain=True)
+        samples = mcmc.get_samples(group_by_chain=False)
         y_c = samples.pop("y")
-        y_t = sample_gp_pointwise(rng_condition, s_c[None], y_c, s_t[None], **samples)
-        y_t = jnp.reshape(y_t, (-1, *y_t.shape[2:]))
+        print(samples["ls"].shape)
+        sample_gp_pointwise = lambda x: sample_gp_pointwise_generic(
+            x[0], s_c, x[1], s_t, kernel=numpyro_model.kernel, **x[2]
+        )
+        N = y_c.shape[0]
+        y_t = jax.lax.map(
+            sample_gp_pointwise,
+            (random.split(rng_condition, N), y_c, samples),
+            batch_size=32,
+        )
 
         metrics = {}
         # z
@@ -290,6 +303,11 @@ def evaluate_mcmc(rng, cfg, dataloader):
         std = jnp.std(theta_t, axis=0)
         nll = -jsp.stats.norm.logpdf(true_theta_t, loc=mean, scale=std).mean()
         metrics["MCMC theta NLL"] = nll
+
+        f = StringIO()
+        with redirect_stdout(f):
+            mcmc.print_summary()
+            metrics["MCMC summary"] = f.getvalue()
 
         wandb.log(metrics)
 

@@ -93,6 +93,25 @@ def sample_gp_pointwise(
     s_t: jax.Array,  # [L_test, D]
     **params,  # passes params to gp mean and kernel
 ):
+    return sample_gp_pointwise_generic(
+        rng,
+        s_c=s_c,
+        y_c=y_c,
+        s_t=s_t,
+        kernel=kernel,
+        **params,
+    )
+
+
+def sample_gp_pointwise_generic(
+    rng,
+    s_c: jax.Array,  # [L_ctx, D]
+    y_c: jax.Array,  # [L_ctx]
+    s_t: jax.Array,  # [L_test, D]
+    *,
+    kernel,
+    **params,  # passes params to gp mean and kernel
+):
     """Sample pointwise posterior of a mean-0 GP given by params and observations y_c at s_c.
 
     Time complexity: O(L_ctx^3 + L_test * L_ctx^2)
