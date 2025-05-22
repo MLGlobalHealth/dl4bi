@@ -15,7 +15,7 @@ import jax.scipy as jsp
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random, vmap
-from numpyro.infer import MCMC, NUTS, Predictive
+from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig, OmegaConf
 
 from benchmarks.disease_mapping.samplers import sample_gp_pointwise
@@ -129,24 +129,21 @@ def make_batch(
         )
 
     # Various options for feeding the context
+    empirical_theta = n_pos_c / n_c
     empirical_z = jnp.clip(
-        jsp.special.logit(n_pos_c / n_c), -1e6, 1e6
+        jsp.special.logit(empirical_theta), -1e6, 1e6
     )  # need to guard against inf
     match input_format:
         case "survey":
             f_c = jnp.concat([n_pos_c, n_c], axis=-1)
         case "theta":
-            # empirical theta
-            f_c = n_pos_c / n_c
+            f_c = empirical_theta
         case "z":
-            # emprirical z
             f_c = empirical_z
         case "z_n":
-            # emprirical z + survey size
-            f_c = jnp.concat([empirical_z, z_c], axis=-1)
+            f_c = jnp.concat([empirical_z, n_c], axis=-1)
         case "theta_n":
-            # emprirical theta + survey size
-            f_c = jnp.concat([n_pos_c / n_c, z_c], axis=-1)
+            f_c = jnp.concat([empirical_theta, n_c], axis=-1)
 
     match output_format:
         case "theta":
@@ -252,13 +249,8 @@ def evaluate_mcmc(rng, cfg, dataloader):
     numpyro_model = importlib.import_module(cfg.numpyro)
     rng_data, rng = random.split(rng)  # this matches the evaluate function
     dataloader = dataloader(rng_data)
-    mcmc = MCMC(
-        NUTS(numpyro_model.model),
-        num_warmup=cfg.mcmc.num_warmup,
-        num_samples=cfg.mcmc.num_samples,
-        num_chains=cfg.mcmc.num_chains,
-        chain_method="vectorized",
-    )
+    assert numpyro_model.__name__ == "binomial_model"
+    sampler = NUTS(numpyro_model.model, init_strategy=init_to_median)
 
     for i, batch in enumerate(dataloader):
         rng, rng_mcmc, rng_d, rng_condition = random.split(rng, 4)
@@ -266,9 +258,18 @@ def evaluate_mcmc(rng, cfg, dataloader):
             break
         ((idx, sample),) = batch.sample_for_inference(rng_d)
 
-        s_c = sample.items["s_ctx"]
-        s_t = sample.items["s_test"]
-        n, n_pos = jnp.rollaxis(sample.items["f_ctx"], -1)
+        s_c = sample["s_ctx"]
+        s_t = sample["s_test"]
+        n, n_pos = jnp.rollaxis(sample["f_ctx"], -1)
+        mcmc = MCMC(
+            sampler,
+            num_warmup=cfg.mcmc.num_warmup,
+            num_samples=cfg.mcmc.num_samples,
+            num_chains=cfg.mcmc.num_chains,
+            chain_method="vectorized",
+            progress_bar=False,
+        )
+        print(s_c.shape, n.shape, n_pos.shape)
         mcmc.run(rng_mcmc, s_c, n, n_pos)
         samples = mcmc.get_samples(group_by_chain=True)
         y_c = samples.pop("y")
@@ -279,7 +280,7 @@ def evaluate_mcmc(rng, cfg, dataloader):
         # z
         mean = jnp.mean(y_t, axis=0)
         std = jnp.std(y_t, axis=0)
-        true_z_t = sample.items["f_test"]
+        true_z_t = sample["f_test"]
         nll = -jsp.stats.norm.logpdf(y_t, loc=mean, scale=std).mean()
         metrics["MCMC z NLL"] = nll
         # theta
