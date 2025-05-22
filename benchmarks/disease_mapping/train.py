@@ -256,7 +256,7 @@ def evaluate_mcmc(rng, cfg, dataloader):
     dataloader = dataloader(rng_data)
     assert numpyro_model.__name__ == "binomial_model"
 
-    sampler = (NUTS(numpyro_model.model),)
+    sampler = NUTS(numpyro_model.model)
     for i, batch in enumerate(dataloader):
         rng, rng_mcmc, rng_d, rng_condition = random.split(rng, 4)
         if i >= num_steps:
