@@ -84,15 +84,15 @@ def main(s, mcmc_path, batch_size=8, res=150):
     (results_path / "time.txt").write_text(f"{end_time - start_time:.2f} seconds")
 
     # Generating arviz summary
-    posterior = {"theta_t": theta_t, "z_t": z_t, "y_t": y_t}
+    # posterior = {"theta_t": theta_t, "z_t": z_t, "y_t": y_t}
 
-    az_data = az.from_dict(
-        jax.tree.map(lambda x: x.reshape(num_chains, -1, *x.shape[1:]), posterior)
-    )
-    summary = az.summary(az_data, hdi_prob=0.95)
-    print(summary)
-    summary.to_csv(results_path / "summary.csv")
-    print("Done")
+    # az_data = az.from_dict(
+    #     jax.tree.map(lambda x: x.reshape(num_chains, -1, *x.shape[1:]), posterior)
+    # )
+    # summary = az.summary(az_data, hdi_prob=0.95)
+    # print(summary)
+    # summary.to_csv(results_path / "summary.csv")
+    # print("Done")
 
 
 if __name__ == "__main__":
