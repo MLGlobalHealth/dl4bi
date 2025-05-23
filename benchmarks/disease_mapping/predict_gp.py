@@ -12,7 +12,7 @@ from numpyro.infer import MCMC
 from omegaconf import DictConfig, OmegaConf
 from tqdm import trange
 
-from benchmarks.disease_mapping import data, survey_model
+from benchmarks.disease_mapping import data, model
 from benchmarks.disease_mapping.samplers import sample_gp_pointwise_generic
 
 
@@ -56,11 +56,11 @@ def main(s, mcmc_path, batch_size=8, res=150, thinning=1):
             s_c,
             y_c,
             s_t,
-            kernel=survey_model.kernel,
+            kernel=model.kernel,
             method="map",  # will run preds in blocks of size 1024
             **params,
         )
-        z_t = seed(condition(survey_model.prevalence, params), rng_z)(y_t, x_t)
+        z_t = seed(condition(model.prevalence, params), rng_z)(y_t, x_t)
         return y_t, z_t
 
     print(f"Running predictions with pointwise gp - batch size {batch_size}")

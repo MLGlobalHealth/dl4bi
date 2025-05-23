@@ -1,10 +1,12 @@
+from typing import Literal
+
 import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 from jax import jit, vmap
 from numpyro.handlers import condition, seed
 
-from benchmarks.disease_mapping.survey_model import jitter, kernel, prevalence
+from benchmarks.disease_mapping.model import jitter, kernel, prevalence
 from benchmarks.disease_mapping.utils import rng_vmap
 from dl4bi.core.model_output import DiagonalMVNOutput
 from dl4bi.core.train import TrainState
@@ -93,6 +95,26 @@ def sample_gp_pointwise(
     s_t: jax.Array,  # [L_test, D]
     **params,  # passes params to gp mean and kernel
 ):
+    return sample_gp_pointwise_generic(
+        rng,
+        s_c=s_c,
+        y_c=y_c,
+        s_t=s_t,
+        kernel=kernel,
+        **params,
+    )
+
+
+def sample_gp_pointwise_generic(
+    rng,
+    s_c: jax.Array,  # [L_ctx, D]
+    y_c: jax.Array,  # [L_ctx]
+    s_t: jax.Array,  # [L_test, D]
+    *,
+    kernel,
+    method: Literal["vmap", "map"] = "vmap",
+    **params,  # passes params to gp mean and kernel
+):
     """Sample pointwise posterior of a mean-0 GP given by params and observations y_c at s_c.
 
     Time complexity: O(L_ctx^3 + L_test * L_ctx^2)
@@ -123,7 +145,12 @@ def sample_gp_pointwise(
 
         return conditional_mean.squeeze(), conditional_cov.squeeze()
 
-    mean, var = vmap(calculate_single)(s_t)
+    if method == "vmap":
+        mean, var = vmap(calculate_single)(s_t)
+    elif method == "map":
+        mean, var = jax.lax.map(
+            calculate_single, s_t, batch_size=1024
+        )  # compute in blocks
     z = jax.random.normal(rng, (L_test,))
 
     return mean + jnp.sqrt(var) * z
