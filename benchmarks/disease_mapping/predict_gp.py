@@ -62,7 +62,7 @@ def main(s, mcmc_path, batch_size=8, res=150):
         N // batch_size, desc="Predicting", unit=" batches", dynamic_ncols=True
     ):
         rng_i, rng = random.split(rng)
-        rng_i = random.split(rng_i, num_chains)
+        rng_i = random.split(rng_i, batch_size)
         y_c_i = y_c[i : i + batch_size]
         params_i = jax.tree.map(lambda x: x[i : i + batch_size], samples)
         pred = vmap(sampler)((rng_i, y_c_i, params_i))
