@@ -11,18 +11,15 @@ from typing import Literal
 import hydra
 import jax
 import jax.numpy as jnp
-import jax.scipy as jsp
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random, vmap
 from numpyro import handlers
 from omegaconf import DictConfig, OmegaConf
-from sps.utils import build_grid
 
-from benchmarks.disease_mapping import model as numpyro_model
-from benchmarks.meta_learning.gp import wandb_2d_plots
-from dl4bi.core.train import Callback, evaluate, save_ckpt, train
-from dl4bi.meta_learning.data.spatial import SpatialBatch, SpatialData
+from benchmarks.disease_mapping import survey_model as numpyro_model
+from dl4bi.core.train import evaluate, save_ckpt, train
+from dl4bi.meta_learning.data.spatial import SpatialBatch
 from dl4bi.meta_learning.data.utils import batch_BLD, permute_L_in_BLD
 from dl4bi.meta_learning.utils import cfg_to_run_name
 

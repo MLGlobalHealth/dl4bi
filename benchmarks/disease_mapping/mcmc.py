@@ -1,6 +1,4 @@
 import pickle
-from cProfile import label
-from datetime import datetime
 from inspect import getsource
 from pathlib import Path
 from timeit import default_timer as timer
@@ -10,16 +8,16 @@ import hydra
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
+from numpyro.infer import MCMC, NUTS, Predictive
 from omegaconf import DictConfig, OmegaConf
 
-import benchmarks.disease_mapping.model as model
+import benchmarks.disease_mapping.survey_model as survey_model
 from benchmarks.disease_mapping.data import get_survey_data
 from benchmarks.disease_mapping.visualize import plot_surveys
 
 
 def run_mcmc(cfg: DictConfig, data: dict[str, jax.Array]) -> MCMC:
-    sampler = NUTS(model.survey_model)
+    sampler = NUTS(survey_model.survey_model)
     mcmc = MCMC(
         sampler,
         num_warmup=cfg.num_warmup,
@@ -40,7 +38,7 @@ def prior_predictive_check(data: dict[str, jax.Array]):
     n = data["n"].astype(jnp.int32)
     L = n.shape[-1]
 
-    predictive = Predictive(model.survey_model, num_samples=100)
+    predictive = Predictive(survey_model.survey_model, num_samples=100)
     samples = predictive(rng, s, n, None, x)
     prior_n_pos = samples["n_pos"]
 
@@ -103,7 +101,7 @@ def main(cfg: DictConfig):
     jnp.savez(results_path / "data.npz", **data)
     fig = plot_surveys(data)
     fig.savefig(results_path / "data.png", dpi=300)
-    (results_path / "model.txt").write_text(getsource(model))
+    (results_path / "model.txt").write_text(getsource(survey_model))
 
     # Prior predictive check
     fig = prior_predictive_check(data)
