@@ -52,7 +52,9 @@ def main(cfg: DictConfig):
     loader = gen_obs_data(rng, inference_model, dec_model, state)
     adj_mat = None
     if spatial_prior.__name__ in ["car", "icar", "bym"]:
-        adj_mat = generate_adjacency_matrix(map_data, cfg.data.graph_construction)
+        adj_mat = generate_adjacency_matrix(
+            map_data, cfg.data.graph_construction.self_loops
+        )
     num_samples = cfg.emprical_bayes_samples
     real_conds = jnp.zeros((num_samples, len(conds_names)))
     inferred_conds = jnp.zeros_like(real_conds)

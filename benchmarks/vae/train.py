@@ -61,6 +61,7 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
         loader,
         valid_monitor_metric="loss",
+        return_state="best",
         callbacks=[
             Callback(
                 callback_fn(
