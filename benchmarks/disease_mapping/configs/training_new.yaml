@@ -1,0 +1,29 @@
+defaults:
+  - _self_ # use default global values below
+  - data: so3
+  - model: tnp_kr_geo
+  # specified in code
+  # - kernel: rbf
+seed: 42
+wandb: True
+project: Disease Mapping - same config as SO3
+train_num_steps: 100000
+valid_num_steps: 5000
+valid_interval: 10000
+optimizer:
+  _target_: optax.chain
+  _args_:
+    - _target_: optax.clip_by_global_norm
+      max_norm: 0.5
+    - _target_: optax.adamw
+      learning_rate:
+        _target_: optax.cosine_depcay_schedule
+        init_value: 1.0e-4
+        decay_steps: ${train_num_steps}
+        alpha: 2.0e-5
+      b1: 0.9
+      b2: 0.999
+      weight_decay: 1.0e-4
+
+input_format: "survey" # survey -> [n_pos, n], or theta -> [n_pos / n]
+output_format: "z" # theta or z
