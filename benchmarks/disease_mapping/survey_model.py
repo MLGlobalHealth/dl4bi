@@ -49,7 +49,7 @@ def prevalence(y, x=None):
     *sample_shape, L = y.shape
     sample_shape = tuple(sample_shape)
 
-    b0 = numpyro.sample("b0", dist.Normal(-2, 5), sample_shape=sample_shape)
+    b0 = numpyro.sample("b0", dist.Normal(-1, 5), sample_shape=sample_shape)
     b0 = b0[..., None]  # make broadcastable to [sample_shape, L]
 
     if x is not None:
