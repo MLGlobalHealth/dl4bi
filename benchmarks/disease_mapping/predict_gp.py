@@ -29,8 +29,8 @@ def main(s, mcmc_path, batch_size=8, res=150, thinning=1):
     samples = mcmc.get_samples(group_by_chain=True)
     if thinning > 1:
         print(f"Thinning samples by {thinning}")
-        samples = jax.tree_map(slice(None, None, thinning), samples)
-    samples = jax.tree_map(lambda x: x.reshape(num_chains, -1, *x.shape[1:]), samples)
+        samples = jax.tree.map(lambda x: x[:, ::thinning], samples)
+    samples = jax.tree.map(lambda x: x.reshape(-1, *x.shape[2:]), samples)
 
     s_c = jnp.load(mcmc_path / "data.npz")["s"]
     y_c = samples.pop("y")
