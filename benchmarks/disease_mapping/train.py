@@ -5,27 +5,20 @@ Learns the map
 """
 
 import importlib
-from collections import defaultdict
-from contextlib import redirect_stdout
-from functools import partial
 from inspect import getsourcefile
-from io import StringIO
 from pathlib import Path
 
 import hydra
 import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
-import numpyro
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random, vmap
-from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
+from numpyro.infer import MCMC, NUTS, Predictive
 from omegaconf import DictConfig, OmegaConf
-from traitlets import default
 
 from benchmarks.disease_mapping.samplers import sample_gp_pointwise_generic
-from benchmarks.disease_mapping.utils import rng_vmap
 from dl4bi.core.train import evaluate, save_ckpt, train
 from dl4bi.meta_learning.data.spatial import SpatialBatch
 from dl4bi.meta_learning.data.utils import batch_BLD, permute_L_in_BLD
