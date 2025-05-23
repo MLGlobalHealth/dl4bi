@@ -1,4 +1,4 @@
-name: generic
+name: so3
 s:
   - start: -10
     stop: 10

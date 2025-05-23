@@ -17,7 +17,7 @@ optimizer:
       max_norm: 0.5
     - _target_: optax.adamw
       learning_rate:
-        _target_: optax.cosine_depcay_schedule
+        _target_: optax.cosine_decay_schedule
         init_value: 1.0e-4
         decay_steps: ${train_num_steps}
         alpha: 2.0e-5
