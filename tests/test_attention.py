@@ -32,6 +32,24 @@ def test_attention_impl():
     assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
 
 
+def test_cudnn_attention_impl():
+    B, H, L, D = 4, 4, 32, 16
+    key = random.key(42)
+    rng_qkv, rng_bias, rng_init = random.split(key, 3)
+    qs, ks, vs = random.normal(rng_qkv, (3, B, H, L, D))
+    bias = random.normal(rng_bias, (B, H, L, L))
+    valid_lens = jnp.array([2, 4, 6, 3])
+    mask = mask_from_valid_lens(L, valid_lens)
+    (ctx, attn), _ = Attention(use_cudnn=True).init_with_output(
+        rng_init, qs, ks, vs, mask, bias=bias
+    )
+    assert ctx.shape == (B, H, L, D), "Incorrect context output shape!"
+    (ctx, attn), _ = Attention(use_cudnn=True).init_with_output(
+        rng_init, qs, ks, vs, mask, bias=None
+    )
+    assert ctx.shape == (B, H, L, D), "Incorrect context output shape!"
+
+
 def test_multihead_attention_impl():
     B, H, L, D = 4, 4, 32, 64
     key = random.key(42)
@@ -142,6 +160,46 @@ def test_biased_scan_attention_impl():
         assert ctx_scan.shape == (B, H, L, D), "Scan: incorrect context output shape!"
 
 
+def test_cudnn_attention_speed():
+    B, L, H, D, N = 4, 4096, 4, 16, 10
+    rng = random.key(42)
+    rng_qkv, rng_valid, rng_init = random.split(rng, 3)
+    qs, ks, vs = random.normal(rng_qkv, (3, B, H, L, D))
+    valid_lens = random.randint(rng_valid, (B,), 1, maxval=L)
+    mask = mask_from_valid_lens(L, valid_lens)
+    cudnn_attn = Attention(use_cudnn=True)
+    _, params = cudnn_attn.init_with_output(rng_init, qs, ks, vs, mask)
+    jit_cudnn_attn = jax.jit(
+        lambda qs, ks, vs, mask: cudnn_attn.apply(
+            params, qs, ks, vs, mask, rngs={"rng_extra": rng}
+        )
+    )
+    jit_cudnn_attn(qs, ks, vs, mask)  # precompile
+    t_cudnn_start = time()
+    for i in range(N):
+        jit_cudnn_attn(qs, ks, vs, mask)
+    t_cudnn_stop = time()
+    t_cudnn = t_cudnn_stop - t_cudnn_start
+    del jit_cudnn_attn, cudnn_attn, params  # free up memory
+    attn = Attention()
+    _, params = attn.init_with_output(rng_init, qs, ks, vs, mask)
+    jit_attn = jax.jit(
+        lambda qs, ks, vs, mask: attn.apply(
+            params, qs, ks, vs, mask, rngs={"rng_extra": rng}
+        )
+    )
+    jit_attn(qs, ks, vs, mask)  # precompile
+    t_vanilla_start = time()
+    for i in range(N):
+        jit_attn(qs, ks, vs, mask)
+    t_vanilla_stop = time()
+    t_vanilla = t_vanilla_stop - t_vanilla_start
+    factor = 1.1
+    assert t_cudnn < factor * t_vanilla, (
+        f"cudnn version is slower than {factor} vanilla!"
+    )
+
+
 def test_fast_softmax_attention_speed():
     B, H, L, D, N = 1, 4, 1024, 16, 5
     key = random.key(42)
@@ -207,7 +265,7 @@ def test_scan_attention_speed():
 
 
 def test_biased_scan_attention_speed():
-    B, H, L, D, S, N, C = 5, 4, 1024, 16, 2, 5, 1024
+    B, H, L, D, S, N = 5, 4, 1024, 16, 2, 5
     key = random.key(42)
     rng_qkv, rng_s, rng_valid, rng_init = random.split(key, 4)
     qs, ks, vs = random.normal(rng_qkv, (3, B, H, L, D))
@@ -264,6 +322,27 @@ def test_biased_scan_attention_speed():
         assert t_scan_diff < factor * t_true_diff, (
             f"Scan is more than {factor}x slower!"
         )
+
+
+def test_cudnn_attention_scale():
+    # L_ctx, L_test = 105569, 44431  # Case Study for Large Spatial Data, Heaton et al
+    B, L_ctx, L_test, H, D = 1, 110000, 50000, 4, 16
+    key = random.key(42)
+    rng_init, rng_qs, rng_kvs = random.split(key, 3)
+    qs = random.normal(rng_qs, (B, H, L_test, D))
+    kvs = random.normal(rng_kvs, (B, H, L_ctx, D))
+
+    cudnn_attn = Attention(use_cudnn=True)
+    (ctx_cudnn_init, _), params = cudnn_attn.init_with_output(rng_init, qs, kvs, kvs)
+    jit_cudnn_attn = jax.jit(
+        lambda qs, ks, vs: cudnn_attn.apply(params, qs, ks, vs, rngs={"rng_extra": key})
+    )
+    # to view results: tensorboard --logdir /tmp/tensorboard/
+    with jax.profiler.trace("/tmp/tensorboard"):
+        ctx_cudnn, _ = jit_cudnn_attn(qs, kvs, kvs)
+
+    assert jnp.isfinite(ctx_cudnn_init).all(), "Non-finite values produced!"
+    assert jnp.isfinite(ctx_cudnn).all(), "Non-finite values produced!"
 
 
 def test_fast_softmax_attention_scale():

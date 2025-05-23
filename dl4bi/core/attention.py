@@ -704,6 +704,7 @@ class Attention(nn.Module):
     """
 
     p_dropout: float = 0.0
+    use_cudnn: bool = False
 
     @nn.compact
     def __call__(
@@ -729,12 +730,35 @@ class Attention(nn.Module):
         """
         D_qk = qs.shape[-1]
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        scores = jnp.einsum("B H Q D, B H K D -> B H Q K", qs, ks) / jnp.sqrt(D_qk)
-        scores += kwargs.get("bias", 0)
-        if mask is not None:
-            scores = jnp.where(mask[:, None, None, :], scores, -jnp.inf)
-        attn = nn.softmax(scores, axis=-1)  # [B, H, Q, K]
-        ctx = jnp.einsum("B H Q K, B H K D -> B H Q D", drop(attn), vs)
+        bias = kwargs.get("bias")
+        if self.use_cudnn:
+            (B, H, Q, _), K = qs.shape, ks.shape[2]
+            prep = jit(lambda v: v.transpose(0, 2, 1, 3).astype("bfloat16"))
+            # TODO(danj): https://github.com/jax-ml/jax/issues/28974
+            if bias is not None:
+                bias = jnp.broadcast_to(bias, (B, H, Q, K)).astype("bfloat16")
+            if mask is not None:
+                mask = jnp.broadcast_to(mask[:, None, None, :], (B, H, Q, K))
+            ctx = jax.nn.dot_product_attention(
+                prep(qs),  # [B, Q, H, D_qk]
+                prep(ks),  # [B, K, H, D_qk]
+                prep(vs),  # [B, K, H, D_v]
+                bias,
+                mask,
+                # TODO(danj): uncomment and remove above code once bug fixed
+                # None if bias is None else jnp.bfloat16(bias),  # [B, H, Q, K]
+                # None if mask is None else mask[:, None, None, :],  # [B, H, Q, K]
+                implementation="cudnn",
+            ).transpose(0, 2, 1, 3)  # [B, H, Q, D_v]
+            attn = None  # never fully materialized
+        else:  # vanilla attention
+            scores = jnp.einsum("B H Q D, B H K D -> B H Q K", qs, ks) / jnp.sqrt(D_qk)
+            if bias is not None:
+                scores += bias
+            if mask is not None:
+                scores = jnp.where(mask[:, None, None, :], scores, -jnp.inf)
+            attn = nn.softmax(scores, axis=-1)  # [B, H, Q, K]
+            ctx = jnp.einsum("B H Q K, B H K D -> B H Q D", drop(attn), vs)
         return ctx, attn
 
 
