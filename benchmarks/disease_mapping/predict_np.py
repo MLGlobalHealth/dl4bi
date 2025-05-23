@@ -83,8 +83,7 @@ def predict(mcmc_path: Path, gnp_path: Path):
         path = mcmc_path / true_model
         if path.exists():
             print(f"Using {true_model} as ground truth.")
-            true_dist = dict(jnp.load(path / "predictions.npz"))
-            true_cfg = OmegaConf.load(path / "config.yaml")
+            true_dist = dict(jnp.load(path / "predictions.npz", allow_pickle=True))
             break
     else:
         raise ValueError(
@@ -96,11 +95,15 @@ def predict(mcmc_path: Path, gnp_path: Path):
     print(data.keys())
 
     s_c, n, n_pos = data["s"], data["n"], data["n_pos"]
-    s_t, theta_t, z_t = true_dist["s"], true_dist["theta"], true_dist["z"]
+    s_t, theta_t = true_dist["s"], true_dist["theta"]
+    if "z" in true_dist:
+        z_t = true_dist["z"]
+    else:
+        z_t = jax.scipy.special.logit(theta_t).clip(-1000, 1000)
 
     if "x" in data:
         x_c = data["x"]
-        x_t = get_urban_rural(true_cfg.iso, s_t, true_cfg.year)
+        x_t = true_dist["x"]
         print("Using x.")
     else:
         x_c = x_t = None
