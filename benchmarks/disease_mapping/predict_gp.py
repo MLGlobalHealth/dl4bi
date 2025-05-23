@@ -12,7 +12,7 @@ from numpyro.infer import MCMC
 from omegaconf import DictConfig, OmegaConf
 from tqdm import trange
 
-from benchmarks.disease_mapping import data, model
+from benchmarks.disease_mapping import data, model, visualize
 from benchmarks.disease_mapping.samplers import sample_gp_pointwise_generic
 
 
@@ -85,6 +85,7 @@ def main(s, mcmc_path, batch_size=8, res=150, thinning=1):
     theta_t = jax.nn.sigmoid(z_t)
 
     # Save predictions
+    print("Saving predictions")
     results_path = mcmc_path / "gp_pointwise"
     results_path.mkdir(parents=True, exist_ok=True)
     jnp.savez(
@@ -97,6 +98,11 @@ def main(s, mcmc_path, batch_size=8, res=150, thinning=1):
     )
     (results_path / "time.txt").write_text(f"{end_time - start_time:.2f} seconds")
 
+    # Plot
+    print("Plotting predictions")
+    mcmc_data = jnp.load(mcmc_path / "data.npz")
+    fig = visualize.plot_predictions(s_t, y_t, theta_t, mcmc_data)
+    fig.savefig(results_path / "predictions.png", dpi=300)
     # Generating arviz summary
     # posterior = {"theta_t": theta_t, "z_t": z_t, "y_t": y_t}
 
@@ -106,7 +112,7 @@ def main(s, mcmc_path, batch_size=8, res=150, thinning=1):
     # summary = az.summary(az_data, hdi_prob=0.95)
     # print(summary)
     # summary.to_csv(results_path / "summary.csv")
-    # print("Done")
+    print("Done")
 
 
 if __name__ == "__main__":

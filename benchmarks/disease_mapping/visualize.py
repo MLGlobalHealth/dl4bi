@@ -105,7 +105,7 @@ def plot_predictions(
     s_t: np.ndarray,  # [N, S, 2] or [S, 2], assuming from a grid
     y_t: np.ndarray,  # [N, S],
     theta_t: np.ndarray,  # [N, S],
-    data: np.ndarray,
+    data: np.ndarray | None = None,
     y_c: np.ndarray | None = None,
     shape: MultiPolygon | None = None,
 ):
