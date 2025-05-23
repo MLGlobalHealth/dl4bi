@@ -107,3 +107,22 @@ def rng_vmap(fn):
         return vmap(fn)(rng, *args, **kwargs)
 
     return wrapped_fn
+
+
+@jit
+def zstats_to_tstats(mean, std, n=1000):
+    rng = jax.random.key(0)
+    z = jax.random.normal(rng, (n, *mean.shape))
+    z = z * std + mean
+    t = jax.nn.sigmoid(z)
+    return t.mean(0), t.std(0)
+
+
+@jit
+def tstats_to_zstats(mean, std, n=1000):
+    # this is the less useful direction since t is not normal away from 0.5
+    rng = jax.random.key(0)
+    t = jax.random.normal(rng, (n, *mean.shape))
+    t = t * std + mean
+    z = jax.nn.sigmoid(t)
+    return z.mean(0), z.std(0)

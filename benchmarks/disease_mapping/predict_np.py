@@ -10,6 +10,7 @@ from omegaconf import OmegaConf
 from scipy.stats import chi2  # jax doesn't implement ppf
 
 from benchmarks.disease_mapping.data import get_urban_rural
+from benchmarks.disease_mapping.utils import zstats_to_tstats
 from benchmarks.disease_mapping.visualize import map_grid, scatter_map
 from dl4bi.core.model_output import DiagonalMVNOutput
 from dl4bi.core.train import load_ckpt
@@ -76,13 +77,13 @@ def predict(mcmc_path: Path, gnp_path: Path):
     if isinstance(mcmc_path, str):
         mcmc_path = Path(mcmc_path)
 
-    true_models = ["gp", "gp_pointwise"]  # ground truth models in order of preference
+    true_models = ["gp", "gp_pointwise"]  # baseline models in order of preference
 
     for true_model in true_models:
         path = mcmc_path / true_model
         if path.exists():
-            print(f"Using {true_model} as ground truth.")
-            true_dist = dict(jnp.load(path / "predictions.npz"))
+            print(f"Using {true_model} as baseline.")
+            true_dist = dict(jnp.load(path / "predictions.npz", allow_pickle=True))
             true_cfg = OmegaConf.load(path / "config.yaml")
             break
     else:
@@ -113,7 +114,7 @@ def predict(mcmc_path: Path, gnp_path: Path):
         x_c = x_t = None
         print("No x.")
 
-    # Load GNP model
+    # Load NP model
     state, model_cfg = load_ckpt(gnp_path)
     model_name = model_cfg.get("name", cfg_to_run_name(model_cfg))
     match model_cfg.get("input_format", "survey"):
@@ -121,6 +122,7 @@ def predict(mcmc_path: Path, gnp_path: Path):
             y_c = jnp.stack([n_pos, n], axis=-1)
         case "theta":
             y_c = (n_pos / n)[..., None]
+    model_cfg.output_format = model_cfg.get("output_format", "theta")
 
     @jit
     def predict(rng, s_c, x_c, y_c, s_t, x_t):
@@ -176,6 +178,8 @@ def predict(mcmc_path: Path, gnp_path: Path):
         std=predicted_std,
     )
     # Plotting
+    if model_cfg.output_format == "z":
+        predicted_mean, predicted_std = zstats_to_tstats(predicted_mean, predicted_std)
     fig = plot_side_by_side(
         s_t,
         true_mean,

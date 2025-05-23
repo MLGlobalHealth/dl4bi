@@ -3,6 +3,7 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import pandas as pd
+from jax import jit, vmap
 from jax import scipy as jsp
 from omegaconf import OmegaConf
 
@@ -23,12 +24,27 @@ def mre(x, y):
     return jnp.mean(jnp.abs(x - y) / (jnp.abs(x) + 1e-8))
 
 
+def mmd(x, y):
+    # MMD^2 with RBF 1 kernel
+    assert x.ndim == y.ndim == 1
+
+    def k(s, t):
+        return jnp.exp(-((s - t) ** 2))
+
+    mask_x = ~jnp.identity(x.shape[0], dtype=bool)
+    kxx = jnp.mean(k(x[:, None], x[None, :]), where=mask_x)
+    mask_y = ~jnp.identity(y.shape[0], dtype=bool)
+    kyy = jnp.mean(k(y[:, None], y[None, :]), where=mask_y)
+    kxy = jnp.mean(k(x[:, None], y[None, :]))
+    return kxx + kyy - 2 * kxy
+
+
+mmd = jit(vmap(mmd, in_axes=(1, 1)))
+
+
 def evaluate(
     true_dist: jax.Array,  # [N, L]
     predicted_dist: jax.Array | None = None,  # [N, L]
-    predicted_mean: jax.Array | None = None,  # [L]
-    predicted_std: jax.Array | None = None,  # [L]
-    predicted_cov: jax.Array | None = None,  # [L, L]
 ):
     true_mean = jnp.mean(true_dist, axis=0)
     true_std = jnp.std(true_dist, axis=0)
@@ -48,14 +64,11 @@ def evaluate(
     metrics["RMSE(mean)"] = rmse(predicted_mean, true_mean)
     metrics["RMSE(std)"] = rmse(predicted_std, true_std)
     metrics["avg L2(map)"] = rmse(predicted_mean, true_mean)
+    metrics["mean MMD2"] = mmd(predicted_dist, true_dist).mean()
     # this assumes diagonal normal posterior predictive
     metrics["avg pointwise NLL"] = -jsp.stats.norm.logpdf(
         true_dist, predicted_mean, predicted_std
     ).mean()
-    if predicted_cov is not None:
-        metrics["avg NLL"] = -jsp.stats.multivariate_normal.logpdf(
-            true_dist, predicted_mean, predicted_cov
-        ).mean()
 
     z = jsp.stats.norm.ppf(0.975)
     pointwise_coverage = (true_dist >= predicted_mean - z * predicted_std) & (
@@ -69,6 +82,7 @@ def evaluate(
 
 def main(runs: list[Path]):
     true_run = runs[0]
+    rng = jax.random.key(0)
     candidates = ["matheron", "gp", "gp_pointwise"]
     for candidate in candidates:
         if (candidate_path := true_run / candidate).exists():
@@ -87,7 +101,9 @@ def main(runs: list[Path]):
             "num_samples": mcmc_config.num_samples,
             "num_warmup": mcmc_config.num_warmup,
         }
-        for outputs_path in run.glob("*/predictions.npz"):
+        for outputs_path in run.glob("**/predictions.npz"):
+            if outputs_path == candidate_path / "predictions.npz":
+                continue
             predicted_dist = jnp.load(outputs_path)
             print(predicted_dist)
             if "theta" in predicted_dist:
@@ -108,18 +124,30 @@ def main(runs: list[Path]):
                     metrics |= run_params | {"chains": [i]}
                     results.append(metrics)
             else:
-                metrics = evaluate(
-                    true_dist, None, predicted_dist["mean"], predicted_dist["std"]
+                # its from an NP
+                rng_i, rng = jax.random.split(rng)
+                m, std = predicted_dist["mean"], predicted_dist["std"]
+                predicted_dist = (
+                    jax.random.normal(rng_i, shape=(1000, *m.shape)) * std + m
                 )
+                if (
+                    OmegaConf.load(outputs_path.parent / "config.yaml").output_format
+                    == "z"
+                ):
+                    # convert to theta
+                    predicted_dist = jax.nn.sigmoid(predicted_dist)
+
+                metrics = evaluate(true_dist, predicted_dist)
                 metrics["model"] = outputs_path.parent.name
                 results.append(metrics)
 
     # constant predictor
     data = jnp.load(true_run / "data.npz")
     trivial_predictor = jnp.mean(data["n_pos"] / data["n"], axis=0)
+    trivial_predictor = jnp.broadcast_to(trivial_predictor, true_dist.shape)
     results.append(
         {"model": "emprirical mean constant predictor"}
-        | evaluate(true_dist, None, trivial_predictor, 0)
+        | evaluate(true_dist, trivial_predictor)
     )
 
     df = pd.DataFrame.from_records(results, index="model")

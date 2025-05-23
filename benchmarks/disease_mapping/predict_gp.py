@@ -23,8 +23,15 @@ def main(s, mcmc_path, batch_size=8, res=150, thinning=1):
         mcmc: MCMC = pickle.load(f)
     iso = mcmc_cfg.get("iso")
     (year,) = findall("\\d+", mcmc_cfg.query)
+    year = int(year)
     region = None
     num_chains = mcmc.num_chains
+    results_path = mcmc_path / "gp_pointwise"
+    results_path.mkdir(parents=True, exist_ok=True)
+    # Save "config" for compatibility
+    OmegaConf.save(
+        OmegaConf.create({"iso": iso, "year": year}), results_path / "config.yaml"
+    )
 
     samples = mcmc.get_samples(group_by_chain=True)
     if thinning > 1:
@@ -86,8 +93,7 @@ def main(s, mcmc_path, batch_size=8, res=150, thinning=1):
 
     # Save predictions
     print("Saving predictions")
-    results_path = mcmc_path / "gp_pointwise"
-    results_path.mkdir(parents=True, exist_ok=True)
+
     jnp.savez(
         results_path / "predictions.npz",
         s=s_t,
