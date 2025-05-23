@@ -95,7 +95,15 @@ def predict(mcmc_path: Path, gnp_path: Path):
     print(data.keys())
 
     s_c, n, n_pos = data["s"], data["n"], data["n_pos"]
-    s_t, theta_t = true_dist["s"], true_dist["theta"]
+
+    if "theta/mean" in true_dist:
+        true_mean = true_dist["theta/mean"]
+        true_std = true_dist["theta/std"]
+    else:
+        true_mean = true_dist["theta"].mean(0)
+        true_std = true_dist["theta"].std(0)
+
+    s_t = true_dist["s"]
 
     if "x" in data:
         x_c = data["x"]
@@ -170,8 +178,8 @@ def predict(mcmc_path: Path, gnp_path: Path):
     # Plotting
     fig = plot_side_by_side(
         s_t,
-        theta_t.mean(0),
-        theta_t.std(0),
+        true_mean,
+        true_std,
         predicted_mean,
         predicted_std,
     )
