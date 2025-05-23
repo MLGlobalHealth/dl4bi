@@ -1,0 +1,41 @@
+defaults:
+  - _self_
+  - model: spatial/geo_bsa_tnp
+numpyro: survey_model
+data:
+  batch_size: 16
+  name: tza_made_generic
+  num_ctx:
+    max: 1024
+    min: 100
+  num_test: 1024
+  s:
+    - start: -5
+      stop: 5
+    - start: -5
+      stop: 5
+  urban_rural: false
+input_format: survey
+output_format: theta
+optimizer:
+  _args_:
+    - _target_: optax.clip_by_global_norm
+      max_norm: 1
+    - _target_: optax.adamw
+      b1: 0.9
+      b2: 0.999
+      learning_rate:
+        _target_: optax.cosine_decay_schedule
+        alpha: 2e-05
+        decay_steps: 100000
+        init_value: 0.001
+      weight_decay: 0.0001
+  _target_: optax.chain
+plot_interval: 10000
+project: Disease Mapping
+seed: 42
+train_num_steps: 100000
+valid_interval: 10000
+valid_num_steps: 5000
+wandb: true
+do_mcmc: false
