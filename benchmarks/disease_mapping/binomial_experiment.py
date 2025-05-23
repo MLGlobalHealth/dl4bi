@@ -45,6 +45,8 @@ def binomial_experiment(seeds: jax.Array, dry_run: bool = False):
                     print("=" * 100)
                     main(cfg)
 
+    seed = 5  # for comparison with mcmc
+
 
 if __name__ == "__main__":
     args = parse_args(sys.argv)
