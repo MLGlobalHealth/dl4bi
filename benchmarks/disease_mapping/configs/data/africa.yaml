@@ -1,0 +1,16 @@
+name: africa
+s:
+  # eastings
+  - start: -18
+    stop: 52
+    num: 71
+  # northings
+  - start: -35
+    stop: 38
+    num: 74
+num_ctx:
+  min: 200 # ~5%
+  max: 2048 # ~50%
+num_test: 4096
+batch_size: 16 
+# obs_noise: 0.01

@@ -65,6 +65,9 @@ def main(cfg: DictConfig):
             cfg.valid_num_steps,
         )
         wandb.log({f"Test {m}": v for m, v in metrics.items()})
+        if cfg.data.name == "2d":
+            data = next(clbk_dataloader(rng_test))
+            clbk(0, rng_test, state, *data)
         return
     state = train(
         rng_train,

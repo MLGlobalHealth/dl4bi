@@ -11,14 +11,15 @@ import sys
 from collections.abc import Callable
 
 import jax
-from beijing_air_quality import main as beijing_air_quality_main
-from era5 import main as era5_main
-from generic_spatial import main as generic_spatial_main
-from gp import main as gp_main
 from hydra import compose, initialize
 from jax import random
-from multiscale_2d_gp import main as multiscale_2d_gp_main
-from sir import main as sir_main
+
+from .beijing_air_quality import main as beijing_air_quality_main
+from .era5 import main as era5_main
+from .generic_spatial import main as generic_spatial_main
+from .gp import main as gp_main
+from .multiscale_2d_gp import main as multiscale_2d_gp_main
+from .sir import main as sir_main
 
 
 def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
