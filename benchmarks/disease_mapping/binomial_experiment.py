@@ -9,10 +9,15 @@ from benchmarks.meta_learning.reproduce_paper import parse_args
 
 
 def binomial_experiment(seeds: jax.Array, dry_run: bool = False):
-    overrides = []
+    overrides = [
+        "model=spatial/bsa_tnp",
+        "data=1d",
+        "numpyro=binomial_model",
+        "model.output_fn={__target__:dl4bi.core.model_output.DiagonalMVNOutput.from_activations, __partial__:true,min_std:0.01 }",
+    ]
     if dry_run:
         seeds = seeds[:2]  # no need for more than 2 runs each in dry run
-        overrides = [
+        overrides += [
             "wandb=False",
             "train_num_steps=100",
             "valid_num_steps=50",
@@ -30,9 +35,6 @@ def binomial_experiment(seeds: jax.Array, dry_run: bool = False):
                         "training",
                         overrides=[
                             f"project={project}",
-                            "model=spatial/bsa_tnp",
-                            "data=1d",
-                            "numpyro=binomial_model",
                             f"seed={seed}",
                             f"input_format={input_format}",
                             f"output_format={output_format}",
