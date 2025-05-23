@@ -13,7 +13,7 @@ def kernel(x, y, /, *, var, ls, **_):
     return rbf(x, y, var, ls)
 
 
-jitter = 1e-4  # note this is in fact N(0, s2=jitter) independent noise
+jitter = 1e-3  # note this is in fact N(0, s2=jitter) independent noise
 
 
 def spatial_effect(s: jax.Array):

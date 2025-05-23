@@ -28,7 +28,7 @@ def binomial_experiment(seeds: jax.Array, dry_run: bool = False):
     paths = []
     for seed in seeds:
         for input_format in ["survey", "theta", "theta_n", "z", "z_n"]:
-            for output_format in ["z", "theta"]:
+            for output_format in ["z"]:
                 with initialize(config_path="configs", version_base=None):
                     name = f"binomial-{input_format}-{output_format}"
                     cfg = compose(
