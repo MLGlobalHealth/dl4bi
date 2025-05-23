@@ -1,9 +1,9 @@
 defaults:
   - _self_ # use default global values below
-  - data: tza
-  - model: spatial/tnp_kr_scan 
+  - data: generic
+  - model: tnp_kr_geo
   # specified in code
-  # - kernel: rbf 
+  # - kernel: rbf
 seed: 42
 wandb: True
 project: Disease Mapping

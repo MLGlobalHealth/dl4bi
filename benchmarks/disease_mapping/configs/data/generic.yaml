@@ -1,0 +1,16 @@
+name: generic
+s:
+  # nums correspond to a grid with resolution of 150 seconds
+  - start: -5
+    stop: 5
+    # num: 28
+  - start: -5
+    stop: 5
+    # num: 39
+num_ctx:
+  min: 100 # ~10%
+  max: 1024 # ~100%
+num_test: 1024
+batch_size: 16
+# obs_noise: 0.01
+urban_rural: false
