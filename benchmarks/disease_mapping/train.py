@@ -20,6 +20,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from benchmarks.disease_mapping.samplers import sample_gp_pointwise_generic
 from dl4bi.core.train import evaluate, save_ckpt, train
+from dl4bi.core.utils import breakpoint_if_nonfinite
 from dl4bi.meta_learning.data.spatial import SpatialBatch
 from dl4bi.meta_learning.data.utils import batch_BLD, permute_L_in_BLD
 from dl4bi.meta_learning.utils import cfg_to_run_name
@@ -128,11 +129,13 @@ def make_batch(
             batch_BLD(rng_b, [s, x, n, z, n_pos], *batch_args)
         )
 
+    # this sometimes became 1.000001 under jit :)
+    empirical_theta = jnp.clip(n_pos_c / n_c, 0, 1)
+    # guard against inf
+    empirical_z = jsp.special.logit(empirical_theta).clip(-1000, 1000)
+    # breakpoint_if_nonfinite(empirical_z)
+
     # Various options for feeding the context
-    empirical_theta = n_pos_c / n_c
-    empirical_z = jnp.clip(
-        jsp.special.logit(empirical_theta), -1e6, 1e6
-    )  # need to guard against inf
     match input_format:
         case "survey":
             f_c = jnp.concat([n_pos_c, n_c], axis=-1)
