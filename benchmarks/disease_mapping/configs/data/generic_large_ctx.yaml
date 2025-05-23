@@ -1,0 +1,14 @@
+name: generic
+s:
+  - start: -10
+    stop: +10
+    num: 64
+  - start: -10
+    stop: +10
+    num: 64
+num_ctx:
+  min: 128 # ~5%
+  max: 1024 # ~10%
+num_test: 1024 # 25%
+batch_size: 16
+urban_rural: false
