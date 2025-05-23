@@ -13,7 +13,7 @@ def binomial_experiment(seeds: jax.Array, dry_run: bool = False):
         "model=spatial/bsa_tnp",
         "data=1d",
         "numpyro=binomial_model",
-        "model.output_fn={__target__:dl4bi.core.model_output.DiagonalMVNOutput.from_activations, __partial__:true,min_std:0.01 }",
+        "+model.output_fn={_target_:dl4bi.core.model_output.DiagonalMVNOutput.from_activations, _partial_:true, min_std:0.01 }",
     ]
     if dry_run:
         seeds = seeds[:2]  # no need for more than 2 runs each in dry run
