@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import jax
 import jax.numpy as jnp
@@ -80,13 +81,13 @@ def evaluate(
     return metrics
 
 
-def main(runs: list[Path]):
+def main(runs: list[Path], quantity: Literal["theta", "z"]):
     true_run = runs[0]
     rng = jax.random.key(0)
     candidates = ["matheron", "gp", "gp_pointwise"]
     for candidate in candidates:
         if (candidate_path := true_run / candidate).exists():
-            true_dist = jnp.load(candidate_path / "predictions.npz")["theta"]
+            true_dist = jnp.load(candidate_path / "predictions.npz")[quantity]
             print(f"Using {candidate_path} as ground truth.")
             break
     else:
@@ -102,15 +103,16 @@ def main(runs: list[Path]):
             "num_warmup": mcmc_config.num_warmup,
         }
         for outputs_path in run.glob("**/predictions.npz"):
-            if outputs_path == candidate_path / "predictions.npz":
+            outputs_path = outputs_path.parent
+            if outputs_path == candidate_path:
                 continue
-            predicted_dist = jnp.load(outputs_path)
+            predicted_dist = jnp.load(outputs_path / "predictions.npz")
             print(predicted_dist)
             if "theta" in predicted_dist:
                 # its from an MCMC run
-                predicted_dist = predicted_dist["theta"]
+                predicted_dist = predicted_dist[quantity]
                 metrics = evaluate(true_dist, predicted_dist)
-                metrics["model"] = outputs_path.parent.name
+                metrics["model"] = outputs_path.name
                 metrics |= run_params
                 results.append(metrics)
 
@@ -120,7 +122,7 @@ def main(runs: list[Path]):
                 )
                 for i in range(num_chains):
                     metrics = evaluate(true_dist, predicted_dist[i])
-                    metrics["model"] = outputs_path.parent.name + f"/{i}"
+                    metrics["model"] = outputs_path.name + f"/{i}"
                     metrics |= run_params | {"chains": [i]}
                     results.append(metrics)
             else:
@@ -130,15 +132,20 @@ def main(runs: list[Path]):
                 predicted_dist = (
                     jax.random.normal(rng_i, shape=(1000, *m.shape)) * std + m
                 )
-                if (
-                    OmegaConf.load(outputs_path.parent / "config.yaml").output_format
-                    == "z"
-                ):
+                model_cfg = OmegaConf.load(outputs_path / "config.yaml")
+                if model_cfg.output_format == "z" and quantity == "theta":
                     # convert to theta
                     predicted_dist = jax.nn.sigmoid(predicted_dist)
+                elif model_cfg.output_format == "theta" and quantity == "z":
+                    # convert to z
+                    predicted_dist = jnp.clip(predicted_dist, 0, 1)
+                    predicted_dist = jax.scipy.special.logit(predicted_dist).clip(
+                        -1e6, 1e6
+                    )
 
                 metrics = evaluate(true_dist, predicted_dist)
-                metrics["model"] = outputs_path.parent.name
+                metrics["model"] = outputs_path.name
+                metrics["seed"] = mcmc_config.seed
                 results.append(metrics)
 
     # constant predictor
@@ -159,9 +166,16 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Compare MCMC runs.")
     parser.add_argument("runs", type=Path, nargs="+", help="Paths to MCMC runs.")
+    parser.add_argument(
+        "--theta", action="store_true", help="Use theta predictions instead of z."
+    )
     args = parser.parse_args()
+    if args.theta:
+        quantity = "theta"
+    else:
+        quantity = "z"
 
-    result = main(args.runs)
+    result = main(args.runs, quantity)
 
     print(result)
     result.to_csv("results.csv")
