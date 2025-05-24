@@ -168,7 +168,7 @@ def predict(mcmc_path: Path, gnp_path: Path):
     time_end = timer()
     print(f"Took {time_end - time_start:.2f} seconds.")
     print("Saving predictions...")
-    results_path = mcmc_path / model_name
+    results_path = mcmc_path / f"{model_cfg.seed}" / model_name
     results_path.mkdir(parents=True, exist_ok=True)
     OmegaConf.save(model_cfg, results_path / "config.yaml")
     jnp.savez(
