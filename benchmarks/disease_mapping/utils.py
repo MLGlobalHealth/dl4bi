@@ -124,5 +124,6 @@ def tstats_to_zstats(mean, std, n=1000):
     rng = jax.random.key(0)
     t = jax.random.normal(rng, (n, *mean.shape))
     t = t * std + mean
-    z = jax.nn.sigmoid(t)
+    t = t.clip(0, 1)  # clip to [0,1] to avoid NaNs
+    z = jax.scipy.special.logit(t).clip(-1e6, 1e6)
     return z.mean(0), z.std(0)

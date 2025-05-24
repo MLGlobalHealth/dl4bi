@@ -16,7 +16,9 @@ def infer_resolution(s):
     return min(lon_diff.min(), lat_diff.min())
 
 
-def scatter_map(locations, values, ax: plt.Axes, cmap="viridis", vmin=None, vmax=None):
+def scatter_map(
+    locations, values, ax: plt.Axes, cmap="viridis", vmin=None, vmax=None, colorbar=True
+):
     """
     Scatter plot with a colorbar.
     """
@@ -38,7 +40,8 @@ def scatter_map(locations, values, ax: plt.Axes, cmap="viridis", vmin=None, vmax
     ax.set_ylim(lat.min() - 0.5, lat.max() + 0.5)
     sm = ax.pcolormesh(X, Y, data, cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set_aspect("equal")
-    plt.colorbar(sm, ax=ax)
+    if colorbar:
+        plt.colorbar(sm, ax=ax)
 
     return ax
 

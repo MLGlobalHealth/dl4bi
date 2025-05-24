@@ -17,14 +17,19 @@ from dl4bi.core.train import load_ckpt
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
-def plot_side_by_side(s, gp_mean, gp_std, predicted_mean, predicted_std):
+def plot_side_by_side(
+    s, gp_mean, gp_std, predicted_mean, predicted_std, mean_min=0, mean_max=1
+):
     fig, axes = map_grid(s, 2, 3)
     fig.suptitle("GP vs Neural Process")
 
     std_min = min(gp_std.min(), predicted_std.min())
     std_max = max(gp_std.max(), predicted_std.max())
-    mean_min = 0
-    mean_max = 1
+
+    if mean_min is None:
+        mean_min = min(gp_mean.min(), predicted_mean.min())
+    if mean_max is None:
+        mean_max = max(gp_mean.max(), predicted_mean.max())
 
     scatter_map(s, gp_mean, ax=axes[0, 0], vmin=mean_min, vmax=mean_max)
     scatter_map(s, predicted_mean, ax=axes[0, 1], vmin=mean_min, vmax=mean_max)
@@ -185,7 +190,9 @@ def predict(mcmc_path: Path, gnp_path: Path):
         predicted_mean_theta, predicted_std_theta = predicted_mean, predicted_std
         predicted_mean_z, predicted_std_z = tstats_to_zstats(
             predicted_mean, predicted_std
-        ).clip(-100, 100)
+        )
+        predicted_mean_z = jnp.clip(predicted_mean_z, -100, 100)
+        predicted_std_z = jnp.clip(predicted_std_z, -100, 100)
     plot_side_by_side(
         s_t,
         true_mean_theta,
@@ -199,6 +206,8 @@ def predict(mcmc_path: Path, gnp_path: Path):
         true_std_z,
         predicted_mean_z,
         predicted_std_z,
+        mean_min=None,
+        mean_max=None,
     ).savefig(results_path / "predictions_z.png", dpi=300)
 
 
