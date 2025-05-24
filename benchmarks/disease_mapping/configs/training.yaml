@@ -6,7 +6,7 @@ defaults:
   # - kernel: rbf
 seed: 42
 wandb: True
-project: Disease Mapping
+project: Disease Mapping - best config
 train_num_steps: 100000
 valid_num_steps: 5000
 valid_interval: 10000
