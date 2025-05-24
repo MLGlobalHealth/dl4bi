@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 from scipy.stats import chi2  # jax doesn't implement ppf
 
 from benchmarks.disease_mapping.data import get_urban_rural
-from benchmarks.disease_mapping.utils import zstats_to_tstats
+from benchmarks.disease_mapping.utils import tstats_to_zstats, zstats_to_tstats
 from benchmarks.disease_mapping.visualize import map_grid, scatter_map
 from dl4bi.core.model_output import DiagonalMVNOutput
 from dl4bi.core.train import load_ckpt
@@ -97,12 +97,10 @@ def predict(mcmc_path: Path, gnp_path: Path):
 
     s_c, n, n_pos = data["s"], data["n"], data["n_pos"]
 
-    if "theta/mean" in true_dist:
-        true_mean = true_dist["theta/mean"]
-        true_std = true_dist["theta/std"]
-    else:
-        true_mean = true_dist["theta"].mean(0)
-        true_std = true_dist["theta"].std(0)
+    true_mean_theta = true_dist["theta"].mean(0)
+    true_std_theta = true_dist["theta"].std(0)
+    true_mean_z = true_dist["z"].mean(0)
+    true_std_z = true_dist["z"].std(0)
 
     s_t = true_dist["s"]
 
@@ -179,15 +177,29 @@ def predict(mcmc_path: Path, gnp_path: Path):
     )
     # Plotting
     if model_cfg.output_format == "z":
-        predicted_mean, predicted_std = zstats_to_tstats(predicted_mean, predicted_std)
-    fig = plot_side_by_side(
+        predicted_mean_z, predicted_std_z = predicted_mean, predicted_std
+        predicted_mean_theta, predicted_std_theta = zstats_to_tstats(
+            predicted_mean, predicted_std
+        )
+    else:
+        predicted_mean_theta, predicted_std_theta = predicted_mean, predicted_std
+        predicted_mean_z, predicted_std_z = tstats_to_zstats(
+            predicted_mean, predicted_std
+        ).clip(-100, 100)
+    plot_side_by_side(
         s_t,
-        true_mean,
-        true_std,
-        predicted_mean,
-        predicted_std,
-    )
-    fig.savefig(results_path / "predictions.png", dpi=300)
+        true_mean_theta,
+        true_std_theta,
+        predicted_mean_theta,
+        predicted_std_theta,
+    ).savefig(results_path / "predictions_theta.png", dpi=300)
+    plot_side_by_side(
+        s_t,
+        true_mean_z,
+        true_std_z,
+        predicted_mean_z,
+        predicted_std_z,
+    ).savefig(results_path / "predictions_z.png", dpi=300)
 
 
 def main():
