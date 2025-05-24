@@ -59,12 +59,12 @@ def evaluate(
     metrics["N samples"] = predicted_dist.shape[0] if predicted_dist is not None else 0
     metrics["MEAN(true mean)"] = jnp.mean(true_mean)
     metrics["MAE(mean)"] = mae(predicted_mean, true_mean)
-    metrics["MRE(mean)"] = mre(predicted_mean, true_mean)
+    # metrics["MRE(mean)"] = mre(true_mean, predicted_mean)
     metrics["MAE(std)"] = mae(predicted_std, true_std)
-    metrics["MRE(std)"] = mre(predicted_std, true_std)
+    # metrics["MRE(std)"] = mre(true_std, predicted_std)
     metrics["RMSE(mean)"] = rmse(predicted_mean, true_mean)
     metrics["RMSE(std)"] = rmse(predicted_std, true_std)
-    metrics["avg L2(map)"] = rmse(predicted_mean, true_mean)
+    metrics["avg L2(map)"] = rmse(predicted_mean, true_dist)
     metrics["mean MMD2"] = mmd(predicted_dist, true_dist).mean()
     # this assumes diagonal normal posterior predictive
     metrics["avg pointwise NLL"] = -jsp.stats.norm.logpdf(
@@ -130,7 +130,7 @@ def main(runs: list[Path], quantity: Literal["theta", "z"]):
                 rng_i, rng = jax.random.split(rng)
                 m, std = predicted_dist["mean"], predicted_dist["std"]
                 predicted_dist = (
-                    jax.random.normal(rng_i, shape=(1000, *m.shape)) * std + m
+                    jax.random.normal(rng_i, shape=(4000, *m.shape)) * std + m
                 )
                 model_cfg = OmegaConf.load(outputs_path / "config.yaml")
                 if model_cfg.output_format == "z" and quantity == "theta":
@@ -145,7 +145,7 @@ def main(runs: list[Path], quantity: Literal["theta", "z"]):
 
                 metrics = evaluate(true_dist, predicted_dist)
                 metrics["model"] = outputs_path.name
-                metrics["seed"] = mcmc_config.seed
+                metrics["seed"] = model_cfg.seed
                 results.append(metrics)
 
     # constant predictor
@@ -157,7 +157,8 @@ def main(runs: list[Path], quantity: Literal["theta", "z"]):
         | evaluate(true_dist, trivial_predictor)
     )
 
-    df = pd.DataFrame.from_records(results, index="model")
+    df: pd.DataFrame = pd.DataFrame.from_records(results, index="model")
+    df = df.groupby(["model"]).agg(["mean", "sem"]).round(3)
     return df
 
 
