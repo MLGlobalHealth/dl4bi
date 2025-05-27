@@ -10,9 +10,9 @@ valid_interval: 100
 test_num_steps: 100
 data:
   batch_size: 32
-  num_ctx_min: 624 # ~= 48 hours * 12 locations + 12 for buffer
-  num_ctx_max: 624
-  num_test: 84 # ~= 6 hours * 12 locations + 12 for buffer
+  num_ctx_min: 90 # ~3 months daily
+  num_ctx_max: 90
+  num_test: 14 # 2 weeks
   pct_train: 0.8
   pct_valid: 0.1
   pct_test: 0.1
