@@ -113,8 +113,9 @@ def load_data(
     path = Path("cache/denge.csv")
     df = pd.read_csv(path)
     df = df.sort_values(by="date").reset_index(drop=True)
-    # df["day_of_week"] = df.date.dt.day_of_week
-    # df["is_weekend"] = (df.date.dt.day_of_week >= 5).astype(int)
+    df['date'] = pd.to_datetime(df['date'])
+    df["day_of_week"] = df.date.dt.day_of_week
+    df["is_weekend"] = (df.date.dt.day_of_week >= 6).astype(int)
     df["date"] = (df.date - df.date.min()).dt.total_seconds()
     s_cols = ["lat", "long"]
     t_cols = ["date"]
