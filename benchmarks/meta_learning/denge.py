@@ -120,7 +120,7 @@ def load_data(
     s_cols = ["lat", "long"]
     t_cols = ["date"]
     f_cols = ["count"]  # target columns
-    x_cols = list(set(df.columns - set(s_cols + t_cols + f_cols)))
+    x_cols = list(set(df.columns) - set(s_cols + t_cols + f_cols))
     df = df[x_cols + s_cols + t_cols + f_cols]
     N = df.shape[0]
     num_train, num_valid, num_test = map(
