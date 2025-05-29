@@ -156,9 +156,9 @@ def standardize_by_train(
     x_valid = tx.transform(df_valid)
     x_test = tx.transform(df_test)
     cols = tx.get_feature_names_out().tolist()
-    df_train = pd.DataFrame(x_train, columns=cols)
-    df_valid = pd.DataFrame(x_valid, columns=cols)
-    df_test = pd.DataFrame(x_test, columns=cols)
+    df_train = pd.DataFrame(x_train, columns=cols).infer_objects()
+    df_valid = pd.DataFrame(x_valid, columns=cols).infer_objects()
+    df_test = pd.DataFrame(x_test, columns=cols).infer_objects()
     return df_train, df_valid, df_test
 
 
