@@ -11,7 +11,7 @@ from hydra.utils import instantiate
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, OrdinalEncoder
 
 from dl4bi.core.train import (
     evaluate,
@@ -147,7 +147,7 @@ def standardize_by_train(
         transformers=[
             ("num", MinMaxScaler(), num_feats),
             # NOTE: probably want to embed districs as IDs instead of binarize
-            # ("cat", OneHotEncoder(sparse_output=False), cat_feats),
+            ("cat", OrdinalEncoder(), cat_feats),
         ],
         remainder="passthrough",
         verbose_feature_names_out=False,
