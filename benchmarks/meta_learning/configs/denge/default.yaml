@@ -8,6 +8,7 @@ train_num_steps: 1000
 valid_num_steps: 100
 valid_interval: 100
 test_num_steps: 100
+infer_num_steps: 100
 data:
   batch_size: 32
   num_ctx_min: 90 # ~3 months daily
