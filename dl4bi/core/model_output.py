@@ -190,11 +190,12 @@ class PoissonOutput(DistributionOutput):
         return jnp.sqrt(self.lam)
 
     def nll(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
-        mask = None if mask is None else mask[..., 0]
         return -stats.poisson.logpmf(x, self.lam).mean(where=mask)
 
     def metrics(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
-        return {"NLL": self.nll(x, mask)}
+        rmse = jnp.sqrt(jnp.square(x - self.lam).mean(where=mask))
+        mae = jnp.abs(x - self.lam).mean(where=mask)
+        return {"NLL": self.nll(x, mask), "RMSE": rmse, "MAE": mae}
 
 
 # register to use in jitted functions

@@ -8,7 +8,7 @@ embed_x:
   channel: 0
 embed_all:
   _target_: dl4bi.mlp.MLP
-  dims: [256, 128, 64]
+  dims: [512, 256, 128, 64]
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
@@ -48,7 +48,10 @@ blk:
       _partial_: true
 head:
   _target_: dl4bi.mlp.MLP
-  dims: [256, 64, 4]
+  dims: [256, 64, 1]
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
+output_fn:
+  _target_: dl4bi.core.model_output.PoissonOutput.from_activations
+  _partial_: true
