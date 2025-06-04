@@ -24,7 +24,7 @@ from dl4bi.meta_learning.data.tabular import TabularData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
-@hydra.main("configs/denge", config_name="default", version_base=None)
+@hydra.main("configs/dengue", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
     wandb.init(
@@ -38,10 +38,8 @@ def main(cfg: DictConfig):
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     rng = random.key(cfg.seed)
-    rng_data, rng_train, rng_test = random.split(rng, 3)
-    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(
-        rng_data, **cfg.data
-    )
+    rng_train, rng_test = random.split(rng)
+    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(**cfg.data)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     state = train(
@@ -64,6 +62,8 @@ def main(cfg: DictConfig):
         test_dataloader,
         cfg.test_num_steps,
     )
+    wandb.log({f"Test {m}": v for m, v in metrics.items()})
+    save_ckpt(state, cfg, path.with_suffix(".ckpt"))
     results = []
     batches = test_dataloader(rng_test)
     for _ in range(cfg.infer_num_batches):
@@ -73,22 +73,19 @@ def main(cfg: DictConfig):
         results += [(batch, output)]
     with open("/tmp/results.pkl", "wb") as fp:
         pickle.dump(results, fp)
-    wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
 def build_dataloaders(
-    rng: jax.Array,
-    batch_size: int = 64,
-    num_ctx_min: int = 7 * 4 * 3,  # last 3 months
-    num_ctx_max: int = 28,
-    num_test: int = 14,  # 2 weeks
+    batch_size: int = 32,
+    num_ctx_min: int = 2250,  # (24 + 1) * 90 => ~3 months
+    num_ctx_max: int = 2250,
+    num_test: int = 350,  # (24 + 1) * 14 => 2 weeks
     pct_train: float = 0.8,
     pct_valid: float = 0.1,
     pct_test: float = 0.1,
 ):
     B = batch_size
-    train, valid, test = load_data(rng, pct_train, pct_valid, pct_test)
+    train, valid, test = load_data(pct_train, pct_valid, pct_test)
 
     def build_dataloader(x: jax.Array, s: jax.Array, t: jax.Array, f: jax.Array):
         N, L = x.shape[0], num_ctx_max + num_test
@@ -115,23 +112,22 @@ def build_dataloaders(
 
 
 def load_data(
-    rng: jax.Array,
     pct_train: float = 0.8,
     pct_valid: float = 0.1,
     pct_test: float = 0.1,
 ):
-    rng_valid, rng_test = random.split(rng)
-    path = Path("cache/denge.csv")
-    df = pd.read_csv(path)
+    path = Path("cache/dengue.parquet")
+    df = pd.read_parquet(path)
     df = df.sort_values(by="date").reset_index(drop=True)
     df["date"] = pd.to_datetime(df["date"])
-    df["day_of_week"] = df.date.dt.day_of_week
     df["is_weekend"] = (df.date.dt.day_of_week >= 6).astype(int)
     df["date"] = (df.date - df.date.min()).dt.total_seconds()
     s_cols = ["lat", "long"]
     t_cols = ["date"]
-    f_cols = ["count"]  # target columns
+    f_cols = ["n"]  # target columns
     x_cols = list(set(df.columns) - set(s_cols + t_cols + f_cols))
+    x_cols.remove("district")
+    x_cols = ["district"] + sorted(x_cols)
     df = df[x_cols + s_cols + t_cols + f_cols]
     N = df.shape[0]
     num_train, num_valid, num_test = map(
@@ -152,8 +148,9 @@ def standardize_by_train(
     df_valid: pd.DataFrame,
     df_test: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    num_feats = list(df_train.columns)
+    num_feats.remove("district")
     ord_feats = ["district"]
-    num_feats = list(set(df_train.columns) - set(ord_feats))
     tx = ColumnTransformer(
         transformers=[
             ("ord", OrdinalEncoder(), ord_feats),

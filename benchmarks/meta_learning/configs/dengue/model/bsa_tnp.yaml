@@ -3,7 +3,7 @@ num_blks: 6
 num_reps: 1
 embed_x:
   _target_: dl4bi.embed.IDEmbedding
-  num_ids: 10
+  num_ids: 24
   num_features: 16
   channel: 0
 embed_all:

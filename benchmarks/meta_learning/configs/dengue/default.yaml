@@ -4,16 +4,16 @@ defaults:
 seed: 42
 wandb: True
 project: Denge Fever
-train_num_steps: 1000
+train_num_steps: 2000
 valid_num_steps: 100
 valid_interval: 100
 test_num_steps: 100
 infer_num_steps: 100
 data:
   batch_size: 32
-  num_ctx_min: 90 # ~3 months daily
-  num_ctx_max: 90
-  num_test: 14 # 2 weeks
+  num_ctx_min: 2250 # (24 + 1) * 90 => ~3 months daily
+  num_ctx_max: 2250
+  num_test: 350 # (24 + 1) * 14 => 2 weeks
   pct_train: 0.8
   pct_valid: 0.1
   pct_test: 0.1
