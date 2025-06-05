@@ -69,7 +69,7 @@ def train(
     param_count = nn.tabulate(model, rngs, compute_flops=True, compute_vjp_flops=True)(
         **batch
     )
-    infer_flops, train_flops = estimate_flops(rng_train, state, model.train_step, batch)
+    infer_flops, train_flops = estimate_flops(rng_train, state, train_step, batch)
     bold, reset = "\033[1m", "\033[0m"
     print(param_count)
     print(f"{bold}Estimated Infer GFLOPS: {infer_flops / 1.0e9:g}{reset}")
