@@ -355,8 +355,9 @@ def plot_posterior_predictive_comparisons(
     model_names: list[str],
     var_names: list[str],
     save_prefix: Path,
+    baseline_model: str = "Baseline_GP",
 ):
-    baseline_index = model_names.index("Baseline_GP")
+    baseline_index = model_names.index(baseline_model)
     for var_name in var_names:
         actual_val = conditionals.get(var_name, None)
         fig, ax = plt.subplots(figsize=(4, 4))
