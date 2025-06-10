@@ -4,6 +4,7 @@ sys.path.append("benchmarks/vae")
 import argparse
 import pickle
 from pathlib import Path
+from typing import Union
 
 import arviz as az
 import geopandas as gpd
@@ -11,6 +12,7 @@ import hydra
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 from infer import load_ckpt
@@ -391,12 +393,16 @@ def plot_posterior_predictive_comparisons(
         plt.close(fig)
 
 
-def plot_models_predictive_means(f_hats, map_data, save_path: Path, log=True):
+def plot_models_predictive_means(
+    f_hats, map_data, save_path: Path, obs_mask: Union[jax.Array, bool] = True, log=True
+):
     if log:
         f_hats = [jnp.log(f_mean + 1) for f_mean in f_hats]
     f_hat_means = [f_hats[0]] + [f_mean.mean(axis=0) for f_mean in f_hats[1:]]
     vmin = jnp.min(jnp.array([f_mean.min() for f_mean in f_hat_means])).item()
     vmax = jnp.max(jnp.array([f_mean.max() for f_mean in f_hat_means])).item()
+    if not isinstance(obs_mask, bool):
+        f_hat_means = [np.ma.masked_where(~obs_mask, f_hat_means[0])] + f_hat_means
     fig, ax = plt.subplots(
         1, len(f_hat_means), figsize=(6 * len(f_hat_means), 7), constrained_layout=True
     )

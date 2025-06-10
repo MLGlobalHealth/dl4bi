@@ -19,6 +19,7 @@ from numpyro.infer import MCMC, NUTS, SVI, Predictive, Trace_ELBO, init_to_media
 from numpyro.infer.autoguide import AutoMultivariateNormal
 from numpyro.optim import Adam
 from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
+from scipy.stats import wasserstein_distance
 from sklearn.cluster import KMeans
 from sps.kernels import matern_5_2
 from sps.utils import build_grid
@@ -28,7 +29,7 @@ import wandb
 from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, train
-from dl4bi.vae import PriorCVAE, TransformerDeepRV, gMLPDeepRV
+from dl4bi.vae import PriorCVAE, ScanTransformerDeepRV, gMLPDeepRV
 from dl4bi.vae.train_utils import (
     cond_as_locs,
     deep_rv_train_step,
@@ -49,7 +50,7 @@ def main(seed=42, logged_priors=True):
         "Baseline_GP": None,
         "PriorCVAE": PriorCVAE(MLP(dims=[L, L]), MLP(dims=[L, L]), cond_as_locs, L),
         "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
-        "DeepRV + Transfomer": TransformerDeepRV(num_blks=2, dim=64),
+        "DeepRV + ScanTransfomer": ScanTransformerDeepRV(num_blks=2, dim=64),
         "ADVI": None,
         "Inducing Points": None,
     }
@@ -64,7 +65,7 @@ def main(seed=42, logged_priors=True):
     poisson_inducing_llk = inference_model_inducing_points(
         s, priors, obs_mask, logged_priors, 64
     )
-    loader = gen_train_dataloader(s, priors, logged_priors)
+    loader = gen_train_dataloader(s, priors, logged_priors, batch_size=16)
     y_hats, all_samples, result = [], [], []
     for model_name, nn_model in models.items():
         infer_model = (
@@ -105,13 +106,23 @@ def main(seed=42, logged_priors=True):
                 "ESS fixed effects": ess["beta"].item() if ess else None,
             }
         )
+    model_names = list(models.keys())
     plot_posterior_predictive_comparisons(
-        all_samples, {}, priors, list(models.keys()), cond_names, save_dir / "comp"
+        all_samples, {}, priors, model_names, cond_names, save_dir / "comp"
     )
     plot_models_predictive_means(
-        y_obs, y_hats, obs_mask, list(models.keys()), save_dir / "obs_means.png"
+        y_obs, y_hats, obs_mask, model_names, save_dir / "obs_means.png"
     )
-    pd.DataFrame(result).to_csv(save_dir / "res.csv")
+    wass_dist = posterior_wasserstein_distance(all_samples, model_names, cond_names)
+    result = pd.DataFrame(result)
+    for model_name in model_names:
+        if model_name == "Baseline_GP":
+            continue
+        for n in cond_names:
+            result.loc[
+                result["model_name"] == model_name, f"{n} wasserstein distance"
+            ] = wass_dist[model_name][n]
+    result.to_csv(save_dir / "res.csv")
 
 
 def hmc(
@@ -155,15 +166,18 @@ def surrogate_model_train(
     loader: Callable,
     model_name: str,
     model: nn.Module,
-    train_num_steps: int = 100_000,
-    valid_interval: int = 25_000,
+    train_num_steps: int = 200_000,
+    valid_interval: int = 50_000,
     valid_steps: int = 5_000,
 ):
     train_step = prior_cvae_train_step
     lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-3)
     if model_name != "PriorCVAE":
+        lr_schedule = cosine_annealing_lr(train_num_steps, 5.0e-3)
         train_step = deep_rv_train_step
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
+    if model_name == "DeepRV + ScanTransfomer":
+        optimizer = optax.yogi(1.0e-3)
     start = datetime.now()
     state = train(
         rng_train,
@@ -287,7 +301,7 @@ def gen_y_obs(rng: Array, s: Array):
     return dist.Poisson(rate=lambda_).sample(rng_poiss)
 
 
-def generate_obs_mask(rng: Array, y_obs: Array, obs_ratio: float = 0.15):
+def generate_obs_mask(rng: Array, y_obs: Array, obs_ratio: float = 0.1):
     """Creates a mask which indicates to the inference model which locations to
     observe. Randomly chooses a subset of location to be observed."""
     L = y_obs.shape[0]
@@ -330,6 +344,30 @@ def plot_models_predictive_means(
     fig.savefig(save_path, dpi=200)
     plt.clf()
     plt.close(fig)
+
+
+def posterior_wasserstein_distance(
+    samples: list, model_names: list[str], var_names: list[str]
+):
+    """
+    Computes Wasserstein distance for each variable between the posterior distributions
+    of each model and the baseline "Baseline_GP".
+    """
+    baseline_index = model_names.index("Baseline_GP")
+    baseline_samples = samples[baseline_index]
+    distances = {m: {} for m in model_names if m != "Baseline_GP"}
+    for model_name, model_sample in zip(model_names, samples):
+        if model_name == "Baseline_GP":
+            continue
+        for var_name in var_names:
+            baseline_var_samples = baseline_samples.get(var_name)
+            model_var_samples = model_sample.get(var_name)
+            if baseline_var_samples is not None and model_var_samples is not None:
+                dist = wasserstein_distance(baseline_var_samples, model_var_samples)
+                distances[model_name][var_name] = dist
+            else:
+                distances[model_name][var_name] = jnp.nan
+    return distances
 
 
 if __name__ == "__main__":

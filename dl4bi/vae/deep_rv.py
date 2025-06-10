@@ -69,12 +69,14 @@ class gMLPDeepRV(nn.Module):
     num_blks: int = 2
 
     @nn.compact
-    def __call__(self, z: Array, conditionals: Array, **kwargs):
-        x = cond_as_feats(z, conditionals)
+    def __call__(self, z: Array, conditionals: Array, s: Array, **kwargs):
+        batched_s = jnp.repeat(s[None, ...], z.shape[0], axis=0)
+        x = jnp.concat([jnp.atleast_3d(z), batched_s], axis=-1)
+        x = cond_as_feats(x, conditionals)
         return VAEOutput(gMLP(self.num_blks)(x))
 
-    def decode(self, z: Array, conditionals: Array, **kwargs):
-        return self(z, conditionals, **kwargs).f_hat
+    def decode(self, z: Array, conditionals: Array, s: Array, **kwargs):
+        return self(z, conditionals, s, **kwargs).f_hat
 
 
 class MLPDeepRV(nn.Module):
@@ -139,7 +141,7 @@ class ScanTransformerDeepRV(nn.Module):
                 proj_ks=MLP([D * 2]),
                 proj_vs=MLP([D * 2]),
                 proj_out=MLP([D]),
-                attn=BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()),
+                attn=BiasedScanAttention(bias={"s": Bias.build_rbf_network_bias()}),
             )
             ffn = MLP([D * 4, D])
             x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(
