@@ -131,7 +131,7 @@ def surrogate_model_train(
     loader: Callable,
     model: nn.Module,
     results_dir: Path,
-    train_num_steps: int = 250_000,
+    train_num_steps: int = 300_000,
     valid_interval: int = 50_000,
     valid_steps: int = 5_000,
 ):
