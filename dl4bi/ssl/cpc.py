@@ -38,19 +38,8 @@ def sample_batch(rng: jax.Array, shape: tuple[int, int, int] = (64, 128, 4)):
     x = random.normal(rng, (B, L, D))
     # simple autoregressive process
     for i in range(1, L):
-        x[:, i, :] += 0.8 * x[:, i - 1, :]
+        x = x.at[:, i, :].set(x[:, i, :] + 0.8 * x[:, i - 1, :])
     return x
-
-
-class CPCModel(nn.Module):
-    encode: Callable = MLP([64] * 4)
-    autoregress: Callable = GRU(64)
-
-    @nn.compact
-    def __call__(self, x):
-        z = self.encode(x)
-        c = self.autoregress(z)
-        return z, c
 
 
 class GRU(nn.Module):
@@ -72,7 +61,18 @@ class GRU(nn.Module):
         return y  # [B, T, D]
 
 
-@partial(jit, static_argnames=("batch_size",))
+class CPCModel(nn.Module):
+    encode: Callable = MLP([64] * 4)
+    autoregress: Callable = GRU(64)
+
+    @nn.compact
+    def __call__(self, x):
+        z = self.encode(x)
+        c = self.autoregress(z)
+        return z, c
+
+
+@partial(jit, static_argnames=("K",))
 def train_step(rng: jax.Array, state: TrainState, K: int = 5):
     x = sample_batch(rng)
 
@@ -80,26 +80,16 @@ def train_step(rng: jax.Array, state: TrainState, K: int = 5):
         z, c = state.apply_fn({"params": params}, x)
         B, T, D = z.shape
         z_k = jnp.stack([jnp.roll(z, -k - 1, axis=1) for k in range(K)], axis=2)
-        return info_nce_loss(c, z_k, K)
+        logits = jnp.einsum("btd,btkd->btk", c, z_k)
+        log_probs = logits - jax.nn.logsumexp(logits, axis=-1, keepdims=True)
+        # positive is z_{t+1}, negatives are z_{t+2:t+k}
+        # since cross-entropy would zero those out, we only take the mean of the
+        # first prediction for each time step
+        return -log_probs[:, T - K, 0].mean()
 
     loss, grads = jax.value_and_grad(loss_fn)(state.params)
     return state.apply_gradients(grads=grads), loss
 
 
-def info_nce_loss(c, z_k, K=5):
-    """
-    context: [B, T-K, D]
-    future_z: [B, T-K, K, D]
-    """
-    B, T_K, K, D = z_k.shape
-
-    def contrastive_loss_single(c_t, z_t):  # c_t: [B, D], z_t: [B, K, D]
-        logits = jnp.einsum("bd,bkd->bk", c_t, z_t)  # [B, K]
-        logits = logits - jax.scipy.special.logsumexp(logits, axis=1, keepdims=True)
-        labels = jnp.zeros((B,), dtype=int)  # positive at position 0
-        return -jnp.take_along_axis(logits, labels[:, None], axis=1).mean()
-
-    loss = 0.0
-    for k in range(K):
-        loss += contrastive_loss_single(c[:, :-K], z_k[:, :-K, k])
-    return loss / K
+if __name__ == "__main__":
+    main()
