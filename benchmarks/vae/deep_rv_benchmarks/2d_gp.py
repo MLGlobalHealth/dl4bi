@@ -15,6 +15,7 @@ import optax
 import pandas as pd
 from jax import Array, jit, random
 from numpyro import distributions as dist
+from numpyro.distributions.transforms import ParameterFreeTransform
 from numpyro.infer import MCMC, NUTS, SVI, Predictive, Trace_ELBO, init_to_median
 from numpyro.infer.autoguide import AutoMultivariateNormal
 from numpyro.optim import Adam
@@ -56,16 +57,14 @@ def main(seed=42, logged_priors=True):
     }
     y_obs = gen_y_obs(rng_obs, s)
     obs_mask = generate_obs_mask(rng_idxs, y_obs)
+    log_ls = dist.TransformedDistribution(dist.Beta(4.0, 1.0), LogScaleTransform())
     priors = {
-        "ls": dist.Uniform(1.0, 100.0),
-        "log_ls": dist.Beta(4.0, 1.0),
+        "ls": log_ls if logged_priors else dist.Uniform(1.0, 100.0),
         "beta": dist.Normal(),
     }
-    poisson_llk, cond_names = inference_model(s, priors, logged_priors)
-    poisson_inducing_llk = inference_model_inducing_points(
-        s, priors, obs_mask, logged_priors, 64
-    )
-    loader = gen_train_dataloader(s, priors, logged_priors, batch_size=16)
+    poisson_llk, cond_names = inference_model(s, priors)
+    poisson_inducing_llk = inference_model_inducing_points(s, priors, obs_mask, 64)
+    loader = gen_train_dataloader(s, priors, batch_size=16)
     y_hats, all_samples, result = [], [], []
     for model_name, nn_model in models.items():
         infer_model = (
@@ -199,7 +198,7 @@ def surrogate_model_train(
     return train_time, eval_mse, surrogate_decoder
 
 
-def gen_train_dataloader(s: Array, priors: dict, logged_priors: bool, batch_size=32):
+def gen_train_dataloader(s: Array, priors: dict, batch_size=32):
     jitter = 5e-4 * jnp.eye(s.shape[0])
     kernel_jit = jit(lambda s, var, ls: matern_5_2(s, s, var, ls) + jitter)
     f_jit = jit(lambda K, z: jnp.einsum("ij,bj->bi", jnp.linalg.cholesky(K), z))
@@ -208,10 +207,7 @@ def gen_train_dataloader(s: Array, priors: dict, logged_priors: bool, batch_size
         while True:
             rng_data, rng_ls, rng_z = random.split(rng_data, 3)
             var = 1.0
-            if logged_priors:
-                ls = jnp.exp(priors["log_ls"].sample(rng_ls) * jnp.log(100))
-            else:
-                ls = priors["ls"].sample(rng_ls)
+            ls = priors["ls"].sample(rng_ls)
             z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s.shape[0]))
             K = kernel_jit(s, var, ls)
             f = f_jit(K, z)
@@ -220,7 +216,7 @@ def gen_train_dataloader(s: Array, priors: dict, logged_priors: bool, batch_size
     return dataloader
 
 
-def inference_model(s: Array, priors: dict, logged_priors: bool):
+def inference_model(s: Array, priors: dict):
     """
     Builds a poisson likelihood inference model for GP and surrogate models
     """
@@ -228,11 +224,7 @@ def inference_model(s: Array, priors: dict, logged_priors: bool):
 
     def poisson(surrogate_decoder=None, obs_mask=True, y=None):
         var = 1.0
-        if logged_priors:
-            log_ls = numpyro.sample("log_ls", priors["log_ls"], sample_shape=())
-            ls = numpyro.deterministic("ls", jnp.exp(log_ls * jnp.log(100)))
-        else:
-            ls = numpyro.sample("ls", priors["ls"], sample_shape=())
+        ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
         z = numpyro.sample("z", dist.Normal(), sample_shape=(1, s.shape[0]))
         if surrogate_decoder:  # NOTE: whether to use a replacment for the GP
@@ -252,7 +244,7 @@ def inference_model(s: Array, priors: dict, logged_priors: bool):
 
 
 def inference_model_inducing_points(
-    s: Array, priors: dict, obs_mask: Array, logged_priors: bool, num_points: int
+    s: Array, priors: dict, obs_mask: Array, num_points: int
 ):
     """Builds a poisson likelihood inference model for inducing points"""
     kmeans = KMeans(n_clusters=num_points, random_state=0)
@@ -260,11 +252,7 @@ def inference_model_inducing_points(
 
     def poisson_inducing(surrogate_decoder=None, obs_mask=True, y=None):
         var = 1.0
-        if logged_priors:
-            log_ls = numpyro.sample("log_ls", priors["log_ls"], sample_shape=())
-            ls = numpyro.deterministic("ls", jnp.exp(log_ls * jnp.log(100)))
-        else:
-            ls = numpyro.sample("ls", priors["ls"], sample_shape=())
+        ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
         K_uu = matern_5_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
         K_su = matern_5_2(s, u, var, ls)
@@ -307,7 +295,7 @@ def generate_obs_mask(rng: Array, y_obs: Array, obs_ratio: float = 0.1):
     L = y_obs.shape[0]
     num_obs_locations = int(obs_ratio * L)
     obs_idxs = random.choice(rng, jnp.arange(L), (num_obs_locations,), replace=False)
-    return jnp.array([i in obs_idxs for i in range(L)])
+    return jnp.isin(jnp.arange(L), obs_idxs)
 
 
 def plot_models_predictive_means(
@@ -368,6 +356,21 @@ def posterior_wasserstein_distance(
             else:
                 distances[model_name][var_name] = jnp.nan
     return distances
+
+
+class LogScaleTransform(ParameterFreeTransform):
+    domain = dist.constraints.real
+    codomain = dist.constraints.positive
+    event_dim = 0  # Scalar transform
+
+    def __call__(self, x):
+        return jnp.exp(x * jnp.log(100.0))
+
+    def _inverse(self, y):
+        return jnp.log(y) / jnp.log(100.0)
+
+    def log_abs_det_jacobian(self, x, y, intermediates=None):
+        return jnp.log(100.0) + x * jnp.log(100.0)
 
 
 if __name__ == "__main__":

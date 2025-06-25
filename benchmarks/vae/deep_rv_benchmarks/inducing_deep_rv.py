@@ -1,22 +1,27 @@
 import sys
 
 sys.path.append("benchmarks/vae")
-import argparse
+import pickle
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Union
 
 import arviz as az
 import flax.linen as nn
+import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro
 import optax
 import pandas as pd
-from jax import Array, jit, random
+from jax import Array, jit, random, vmap
+from numpyro import deterministic, sample
 from numpyro import distributions as dist
+from numpyro.distributions.transforms import ParameterFreeTransform
+from numpyro.handlers import seed, substitute, trace
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
+from omegaconf import DictConfig
 from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
 from sklearn.cluster import KMeans
 from sps.kernels import matern_1_2
@@ -25,44 +30,44 @@ from utils.plot_utils import plot_infer_trace
 
 import wandb
 from dl4bi.core.model_output import VAEOutput
-from dl4bi.core.train import cosine_annealing_lr, evaluate, train
+from dl4bi.core.train import cosine_annealing_lr, evaluate, save_ckpt, train
 from dl4bi.vae import gMLPDeepRV
 from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
 
 
-def main(seed=51, logged_priors=True, solve_inv: bool = False):
+def main(seed=89, logged_priors=False):
     wandb.init(mode="disabled")  # NOTE: downstream function assumes active wandb
     rng = random.key(seed)
     rng_train, rng_test, rng_infer, rng_idxs, rng_obs = random.split(rng, 5)
     save_dir = Path(f"results/inducing_drv{'_log_priors' if logged_priors else ''}/")
     save_dir.mkdir(parents=True, exist_ok=True)
-    s = build_grid([{"start": 0.0, "stop": 100.0, "num": 256}] * 2).reshape(-1, 2)
+    grid_dim = 32
+    s = build_grid([{"start": 0.0, "stop": 100.0, "num": grid_dim}] * 2).reshape(-1, 2)
     models = {
+        "DeepRV inv + gMLP": gMLPDeepRV(num_blks=2),
         "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
-        # "Baseline_GP": None,
         "Inducing Points": None,
     }
     y_obs = gen_y_obs(rng_obs, s)
-    obs_mask = generate_obs_mask(rng_idxs, y_obs)
+    obs_mask = generate_obs_mask(rng_idxs, y_obs, 0.3)
+    log_ls = dist.TransformedDistribution(dist.Beta(4.0, 1.0), LogScaleTransform())
     priors = {
-        "ls": dist.Uniform(1.0, 100.0),
-        "log_ls": dist.Beta(4.0, 1.0),
+        "ls": log_ls if logged_priors else dist.Uniform(1.0, 100.0),
         "beta": dist.Normal(),
     }
-
     y_hats, all_samples, result = [], [], []
-    L_train, L = int(s.shape[0] ** 1.75), s.shape[0]
+    L_train = int(s.shape[0] ** 0.75)
     for model_name, nn_model in models.items():
+        solve_inv = "inv" in model_name
         infer_model, cond_names, s_train = inference_model_inducing_points(
-            s, priors, obs_mask, logged_priors, L_train, solve_inv
-        )
-        loader = gen_train_dataloader(
-            s_train, priors, logged_priors, solve_inv, batch_size=32
+            s, priors, obs_mask, L_train, solve_inv
         )
         train_time, eval_mse, surrogate_decoder, ess = None, None, None, {}
         if nn_model is not None:
+            loader = gen_train_dataloader(s_train, priors, solve_inv, batch_size=32)
+            (save_dir / f"{model_name}").mkdir(parents=True, exist_ok=True)
             train_time, eval_mse, surrogate_decoder = surrogate_model_train(
-                rng_train, rng_test, loader, nn_model
+                rng_train, rng_test, loader, nn_model, save_dir / f"{model_name}"
             )
         samples, mcmc, post, infer_time = hmc(
             rng_infer, infer_model, y_obs, obs_mask, surrogate_decoder
@@ -87,23 +92,33 @@ def main(seed=51, logged_priors=True, solve_inv: bool = False):
                 "inferred lengthscale mean": samples["ls"].mean(axis=0),
                 "inferred fixed effects": samples["beta"].mean(axis=0),
                 "MSE(y, y_hat)": ((y_obs - post["obs"].mean(axis=0)) ** 2).mean(),
-                "ESS spatial effects": ess["mu"].mean().item() if ess else None,
+                "ESS spatial effects": ess["f"].mean().item() if ess else None,
                 "ESS lengthscale": ess["ls"].item() if ess else None,
                 "ESS fixed effects": ess["beta"].item() if ess else None,
             }
         )
     model_names = list(models.keys())
-    plot_posterior_predictive_comparisons(
-        all_samples,
-        {},
-        priors,
-        model_names,
-        cond_names,
-        save_dir / "comp",
-        "Inducing Points",
-    )
+    try:
+        plot_posterior_predictive_comparisons(
+            all_samples,
+            {},
+            priors,
+            model_names,
+            cond_names,
+            save_dir / "comp",
+            "Inducing Points",
+        )
+    except Exception:
+        pass
     plot_models_predictive_means(
-        y_obs, y_hats, obs_mask, model_names, save_dir / "obs_means.png"
+        s,
+        s_train,
+        grid_dim,
+        y_obs,
+        y_hats,
+        obs_mask,
+        model_names,
+        save_dir / "obs_means.png",
     )
     pd.DataFrame(result).to_csv(save_dir / "res.csv")
 
@@ -119,7 +134,7 @@ def hmc(
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
     k1, k2 = random.split(rng)
     # mcmc = MCMC(nuts, num_chains=1, num_samples=1_000, num_warmup=4_00)
-    mcmc = MCMC(nuts, num_chains=4, num_samples=10_000, num_warmup=4_000)
+    mcmc = MCMC(nuts, num_chains=2, num_samples=5_000, num_warmup=2_000)
     start = datetime.now()
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=y_obs)
     infer_time = (datetime.now() - start).total_seconds()
@@ -134,6 +149,7 @@ def surrogate_model_train(
     rng_test: Array,
     loader: Callable,
     model: nn.Module,
+    results_dir: Path,
     train_num_steps: int = 200_000,
     valid_interval: int = 50_000,
     valid_steps: int = 5_000,
@@ -158,77 +174,69 @@ def surrogate_model_train(
     )
     train_time = (datetime.now() - start).total_seconds()
     eval_mse = evaluate(rng_test, state, valid_step, loader, valid_steps)["norm MSE"]
+    save_ckpt(state, DictConfig({}), results_dir / "model.ckpt")
+    with open(results_dir / "train_time.pkl", "wb") as out_file:
+        pickle.dump({"train_time": train_time, "eval_mse": eval_mse}, out_file)
     surrogate_decoder = generate_surrogate_decoder(state, model)
     return train_time, eval_mse, surrogate_decoder
 
 
 def gen_train_dataloader(
-    s_train: Array, priors: dict, logged_priors: bool, solve_inv: bool, batch_size: int
+    s_train: Array, priors: dict, solve_inv: bool, batch_size: int
 ):
     jitter = 5e-4 * jnp.eye(s_train.shape[0])
     kernel_jit = jit(lambda s, var, ls: matern_1_2(s, s, var, ls) + jitter)
     f_jit = jit(lambda K, z: jnp.einsum("ij,bj->bi", jnp.linalg.cholesky(K), z))
+    jit_solve_fn = jit(vmap(lambda M, V: jnp.linalg.solve(M, V), in_axes=(None, 0)))
 
     def dataloader(rng_data):
         while True:
             rng_data, rng_ls, rng_z = random.split(rng_data, 3)
             var = 1.0
-            if logged_priors:
-                ls = jnp.exp(priors["log_ls"].sample(rng_ls) * jnp.log(100))
-            else:
-                ls = priors["ls"].sample(rng_ls)
-            z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s.shape[0]))
+            ls = priors["ls"].sample(rng_ls)
+            z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s_train.shape[0]))
             K = kernel_jit(s_train, var, ls)
             f = f_jit(K, z)
             if solve_inv:
-                f = jnp.linalg.solve(K, f)
+                f = jit_solve_fn(K, f)
+
             yield {"s": s_train, "f": f, "z": z, "conditionals": jnp.array([ls])}
 
     return dataloader
 
 
 def inference_model_inducing_points(
-    s: Array,
-    priors: dict,
-    obs_mask: Array,
-    logged_priors: bool,
-    num_points: int,
-    solve_inv: bool,
+    s: Array, priors: dict, obs_mask: Array, num_points: int, solve_inv: bool
 ):
     """Builds a poisson likelihood inference model for inducing points"""
     kmeans = KMeans(n_clusters=num_points, random_state=0)
     u = kmeans.fit(s[obs_mask]).cluster_centers_  # shape (num_points, s.shape[1])
     surrogate_kwargs = {"s": u}  # we train deepRV with u
+    jitter = 5e-4 * jnp.eye(u.shape[0])
 
     def poisson_inducing(surrogate_decoder=None, obs_mask=True, y=None):
         var = 1.0
-        if logged_priors:
-            log_ls = numpyro.sample("log_ls", priors["log_ls"], sample_shape=())
-            ls = numpyro.deterministic("ls", jnp.exp(log_ls * jnp.log(100)))
-        else:
-            ls = numpyro.sample("ls", priors["ls"], sample_shape=())
-        beta = numpyro.sample("beta", priors["beta"], sample_shape=())
-        K_uu = matern_1_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
+        ls = sample("ls", priors["ls"], sample_shape=())
+        beta = sample("beta", priors["beta"], sample_shape=())
+        K_uu = matern_1_2(u, u, var, ls) + jitter
         K_su = matern_1_2(s, u, var, ls)
         if surrogate_decoder is None:
-            f_u = numpyro.sample("mu", dist.MultivariateNormal(0.0, K_uu))
-            s_K_uu = jnp.linalg.solve(K_uu, f_u)
+            f_u = sample("f_u", dist.MultivariateNormal(0.0, K_uu))
+            f_bar_u = jnp.linalg.solve(K_uu, f_u)
         else:
-            z = numpyro.sample("z", dist.Normal(), sample_shape=(1, s.shape[0]))
-            s_K_uu = surrogate_decoder(z, jnp.array([ls]), **surrogate_kwargs).squeeze()
+            z = sample("z", dist.Normal(), sample_shape=(1, u.shape[0]))
+            f_bar_u = deterministic(
+                "f_u",
+                surrogate_decoder(z, jnp.array([ls]), **surrogate_kwargs).squeeze(),
+            )
             if not solve_inv:
-                s_K_uu = jnp.linalg.solve(K_uu, s_K_uu)
-        f = numpyro.deterministic("f", K_su @ s_K_uu)
-        # NOTE: uncomment to perform FITC correction for marginal variances
-        # K_uu_inv_K_us = jnp.linalg.solve(K_uu, K_su.T)
-        # Q_ss_diag = jnp.sum(K_su * K_uu_inv_K_us.T, axis=1)
-        # delta = jnp.clip(var - Q_ss_diag, 1.0e-6, jnp.inf)  # K_ss_diag = var
-        # f_mu = numpyro.sample("f_mu", dist.Normal(f_mu, jnp.sqrt(delta)).to_event(1))
+                f_bar_u = jnp.linalg.solve(K_uu, f_bar_u)
+        f = deterministic("f", K_su @ f_bar_u)
         lambda_ = jnp.exp(f + beta)
         with numpyro.handlers.mask(mask=obs_mask):
-            numpyro.sample("obs", dist.Poisson(lambda_), obs=y)
+            sample("obs", dist.Poisson(lambda_), obs=y)
 
-    return poisson_inducing, priors.keys(), u
+    return poisson_inducing, ["ls", "beta"], u
 
 
 @jit
@@ -250,7 +258,7 @@ def gen_y_obs(rng: Array, s: Array):
     return dist.Poisson(rate=lambda_).sample(rng_poiss)
 
 
-def generate_obs_mask(rng: Array, y_obs: Array, obs_ratio: float = 0.2):
+def generate_obs_mask(rng: Array, y_obs: Array, obs_ratio: float = 0.15):
     """Creates a mask which indicates to the inference model which locations to
     observe. Randomly chooses a subset of location to be observed."""
     L = y_obs.shape[0]
@@ -262,6 +270,7 @@ def generate_obs_mask(rng: Array, y_obs: Array, obs_ratio: float = 0.2):
 def plot_models_predictive_means(
     s,
     s_train,
+    grid_dim,
     f_obs,
     f_hats,
     obs_mask,
@@ -269,14 +278,15 @@ def plot_models_predictive_means(
     save_path: Path,
     log=True,
 ):
-    f_hat_means = [f_mean.mean(axis=0).reshape(64, 64) for f_mean in f_hats]
-    f_obs = f_obs.reshape(64, 64)
+    f_hat_means = [f_mean.mean(axis=0).reshape(grid_dim, grid_dim) for f_mean in f_hats]
+    f_obs = f_obs.reshape(grid_dim, grid_dim)
     if log:
         f_hat_means = [jnp.log(f + 1) for f in f_hat_means]
         f_obs = jnp.log(f_obs + 1)
     vmin = jnp.min(jnp.array([f_mean.min() for f_mean in f_hat_means])).item()
     vmax = jnp.max(jnp.array([f_mean.max() for f_mean in f_hat_means])).item()
-    cols = 5
+    vmax, vmin = max(vmax, f_obs.max().item()), min(vmax, f_obs.min().item())
+    cols = 3
     rows = int(jnp.ceil((len(f_hat_means) + 3) / cols))
     fig, ax = plt.subplots(
         rows, cols, figsize=(6 * cols, 7 * rows), constrained_layout=True
@@ -286,8 +296,8 @@ def plot_models_predictive_means(
     closest_s_indices = jnp.argmin(distances_sq, axis=0)
     closest_mask = jnp.zeros(s.shape[0], dtype=bool)
     closest_mask = closest_mask.at[closest_s_indices].set(True)
-    masked_f_obs = np.ma.masked_where(~obs_mask.reshape(64, 64), f_obs)
-    f_train = np.ma.masked_where(~closest_mask.reshape(64, 64), f_obs)
+    masked_f_obs = np.ma.masked_where(~obs_mask.reshape(grid_dim, grid_dim), f_obs)
+    f_train = np.ma.masked_where(~closest_mask.reshape(grid_dim, grid_dim), f_obs)
     cmap = plt.cm.viridis
     cmap.set_bad(color="black")
     ax[0].imshow(masked_f_obs, origin="lower", cmap=cmap)
@@ -297,7 +307,7 @@ def plot_models_predictive_means(
     ax[2].imshow(f_obs, vmin=vmin, vmax=vmax, origin="lower")
     ax[2].set_title("y")
     for i, f_mean in enumerate(f_hat_means, start=3):
-        model_name = model_names[i - 2]
+        model_name = model_names[i - 3]
         im = ax[i].imshow(f_mean, vmin=vmin, vmax=vmax, origin="lower")
         ax[i].set_title("Mean " r"$\hat{y}$" f" {model_name}")
     for i in range(len(ax)):
@@ -309,8 +319,72 @@ def plot_models_predictive_means(
     plt.close(fig)
 
 
+def compute_f_gradients(
+    infer_model,
+    priors,
+    rng_key,
+    num_points,
+    surrogate_decoder=None,
+    y=None,
+    obs_mask=True,
+    num_samples=10,
+):
+    """
+    Samples z and ls from priors each time, computes f and its gradients w.r.t. z and ls.
+
+    Args:
+        infer_model: NumPyro model callable
+        priors: dict with 'z' and 'ls' keys as NumPyro distributions
+        rng_key: JAX PRNGKey
+        surrogate_decoder: optional surrogate decoder
+        y: observations
+        obs_mask: observation mask
+        num_samples: number of samples to draw
+
+    Returns:
+        f_vals: list of f (GP output) arrays
+        grads_list: list of {"df_dz": ..., "df_dls": ...}
+    """
+
+    f_vals = []
+    grads_list = []
+
+    def wrapped_model(z_, ls_):
+        substitutions = {"z": z_, "ls": ls_}
+        with seed(key_model), substitute(data=substitutions), trace() as tr:
+            infer_model(surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=y)
+        return tr["f"]["value"]
+
+    keys = jax.random.split(rng_key, num_samples * 3).reshape(num_samples, 3, -1)
+    for i in range(num_samples):
+        key_model, key_z, key_ls = keys[i]
+        z = sample("z", dist.Normal(), rng_key=key_z, sample_shape=(1, num_points))
+        ls = sample("ls", priors["ls"], rng_key=key_ls)
+        f_val = wrapped_model(z, ls)
+        grads = {
+            "df_dz": jax.grad(lambda z_: jnp.sum(wrapped_model(z_, ls)))(z),
+            "df_dls": jax.grad(lambda ls_: jnp.sum(wrapped_model(z, ls_)))(ls),
+        }
+        f_vals.append(f_val)
+        grads_list.append(grads)
+
+    return f_vals, grads_list
+
+
+class LogScaleTransform(ParameterFreeTransform):
+    domain = dist.constraints.real
+    codomain = dist.constraints.positive
+    event_dim = 0  # Scalar transform
+
+    def __call__(self, x):
+        return jnp.exp(x * jnp.log(100.0))
+
+    def _inverse(self, y):
+        return jnp.log(y) / jnp.log(100.0)
+
+    def log_abs_det_jacobian(self, x, y, intermediates=None):
+        return jnp.log(100.0) + x * jnp.log(100.0)
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--solve_inv", action="store_true")
-    args = parser.parse_args()
-    main(solve_inv=args.solve_inv)
+    main()
