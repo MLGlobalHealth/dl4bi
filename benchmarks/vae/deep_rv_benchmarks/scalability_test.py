@@ -17,6 +17,7 @@ import pandas as pd
 import seaborn as sns
 from jax import Array, jit, random
 from numpyro import distributions as dist
+from numpyro.distributions.transforms import ParameterFreeTransform
 from numpyro.infer import MCMC, NUTS, SVI, Predictive, Trace_ELBO, init_to_median
 from numpyro.infer.autoguide import AutoMultivariateNormal
 from numpyro.optim import Adam
@@ -43,7 +44,6 @@ from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
 
 
 def main(seed=42, logged_priors=True):
-    wandb.init(mode="disabled")  # NOTE: downstream function assumes active wandb
     rng = random.key(seed)
     save_dir = Path(f"results/scalability{'_log_priors' if logged_priors else ''}/")
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -60,9 +60,9 @@ def main(seed=42, logged_priors=True):
         "Inducing Points": None,
     }
     model_names = list(models.keys())
+    log_ls = dist.TransformedDistribution(dist.Beta(4.0, 1.0), LogScaleTransform())
     priors = {
-        "ls": dist.Uniform(1.0, 100.0),
-        "log_ls": dist.Beta(4.0, 1.0),
+        "ls": log_ls if logged_priors else dist.Uniform(1.0, 100.0),
         "beta": dist.Normal(),
     }
     for s in grids:
@@ -73,10 +73,10 @@ def main(seed=42, logged_priors=True):
         grid_s_path.mkdir(parents=True, exist_ok=True)
         y_obs = gen_y_obs(rng_obs, s)
         obs_mask = generate_obs_mask(rng_idxs, y_obs)
-        poisson_llk, cond_names = inference_model(s, priors, logged_priors)
+        poisson_llk, cond_names = inference_model(s, priors)
         num_pts = int(min(int(2 * jnp.sqrt(L).item()), sum(obs_mask)))
         poisson_inducing_llk = inference_model_inducing_points(
-            s, priors, obs_mask, logged_priors, num_pts
+            s, priors, obs_mask, num_pts
         )
         y_hats, all_samples = [], []
         for model_name, nn_model in models.items():
@@ -90,7 +90,19 @@ def main(seed=42, logged_priors=True):
             max_lr, bs, train_steps = None, None, None
             if nn_model is not None:
                 optimizer, max_lr, bs, train_steps = gen_train_params(model_name, s)
-                loader = gen_train_dataloader(s, priors, logged_priors, batch_size=bs)
+                wandb.init(
+                    config={
+                        "model_name": model_name,
+                        "grid_size": L,
+                        "max_lr": max_lr,
+                        "batch_size": bs,
+                    },
+                    mode="online",
+                    name=f"{model_name}",
+                    project="deep_rv_optimizations",
+                    reinit=True,
+                )
+                loader = gen_train_dataloader(s, priors, batch_size=bs)
                 (
                     train_time,
                     eval_mse,
@@ -107,6 +119,7 @@ def main(seed=42, logged_priors=True):
                     optimizer,
                     train_steps,
                 )
+                wandb.log({"train_time": train_time, "Test Norm MSE": eval_mse})
             if model_name != "ADVI":
                 samples, mcmc, post, infer_time = hmc(
                     rng_infer,
@@ -166,7 +179,7 @@ def main(seed=42, logged_priors=True):
         plot_models_predictive_means(
             y_obs, y_hats, obs_mask, model_names, grid_s_path / "obs_means.png"
         )
-    plot_model_scalability_metrics(result, save_dir)
+    # plot_model_scalability_metrics(result, save_dir)
 
 
 def hmc(
@@ -232,6 +245,9 @@ def surrogate_model_train(
     )
     infer_flops, train_flops = estimate_flops(rng_train, state, train_step, flop_batch)
     parameters = nn.tabulate(model, rngs)(**flop_batch)
+    parameters = int(
+        parameters.split("Total Parameters: ")[-1].split(" ")[0].replace(",", "")
+    )
     start = datetime.now()
     state = train(
         rng_train,
@@ -251,12 +267,12 @@ def surrogate_model_train(
     eval_mse = evaluate(rng_test, state, valid_step, loader, valid_steps)["norm MSE"]
     save_ckpt(state, DictConfig({}), results_dir / "model.ckpt")
     with open(results_dir / "train_time.pkl", "wb") as out_file:
-        pickle.dump([train_time], out_file)
+        pickle.dump({"train_time": train_time, "eval_mse": eval_mse}, out_file)
     surrogate_decoder = generate_surrogate_decoder(state, model)
     return train_time, eval_mse, surrogate_decoder, infer_flops, train_flops, parameters
 
 
-def gen_train_dataloader(s: Array, priors: dict, logged_priors: bool, batch_size=32):
+def gen_train_dataloader(s: Array, priors: dict, batch_size=32):
     jitter = 5e-4 * jnp.eye(s.shape[0])
     kernel_jit = jit(lambda s, var, ls: matern_1_2(s, s, var, ls) + jitter)
     f_jit = jit(lambda K, z: jnp.einsum("ij,bj->bi", jnp.linalg.cholesky(K), z))
@@ -265,10 +281,7 @@ def gen_train_dataloader(s: Array, priors: dict, logged_priors: bool, batch_size
         while True:
             rng_data, rng_ls, rng_z = random.split(rng_data, 3)
             var = 1.0
-            if logged_priors:
-                ls = jnp.exp(priors["log_ls"].sample(rng_ls) * jnp.log(100))
-            else:
-                ls = priors["ls"].sample(rng_ls)
+            ls = priors["ls"].sample(rng_ls)
             z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s.shape[0]))
             K = kernel_jit(s, var, ls)
             f = f_jit(K, z)
@@ -277,7 +290,7 @@ def gen_train_dataloader(s: Array, priors: dict, logged_priors: bool, batch_size
     return dataloader
 
 
-def inference_model(s: Array, priors: dict, logged_priors: bool):
+def inference_model(s: Array, priors: dict):
     """
     Builds a poisson likelihood inference model for GP and surrogate models
     """
@@ -285,11 +298,7 @@ def inference_model(s: Array, priors: dict, logged_priors: bool):
 
     def poisson(surrogate_decoder=None, obs_mask=True, y=None):
         var = 1.0
-        if logged_priors:
-            log_ls = numpyro.sample("log_ls", priors["log_ls"], sample_shape=())
-            ls = numpyro.deterministic("ls", jnp.exp(log_ls * jnp.log(100)))
-        else:
-            ls = numpyro.sample("ls", priors["ls"], sample_shape=())
+        ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
         z = numpyro.sample("z", dist.Normal(), sample_shape=(1, s.shape[0]))
         if surrogate_decoder:  # NOTE: whether to use a replacment for the GP
@@ -309,7 +318,7 @@ def inference_model(s: Array, priors: dict, logged_priors: bool):
 
 
 def inference_model_inducing_points(
-    s: Array, priors: dict, obs_mask: Array, logged_priors: bool, num_points: int
+    s: Array, priors: dict, obs_mask: Array, num_points: int
 ):
     """Builds a poisson likelihood inference model for inducing points"""
     kmeans = KMeans(n_clusters=num_points, random_state=0)
@@ -317,11 +326,7 @@ def inference_model_inducing_points(
 
     def poisson_inducing(surrogate_decoder=None, obs_mask=True, y=None):
         var = 1.0
-        if logged_priors:
-            log_ls = numpyro.sample("log_ls", priors["log_ls"], sample_shape=())
-            ls = numpyro.deterministic("ls", jnp.exp(log_ls * jnp.log(100)))
-        else:
-            ls = numpyro.sample("ls", priors["ls"], sample_shape=())
+        ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
         K_uu = matern_1_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
         K_su = matern_1_2(s, u, var, ls)
@@ -451,18 +456,20 @@ def gen_train_params(model_name, s, default_bs=32):
     L = s.shape[0]
     default_steps = 100_000 if L <= 512 else 200_000
     max_lr = {
-        "DeepRV + gMLP": 5e-3,
+        "DeepRV + gMLP": 5e-3 if L <= 1024 else 1e-2,
         "DeepRV + ScanTransfomer": 1e-4,
         "DeepRV + DKA": 5e-3,
     }[model_name]
     if "ScanTransfomer" in model_name:
         bs = int(min(1, 512 / L) * default_bs)
-    else:
+    if "DKA" in model_name:
         bs = int(min(1, 1024 / L) * default_bs)
+    else:
+        bs = int(min(1, 2048 / L) * default_bs)
     train_steps = default_steps * (default_bs // bs)
     optimizer = optax.yogi(cosine_annealing_lr(train_steps, max_lr))
     if model_name in ["DeepRV + ScanTransfomer", "DeepRV + DKA"]:
-        optimizer = optax.yogi(max_lr)
+        optimizer = optax.adamw(max_lr)
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optimizer)
     return optimizer, max_lr, bs, train_steps
 
@@ -518,6 +525,21 @@ def plot_model_scalability_metrics(result_df: pd.DataFrame, save_dir: Path):
     _plot_metric_group(axes[2], "ESS ls", "Lengthscale ESS", "ESS")
     plt.tight_layout()
     plt.savefig(save_dir / "performance.png")
+
+
+class LogScaleTransform(ParameterFreeTransform):
+    domain = dist.constraints.real
+    codomain = dist.constraints.positive
+    event_dim = 0  # Scalar transform
+
+    def __call__(self, x):
+        return jnp.exp(x * jnp.log(100.0))
+
+    def _inverse(self, y):
+        return jnp.log(y) / jnp.log(100.0)
+
+    def log_abs_det_jacobian(self, x, y, intermediates=None):
+        return jnp.log(100.0) + x * jnp.log(100.0)
 
 
 if __name__ == "__main__":
