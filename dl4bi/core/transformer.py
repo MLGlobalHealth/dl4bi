@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Callable, Optional
 
 import flax.linen as nn
 import jax
@@ -318,3 +318,57 @@ class KRBlock(nn.Module):
         qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)
         qvs_5, kvs_5 = self.ffn(qvs_4, training), self.ffn(kvs_4, training)
         return qvs_3 + drop(qvs_5), kvs_3 + drop(kvs_5)
+
+
+class AttentivePooler(nn.Module):
+    """An Attentive Pooler.
+
+    Args:
+        num_seeds: Number of prototype embeddings to reduce to by pooling.
+        pool: The pooling function, typically multihead attention.
+        mix: A mixing function, typically a transformer encoder.
+
+    Returns:
+        An instance of the `AttentivePooler`.
+    """
+
+    num_seeds: int = 1
+    pool: nn.Module = MultiHeadAttention()
+    mix: nn.Module = TransformerEncoder(num_blks=1)
+
+    @nn.compact
+    def __call__(
+        self,
+        x: jax.Array,
+        mask: Optional[jax.Array] = None,
+        training: bool = False,
+    ):
+        B, L, D = x.shape
+        seeds = self.param("seeds", init.truncated_normal(), (1, self.num_seeds, D))
+        seeds = jnp.repeat(seeds, B, axis=0)
+        x, _ = self.pool(seeds, x, x, mask)
+        return self.mix(x)
+
+
+class SetTransformerBlock(nn.Module):
+    """A Set Transformer Block.
+
+    Args:
+        mix: A mixing function, typically a transformer encoder.
+        pool: The pooling function or module.
+
+    Returns:
+        An instance of the `AttentivePooler`.
+    """
+
+    mix: nn.Module = TransformerEncoder(num_blks=2)
+    pool: nn.Module = AttentivePooler()
+
+    @nn.compact
+    def __call__(
+        self,
+        x: jax.Array,
+        mask: Optional[jax.Array] = None,
+        training: bool = False,
+    ):
+        return self.pool(self.mix(x, mask, training), mask, training)

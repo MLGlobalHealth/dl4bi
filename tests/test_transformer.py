@@ -13,6 +13,7 @@ from dl4bi.core.embed import (
     NeRFEmbedding,
 )
 from dl4bi.core.transformer import (
+    SetTransformerBlock,
     TransformerDecoder,
     TransformerDecoderBlock,
     TransformerEncoder,
@@ -65,3 +66,12 @@ def test_transformer():
         for name, f in [("encoder", f_enc), ("decoder", f_dec)]:
             assert f_enc.shape == (B, L, E), f"Incorrect {name} (fast) output shape!"
             assert not jnp.isnan(f).any(), f"{name.title()} (fast) returned nans!"
+
+
+def test_set_transformer_block():
+    B, L, D = 4, 128, 64
+    rng = random.key(42)
+    rng_data, rng_init = random.split(rng)
+    x = random.normal(rng_data, (B, L, D))
+    x_enc, _ = SetTransformerBlock().init_with_output(rng_init, x)
+    assert x_enc.shape == (4, 1, D)
