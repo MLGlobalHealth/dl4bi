@@ -1,0 +1,9 @@
+_target_: dl4bi.regression.DLinear
+num_output: 30
+seasonal_lags: [7, 365]
+lag_fn:
+  _target_: dl4bi.core.utils.causal_moving_average
+  _partial_: true
+output_fn:
+  _target_: dl4bi.core.model_output.PoissonOutput.from_activations
+  _partial_: true

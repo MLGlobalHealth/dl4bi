@@ -4,6 +4,7 @@ import jax.numpy as jnp
 from flax import linen as nn
 
 from ..core.utils import causal_moving_average
+from .steps import likelihood_train_step, likelihood_valid_step
 
 
 class DLinear(nn.Module):
@@ -20,6 +21,8 @@ class DLinear(nn.Module):
             `causal_moving_average` or `edge_filled_centered_moving_average`.
         output_fn: Can be used for transforming the output, e.g. something
             in the `ModelOutput` family.
+        train_step: What training step to use.
+        valid_step: What validation step to use.
 
     Returns:
         An instance of `DLinear`.
@@ -32,6 +35,8 @@ class DLinear(nn.Module):
     seasonal_lags: Sequence[int]
     lag_fn: Callable = causal_moving_average
     output_fn: Callable = lambda x: x
+    train_step: Callable = likelihood_train_step
+    valid_step: Callable = likelihood_valid_step
 
     @nn.compact
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:  # x: [B, L]
@@ -41,4 +46,4 @@ class DLinear(nn.Module):
             output += nn.Dense(self.num_output)(m)
             x = x[:, -m.shape[1] :] - m
         output += nn.Dense(self.num_output)(x)
-        return output
+        return self.output_fn(output)
