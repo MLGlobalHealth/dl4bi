@@ -3,7 +3,6 @@ from pathlib import Path
 
 import hydra
 import jax
-import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -56,7 +55,7 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         cfg.valid_num_steps,
         valid_dataloader,
-        return_state="best",
+        # return_state="best",
     )
     metrics = evaluate(
         rng_test,
@@ -69,7 +68,10 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
     batch = next(test_dataloader(rng_test))
     output = infer(rng_test, state, batch)
-    plot(batch, output, districts)
+    fig = plot(batch, output, districts)
+    path = "/tmp/dengue.png"
+    fig.savefig(path)
+    wandb.log({"Sample Forecast": wandb.Image(path)})
 
 
 def build_dataloaders(
@@ -168,20 +170,25 @@ def standardize_by_train(
 def plot(batch: RegressionBatch, output: ModelOutput, districts: list[str]):
     N = len(districts)
     fig, axes = plt.subplots(N, 1, figsize=(N, N * 10))
-    gt = jnp.concat([batch.x, batch.y], axis=1)
-    x_all = np.arange(gt.shape[1])
     x_pred = batch.x.shape[1] + np.arange(batch.y.shape[1])
     mu, (lower, upper) = output.mu, output.ci(0.05, 0.95)
+    fontsize = 32
     for i in range(N):
-        axes[i].plot(x_all, gt[i], color="darkblue")
-        axes[i].plot(x_pred, mu[i], color="darkorange")
-        axes[i].fill_between(x_pred, lower[i], upper[i], alpha=0.3, color="darkorange")
-        axes[i].set_ylabel("case count")
-        axes[i].set_xlabel("day")
-        axes[i].set_title(districts[i])
-    fig.suptitle("Denge Fever")
+        axes[i].bar(x_pred, batch.y[i], width=0.8, color="darkblue")
+        axes[i].errorbar(
+            x_pred,
+            mu[i],
+            yerr=[lower[i], upper[i]],
+            fmt="o",
+            capsize=4,
+            color="darkorange",
+        )
+        axes[i].set_ylabel("case count", fontsize=fontsize)
+        axes[i].set_xlabel("day", fontsize=fontsize)
+        axes[i].tick_params(labelsize=fontsize)
+        axes[i].set_title(f"Dengue Forecast in {districts[i]}", fontsize=fontsize)
     fig.tight_layout()
-    fig.savefig("/tmp/dengue.png")
+    return fig
 
 
 if __name__ == "__main__":
