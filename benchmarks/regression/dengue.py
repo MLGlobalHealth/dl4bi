@@ -3,6 +3,9 @@ from pathlib import Path
 
 import hydra
 import jax
+import jax.numpy as jnp
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import wandb
 from hydra.utils import instantiate
@@ -11,13 +14,15 @@ from omegaconf import DictConfig, OmegaConf
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler
 
+from dl4bi.core.model_output import ModelOutput
 from dl4bi.core.train import (
     evaluate,
+    infer,
     save_ckpt,
     train,
 )
 from dl4bi.meta_learning.utils import cfg_to_run_name
-from dl4bi.regression.steps import RegressionBatch
+from dl4bi.regression.data import RegressionBatch
 
 
 @hydra.main("configs/dengue", config_name="default", version_base=None)
@@ -35,7 +40,9 @@ def main(cfg: DictConfig):
     path.parent.mkdir(parents=True, exist_ok=True)
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(**cfg.data)
+    train_dataloader, valid_dataloader, test_dataloader, districts = build_dataloaders(
+        **cfg.data
+    )
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     state = train(
@@ -60,8 +67,9 @@ def main(cfg: DictConfig):
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
-    # TODO(danj): load test batches and plot a sample
-    # TODO(danj): partition dataset into pre-2018 and post?
+    batch = next(test_dataloader(rng_test))
+    output = infer(rng_test, state, batch)
+    plot(batch, output, districts)
 
 
 def build_dataloaders(
@@ -90,6 +98,7 @@ def build_dataloaders(
         build_dataloader(df_train),
         build_dataloader(df_valid),
         build_dataloader(df_test),
+        list(df_train.columns),
     )
 
 
@@ -99,11 +108,10 @@ def load_data(
     pct_test: float = 0.1,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     path = Path("cache/dengue.parquet")
-    path = Path("~/scratch/daily_d_ts.parquet")
     features = ["date", "district", "n"]
     df = pd.read_parquet(path)[features]
     df = df.set_index("date").sort_index()
-    # TODO(danj): separate model for later years?
+    # TODO(danj): partition dataset into pre-2017 and post?
     df = df[df.index < "2017-01-01"]
     idx = pd.date_range(df.index.min(), df.index.max())
     df = df.groupby("district").apply(forward_fill, idx)
@@ -155,6 +163,25 @@ def standardize_by_train(
     df_valid = pd.DataFrame(x_valid, columns=cols).infer_objects()
     df_test = pd.DataFrame(x_test, columns=cols).infer_objects()
     return df_train, df_valid, df_test, tx
+
+
+def plot(batch: RegressionBatch, output: ModelOutput, districts: list[str]):
+    N = len(districts)
+    fig, axes = plt.subplots(N, 1, figsize=(N, N * 10))
+    gt = jnp.concat([batch.x, batch.y], axis=1)
+    x_all = np.arange(gt.shape[1])
+    x_pred = batch.x.shape[1] + np.arange(batch.y.shape[1])
+    mu, (lower, upper) = output.mu, output.ci(0.05, 0.95)
+    for i in range(N):
+        axes[i].plot(x_all, gt[i], color="darkblue")
+        axes[i].plot(x_pred, mu[i], color="darkorange")
+        axes[i].fill_between(x_pred, lower[i], upper[i], alpha=0.3, color="darkorange")
+        axes[i].set_ylabel("case count")
+        axes[i].set_xlabel("day")
+        axes[i].set_title(districts[i])
+    fig.suptitle("Denge Fever")
+    fig.tight_layout()
+    fig.savefig("/tmp/dengue.png")
 
 
 if __name__ == "__main__":

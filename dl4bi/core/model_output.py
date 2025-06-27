@@ -6,11 +6,13 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax import jit
 from jax.nn import sigmoid, softmax, softplus
 from jax.scipy import stats
 from jax.scipy.special import gammaln, logsumexp
 from optax.losses import safe_softmax_cross_entropy, squared_error
+from scipy.stats import poisson
 
 
 @dataclass(frozen=True)
@@ -186,8 +188,15 @@ class PoissonOutput(DistributionOutput):
         return PoissonOutput(softplus(act))
 
     @property
-    def std(self):
-        return jnp.sqrt(self.lam)
+    def mu(self):
+        return self.lam
+
+    @property
+    def var(self):
+        return self.lam
+
+    def ci(self, lower: float = 0.05, upper: float = 0.95):
+        return poisson.ppf(lower, self.lam), poisson.ppf(upper, self.lam)
 
     def nll(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
         return -stats.poisson.logpmf(x, self.lam).mean(where=mask)
@@ -222,8 +231,17 @@ class ZeroInflatedPoissonOutput(DistributionOutput):
         return ZeroInflatedPoissonOutput.from_activations(act)
 
     @property
-    def std(self):
-        return jnp.sqrt((1 - self.pi) * self.lam * (1 + self.pi * self.lam))
+    def mu(self):
+        return (1 - self.pi) * self.lam
+
+    @property
+    def var(self):
+        return (1 - self.pi) * self.lam * (1 + self.pi * self.lam)
+
+    def ci(self, lower: float = 0.05, upper: float = 0.95, max_k: int = 10000):
+        vec_q_lower = np.vectorize(lambda pi, lam: _zip_quantile(lower, pi, lam, max_k))
+        vec_q_upper = np.vectorize(lambda pi, lam: _zip_quantile(upper, pi, lam, max_k))
+        return vec_q_lower(self.pi, self.lam), vec_q_upper(self.pi, self.lam)
 
     def nll(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
         pi, lam = self.pi, self.lam
@@ -234,6 +252,24 @@ class ZeroInflatedPoissonOutput(DistributionOutput):
 
     def metrics(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
         return {"NLL": self.nll(x, mask)}
+
+
+def _zip_quantile(alpha: float, pi: float, lam: int, max_k: int = 10000):
+    if alpha <= pi + (1 - pi) * np.exp(-lam):
+        return 0.0
+    for k in range(1, max_k + 1):
+        if _zip_cdf(k, pi, lam) >= alpha:
+            return k
+    raise ValueError(f"quantile not found up to k={max_k}")
+
+
+def _zip_cdf(k: int, pi: float, lam: int):
+    c0 = pi + (1 - pi) * poisson.pmf(0, lam)
+    if k < 0:
+        return 0.0
+    if k == 0:
+        return c0
+    return c0 + (1 - pi) * (poisson.cdf(k, lam) - poisson.pmf(0, lam))
 
 
 # register to use in jitted functions
