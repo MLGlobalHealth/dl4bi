@@ -3,7 +3,6 @@ from pathlib import Path
 
 import hydra
 import jax
-import jax.numpy as jnp
 import pandas as pd
 import wandb
 from hydra.utils import instantiate
@@ -66,14 +65,12 @@ def main(cfg: DictConfig):
 
 
 def build_dataloaders(
-    batch_size: int = 64,
     num_ctx: int = 384,
     num_test: int = 30,
     pct_train: float = 0.8,
     pct_valid: float = 0.1,
     pct_test: float = 0.1,
 ):
-    B = batch_size
     df_train, df_valid, df_test = load_data(pct_train, pct_valid, pct_test)
 
     def build_dataloader(df: pd.DataFrame):
@@ -81,12 +78,11 @@ def build_dataloaders(
 
         def dataloader(rng: jax.Array):
             while True:
-                rng_i, rng_b, rng = random.split(rng, 3)
-                idx = random.choice(rng_i, N - L, (B, 1), replace=False)
-                idx += jnp.arange(L)  # [B, L]
-                # TODO(danj): index each district with these indices
-                # TODO(danj): return a RegressionBatch
-                yield RegressionBatch(idx)
+                rng_i, rng = random.split(rng)
+                idx = random.choice(rng_i, N - L, (1,), replace=False).item()
+                d = df.iloc[idx : idx + L].values.T  # [num districts, L]
+                x, y = d[:, :num_ctx], d[:, num_ctx:]
+                yield RegressionBatch(x, y)
 
         return dataloader
 
@@ -108,7 +104,7 @@ def load_data(
     df = pd.read_parquet(path)[features]
     df = df.set_index("date").sort_index()
     # TODO(danj): separate model for later years?
-    # df = df[df.index < "2017-01-01"]
+    df = df[df.index < "2017-01-01"]
     idx = pd.date_range(df.index.min(), df.index.max())
     df = df.groupby("district").apply(forward_fill, idx)
     df.index = df.index.droplevel(0)
@@ -121,6 +117,7 @@ def load_data(
     df_train, df_test = df[:-num_test], df[-num_test:]
     df_train, df_valid = df_train[:-num_valid], df_train[-num_valid:]
     df_train = df_train[:num_train]
+    print(f"Train N: {num_train}, Valid N: {num_valid}, Test N: {num_test}")
     return df_train, df_valid, df_test
     # TODO(danj): standardize by district?
     # return standardize_by_train(df_train, df_valid, df_test)

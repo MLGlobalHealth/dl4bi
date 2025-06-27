@@ -2,18 +2,16 @@ defaults:
   - _self_ # use default global values below
   - model: d_linear
 seed: 42
-wandb: True
+wandb: False
 project: Dengue Fever
-train_num_steps: 500
-valid_num_steps: 100
-valid_interval: 50
-test_num_steps: 100
-infer_num_steps: 100
+train_num_steps: 250000
+valid_num_steps: 1000
+valid_interval: 25000
+test_num_steps: 1000
+infer_num_steps: 1000
 data:
-  batch_size: 8
-  num_ctx_min: 2250 # (24 + 1) * 90 => ~3 months daily
-  num_ctx_max: 2250
-  num_test: 350 # (24 + 1) * 14 => 2 weeks
+  num_ctx: 384
+  num_test: 30
   pct_train: 0.8
   pct_valid: 0.1
   pct_test: 0.1
@@ -21,9 +19,13 @@ optimizer:
   _target_: optax.chain
   _args_:
     - _target_: optax.clip_by_global_norm
-      max_norm: 0.5
+      max_norm: 1.0
     - _target_: optax.adamw
-      learning_rate: 1.0e-5
+      learning_rate:
+        _target_: optax.cosine_decay_schedule
+        init_value: 1.0e-4
+        decay_steps: ${train_num_steps}
+        alpha: 2.0e-5
       b1: 0.9
       b2: 0.999
       weight_decay: 1.0e-4

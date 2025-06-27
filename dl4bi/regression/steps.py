@@ -1,15 +1,8 @@
-from dataclasses import dataclass
-
 import jax
 from jax import jit, random
 
-from ..core.data import Batch
 from ..core.train import TrainState
-
-
-@dataclass(frozen=True)
-class RegressionBatch(Batch):
-    y: jax.Array
+from .data import RegressionBatch
 
 
 @jit

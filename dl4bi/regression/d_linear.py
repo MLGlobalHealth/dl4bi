@@ -39,7 +39,7 @@ class DLinear(nn.Module):
     valid_step: Callable = likelihood_valid_step
 
     @nn.compact
-    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:  # x: [B, L]
+    def __call__(self, x: jnp.ndarray, **kwargs) -> jnp.ndarray:  # x: [B, L]
         output = jnp.zeros((self.num_output,))
         for seasonal_lag in sorted(self.seasonal_lags):
             m = self.lag_fn(x, seasonal_lag)

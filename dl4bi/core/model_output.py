@@ -7,9 +7,9 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from jax import jit
-from jax.nn import softmax, softplus
+from jax.nn import sigmoid, softmax, softplus
 from jax.scipy import stats
-from jax.scipy.special import logsumexp
+from jax.scipy.special import gammaln, logsumexp
 from optax.losses import safe_softmax_cross_entropy, squared_error
 
 
@@ -181,7 +181,7 @@ class PoissonOutput(DistributionOutput):
         return PoissonOutput(softplus(act))
 
     @classmethod
-    def from_latent_activations(cls, act: jax.Array, min_std: float = 0.0, **kwargs):
+    def from_latent_activations(cls, act: jax.Array, **kwargs):
         act = act.mean(axis=1)  # average latent samples
         return PoissonOutput(softplus(act))
 
@@ -203,6 +203,44 @@ jax.tree_util.register_pytree_node(
     PoissonOutput,
     lambda d: ((d.lam,), None),
     lambda _aux, children: PoissonOutput(*children),
+)
+
+
+@dataclass(frozen=True)
+class ZeroInflatedPoissonOutput(DistributionOutput):
+    pi: jax.Array
+    lam: jax.Array
+
+    @classmethod
+    def from_activations(cls, act: jax.Array, **kwargs):
+        log_pi, log_lam = jnp.split(act, 2, axis=-1)
+        return ZeroInflatedPoissonOutput(sigmoid(log_pi), softplus(log_lam))
+
+    @classmethod
+    def from_latent_activations(cls, act: jax.Array, **kwargs):
+        act = act.mean(axis=1)  # average latent samples
+        return ZeroInflatedPoissonOutput.from_activations(act)
+
+    @property
+    def std(self):
+        return jnp.sqrt((1 - self.pi) * self.lam * (1 + self.pi * self.lam))
+
+    def nll(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
+        pi, lam = self.pi, self.lam
+        log_p_0 = jnp.logaddexp(jnp.log(pi), jnp.log1p(-pi) - lam)
+        log_p_gt_0 = jnp.log1p(-pi) + x * jnp.log(lam) - lam - gammaln(x + 1)
+        log_p = jnp.where(x == 0, log_p_0, log_p_gt_0)
+        return -jnp.mean(log_p)
+
+    def metrics(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
+        return {"NLL": self.nll(x, mask)}
+
+
+# register to use in jitted functions
+jax.tree_util.register_pytree_node(
+    ZeroInflatedPoissonOutput,
+    lambda d: ((d.pi, d.lam), None),
+    lambda _aux, children: ZeroInflatedPoissonOutput(*children),
 )
 
 
