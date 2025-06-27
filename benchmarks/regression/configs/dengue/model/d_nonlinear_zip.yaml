@@ -1,0 +1,13 @@
+_target_: dl4bi.regression.DNonLinear
+num_output: 60
+seasonal_lags: [7]
+lag_fn:
+  _target_: dl4bi.core.utils.causal_moving_average
+  _partial_: true
+num_layers: 2
+act_fn:
+  _target_: jax.nn.gelu
+  _partial_: true
+output_fn:
+  _target_: dl4bi.core.model_output.ZeroInflatedPoissonOutput.from_activations
+  _partial_: true

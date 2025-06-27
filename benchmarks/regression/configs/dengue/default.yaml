@@ -1,6 +1,7 @@
 defaults:
   - _self_ # use default global values below
-  - model: d_linear_zip
+  # - model: d_linear_zip
+  - model: d_linear
 seed: 42
 wandb: False
 project: Dengue Fever

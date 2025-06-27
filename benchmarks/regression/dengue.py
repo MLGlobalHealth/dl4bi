@@ -171,7 +171,7 @@ def plot(batch: RegressionBatch, output: ModelOutput, districts: list[str]):
     N = len(districts)
     fig, axes = plt.subplots(N, 1, figsize=(N, N * 10))
     x_pred = batch.x.shape[1] + np.arange(batch.y.shape[1])
-    mu, (lower, upper) = output.mu, output.ci(0.05, 0.95)
+    mu, (lower, upper) = output.mu, output.ci(0.1, 0.9)
     fontsize = 32
     for i in range(N):
         axes[i].bar(x_pred, batch.y[i], width=0.8, color="darkblue")
@@ -180,7 +180,7 @@ def plot(batch: RegressionBatch, output: ModelOutput, districts: list[str]):
             mu[i],
             yerr=[lower[i], upper[i]],
             fmt="o",
-            capsize=4,
+            capsize=6,
             color="darkorange",
         )
         axes[i].set_ylabel("case count", fontsize=fontsize)
