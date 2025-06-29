@@ -18,7 +18,8 @@ import wandb
 from hydra.utils import instantiate
 from jax import jit, random, vmap
 from jax.experimental import enable_x64
-from numpyro.infer import MCMC, NUTS
+from numpyro.examples.datasets import LYNXHARE, load_dataset
+from numpyro.infer import MCMC, NUTS, Predictive
 from omegaconf import DictConfig, OmegaConf
 from scipy.stats import norm
 from sps.gp import GP
@@ -37,7 +38,7 @@ from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
-@hydra.main("configs/generic_spatial", config_name="default", version_base=None)
+@hydra.main("configs/predator_prey", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
@@ -105,9 +106,7 @@ def build_dataloaders(data: DictConfig):
     L = data.num_ctx_max + data.num_test
     s_min = jnp.array([axis["start"] for axis in data.s])
     s_max = jnp.array([axis["stop"] for axis in data.s])
-    # NOTE: pure JAX version is faster
-    # prior_pred = jit(Predictive(generic_spatial_model, num_samples=B))
-    prior_pred = partial(jax_prior_pred, batch_size=B)
+    prior_pred = jit(Predictive(predator_prey_model, num_samples=B))
     batchify = jit(lambda v: jnp.repeat(v[None, ...], B, axis=0))
 
     def dataloader(rng: jax.Array, is_callback: bool = False):
@@ -127,49 +126,6 @@ def build_dataloaders(data: DictConfig):
             yield (b, samples) if is_callback else b
 
     return dataloader, partial(dataloader, is_callback=True)
-
-
-def jax_prior_pred(
-    rng: jax.Array,
-    x: jax.Array,
-    s: jax.Array,
-    batch_size: int,
-    jitter: float = 1e-5,
-):
-    """A pure JAX spatial model with fixed and random spatial effects.
-
-    Relative to the numpyro model, this is a faster implementation because it
-    amortizes the Cholesky decomposition by fixing lengthscale and variance
-    per batch.
-    """
-    rng_gp, rng_rest = random.split(rng)
-    var = Prior("fixed", {"value": 1.0})
-    ls = Prior("beta", {"a": 3.0, "b": 7.0})
-    # can't jit; hlo lowering fails on cholesky
-    f_mu_s, var, ls, *_ = GP(rbf, var, ls, jitter=jitter).simulate(
-        rng_gp, s, batch_size
-    )
-    f_mu_s = f_mu_s[..., 0]  # [B, L]
-    f, beta, f_obs_noise = _jax_prior_pred_helper(rng_rest, x, f_mu_s)
-    return {
-        "var": var,  # [1]
-        "ls": ls,  # [1]
-        "beta": beta,  # [B, D_x]
-        "f_mu_s": f_mu_s,  # [B, L]
-        "f_obs_noise": f_obs_noise,
-        "f": f,
-    }
-
-
-@jit
-def _jax_prior_pred_helper(rng: jax.Array, x: jax.Array, f_mu_s: jax.Array):
-    B, (L, D_x) = f_mu_s.shape[0], x.shape
-    rng_beta, rng_sigma, rng_noise = random.split(rng, 3)
-    beta = random.normal(rng_beta, (D_x,))
-    f_mu_x = beta @ x.T  # beta: [D_x], x: [L, D_x], x.T: [D_x, L], f_mu_x: [L]
-    f_obs_noise = 0.1 * jnp.abs(random.normal(rng_sigma, (B,)))  # HalfNormal(0.1)
-    f = f_mu_x + f_mu_s + f_obs_noise[:, None] * random.normal(rng_noise, (B, L))
-    return f, beta, f_obs_noise
 
 
 def infer_with_model(
@@ -194,6 +150,7 @@ def infer_with_model(
     )
 
 
+# TODO(danj): update
 def infer_with_mcmc(
     rng: jax.Array,
     sample: dict,
@@ -207,7 +164,7 @@ def infer_with_mcmc(
     }
     with enable_x64():
         mcmc = MCMC(
-            NUTS(generic_spatial_model),
+            NUTS(predator_prey_model),
             num_warmup=mcmc_cfg.num_warmup,
             num_samples=mcmc_cfg.num_samples,
             num_chains=mcmc_cfg.num_chains,
@@ -241,30 +198,45 @@ def print_summary(mcmc, pattern):
     print(filtered)
 
 
-def generic_spatial_model(
-    x: jax.Array,  # [L, D_x]
-    s: jax.Array,  # [L, D_s]
-    f: Optional[jax.Array] = None,  # [L, 1]
-    jitter: float = 1e-5,
-):
-    """Generic spatial model with fixed and random spatial effects.
+# source: https://num.pyro.ai/en/stable/examples/ode.html
+def predator_prey_model(N, y=None):
+    # initial population
+    z_init = numpyro.sample("z_init", dist.LogNormal(jnp.log(10), 1).expand([2]))
+    # measurement times
+    ts = jnp.arange(float(N))
+    # params alpha, beta, gamma, delta, of dz_dt
+    theta = numpyro.sample(
+        "theta",
+        dist.TruncatedNormal(
+            low=0.0,
+            loc=jnp.array([1.0, 0.05, 1.0, 0.05]),
+            scale=jnp.array([0.5, 0.05, 0.5, 0.05]),
+        ),
+    )
+    # integrate dz/dt, the result will be Nx2
+    z = odeint(dz_dt, z_init, ts, theta, rtol=1e-6, atol=1e-5, mxstep=1000)
+    # measurement errors
+    sigma = numpyro.sample("sigma", dist.LogNormal(-1, 1).expand([2]))
+    # measured populations
+    numpyro.sample("y", dist.LogNormal(jnp.log(z), sigma), obs=y)
 
-    Args:
-        x: Array of input covariates, `[L, D]`.
-        s: Array of input locations, `[L, S]`.
-        f: Observed function values, `[L, 1]`.
+
+def dz_dt(z, t, theta):
     """
-
-    L, D_x = x.shape
-    var = numpyro.deterministic("var", 1.0)
-    ls = numpyro.sample("ls", dist.Beta(3.0, 7.0))
-    k = rbf(s, s, var, ls) + jitter * jnp.eye(L)
-    beta = numpyro.sample("beta", dist.Normal(jnp.zeros(D_x), jnp.ones(D_x)))
-    f_mu_x = x @ beta
-    f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(0, k))
-    f_mu = f_mu_x + f_mu_s
-    f_obs_noise = numpyro.sample("f_obs_noise", dist.HalfNormal(0.1))
-    numpyro.sample("f", dist.Normal(f_mu, f_obs_noise), obs=f)
+    Lokta-Volterra equations. Real positive parameters `alpha`, `beta`, `gamma`,
+    `delta` describes the interactions of two species.
+    """
+    u = z[0]
+    v = z[1]
+    alpha, beta, gamma, delta = (
+        theta[..., 0],
+        theta[..., 1],
+        theta[..., 2],
+        theta[..., 3],
+    )
+    du_dt = (alpha - beta * v) * u
+    dv_dt = (-gamma + delta * u) * v
+    return jnp.stack([du_dt, dv_dt])
 
 
 def compute_inference_metrics(
@@ -288,6 +260,7 @@ def compute_inference_metrics(
     return m
 
 
+# TODO(danj): update
 @partial(jit, static_argnames=("jitter",))
 def pointwise_post_pred(
     rng: jax.Array,
@@ -316,57 +289,6 @@ def pointwise_post_pred(
         jitter,
     )  # f: [N, L]
     return f.mean(axis=0), f.std(axis=0)
-
-
-@partial(jit, static_argnames=("jitter",))
-def post_pred(
-    rng: jax.Array,
-    s_ctx: jax.Array,  # [L_ctx, D_s]
-    s_test: jax.Array,  # [L_test, D_s]
-    x_test: jax.Array,  # [L_test, D_x]
-    beta: jax.Array,  # [D]
-    var: jax.Array,  # [1]
-    ls: jax.Array,  # [1]
-    f_mu_s: jax.Array,  # [L_ctx, 1]
-    f_obs_noise: jax.Array,  # [1]
-    jitter: float = 1e-5,
-):
-    """Generates a posterior predictive sample.
-
-    Source: https://num.pyro.ai/en/stable/examples/gp.html
-    """
-    rng_gp, rng_noise = random.split(rng)
-    f_mu_s = condition_gp(rng_gp, s_ctx, f_mu_s, s_test, var, ls, rbf, jitter)
-    f_mu_x = beta @ x_test.T
-    f_mu = f_mu_s + f_mu_x
-    f = f_mu + f_obs_noise * random.normal(rng_noise, f_mu.shape)
-    return f
-
-
-@partial(jit, static_argnames=("jitter", "kernel"))
-def condition_gp(
-    rng: jax.Array,
-    s_ctx: jax.Array,
-    f_ctx: jax.Array,
-    s_test: jax.Array,
-    var: jax.Array,
-    ls: jax.Array,
-    kernel: Callable = rbf,
-    jitter=1e-5,
-):
-    """Conditions a GP on observed points.
-
-    Source: https://num.pyro.ai/en/stable/examples/gp.html
-    """
-    L_ctx, L_test = s_ctx.shape[0], s_test.shape[0]
-    k_tt = kernel(s_test, s_test, var, ls) + jitter * jnp.eye(L_test)
-    k_tc = kernel(s_test, s_ctx, var, ls)
-    k_cc = kernel(s_ctx, s_ctx, var, ls) + jitter * jnp.eye(L_ctx)
-    K_cc_cho = jax.scipy.linalg.cho_factor(k_cc)
-    K = k_tt - k_tc @ jax.scipy.linalg.cho_solve(K_cc_cho, k_tc.T)
-    mu = k_tc @ jax.scipy.linalg.cho_solve(K_cc_cho, f_ctx)
-    noise = jnp.sqrt(jnp.clip(jnp.diag(K), 0.0)) * random.normal(rng, L_test)
-    return mu + noise
 
 
 if __name__ == "__main__":
