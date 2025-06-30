@@ -454,7 +454,7 @@ def posterior_wasserstein_distance(
 
 def gen_train_params(model_name, s, default_bs=32):
     L = s.shape[0]
-    default_steps = 100_000 if L <= 512 else 200_000
+    default_steps = 200_000
     max_lr = {
         "DeepRV + gMLP": 5e-3 if L <= 1024 else 1e-2,
         "DeepRV + ScanTransfomer": 1e-4,
@@ -481,6 +481,10 @@ def plot_model_scalability_metrics(result_df: pd.DataFrame, save_dir: Path):
     """
     sns.set_theme(style="whitegrid")
     models = result_df["model_name"].unique()
+    palette = sns.color_palette("tab10", n_colors=len(models))
+    model_colors = {model: palette[i] for i, model in enumerate(models)}
+    result_df.infer_flops = result_df.infer_flops / result_df.bs
+    result_df.train_flops = result_df.train_flops / result_df.bs
 
     def _plot_metric_group(
         ax, metric_cols: Union[str, List[str]], title: str, ylabel: str
@@ -489,11 +493,18 @@ def plot_model_scalability_metrics(result_df: pd.DataFrame, save_dir: Path):
             metric_cols = [metric_cols]
         for model in models:
             df_m = result_df[result_df["model_name"] == model]
+            color = model_colors[model]
             for metric in metric_cols:
                 if metric not in df_m.columns or df_m[metric].isnull().all():
                     continue
                 label = f"{model}" if len(metric_cols) == 1 else f"{model} - {metric}"
-                ax.plot(df_m["grid_size"], df_m[metric], label=label, marker="o")
+                ax.plot(
+                    df_m["grid_size"],
+                    df_m[metric],
+                    label=label,
+                    marker="o",
+                    color=color,
+                )
         ax.set_title(title)
         ax.set_xlabel("Grid Size")
         ax.set_ylabel(ylabel)
@@ -506,11 +517,12 @@ def plot_model_scalability_metrics(result_df: pd.DataFrame, save_dir: Path):
     _plot_metric_group(axes[2], "total_time", "Total Time", "Seconds")
     plt.tight_layout()
     plt.savefig(save_dir / "speed.png")
-
     # NOTE: scalability
     _, axes = plt.subplots(1, 2, figsize=(10, 5), sharex=True)
     _plot_metric_group(axes[0], "parameters", "Parameter Count", "Count")
-    _plot_metric_group(axes[1], ["infer_flops", "train_flops"], "GFLOPs", "GFLOPs")
+    _plot_metric_group(
+        axes[1], ["infer_flops", "train_flops"], "GFLOPs per sample", "GFLOPs"
+    )
     plt.tight_layout()
     plt.savefig(save_dir / "flops.png")
     # NOTE: performance

@@ -41,7 +41,9 @@ def deep_rv_train_step(
     batch: dict,
     var_idx: Optional[int] = None,
 ):
-    """Standard VAE training step that uses an ELBO loss.
+    """DeepRV training step, MSE(f, f_hat).
+    Can be normalized by variance to stabilize training, if
+    variance is given as a conditional parameter.
 
     Args:
         rng: A PRNG key.
@@ -60,6 +62,42 @@ def deep_rv_train_step(
             {"params": params}, **batch, rngs={"extra": rng}
         )
         return (1 / var) * output.mse(f)
+
+    loss, grads = value_and_grad(deep_rv_loss)(state.params)
+    return state.apply_gradients(grads=grads), loss
+
+
+@partial(jax.jit, static_argnames=["var_idx"])
+def inducing_deep_rv_train_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: dict,
+    var_idx: Optional[int] = None,
+):
+    """Inducing point DeepRV training step, MSE(K_su @ f, K_su @ f_hat).
+    Can be normalized by variance to stabilize training, if
+    variance is given as a conditional parameter.
+
+    Args:
+        rng: A PRNG key.
+        state: The current training state.
+        batch: Batch of data.
+        var_idx: the variance conditional index (if exists)
+
+    Returns:
+        `TrainState` with updated parameters, and the loss
+    """
+
+    def deep_rv_loss(params):
+        f_bar_u, conditionals = batch["f"], batch["conditionals"]
+        K_su = batch["K_su"]
+        var = conditionals[var_idx] if var_idx is not None else 1.0
+        output: VAEOutput = state.apply_fn(
+            {"params": params}, **batch, rngs={"extra": rng}
+        )
+        residuals = f_bar_u.squeeze() - output.f_hat.squeeze()
+        f_mse = 0.5 * (jnp.einsum("ij, bj-> bi", K_su, residuals)) ** 2
+        return (1 / (2 * var)) * (f_mse.mean() + (residuals**2).mean())
 
     loss, grads = value_and_grad(deep_rv_loss)(state.params)
     return state.apply_gradients(grads=grads), loss
