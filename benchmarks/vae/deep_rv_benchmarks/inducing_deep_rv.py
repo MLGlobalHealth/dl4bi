@@ -22,6 +22,7 @@ from numpyro.distributions.transforms import ParameterFreeTransform
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig
 from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
+from scipy.stats import wasserstein_distance
 from sklearn.cluster import KMeans
 from sps.kernels import matern_1_2
 from sps.utils import build_grid
@@ -38,7 +39,7 @@ from dl4bi.vae.train_utils import (
 )
 
 
-def main(seed=89, logged_priors=False):
+def main(seed=89, logged_priors=False, max_ls=50.0):
     wandb.init(mode="disabled")  # NOTE: downstream function assumes active wandb
     rng = random.key(seed)
     rng_train, rng_test, rng_infer, rng_idxs, rng_obs = random.split(rng, 5)
@@ -47,21 +48,24 @@ def main(seed=89, logged_priors=False):
     grid_dim = 32
     s = build_grid([{"start": 0.0, "stop": 100.0, "num": grid_dim}] * 2).reshape(-1, 2)
     models = {
-        "DeepRV inv + gMLP": gMLPDeepRV(num_blks=2),
-        "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
-        "Inducing Points": None,
+        "DeepRV inv simple + gMLP": (gMLPDeepRV(num_blks=2), deep_rv_train_step),
+        "DeepRV inv + gMLP": (gMLPDeepRV(num_blks=2), inducing_deep_rv_train_step),
+        "DeepRV + gMLP": (gMLPDeepRV(num_blks=2), deep_rv_train_step),
+        "Inducing Points": (None, None),
     }
     y_obs = gen_y_obs(rng_obs, s)
     obs_mask = generate_obs_mask(rng_idxs, y_obs, 0.3)
-    log_ls = dist.TransformedDistribution(dist.Beta(4.0, 1.0), LogScaleTransform())
+    log_ls = dist.TransformedDistribution(
+        dist.Beta(4.0, 1.0), LogScaleTransform(max_ls=max_ls)
+    )
     priors = {
-        "ls": log_ls if logged_priors else dist.Uniform(1.0, 100.0),
+        "ls": log_ls if logged_priors else dist.Uniform(1.0, max_ls),
         "beta": dist.Normal(),
     }
     y_hats, all_samples, result = [], [], []
     L_train = int(s.shape[0] ** 0.75)
 
-    for model_name, nn_model in models.items():
+    for model_name, (nn_model, train_step) in models.items():
         solve_inv = "inv" in model_name
         infer_model, cond_names, s_train = inference_model_inducing_points(
             s, priors, obs_mask, L_train, solve_inv
@@ -76,6 +80,7 @@ def main(seed=89, logged_priors=False):
                 rng_test,
                 loader,
                 nn_model,
+                train_step,
                 solve_inv,
                 save_dir / f"{model_name}",
             )
@@ -131,7 +136,47 @@ def main(seed=89, logged_priors=False):
         model_names,
         save_dir / "obs_means.png",
     )
-    pd.DataFrame(result).to_csv(save_dir / "res.csv")
+    wass_dist = posterior_wasserstein_distance(all_samples, model_names, cond_names)
+    result = pd.DataFrame(result)
+    for model_name in model_names:
+        if model_name == "Inducing Points":
+            continue
+        for n in cond_names:
+            result.loc[
+                result["model_name"] == model_name, f"{n} wasserstein distance"
+            ] = wass_dist[model_name][n]
+    result.to_csv(save_dir / "res.csv")
+    # from diagnostics import compare_grads, compare_smoothness, diff_per_loader
+
+    # _, _, s_train = inference_model_inducing_points(s, priors, obs_mask, L_train, False)
+    # diff_per_loader(models, s, s_train, matern_1_2, save_dir, max_ls)
+    # compare_grads(
+    #     models,
+    #     s,
+    #     matern_1_2,
+    #     priors,
+    #     obs_mask,
+    #     L_train,
+    #     save_dir,
+    #     target="f",
+    #     max_ls=max_ls,
+    # )
+    # compare_grads(
+    #     models,
+    #     s,
+    #     matern_1_2,
+    #     priors,
+    #     obs_mask,
+    #     L_train,
+    #     save_dir,
+    #     target="f_u_bar",
+    #     max_ls=max_ls,
+    # )
+    # for ls in jnp.linspace(1.0, max_ls, 15):
+    #     compare_smoothness(
+    #         models, s, matern_1_2, priors, obs_mask, L_train, save_dir, ls
+    #     )
+    # exit(0)
 
 
 def hmc(
@@ -160,15 +205,15 @@ def surrogate_model_train(
     rng_test: Array,
     loader: Callable,
     model: nn.Module,
+    train_step,
     solve_inv: bool,
     results_dir: Path,
-    train_num_steps: int = 300_000,
-    valid_interval: int = 50_000,
+    train_num_steps: int = 400_000,
+    valid_interval: int = 100_000,
     valid_steps: int = 5_000,
 ):
     valid_step = partial(inducing_valid_step, solve_inv=solve_inv)
     lr_schedule = cosine_annealing_lr(train_num_steps, 5.0e-3)
-    train_step = inducing_deep_rv_train_step if solve_inv else deep_rv_train_step
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
     start = datetime.now()
     state = train(
@@ -360,30 +405,42 @@ class LogScaleTransform(ParameterFreeTransform):
     codomain = dist.constraints.positive
     event_dim = 0  # Scalar transform
 
+    def __init__(self, max_ls=50.0):
+        self.max_ls = max_ls
+
     def __call__(self, x):
-        return jnp.exp(x * jnp.log(100.0))
+        return jnp.exp(x * jnp.log(self.max_ls))
 
     def _inverse(self, y):
-        return jnp.log(y) / jnp.log(100.0)
+        return jnp.log(y) / jnp.log(self.max_ls)
 
     def log_abs_det_jacobian(self, x, y, intermediates=None):
-        return jnp.log(100.0) + x * jnp.log(100.0)
+        return jnp.log(self.max_ls) + x * jnp.log(self.max_ls)
+
+
+def posterior_wasserstein_distance(
+    samples: list, model_names: list[str], var_names: list[str]
+):
+    """
+    Computes Wasserstein distance for each variable between the posterior distributions
+    of each model and the baseline "Baseline_GP".
+    """
+    baseline_index = model_names.index("Inducing Points")
+    baseline_samples = samples[baseline_index]
+    distances = {m: {} for m in model_names if m != "Inducing Points"}
+    for model_name, model_sample in zip(model_names, samples):
+        if model_name == "Inducing Points":
+            continue
+        for var_name in var_names:
+            baseline_var_samples = baseline_samples.get(var_name)
+            model_var_samples = model_sample.get(var_name)
+            if baseline_var_samples is not None and model_var_samples is not None:
+                dist = wasserstein_distance(baseline_var_samples, model_var_samples)
+                distances[model_name][var_name] = dist
+            else:
+                distances[model_name][var_name] = jnp.nan
+    return distances
 
 
 if __name__ == "__main__":
     main()
-
-    # from diagnostics import compare_grads, compare_smoothness, diff_per_loader
-    # _, _, s_train = inference_model_inducing_points(s, priors, obs_mask, L_train, False)
-    # diff_per_loader(models, s, s_train, matern_1_2, save_dir)
-    # compare_grads(
-    #     models, s, matern_1_2, priors, obs_mask, L_train, save_dir, target="f"
-    # )
-    # compare_grads(
-    #     models, s, matern_1_2, priors, obs_mask, L_train, save_dir, target="f_u_bar"
-    # )
-    # for ls in jnp.linspace(5.0, 90.0, 17):
-    #     compare_smoothness(
-    #         models, s, matern_1_2, priors, obs_mask, L_train, save_dir, ls
-    #     )
-    # exit(0)

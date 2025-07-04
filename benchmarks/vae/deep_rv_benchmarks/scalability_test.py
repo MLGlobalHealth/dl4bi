@@ -134,7 +134,9 @@ def main(seed=42, logged_priors=True):
                     samples, mcmc, None, cond_names, model_path / "infer_trace.png"
                 )
             else:
-                samples, post, infer_time = advi(rng_infer, infer_model, y_obs)
+                samples, post, infer_time = advi(
+                    rng_infer, infer_model, y_obs, obs_mask
+                )
             y_hats.append(post["obs"])
             all_samples.append(samples)
             res = {
@@ -209,13 +211,13 @@ def hmc(
     return samples, mcmc, post, infer_time
 
 
-def advi(rng: Array, model: Callable, y_obs: Array, num_steps=50_000):
-    rng_advi, rng_pp, rng_post = random.split(rng, 3)
+def advi(rng: Array, model: Callable, y: Array, obs_mask: Array, num_steps=50_000):
+    rng_svi, rng_pp, rng_post = random.split(rng, 3)
     guide = AutoMultivariateNormal(model)
     optimizer = Adam(step_size=0.0001)
     svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
     start = datetime.now()
-    svi_result = svi.run(rng_advi, num_steps, y=y_obs, stable_update=True)
+    svi_result = svi.run(rng_svi, num_steps, y=y, obs_mask=obs_mask, stable_update=True)
     infer_time = (datetime.now() - start).total_seconds()
     params = svi_result.params
     samples = guide.sample_posterior(rng_pp, params, sample_shape=(40_000,))

@@ -29,6 +29,7 @@ def compare_grads(
     save_dir: Path,
     target: str = "f",
     base_model: str = "Inducing Points",
+    max_ls=50.0,
 ):
     plot_dir = save_dir / f"grad_plots_{target}"
     plot_dir.mkdir(parents=True, exist_ok=True)
@@ -41,7 +42,7 @@ def compare_grads(
         )
         surr_dec = surr_models.get(model_name, None)
         results_dict[model_name] = compute_gradients_for_target(
-            infer_model, rng, num_points, target, surr_dec
+            infer_model, rng, num_points, target, surr_dec, max_ls
         )
     # Baseline to compare to
     baseline_vals, baseline_grads, _ = results_dict[base_model]
@@ -70,13 +71,13 @@ def compare_grads(
 
 
 def compute_gradients_for_target(
-    infer_model, rng_key, num_points, target, surrogate_decoder
+    infer_model, rng_key, num_points, target, surrogate_decoder, max_ls
 ):
     f_vals = []
     grads_list = []
     key_model, key_z = jax.random.split(rng_key)
     z = sample("z", dist.Normal(), rng_key=key_z, sample_shape=(1, num_points))
-    ls_grid = jnp.linspace(5.0, 90.0, 17)
+    ls_grid = jnp.linspace(1.0, max_ls, 15)
 
     def wrapped_model(z_, ls_):
         substitutions = {"z": z_, "ls": ls_}
@@ -253,7 +254,7 @@ def inference_model_inducing_points(
     return poisson_inducing
 
 
-def diff_per_loader(models_dict, s, s_train, kernel, save_dir, bs=32):
+def diff_per_loader(models_dict, s, s_train, kernel, save_dir, max_ls=50.0, bs=32):
     plot_dir = save_dir / "numerical_precision_plots"
     plot_dir.mkdir(parents=True, exist_ok=True)
     rng = random.key(17)
@@ -261,24 +262,24 @@ def diff_per_loader(models_dict, s, s_train, kernel, save_dir, bs=32):
     f_u_bar_mses = {m: [] for m in surr_models.keys()}
     f_mses = {m: [] for m in surr_models.keys()}
     kwargs = {"s": s_train}
-    ls_grid = jnp.linspace(5.0, 90.0, 17)
-    selected_ls_indices = [1, 5, 10, 15]
-
+    ls_grid = jnp.linspace(1.0, max_ls, 15)
+    selected_ls_indices = [0, 5, 10, 14]
+    K_uu_cond_num = []
     for ls_idx, ls_val in enumerate(ls_grid):
         priors = {"ls": dist.Delta(ls_val)}
         batch = gen_loader(kernel, s_train, priors, bs)(rng).__next__()
         K_su = kernel(s, s_train, 1.0, ls_val)
         f_u_bar = batch["f_u_bar"].squeeze()  # GT f_u_bar
         f = jnp.einsum("ij,bj->bi", K_su, f_u_bar)  # GT f from inducing points
-
+        K_uu = batch["K_uu"]
         # Precompute SVD of K_su for residual projection
         U, S, Vh = jnp.linalg.svd(K_su, full_matrices=False)
-
+        K_uu_cond_num.append(jnp.linalg.cond(K_uu))
         for m_name, surr_dec in surr_models.items():
             pred_f_u_bar = surr_dec(batch["z"], jnp.array([ls_val]), **kwargs).squeeze()
 
             if "inv" not in m_name:
-                pred_f_u_bar = jit_solve_func(batch["K_uu"], pred_f_u_bar)
+                pred_f_u_bar = jit_solve_func(K_uu, pred_f_u_bar)
 
             pred_f = jnp.einsum("ij,bj->bi", K_su, pred_f_u_bar)
 
@@ -293,7 +294,7 @@ def diff_per_loader(models_dict, s, s_train, kernel, save_dir, bs=32):
             mse_jit = optax.l2_loss(pred_f_u_bar, f_u_bar).mean()
             f_u_bar_mses[m_name].append(mse_jit)
             f_mses[m_name].append(optax.l2_loss(pred_f, f).mean())
-
+    plot_K_uu_cond(K_uu_cond_num, plot_dir, ls_grid)
     plot_mses(f_u_bar_mses, ls_grid, plot_dir, f_mses)
 
 
@@ -307,6 +308,17 @@ def plot_energies(U, f_residuals, m_name, ls_val, ls_folder):
     plt.ylabel("Mean Energy")
     plt.tight_layout()
     plt.savefig(ls_folder / "svd_residual_energy.png")
+    plt.close()
+
+
+def plot_K_uu_cond(K_uu_cond, plot_dir, ls_grid):
+    plt.figure(figsize=(6, 4))
+    plt.plot(ls_grid, K_uu_cond, marker="o")
+    plt.title("K_uu condition number over lengthscale")
+    plt.xlabel("ls")
+    plt.ylabel(r"Condition Number $\kappa = \frac{\sigma_{max}}{\sigma_{min}}$")
+    plt.tight_layout()
+    plt.savefig(plot_dir / "K_uu_cond.png")
     plt.close()
 
 

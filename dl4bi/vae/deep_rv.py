@@ -11,7 +11,7 @@ from ..core.attention import (
     MultiHeadAttention,
 )
 from ..core.bias import Bias
-from ..core.mlp import MLP, gMLP
+from ..core.mlp import MLP, gMLP, gMLPBlock
 from ..core.model_output import VAEOutput
 from ..core.transformer import TransformerEncoderBlock
 from ..vae.train_utils import cond_as_feats, cond_as_locs
@@ -74,6 +74,30 @@ class gMLPDeepRV(nn.Module):
         x = jnp.concat([jnp.atleast_3d(z), batched_s], axis=-1)
         x = cond_as_feats(x, conditionals)
         return VAEOutput(gMLP(self.num_blks)(x))
+
+    def decode(self, z: Array, conditionals: Array, s: Array, **kwargs):
+        return self(z, conditionals, s, **kwargs).f_hat
+
+
+class gMLPActivDeepRV(nn.Module):
+    num_blks: int = 2
+
+    @nn.compact
+    def __call__(self, z: Array, conditionals: Array, s: Array, **kwargs):
+        batched_s = jnp.repeat(s[None, ...], z.shape[0], axis=0)
+        x = jnp.concat([jnp.atleast_3d(z), batched_s], axis=-1)
+        x = cond_as_feats(x, conditionals)
+        return VAEOutput(
+            gMLP(
+                num_blks=self.num_blks,
+                embed=MLP([64, 64], nn.gelu),
+                blk=gMLPBlock(
+                    proj_in=MLP([128, 128], nn.gelu),
+                    proj_out=MLP([64, 64], nn.gelu),
+                    gate_fn=nn.gelu,
+                ),
+            )(x)
+        )
 
     def decode(self, z: Array, conditionals: Array, s: Array, **kwargs):
         return self(z, conditionals, s, **kwargs).f_hat

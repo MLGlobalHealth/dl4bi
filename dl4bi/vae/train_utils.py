@@ -67,12 +67,13 @@ def deep_rv_train_step(
     return state.apply_gradients(grads=grads), loss
 
 
-@partial(jax.jit, static_argnames=["var_idx"])
+@partial(jax.jit, static_argnames=["var_idx", "f_mse_w"])
 def inducing_deep_rv_train_step(
     rng: jax.Array,
     state: TrainState,
     batch: dict,
     var_idx: Optional[int] = None,
+    f_mse_w: float = 0.8,
 ):
     """Inducing point DeepRV training step, MSE(K_su @ f, K_su @ f_hat).
     Can be normalized by variance to stabilize training, if
@@ -96,8 +97,9 @@ def inducing_deep_rv_train_step(
             {"params": params}, **batch, rngs={"extra": rng}
         )
         residuals = f_bar_u.squeeze() - output.f_hat.squeeze()
-        f_mse = 0.5 * (jnp.einsum("ij, bj-> bi", K_su, residuals)) ** 2
-        return (1 / (2 * var)) * (f_mse.mean() + (residuals**2).mean())
+        f_bar_u_mse = (residuals**2).mean()
+        f_mse = (jnp.einsum("ij, bj-> bi", K_su, residuals)) ** 2
+        return (1 / (2 * var)) * (f_mse_w * f_mse.mean() + (1 - f_mse_w) * f_bar_u_mse)
 
     loss, grads = value_and_grad(deep_rv_loss)(state.params)
     return state.apply_gradients(grads=grads), loss
