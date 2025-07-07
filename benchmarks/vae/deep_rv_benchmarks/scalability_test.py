@@ -3,6 +3,7 @@ import sys
 sys.path.append("benchmarks/vae")
 import pickle
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Callable, List, Optional, Union
 
@@ -15,7 +16,8 @@ import numpyro
 import optax
 import pandas as pd
 import seaborn as sns
-from jax import Array, jit, random
+from jax import Array, jit, random, vmap
+from jax.scipy.linalg import solve_triangular
 from numpyro import distributions as dist
 from numpyro.distributions.transforms import ParameterFreeTransform
 from numpyro.infer import MCMC, NUTS, SVI, Predictive, Trace_ELBO, init_to_median
@@ -39,7 +41,7 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
-from dl4bi.vae import DKADeepRV, ScanTransformerDeepRV, gMLPDeepRV
+from dl4bi.vae import ScanTransformerDeepRV, gMLPDeepRV
 from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
 
 
@@ -55,9 +57,9 @@ def main(seed=42, logged_priors=True):
         "Baseline_GP": None,
         "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
         "DeepRV + ScanTransfomer": ScanTransformerDeepRV(num_blks=2, dim=64),
-        "DeepRV + DKA": DKADeepRV(dim=128, num_blks=3),
-        "ADVI": None,
+        "Inducing DeepRV + gMLP": gMLPDeepRV(num_blks=2),
         "Inducing Points": None,
+        "ADVI": None,
     }
     model_names = list(models.keys())
     log_ls = dist.TransformedDistribution(dist.Beta(4.0, 1.0), LogScaleTransform())
@@ -75,16 +77,15 @@ def main(seed=42, logged_priors=True):
         obs_mask = generate_obs_mask(rng_idxs, y_obs)
         poisson_llk, cond_names = inference_model(s, priors)
         num_pts = int(min(int(2 * jnp.sqrt(L).item()), sum(obs_mask)))
-        poisson_inducing_llk = inference_model_inducing_points(
+        poiss_inducing, u = inference_model_inducing_points(
             s, priors, obs_mask, num_pts
         )
         y_hats, all_samples = [], []
         for model_name, nn_model in models.items():
             model_path = grid_s_path / f"{model_name}"
             model_path.mkdir(parents=True, exist_ok=True)
-            infer_model = (
-                poisson_inducing_llk if model_name == "Inducing Points" else poisson_llk
-            )
+            is_inducing = "Inducing" in model_name
+            infer_model = poiss_inducing if is_inducing else poisson_llk
             train_time, eval_mse, surrogate_decoder, ess = None, None, None, {}
             infer_gflops, train_gflops, parameters = None, None, None
             max_lr, bs, train_steps = None, None, None
@@ -102,7 +103,7 @@ def main(seed=42, logged_priors=True):
                     project="deep_rv_optimizations",
                     reinit=True,
                 )
-                loader = gen_train_dataloader(s, priors, batch_size=bs)
+                loader = gen_train_dataloader(s, u, priors, is_inducing, batch_size=bs)
                 (
                     train_time,
                     eval_mse,
@@ -135,7 +136,7 @@ def main(seed=42, logged_priors=True):
                 )
             else:
                 samples, post, infer_time = advi(
-                    rng_infer, infer_model, y_obs, obs_mask
+                    rng_infer, infer_model, y_obs, obs_mask, model_path
                 )
             y_hats.append(post["obs"])
             all_samples.append(samples)
@@ -211,7 +212,14 @@ def hmc(
     return samples, mcmc, post, infer_time
 
 
-def advi(rng: Array, model: Callable, y: Array, obs_mask: Array, num_steps=50_000):
+def advi(
+    rng: Array,
+    model: Callable,
+    y: Array,
+    obs_mask: Array,
+    results_dir: Path,
+    num_steps: int = 50_000,
+):
     rng_svi, rng_pp, rng_post = random.split(rng, 3)
     guide = AutoMultivariateNormal(model)
     optimizer = Adam(step_size=0.0001)
@@ -222,6 +230,10 @@ def advi(rng: Array, model: Callable, y: Array, obs_mask: Array, num_steps=50_00
     params = svi_result.params
     samples = guide.sample_posterior(rng_pp, params, sample_shape=(40_000,))
     post = Predictive(model, samples)(rng_post)
+    with open(results_dir / "hmc_samples.pkl", "wb") as out_file:
+        pickle.dump(samples, out_file)
+    with open(results_dir / "hmc_pp.pkl", "wb") as out_file:
+        pickle.dump(post, out_file)
     return samples, post, infer_time
 
 
@@ -274,20 +286,33 @@ def surrogate_model_train(
     return train_time, eval_mse, surrogate_decoder, infer_flops, train_flops, parameters
 
 
-def gen_train_dataloader(s: Array, priors: dict, batch_size=32):
-    jitter = 5e-4 * jnp.eye(s.shape[0])
+@partial(jit, static_argnames=["lower"])
+def jit_trin_solve_func(L_T, z, lower=False):
+    s_trin = partial(solve_triangular, lower=lower)
+    return vmap(s_trin, in_axes=(None, 0))(L_T, z)
+
+
+def gen_train_dataloader(
+    s: Array, u: Array, priors: dict, inducing=False, batch_size=32
+):
+    s_train = u if inducing else s
+    jitter = 5e-4 * jnp.eye(s_train.shape[0])
     kernel_jit = jit(lambda s, var, ls: matern_1_2(s, s, var, ls) + jitter)
-    f_jit = jit(lambda K, z: jnp.einsum("ij,bj->bi", jnp.linalg.cholesky(K), z))
+    f_jit = jit(lambda L, z: jnp.einsum("ij,bj->bi", L, z))
 
     def dataloader(rng_data):
         while True:
             rng_data, rng_ls, rng_z = random.split(rng_data, 3)
             var = 1.0
             ls = priors["ls"].sample(rng_ls)
-            z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s.shape[0]))
-            K = kernel_jit(s, var, ls)
-            f = f_jit(K, z)
-            yield {"s": s, "f": f, "z": z, "conditionals": jnp.array([ls])}
+            z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s_train.shape[0]))
+            K = kernel_jit(s_train, var, ls)
+            L = jnp.linalg.cholesky(K)
+            if inducing:
+                f = jit_trin_solve_func(L.T, z, lower=False)
+            else:
+                f = f_jit(L, z)
+            yield {"s": s_train, "f": f, "z": z, "conditionals": jnp.array([ls])}
 
     return dataloader
 
@@ -325,15 +350,21 @@ def inference_model_inducing_points(
     """Builds a poisson likelihood inference model for inducing points"""
     kmeans = KMeans(n_clusters=num_points, random_state=0)
     u = kmeans.fit(s[obs_mask]).cluster_centers_  # shape (num_points, s.shape[1])
+    surr_kwargs = {"s": u}
 
     def poisson_inducing(surrogate_decoder=None, obs_mask=True, y=None):
         var = 1.0
         ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
-        K_uu = matern_1_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
         K_su = matern_1_2(s, u, var, ls)
-        f_u = numpyro.sample("mu", dist.MultivariateNormal(0.0, K_uu))
-        f = K_su @ jnp.linalg.solve(K_uu, f_u)
+        z = numpyro.sample("z", dist.Normal(), sample_shape=(1, u.shape[0]))
+        if surrogate_decoder is not None:
+            f_u_bar = surrogate_decoder(z, jnp.array([ls]), **surr_kwargs).squeeze()
+        else:
+            K_uu = matern_1_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
+            L_uu = jnp.linalg.cholesky(K_uu)
+            f_u_bar = solve_triangular(L_uu.T, z[0], lower=False)
+        f = numpyro.deterministic("mu", K_su @ f_u_bar)
         # NOTE: uncomment to perform FITC correction for marginal variances
         # K_uu_inv_K_us = jnp.linalg.solve(K_uu, K_su.T)
         # Q_ss_diag = jnp.sum(K_su * K_uu_inv_K_us.T, axis=1)
@@ -343,7 +374,7 @@ def inference_model_inducing_points(
         with numpyro.handlers.mask(mask=obs_mask):
             numpyro.sample("obs", dist.Poisson(lambda_), obs=y)
 
-    return poisson_inducing
+    return poisson_inducing, u
 
 
 @jit
@@ -371,7 +402,7 @@ def generate_obs_mask(rng: Array, y_obs: Array, obs_ratio: float = 0.15):
     L = y_obs.shape[0]
     num_obs_locations = int(obs_ratio * L)
     obs_idxs = random.choice(rng, jnp.arange(L), (num_obs_locations,), replace=False)
-    return jnp.array([i in obs_idxs for i in range(L)])
+    return jnp.isin(jnp.arange(L), obs_idxs)
 
 
 def plot_models_predictive_means(
@@ -458,17 +489,20 @@ def gen_train_params(model_name, s, default_bs=32):
     L = s.shape[0]
     default_steps = 200_000
     max_lr = {
+        "Inducing DeepRV + gMLP": 5e-3,
         "DeepRV + gMLP": 5e-3 if L <= 1024 else 1e-2,
         "DeepRV + ScanTransfomer": 1e-4,
         "DeepRV + DKA": 5e-3,
     }[model_name]
-    if "ScanTransfomer" in model_name:
-        bs = int(min(1, 512 / L) * default_bs)
-    if "DKA" in model_name:
-        bs = int(min(1, 1024 / L) * default_bs)
-    else:
-        bs = int(min(1, 2048 / L) * default_bs)
+    bs = {
+        "Inducing DeepRV + gMLP": default_bs,
+        "DeepRV + gMLP": int(min(1, 2048 / L) * default_bs),
+        "DeepRV + ScanTransfomer": int(min(1, 512 / L) * default_bs),
+        "DeepRV + DKA": int(min(1, 1024 / L) * default_bs),
+    }[model_name]
     train_steps = default_steps * (default_bs // bs)
+    if model_name == "Inducing DeepRV + gMLP":
+        train_steps *= 2
     optimizer = optax.yogi(cosine_annealing_lr(train_steps, max_lr))
     if model_name in ["DeepRV + ScanTransfomer", "DeepRV + DKA"]:
         optimizer = optax.adamw(max_lr)
@@ -554,6 +588,63 @@ class LogScaleTransform(ParameterFreeTransform):
 
     def log_abs_det_jacobian(self, x, y, intermediates=None):
         return jnp.log(100.0) + x * jnp.log(100.0)
+
+
+# def load_surr_model_results(model, model_name, grid_size, optimizer, ls=10):
+#     from orbax.checkpoint import PyTreeCheckpointer
+
+#     grid_path = Path(
+#         f"results/scalability_log_priors_ls_{ls}/grid_{grid_size}"
+#     ).absolute()
+#     model_path = grid_path / f"{model_name}"
+#     ckptr = PyTreeCheckpointer()
+#     ckpt = ckptr.restore(model_path / "model.ckpt")
+#     state = TrainState.create(
+#         apply_fn=model.apply,
+#         tx=optimizer,
+#         params=ckpt["state"]["params"],
+#         kwargs=ckpt["state"]["kwargs"],
+#     )
+#     surrogate_decoder = generate_surrogate_decoder(state, model)
+#     res_df = pd.read_csv(grid_path / "res.csv")
+#     res_df = res_df[res_df["model_name"] == model_name]
+#     train_time, eval_mse = (
+#         res_df["train_time"].values[0],
+#         res_df["Test Norm MSE"].values[0],
+#     )
+#     infer_flops, train_flops = (
+#         res_df["infer_flops"].values[0],
+#         res_df["train_flops"].values[0],
+#     )
+#     parameters = res_df["parameters"].values[0]
+#     return train_time, eval_mse, surrogate_decoder, infer_flops, train_flops, parameters
+
+
+# def load_inference_results(model_name, grid_size, ls=10.0):
+#     res_dir = Path(
+#         f"results/scalability_log_priors_ls_{ls}/grid_{grid_size}/{model_name}/"
+#     )
+#     with open(res_dir / "hmc_pp.pkl", "rb") as load_f:
+#         post = pickle.load(load_f)
+#     with open(res_dir / "hmc_samples.pkl", "rb") as load_f:
+#         samples = pickle.load(load_f)
+#     return samples, post
+
+
+# def load_single_res(model_name, grid_size, ls=10.0):
+#     res_dir = Path(
+#         f"results/scalability_log_priors_ls_{ls}/grid_{grid_size}/{model_name}/single_res.pkl"
+#     )
+#     with open(res_dir, "rb") as load_f:
+#         single_res = pickle.load(load_f)
+#     if isinstance(single_res["parameters"], str):
+#         single_res["parameters"] = int(
+#             single_res["parameters"]
+#             .split("Total Parameters: ")[-1]
+#             .split(" ")[0]
+#             .replace(",", "")
+#         )
+#     return single_res
 
 
 if __name__ == "__main__":

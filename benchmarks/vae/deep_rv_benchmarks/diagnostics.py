@@ -1,6 +1,7 @@
 import sys
 
 sys.path.append("benchmarks/vae")
+from functools import partial
 from pathlib import Path
 from typing import Callable, Union
 
@@ -10,10 +11,10 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
 from jax import Array, jit, random, vmap
-from numpyro import deterministic, sample
+from jax.scipy.linalg import solve_triangular
 from numpyro import distributions as dist
+from numpyro import sample
 from numpyro.handlers import seed, substitute, trace
-from sklearn.cluster import KMeans
 
 from dl4bi.core.train import PyTreeCheckpointer, TrainState, cosine_annealing_lr
 from dl4bi.vae.train_utils import generate_surrogate_decoder
@@ -22,14 +23,14 @@ from dl4bi.vae.train_utils import generate_surrogate_decoder
 def compare_grads(
     models_dict: dict[str, nn.Module],
     s: Array,
-    kernel: Callable,
+    infer_model_fn: Callable,
     priors: dict[str, dist.Distribution],
     obs_mask: Union[bool, Array],
     num_points: int,
     save_dir: Path,
     target: str = "f",
     base_model: str = "Inducing Points",
-    max_ls=50.0,
+    max_ls=100.0,
 ):
     plot_dir = save_dir / f"grad_plots_{target}"
     plot_dir.mkdir(parents=True, exist_ok=True)
@@ -37,8 +38,8 @@ def compare_grads(
     surr_models = get_surr_decs(models_dict, save_dir)
     results_dict = {}
     for model_name in models_dict.keys():
-        infer_model = inference_model_inducing_points(
-            s, kernel, priors, obs_mask, num_points, "inv" in model_name
+        infer_model, _, _ = infer_model_fn(
+            s, priors, obs_mask, num_points, "inv" in model_name
         )
         surr_dec = surr_models.get(model_name, None)
         results_dict[model_name] = compute_gradients_for_target(
@@ -105,7 +106,6 @@ def visualize_gradients_generalized(
     results_dict, plot_dir: Path, target: str, base_model: str = "Inducing Points"
 ):
     baseline_vals, _, ls_grid = results_dict[base_model]
-
     # 1. MSE vs baseline for target
     plt.figure(figsize=(8, 6))
     for model_name, (vals, _, _) in results_dict.items():
@@ -153,107 +153,6 @@ def visualize_gradients_generalized(
     plt.close()
 
 
-def compare_smoothness(
-    models_dict: dict[str, nn.Module],
-    s: Array,
-    kernel: Callable,
-    priors: dict[str, dist.Distribution],
-    obs_mask: Union[bool, Array],
-    num_points: int,
-    save_dir: Path,
-    base_ls=30.0,
-    num_points_in_grid: int = 100,
-):
-    plot_dir = save_dir / "smooth_plots"
-    plot_dir.mkdir(exist_ok=True)
-    rng = random.key(0)
-    delta_ls_grid = jnp.linspace(-1.0, 1.0, num_points_in_grid)
-    rng_z, rng_fn = random.split(rng, 2)
-    z = sample("z", dist.Normal(), rng_key=rng_z, sample_shape=(1, num_points))
-    surr_models = get_surr_decs(models_dict, save_dir)
-    lip_results = {}
-    for model_name in models_dict.keys():
-        f_fn = inference_model_inducing_points(
-            s, kernel, priors, obs_mask, num_points, "inv" in model_name
-        )
-        surr_dec = surr_models.get(model_name, None)
-        lip_consts = []
-        for dls in delta_ls_grid:
-            with seed(rng_seed=rng_fn), substitute(data={"z": z, "ls": base_ls}):
-                f_base = f_fn(surrogate_decoder=surr_dec)
-            with seed(rng_seed=rng_fn), substitute(data={"z": z, "ls": base_ls + dls}):
-                f_perturbed = f_fn(surrogate_decoder=surr_dec)
-            numerator = jnp.linalg.norm(f_perturbed - f_base)
-            lip_consts.append(numerator)
-        lip_results[model_name] = jnp.array(lip_consts)
-
-    # Plot
-    plt.figure(figsize=(8, 6))
-    for model_name, lips in lip_results.items():
-        plt.plot(delta_ls_grid, lips, label=model_name, marker="o", markersize=3)
-    plt.axvline(0.0, color="gray", linestyle="--", alpha=0.5)
-    plt.title("Local Sensitivity (Lipschitz Estimate) over LS Perturbations")
-    plt.xlabel("Delta LS (Perturbation)")
-    plt.ylabel("Finite Difference Sensitivity" r" ${f_{ls} - f_{ls+dls}}$")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(plot_dir / f"smoothness_vs_ls_{base_ls}.png")
-    plt.figure(figsize=(8, 6))
-
-    for model_name, lips in lip_results.items():
-        plt.plot(
-            delta_ls_grid,
-            lips / jnp.abs(delta_ls_grid),
-            label=model_name,
-            marker="o",
-            markersize=3,
-        )
-    plt.axvline(0.0, color="gray", linestyle="--", alpha=0.5)
-    plt.title("Norm Local Sensitivity (Lipschitz Estimate) over LS Perturbations")
-    plt.xlabel("Delta LS (Perturbation)")
-    plt.ylabel("Finite Difference Sensitivity" r" $\frac{f_{ls} - f_{ls+dls}}{dls}$")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(plot_dir / f"Norm_smoothness_vs_ls_{base_ls}.png")
-
-
-def inference_model_inducing_points(
-    s: Array,
-    kernel: Callable,
-    priors: dict,
-    obs_mask: Array,
-    num_points: int,
-    solve_inv: bool,
-):
-    """Builds a poisson likelihood inference model for inducing points"""
-    kmeans = KMeans(n_clusters=num_points, random_state=0)
-    u = kmeans.fit(s[obs_mask]).cluster_centers_  # shape (num_points, s.shape[1])
-    surr_kwargs = {"s": u}  # we train deepRV with u
-    jitter = 5e-4 * jnp.eye(u.shape[0])
-
-    def poisson_inducing(surrogate_decoder=None):
-        var = 1.0
-        ls = sample("ls", priors["ls"], sample_shape=())
-        K_su = kernel(s, u, var, ls)
-        z = sample("z", dist.Normal(), sample_shape=(1, u.shape[0]))
-        if surrogate_decoder is not None and solve_inv:
-            f_bar_u = deterministic(
-                "f_u_bar",
-                surrogate_decoder(z, jnp.array([ls]), **surr_kwargs).squeeze(),
-            )
-        else:
-            K_uu = kernel(u, u, var, ls) + jitter
-            if surrogate_decoder is not None:
-                f_u = surrogate_decoder(z, jnp.array([ls]), **surr_kwargs).squeeze()
-            else:
-                L_uu_chol = jnp.linalg.cholesky(K_uu)
-                f_u = jnp.matmul(L_uu_chol, z[0])
-            f_bar_u = deterministic("f_u_bar", jnp.linalg.solve(K_uu, f_u))
-        return deterministic("f", K_su @ f_bar_u)
-
-    return poisson_inducing
-
-
 def diff_per_loader(models_dict, s, s_train, kernel, save_dir, max_ls=50.0, bs=32):
     plot_dir = save_dir / "numerical_precision_plots"
     plot_dir.mkdir(parents=True, exist_ok=True)
@@ -271,16 +170,16 @@ def diff_per_loader(models_dict, s, s_train, kernel, save_dir, max_ls=50.0, bs=3
         K_su = kernel(s, s_train, 1.0, ls_val)
         f_u_bar = batch["f_u_bar"].squeeze()  # GT f_u_bar
         f = jnp.einsum("ij,bj->bi", K_su, f_u_bar)  # GT f from inducing points
-        K_uu = batch["K_uu"]
+        L_uu, K_uu = batch["L_uu"], batch["K_uu"]
         # Precompute SVD of K_su for residual projection
         U, S, Vh = jnp.linalg.svd(K_su, full_matrices=False)
         K_uu_cond_num.append(jnp.linalg.cond(K_uu))
         for m_name, surr_dec in surr_models.items():
             pred_f_u_bar = surr_dec(batch["z"], jnp.array([ls_val]), **kwargs).squeeze()
-
             if "inv" not in m_name:
-                pred_f_u_bar = jit_solve_func(K_uu, pred_f_u_bar)
-
+                pred_f_u_bar = jit_trin_solve_func(
+                    L_uu.T, jit_trin_solve_func(L_uu, pred_f_u_bar, True), False
+                )
             pred_f = jnp.einsum("ij,bj->bi", K_su, pred_f_u_bar)
 
             if ls_idx in selected_ls_indices:
@@ -372,15 +271,16 @@ def plot_residuals(residuals, f_residuals, m_name, ls_val, ls_folder):
         plt.close()
 
 
-@jit
-def jit_solve_func(M, v):
-    return vmap(jnp.linalg.solve, in_axes=(None, 0))(M, v)
+@partial(jit, static_argnames=["lower"])
+def jit_trin_solve_func(L_T, z, lower=False):
+    s_trin = partial(solve_triangular, lower=lower)
+    return vmap(s_trin, in_axes=(None, 0))(L_T, z)
 
 
 def gen_loader(kernel: Callable, s_train: Array, priors: dict, batch_size: int):
     jitter = 5e-4 * jnp.eye(s_train.shape[0])
     kernel_jit = jit(lambda s, var, ls: kernel(s, s, var, ls) + jitter)
-    f_jit = jit(lambda K, z: jnp.einsum("ij,bj->bi", jnp.linalg.cholesky(K), z))
+    f_jit = jit(lambda L, z: jnp.einsum("ij,bj->bi", L, z))
 
     def dataloader(rng_data):
         while True:
@@ -389,12 +289,14 @@ def gen_loader(kernel: Callable, s_train: Array, priors: dict, batch_size: int):
             ls = priors["ls"].sample(rng_ls)
             z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s_train.shape[0]))
             K_uu = kernel_jit(s_train, var, ls)
-            f_u = f_jit(K_uu, z)
-            f_u_bar = jit_solve_func(K_uu, f_u)
+            L_uu = jnp.linalg.cholesky(K_uu)
+            f_u = f_jit(L_uu, z)
+            f_u_bar = jit_trin_solve_func(L_uu.T, z, False)
 
             yield {
                 "s": s_train,
                 "K_uu": K_uu,
+                "L_uu": L_uu,
                 "f_u_bar": f_u_bar,
                 "f_u": f_u,
                 "z": z,
@@ -409,7 +311,7 @@ def get_surr_decs(models_dict, save_dir):
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
     ckptr = PyTreeCheckpointer()
     surr_models = {}
-    for model_name, nn_model in models_dict.items():
+    for model_name, (nn_model, _) in models_dict.items():
         if nn_model is None:
             continue
         ckpt = ckptr.restore(((save_dir / f"{model_name}") / "model.ckpt").absolute())

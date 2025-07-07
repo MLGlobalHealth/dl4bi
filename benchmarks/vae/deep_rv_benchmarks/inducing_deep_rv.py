@@ -16,6 +16,7 @@ import numpyro
 import optax
 import pandas as pd
 from jax import Array, jit, random, vmap
+from jax.scipy.linalg import solve_triangular
 from numpyro import deterministic, sample
 from numpyro import distributions as dist
 from numpyro.distributions.transforms import ParameterFreeTransform
@@ -39,7 +40,7 @@ from dl4bi.vae.train_utils import (
 )
 
 
-def main(seed=89, logged_priors=False, max_ls=50.0):
+def main(seed=55, logged_priors=False, max_ls=100.0):
     wandb.init(mode="disabled")  # NOTE: downstream function assumes active wandb
     rng = random.key(seed)
     rng_train, rng_test, rng_infer, rng_idxs, rng_obs = random.split(rng, 5)
@@ -146,14 +147,14 @@ def main(seed=89, logged_priors=False, max_ls=50.0):
                 result["model_name"] == model_name, f"{n} wasserstein distance"
             ] = wass_dist[model_name][n]
     result.to_csv(save_dir / "res.csv")
-    # from diagnostics import compare_grads, compare_smoothness, diff_per_loader
+    # from diagnostics import compare_grads, diff_per_loader
 
     # _, _, s_train = inference_model_inducing_points(s, priors, obs_mask, L_train, False)
     # diff_per_loader(models, s, s_train, matern_1_2, save_dir, max_ls)
     # compare_grads(
     #     models,
     #     s,
-    #     matern_1_2,
+    #     inference_model_inducing_points,
     #     priors,
     #     obs_mask,
     #     L_train,
@@ -164,7 +165,7 @@ def main(seed=89, logged_priors=False, max_ls=50.0):
     # compare_grads(
     #     models,
     #     s,
-    #     matern_1_2,
+    #     inference_model_inducing_points,
     #     priors,
     #     obs_mask,
     #     L_train,
@@ -172,10 +173,6 @@ def main(seed=89, logged_priors=False, max_ls=50.0):
     #     target="f_u_bar",
     #     max_ls=max_ls,
     # )
-    # for ls in jnp.linspace(1.0, max_ls, 15):
-    #     compare_smoothness(
-    #         models, s, matern_1_2, priors, obs_mask, L_train, save_dir, ls
-    #     )
     # exit(0)
 
 
@@ -187,7 +184,7 @@ def hmc(
     surrogate_decoder: Optional[Callable] = None,
 ):
     """runs HMC on given inference model and observed f"""
-    nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
+    nuts = NUTS(model, init_strategy=init_to_median(num_samples=50))
     k1, k2 = random.split(rng)
     # mcmc = MCMC(nuts, num_chains=1, num_samples=1_000, num_warmup=4_00)
     mcmc = MCMC(nuts, num_chains=2, num_samples=5_000, num_warmup=2_000)
@@ -248,13 +245,19 @@ def jit_solve_func(M, v):
     return vmap(jnp.linalg.solve, in_axes=(None, 0))(M, v)
 
 
+@partial(jit, static_argnames=["lower"])
+def jit_trin_solve_func(L_T, z, lower=False):
+    s_trin = partial(solve_triangular, lower=lower)
+    return vmap(s_trin, in_axes=(None, 0))(L_T, z)
+
+
 def gen_train_dataloader(
     s: Array, s_train: Array, priors: dict, solve_inv: bool, batch_size: int
 ):
     var = 1.0
     jitter = 5e-4 * jnp.eye(s_train.shape[0])
     kernel_jit = jit(lambda s1, s2, var, ls: matern_1_2(s1, s2, var, ls))
-    f_jit = jit(lambda K, z: jnp.einsum("ij,bj->bi", jnp.linalg.cholesky(K), z))
+    f_jit = jit(lambda L, z: jnp.einsum("ij,bj->bi", L, z))
 
     def dataloader(rng_data):
         while True:
@@ -262,9 +265,10 @@ def gen_train_dataloader(
             ls = priors["ls"].sample(rng_ls)
             z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s_train.shape[0]))
             K = kernel_jit(s_train, s_train, var, ls) + jitter
-            f = f_jit(K, z)
+            L = jnp.linalg.cholesky(K)
+            f = f_jit(L, z)
             if solve_inv:
-                f = jit_solve_func(K, f)
+                f = jit_trin_solve_func(L.T, z, False)
             K_su = kernel_jit(s, s_train, var, ls)
 
             yield {
@@ -272,7 +276,7 @@ def gen_train_dataloader(
                 "f": f,
                 "z": z,
                 "conditionals": jnp.array([ls]),
-                "K_uu": K,
+                "L_uu": L,
                 "K_su": K_su,
             }
 
@@ -299,16 +303,21 @@ def inference_model_inducing_points(
             f_bar_u = deterministic("f_u_bar", f_bar_u)
         else:
             K_uu = matern_1_2(u, u, var, ls) + jitter
+            L_uu = jnp.linalg.cholesky(K_uu)
             if surrogate_decoder is not None:
                 f_u = surrogate_decoder(z, jnp.array([ls]), **surr_kwargs).squeeze()
+                f_bar_u = solve_triangular(
+                    L_uu.T, solve_triangular(L_uu, f_u, lower=True), lower=False
+                )
+                f_bar_u = deterministic("f_u_bar", f_bar_u)
             else:
-                L_uu_chol = jnp.linalg.cholesky(K_uu)
-                f_u = jnp.matmul(L_uu_chol, z[0])
-            f_bar_u = deterministic("f_u_bar", jnp.linalg.solve(K_uu, f_u))
+                f_bar_u = deterministic(
+                    "f_u_bar", solve_triangular(L_uu.T, z[0], lower=False)
+                )
         f = deterministic("f", K_su @ f_bar_u)
         lambda_ = jnp.exp(f + beta)
         with numpyro.handlers.mask(mask=obs_mask):
-            sample("obs", dist.Poisson(lambda_), obs=y)
+            return sample("obs", dist.Poisson(lambda_), obs=y)
 
     return poisson_inducing, ["ls", "beta"], u
 
@@ -318,13 +327,15 @@ def inducing_valid_step(rng, state, batch, solve_inv):
     output: VAEOutput = state.apply_fn(
         {"params": state.params, **state.kwargs}, **batch, rngs={"extra": rng}
     )
-    f_bar_u, K_su, K_uu = batch["f"], batch["K_su"], batch["K_uu"]
+    f_bar_u, L_uu = batch["f"], batch["L_uu"]
     f_bar_u_hat = output.f_hat
     if not solve_inv:
-        f_bar_u = jit_solve_func(K_uu, f_bar_u)
-        f_bar_u_hat = jit_solve_func(K_uu, output.f_hat)
+        f_bar_u = jit_trin_solve_func(L_uu.T, batch["z"], False)
+        f_bar_u_hat = jit_trin_solve_func(
+            L_uu.T, jit_trin_solve_func(L_uu, f_bar_u_hat, True), False
+        )
     residuals = f_bar_u.squeeze() - f_bar_u_hat.squeeze()
-    f_mse = (0.5 * (jnp.einsum("ij, bj-> bi", K_su, residuals)) ** 2).mean()
+    f_mse = (0.5 * (jnp.einsum("ij, bj-> bi", batch["K_su"], residuals)) ** 2).mean()
     metrics = output.metrics(batch["f"], 1.0)
     return {"norm MSE": metrics["MSE"], "f MSE": f_mse}
 
@@ -405,7 +416,7 @@ class LogScaleTransform(ParameterFreeTransform):
     codomain = dist.constraints.positive
     event_dim = 0  # Scalar transform
 
-    def __init__(self, max_ls=50.0):
+    def __init__(self, max_ls=100.0):
         self.max_ls = max_ls
 
     def __call__(self, x):
