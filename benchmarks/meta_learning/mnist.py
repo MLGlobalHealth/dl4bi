@@ -6,7 +6,6 @@ import hydra
 import jax
 import jax.numpy as jnp
 import matplotlib as mpl
-import optax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import wandb
@@ -27,6 +26,8 @@ from dl4bi.meta_learning.utils import (
     regression_to_rgb,
     wandb_2d_img_callback,
 )
+
+# NOTE: this requires `tensorflow` and `tensorflow-datasets` packages
 
 
 @hydra.main("configs/mnist", config_name="default", version_base=None)

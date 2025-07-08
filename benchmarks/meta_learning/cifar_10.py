@@ -27,6 +27,8 @@ from dl4bi.meta_learning.utils import (
     wandb_2d_img_callback,
 )
 
+# NOTE: this requires `tensorflow` and `tensorflow-datasets` packages
+
 
 @hydra.main("configs/cifar_10", config_name="default", version_base=None)
 def main(cfg: DictConfig):
