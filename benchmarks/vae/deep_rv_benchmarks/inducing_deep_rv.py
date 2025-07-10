@@ -34,7 +34,6 @@ from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, save_ckpt, train
 from dl4bi.vae import gMLPDeepRV
 from dl4bi.vae.train_utils import (
-    deep_rv_train_step,
     generate_surrogate_decoder,
     inducing_deep_rv_train_step,
 )
@@ -46,16 +45,14 @@ def main(seed=55, logged_priors=False, max_ls=100.0):
     rng_train, rng_test, rng_infer, rng_idxs, rng_obs = random.split(rng, 5)
     save_dir = Path(f"results/inducing_drv{'_log_priors' if logged_priors else ''}/")
     save_dir.mkdir(parents=True, exist_ok=True)
-    grid_dim = 32
+    grid_dim = 128
     s = build_grid([{"start": 0.0, "stop": 100.0, "num": grid_dim}] * 2).reshape(-1, 2)
     models = {
-        "DeepRV inv simple + gMLP": (gMLPDeepRV(num_blks=2), deep_rv_train_step),
-        "DeepRV inv + gMLP": (gMLPDeepRV(num_blks=2), inducing_deep_rv_train_step),
-        "DeepRV + gMLP": (gMLPDeepRV(num_blks=2), deep_rv_train_step),
-        "Inducing Points": (None, None),
+        "DeepRV inv + gMLP": gMLPDeepRV(num_blks=2),
+        "Inducing Points": None,
     }
     y_obs = gen_y_obs(rng_obs, s)
-    obs_mask = generate_obs_mask(rng_idxs, y_obs, 0.3)
+    obs_mask = generate_obs_mask(rng_idxs, y_obs, 0.1)
     log_ls = dist.TransformedDistribution(
         dist.Beta(4.0, 1.0), LogScaleTransform(max_ls=max_ls)
     )
@@ -64,29 +61,31 @@ def main(seed=55, logged_priors=False, max_ls=100.0):
         "beta": dist.Normal(),
     }
     y_hats, all_samples, result = [], [], []
-    L_train = int(s.shape[0] ** 0.75)
+    L_train = 1024
 
-    for model_name, (nn_model, train_step) in models.items():
-        solve_inv = "inv" in model_name
+    for model_name, nn_model in models.items():
         infer_model, cond_names, s_train = inference_model_inducing_points(
-            s, priors, obs_mask, L_train, solve_inv
+            s, priors, obs_mask, L_train
         )
         train_time, eval_mse, surrogate_decoder, ess = None, None, None, {}
         eval_f_mse = None
         if nn_model is not None:
-            loader = gen_train_dataloader(s, s_train, priors, solve_inv, batch_size=32)
+            loader = gen_train_dataloader(s, s_train, priors, batch_size=32)
             (save_dir / f"{model_name}").mkdir(parents=True, exist_ok=True)
             train_time, eval_mse, surrogate_decoder, eval_f_mse = surrogate_model_train(
                 rng_train,
                 rng_test,
                 loader,
                 nn_model,
-                train_step,
-                solve_inv,
                 save_dir / f"{model_name}",
             )
         samples, mcmc, post, infer_time = hmc(
-            rng_infer, infer_model, y_obs, obs_mask, surrogate_decoder
+            rng_infer,
+            infer_model,
+            y_obs,
+            obs_mask,
+            save_dir / f"{model_name}",
+            surrogate_decoder,
         )
         ess = az.ess(mcmc, method="mean")
         plot_infer_trace(
@@ -181,19 +180,25 @@ def hmc(
     model: Callable,
     y_obs: Array,
     obs_mask: Union[bool, Array],
+    results_dir: Path,
     surrogate_decoder: Optional[Callable] = None,
 ):
     """runs HMC on given inference model and observed f"""
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=50))
     k1, k2 = random.split(rng)
     # mcmc = MCMC(nuts, num_chains=1, num_samples=1_000, num_warmup=4_00)
-    mcmc = MCMC(nuts, num_chains=2, num_samples=5_000, num_warmup=2_000)
+    mcmc = MCMC(nuts, num_chains=2, num_samples=10_000, num_warmup=4_000)
     start = datetime.now()
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=y_obs)
     infer_time = (datetime.now() - start).total_seconds()
     mcmc.print_summary()
     samples = mcmc.get_samples()
     post = Predictive(model, samples)(k2)
+    post["infer_time"] = infer_time
+    with open(results_dir / "hmc_samples.pkl", "wb") as out_file:
+        pickle.dump(samples, out_file)
+    with open(results_dir / "hmc_pp.pkl", "wb") as out_file:
+        pickle.dump(post, out_file)
     return samples, mcmc, post, infer_time
 
 
@@ -202,25 +207,22 @@ def surrogate_model_train(
     rng_test: Array,
     loader: Callable,
     model: nn.Module,
-    train_step,
-    solve_inv: bool,
     results_dir: Path,
-    train_num_steps: int = 400_000,
+    train_num_steps: int = 800_000,
     valid_interval: int = 100_000,
     valid_steps: int = 5_000,
 ):
-    valid_step = partial(inducing_valid_step, solve_inv=solve_inv)
-    lr_schedule = cosine_annealing_lr(train_num_steps, 5.0e-3)
+    lr_schedule = cosine_annealing_lr(train_num_steps, 5e-3)
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
     start = datetime.now()
     state = train(
         rng_train,
         model,
         optimizer,
-        train_step,
+        inducing_deep_rv_train_step,
         train_num_steps,
         loader,
-        valid_step,
+        inducing_valid_step,
         valid_interval,
         valid_steps,
         loader,
@@ -228,7 +230,7 @@ def surrogate_model_train(
         valid_monitor_metric="f MSE",
     )
     train_time = (datetime.now() - start).total_seconds()
-    metrics = evaluate(rng_test, state, valid_step, loader, valid_steps)
+    metrics = evaluate(rng_test, state, inducing_valid_step, loader, valid_steps)
     eval_mse, eval_f_mse = metrics["norm MSE"], metrics["f MSE"]
     save_ckpt(state, DictConfig({}), results_dir / "model.ckpt")
     with open(results_dir / "train_time.pkl", "wb") as out_file:
@@ -240,43 +242,27 @@ def surrogate_model_train(
     return train_time, eval_mse, surrogate_decoder, eval_f_mse
 
 
-@jit
-def jit_solve_func(M, v):
-    return vmap(jnp.linalg.solve, in_axes=(None, 0))(M, v)
-
-
-@partial(jit, static_argnames=["lower"])
-def jit_trin_solve_func(L_T, z, lower=False):
-    s_trin = partial(solve_triangular, lower=lower)
-    return vmap(s_trin, in_axes=(None, 0))(L_T, z)
-
-
-def gen_train_dataloader(
-    s: Array, s_train: Array, priors: dict, solve_inv: bool, batch_size: int
-):
+def gen_train_dataloader(s: Array, s_train: Array, priors: dict, batch_size: int):
     var = 1.0
     jitter = 5e-4 * jnp.eye(s_train.shape[0])
-    kernel_jit = jit(lambda s1, s2, var, ls: matern_1_2(s1, s2, var, ls))
-    f_jit = jit(lambda L, z: jnp.einsum("ij,bj->bi", L, z))
+    L_jit = jit(jnp.linalg.cholesky)
+    s_trin = partial(solve_triangular, lower=False)
+    jit_trin_solve_func = jit(vmap(s_trin, in_axes=(None, 0)))
 
     def dataloader(rng_data):
         while True:
             rng_data, rng_ls, rng_z = random.split(rng_data, 3)
             ls = priors["ls"].sample(rng_ls)
             z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s_train.shape[0]))
-            K = kernel_jit(s_train, s_train, var, ls) + jitter
-            L = jnp.linalg.cholesky(K)
-            f = f_jit(L, z)
-            if solve_inv:
-                f = jit_trin_solve_func(L.T, z, False)
-            K_su = kernel_jit(s, s_train, var, ls)
-
+            K_uu = matern_1_2(s_train, s_train, var, ls) + jitter
+            L_uu = L_jit(K_uu)
+            f_u_bar = jit_trin_solve_func(L_uu.T, z)
+            K_su = matern_1_2(s, s_train, var, ls)
             yield {
                 "s": s_train,
-                "f": f,
+                "f": f_u_bar,
                 "z": z,
                 "conditionals": jnp.array([ls]),
-                "L_uu": L,
                 "K_su": K_su,
             }
 
@@ -284,7 +270,7 @@ def gen_train_dataloader(
 
 
 def inference_model_inducing_points(
-    s: Array, priors: dict, obs_mask: Array, num_points: int, solve_inv: bool
+    s: Array, priors: dict, obs_mask: Array, num_points: int
 ):
     """Builds a poisson likelihood inference model for inducing points"""
     kmeans = KMeans(n_clusters=num_points, random_state=0)
@@ -298,22 +284,15 @@ def inference_model_inducing_points(
         beta = sample("beta", priors["beta"], sample_shape=())
         K_su = matern_1_2(s, u, var, ls)
         z = sample("z", dist.Normal(), sample_shape=(1, u.shape[0]))
-        if surrogate_decoder is not None and solve_inv:
+        if surrogate_decoder is not None:
             f_bar_u = surrogate_decoder(z, jnp.array([ls]), **surr_kwargs).squeeze()
             f_bar_u = deterministic("f_u_bar", f_bar_u)
         else:
             K_uu = matern_1_2(u, u, var, ls) + jitter
             L_uu = jnp.linalg.cholesky(K_uu)
-            if surrogate_decoder is not None:
-                f_u = surrogate_decoder(z, jnp.array([ls]), **surr_kwargs).squeeze()
-                f_bar_u = solve_triangular(
-                    L_uu.T, solve_triangular(L_uu, f_u, lower=True), lower=False
-                )
-                f_bar_u = deterministic("f_u_bar", f_bar_u)
-            else:
-                f_bar_u = deterministic(
-                    "f_u_bar", solve_triangular(L_uu.T, z[0], lower=False)
-                )
+            f_bar_u = deterministic(
+                "f_u_bar", solve_triangular(L_uu.T, z[0], lower=False)
+            )
         f = deterministic("f", K_su @ f_bar_u)
         lambda_ = jnp.exp(f + beta)
         with numpyro.handlers.mask(mask=obs_mask):
@@ -322,18 +301,13 @@ def inference_model_inducing_points(
     return poisson_inducing, ["ls", "beta"], u
 
 
-@partial(jit, static_argnames=["solve_inv"])
-def inducing_valid_step(rng, state, batch, solve_inv):
+@jit
+def inducing_valid_step(rng, state, batch):
     output: VAEOutput = state.apply_fn(
         {"params": state.params, **state.kwargs}, **batch, rngs={"extra": rng}
     )
-    f_bar_u, L_uu = batch["f"], batch["L_uu"]
+    f_bar_u = batch["f"]
     f_bar_u_hat = output.f_hat
-    if not solve_inv:
-        f_bar_u = jit_trin_solve_func(L_uu.T, batch["z"], False)
-        f_bar_u_hat = jit_trin_solve_func(
-            L_uu.T, jit_trin_solve_func(L_uu, f_bar_u_hat, True), False
-        )
     residuals = f_bar_u.squeeze() - f_bar_u_hat.squeeze()
     f_mse = (0.5 * (jnp.einsum("ij, bj-> bi", batch["K_su"], residuals)) ** 2).mean()
     metrics = output.metrics(batch["f"], 1.0)
@@ -342,10 +316,12 @@ def inducing_valid_step(rng, state, batch, solve_inv):
 
 def gen_y_obs(rng: Array, s: Array):
     """generates a poisson observed data sample for inference"""
-    rng_mu, rng_poiss = random.split(rng)
+    rng_z, rng_poiss = random.split(rng)
     var, ls, beta = 1.0, 10.0, 1.0
     K = matern_1_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
-    mu = dist.MultivariateNormal(0.0, K).sample(rng_mu)
+    L = jnp.linalg.cholesky(K)
+    z = dist.Normal().sample(rng_z, sample_shape=(s.shape[0],))
+    mu = L @ z
     lambda_ = jnp.exp(beta + mu)
     return dist.Poisson(rate=lambda_).sample(rng_poiss)
 

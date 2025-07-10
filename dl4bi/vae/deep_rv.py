@@ -94,7 +94,6 @@ class gMLPActivDeepRV(nn.Module):
                 blk=gMLPBlock(
                     proj_in=MLP([128, 128], nn.gelu),
                     proj_out=MLP([64, 64], nn.gelu),
-                    gate_fn=nn.gelu,
                 ),
             )(x)
         )

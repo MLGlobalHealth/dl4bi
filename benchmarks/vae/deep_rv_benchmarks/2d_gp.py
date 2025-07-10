@@ -1,6 +1,7 @@
 import sys
 
 sys.path.append("benchmarks/vae")
+import pickle
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Union
@@ -14,11 +15,13 @@ import numpyro
 import optax
 import pandas as pd
 from jax import Array, jit, random
+from jax.scipy.linalg import solve_triangular
 from numpyro import distributions as dist
 from numpyro.distributions.transforms import ParameterFreeTransform
 from numpyro.infer import MCMC, NUTS, SVI, Predictive, Trace_ELBO, init_to_median
 from numpyro.infer.autoguide import AutoMultivariateNormal
 from numpyro.optim import Adam
+from omegaconf import DictConfig
 from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
 from scipy.stats import wasserstein_distance
 from sklearn.cluster import KMeans
@@ -29,7 +32,7 @@ from utils.plot_utils import plot_infer_trace
 import wandb
 from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
-from dl4bi.core.train import cosine_annealing_lr, evaluate, train
+from dl4bi.core.train import cosine_annealing_lr, evaluate, save_ckpt, train
 from dl4bi.vae import PriorCVAE, ScanTransformerDeepRV, gMLPDeepRV
 from dl4bi.vae.train_utils import (
     cond_as_locs,
@@ -39,7 +42,7 @@ from dl4bi.vae.train_utils import (
 )
 
 
-def main(seed=42, logged_priors=True):
+def main(seed=63, logged_priors=True):
     wandb.init(mode="disabled")  # NOTE: downstream function assumes active wandb
     rng = random.key(seed)
     rng_train, rng_test, rng_infer, rng_idxs, rng_obs = random.split(rng, 5)
@@ -56,7 +59,7 @@ def main(seed=42, logged_priors=True):
         "Inducing Points": None,
     }
     y_obs = gen_y_obs(rng_obs, s)
-    obs_mask = generate_obs_mask(rng_idxs, y_obs)
+    obs_mask = generate_obs_mask(rng_idxs, (32, 32), obs_ratio=0.5)
     log_ls = dist.TransformedDistribution(dist.Beta(4.0, 1.0), LogScaleTransform())
     priors = {
         "ls": log_ls if logged_priors else dist.Uniform(1.0, 100.0),
@@ -67,28 +70,28 @@ def main(seed=42, logged_priors=True):
     loader = gen_train_dataloader(s, priors, batch_size=16)
     y_hats, all_samples, result = [], [], []
     for model_name, nn_model in models.items():
+        model_path = save_dir / f"{model_name}"
+        model_path.mkdir(parents=True, exist_ok=True)
         infer_model = (
             poisson_inducing_llk if model_name == "Inducing Points" else poisson_llk
         )
         train_time, eval_mse, surrogate_decoder, ess = None, None, None, {}
         if nn_model is not None:
             train_time, eval_mse, surrogate_decoder = surrogate_model_train(
-                rng_train, rng_test, loader, model_name, nn_model
+                rng_train, rng_test, loader, model_name, nn_model, model_path
             )
         if model_name != "ADVI":
             samples, mcmc, post, infer_time = hmc(
-                rng_infer, infer_model, y_obs, obs_mask, surrogate_decoder
+                rng_infer, infer_model, y_obs, obs_mask, model_path, surrogate_decoder
             )
             ess = az.ess(mcmc, method="mean")
             plot_infer_trace(
-                samples,
-                mcmc,
-                None,
-                cond_names,
-                save_dir / f"{model_name}_infer_trace.png",
+                samples, mcmc, None, cond_names, model_path / "infer_trace.png"
             )
         else:
-            samples, post, infer_time = advi(rng_infer, infer_model, y_obs)
+            samples, post, infer_time = advi(
+                rng_infer, infer_model, y_obs, obs_mask, model_path
+            )
         y_hats.append(post["obs"])
         all_samples.append(samples)
         result.append(
@@ -129,6 +132,7 @@ def hmc(
     model: Callable,
     y_obs: Array,
     obs_mask: Union[bool, Array],
+    model_path: Path,
     surrogate_decoder: Optional[Callable] = None,
 ):
     """runs HMC on given inference model and observed f"""
@@ -142,20 +146,39 @@ def hmc(
     mcmc.print_summary()
     samples = mcmc.get_samples()
     post = Predictive(model, samples)(k2)
+    post["infer_time"] = infer_time
+    with open(model_path / "hmc_samples.pkl", "wb") as out_file:
+        pickle.dump(samples, out_file)
+    with open(model_path / "hmc_pp.pkl", "wb") as out_file:
+        pickle.dump(post, out_file)
     return samples, mcmc, post, infer_time
 
 
-def advi(rng: Array, model: Callable, y_obs: Array, num_steps=50_000):
+def advi(
+    rng: Array,
+    model: Callable,
+    y_obs: Array,
+    obs_mask: Array,
+    model_path: Path,
+    num_steps: int = 50_000,
+):
     rng_advi, rng_pp, rng_post = random.split(rng, 3)
     guide = AutoMultivariateNormal(model)
     optimizer = Adam(step_size=0.0001)
     svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
     start = datetime.now()
-    svi_result = svi.run(rng_advi, num_steps, y=y_obs, stable_update=True)
+    svi_result = svi.run(
+        rng_advi, num_steps, y=y_obs, obs_mask=obs_mask, stable_update=True
+    )
     infer_time = (datetime.now() - start).total_seconds()
     params = svi_result.params
     samples = guide.sample_posterior(rng_pp, params, sample_shape=(40_000,))
     post = Predictive(model, samples)(rng_post)
+    post["infer_time"] = infer_time
+    with open(model_path / "hmc_samples.pkl", "wb") as out_file:
+        pickle.dump(samples, out_file)
+    with open(model_path / "hmc_pp.pkl", "wb") as out_file:
+        pickle.dump(post, out_file)
     return samples, post, infer_time
 
 
@@ -165,6 +188,7 @@ def surrogate_model_train(
     loader: Callable,
     model_name: str,
     model: nn.Module,
+    model_path: Path,
     train_num_steps: int = 200_000,
     valid_interval: int = 50_000,
     valid_steps: int = 5_000,
@@ -176,7 +200,7 @@ def surrogate_model_train(
         train_step = deep_rv_train_step
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
     if model_name == "DeepRV + ScanTransfomer":
-        optimizer = optax.yogi(1.0e-3)
+        optimizer = optax.adamw(1.0e-3)
     start = datetime.now()
     state = train(
         rng_train,
@@ -194,6 +218,9 @@ def surrogate_model_train(
     )
     train_time = (datetime.now() - start).total_seconds()
     eval_mse = evaluate(rng_test, state, valid_step, loader, valid_steps)["norm MSE"]
+    save_ckpt(state, DictConfig({}), model_path / "model.ckpt")
+    with open(model_path / "train_time.pkl", "wb") as out_file:
+        pickle.dump({"train_time": train_time, "eval_mse": eval_mse}, out_file)
     surrogate_decoder = generate_surrogate_decoder(state, model)
     return train_time, eval_mse, surrogate_decoder
 
@@ -255,9 +282,10 @@ def inference_model_inducing_points(
         ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
         K_uu = matern_5_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
+        L = jnp.linalg.cholesky(K_uu)
         K_su = matern_5_2(s, u, var, ls)
-        f_u = numpyro.sample("mu", dist.MultivariateNormal(0.0, K_uu))
-        f = K_su @ jnp.linalg.solve(K_uu, f_u)
+        z = numpyro.sample("z", dist.Normal(), sample_shape=(u.shape[0],))
+        f = numpyro.deterministic("mu", K_su @ solve_triangular(L.T, z, lower=False))
         # NOTE: uncomment to perform FITC correction for marginal variances
         # K_uu_inv_K_us = jnp.linalg.solve(K_uu, K_su.T)
         # Q_ss_diag = jnp.sum(K_su * K_uu_inv_K_us.T, axis=1)
@@ -289,13 +317,59 @@ def gen_y_obs(rng: Array, s: Array):
     return dist.Poisson(rate=lambda_).sample(rng_poiss)
 
 
-def generate_obs_mask(rng: Array, y_obs: Array, obs_ratio: float = 0.1):
-    """Creates a mask which indicates to the inference model which locations to
-    observe. Randomly chooses a subset of location to be observed."""
-    L = y_obs.shape[0]
-    num_obs_locations = int(obs_ratio * L)
-    obs_idxs = random.choice(rng, jnp.arange(L), (num_obs_locations,), replace=False)
-    return jnp.isin(jnp.arange(L), obs_idxs)
+def generate_obs_mask(rng: Array, grid_shape: tuple, obs_ratio: float = 0.15):
+    """
+    Generates a spatial observation mask for a 2D grid. Keeps a certain percentage of the domain unmasked,
+    in the form of a few spatially-contiguous elliptical blobs. The output is a 1D boolean mask indicating
+    which locations are observed.
+
+    Args:
+        rng: JAX PRNG key
+        y_obs: Flattened signal (L,)
+        grid_shape: Tuple (H, W) for reshaping the 1D signal
+        obs_ratio: Fraction of the total grid to remain observed
+
+    Returns:
+        mask_flat: Flattened boolean mask of shape (L,), where True = observed, False = masked
+    """
+    H, W = grid_shape
+    total_points = H * W
+    num_obs_points = int(obs_ratio * total_points)
+    mask = jnp.zeros((H, W), dtype=bool)
+
+    num_blobs = 5
+    rngs = random.split(rng, num_blobs * 4)
+
+    points_collected = 0
+    blob_idx = 0
+    while points_collected < num_obs_points and blob_idx < num_blobs:
+        center_x = random.randint(rngs[blob_idx * 4 + 0], (), 0, H)
+        center_y = random.randint(rngs[blob_idx * 4 + 1], (), 0, W)
+        radius_x = random.randint(rngs[blob_idx * 4 + 2], (), H // 8, H // 4)
+        radius_y = random.randint(rngs[blob_idx * 4 + 3], (), W // 8, W // 4)
+
+        yy, xx = jnp.meshgrid(jnp.arange(H), jnp.arange(W), indexing="ij")
+        ellipse = (
+            ((xx - center_x) / radius_x) ** 2 + ((yy - center_y) / radius_y) ** 2
+        ) <= 1.0
+        new_mask = jnp.logical_or(mask, ellipse)
+        added = jnp.sum(new_mask) - jnp.sum(mask)
+        mask = new_mask
+        points_collected += int(added)
+        blob_idx += 1
+
+    # NOTE: If we overshot, randomly drop extras
+    if points_collected > num_obs_points:
+        flat_idxs = jnp.argwhere(mask.flatten()).squeeze()
+        rng_trim, _ = random.split(rngs[-1])
+        selected = random.choice(
+            rng_trim, flat_idxs, shape=(num_obs_points,), replace=False
+        )
+        final_mask = jnp.zeros(total_points, dtype=bool).at[selected].set(True)
+    else:
+        final_mask = mask.flatten()
+
+    return final_mask
 
 
 def plot_models_predictive_means(
