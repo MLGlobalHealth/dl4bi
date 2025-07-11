@@ -38,9 +38,7 @@ def compare_grads(
     surr_models = get_surr_decs(models_dict, save_dir)
     results_dict = {}
     for model_name in models_dict.keys():
-        infer_model, _, _ = infer_model_fn(
-            s, priors, obs_mask, num_points, "inv" in model_name
-        )
+        infer_model, _, _ = infer_model_fn(s, priors, obs_mask, num_points)
         surr_dec = surr_models.get(model_name, None)
         results_dict[model_name] = compute_gradients_for_target(
             infer_model, rng, num_points, target, surr_dec, max_ls
@@ -311,7 +309,7 @@ def get_surr_decs(models_dict, save_dir):
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
     ckptr = PyTreeCheckpointer()
     surr_models = {}
-    for model_name, (nn_model, _) in models_dict.items():
+    for model_name, nn_model in models_dict.items():
         if nn_model is None:
             continue
         ckpt = ckptr.restore(((save_dir / f"{model_name}") / "model.ckpt").absolute())

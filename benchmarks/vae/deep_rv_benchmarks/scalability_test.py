@@ -182,7 +182,8 @@ def main(seed=42, logged_priors=True):
         plot_models_predictive_means(
             y_obs, y_hats, obs_mask, model_names, grid_s_path / "obs_means.png"
         )
-    # plot_model_scalability_metrics(result, save_dir)
+    aggregated_df = aggregate_csvs(save_dir)
+    plot_model_scalability_metrics(aggregated_df, save_dir)
 
 
 def hmc(
@@ -519,11 +520,18 @@ def plot_model_scalability_metrics(result_df: pd.DataFrame, save_dir: Path):
     models = result_df["model_name"].unique()
     palette = sns.color_palette("tab10", n_colors=len(models))
     model_colors = {model: palette[i] for i, model in enumerate(models)}
-    result_df.infer_flops = result_df.infer_flops / result_df.bs
-    result_df.train_flops = result_df.train_flops / result_df.bs
+
+    # Normalize FLOPs per sample
+    result_df["infer_flops"] = result_df["infer_flops"]
+    result_df["train_flops"] = result_df["train_flops"]
 
     def _plot_metric_group(
-        ax, metric_cols: Union[str, List[str]], title: str, ylabel: str
+        ax,
+        metric_cols: Union[str, List[str]],
+        title: str,
+        ylabel: str,
+        log_scale=False,
+        loc="upper right",
     ):
         if isinstance(metric_cols, str):
             metric_cols = [metric_cols]
@@ -541,27 +549,52 @@ def plot_model_scalability_metrics(result_df: pd.DataFrame, save_dir: Path):
                     marker="o",
                     color=color,
                 )
-        ax.set_title(title)
-        ax.set_xlabel("Grid Size")
-        ax.set_ylabel(ylabel)
-        ax.legend()
+        ax.set_title(title, fontsize=12)
+        ax.set_xlabel("Grid Size", fontsize=10)
+        ax.set_ylabel(ylabel, fontsize=10)
+        if log_scale:
+            ax.set_yscale("log")
+        ax.legend(fontsize=8, loc=loc)
+        ax.tick_params(axis="both", labelsize=9)
 
-    # NOTE: time
+    # --- Time metrics with log scale
     _, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True)
-    _plot_metric_group(axes[0], "train_time", "Training Time", "Seconds")
-    _plot_metric_group(axes[1], "infer_time", "Inference Time", "Seconds")
-    _plot_metric_group(axes[2], "total_time", "Total Time", "Seconds")
-    plt.tight_layout()
-    plt.savefig(save_dir / "speed.png")
-    # NOTE: scalability
-    _, axes = plt.subplots(1, 2, figsize=(10, 5), sharex=True)
-    _plot_metric_group(axes[0], "parameters", "Parameter Count", "Count")
     _plot_metric_group(
-        axes[1], ["infer_flops", "train_flops"], "GFLOPs per sample", "GFLOPs"
+        axes[0],
+        "train_time",
+        "Training Time",
+        "Seconds",
+        log_scale=True,
+        loc="upper left",
+    )
+    _plot_metric_group(
+        axes[1],
+        "infer_time",
+        "Inference Time",
+        "Seconds",
+        log_scale=True,
+        loc="upper left",
+    )
+    _plot_metric_group(
+        axes[2],
+        "total_time",
+        "Total Time",
+        "Seconds",
+        log_scale=True,
+        loc="upper left",
     )
     plt.tight_layout()
+    plt.savefig(save_dir / "speed.png")
+
+    # --- Scalability metrics
+    _, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True)
+    _plot_metric_group(axes[0], "parameters", "Parameter Count", "Count")
+    _plot_metric_group(axes[1], "infer_flops", "Inference FLOPs per Sample", "GFLOPs")
+    _plot_metric_group(axes[2], "train_flops", "Training FLOPs per Sample", "GFLOPs")
+    plt.tight_layout()
     plt.savefig(save_dir / "flops.png")
-    # NOTE: performance
+
+    # --- Performance metrics
     _, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True)
     _plot_metric_group(axes[0], "MSE(y, y_hat)", "Prediction MSE", "MSE")
     _plot_metric_group(
@@ -588,6 +621,23 @@ class LogScaleTransform(ParameterFreeTransform):
 
     def log_abs_det_jacobian(self, x, y, intermediates=None):
         return jnp.log(100.0) + x * jnp.log(100.0)
+
+
+def aggregate_csvs(base_path: Path):
+    levels = [256, 1024, 2048, 4096]
+    df_list = []
+    for L in levels:
+        file_path = (base_path / f"grid_{L}") / "res.csv"
+        df = pd.read_csv(file_path)
+        df["grid_level"] = L
+        df_list.append(df)
+    aggregated_df = pd.concat(df_list, ignore_index=True)
+    if "Unnamed: 0" in aggregated_df.columns:
+        aggregated_df.drop(columns=["Unnamed: 0"], inplace=True)
+    output_path = base_path / "aggregated_results.csv"
+    aggregated_df.to_csv(output_path, index=False)
+    print(f"Aggregated results saved to {output_path}")
+    return aggregated_df
 
 
 # def load_surr_model_results(model, model_name, grid_size, optimizer, ls=10):
