@@ -45,9 +45,11 @@ from dl4bi.vae import ScanTransformerDeepRV, gMLPDeepRV
 from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
 
 
-def main(seed=42, logged_priors=True):
+def main(seed=42, logged_priors=True, gt_ls=10.0):
     rng = random.key(seed)
-    save_dir = Path(f"results/scalability{'_log_priors' if logged_priors else ''}/")
+    save_dir = Path(
+        f"results/scalability{'_log_priors' if logged_priors else ''}_ls_{gt_ls}/"
+    )
     save_dir.mkdir(parents=True, exist_ok=True)
     grids = [
         build_grid([{"start": 0.0, "stop": 100.0, "num": n}])
@@ -73,7 +75,7 @@ def main(seed=42, logged_priors=True):
         L = s.shape[0]
         grid_s_path = save_dir / f"grid_{L}"
         grid_s_path.mkdir(parents=True, exist_ok=True)
-        y_obs = gen_y_obs(rng_obs, s)
+        y_obs = gen_y_obs(rng_obs, s, gt_ls)
         obs_mask = generate_obs_mask(rng_idxs, y_obs)
         poisson_llk, cond_names = inference_model(s, priors)
         num_pts = int(min(int(2 * jnp.sqrt(L).item()), sum(obs_mask)))
@@ -97,6 +99,7 @@ def main(seed=42, logged_priors=True):
                         "grid_size": L,
                         "max_lr": max_lr,
                         "batch_size": bs,
+                        "seed": seed,
                     },
                     mode="online",
                     name=f"{model_name}",
@@ -156,6 +159,7 @@ def main(seed=42, logged_priors=True):
                 "infer_flops": infer_gflops,
                 "train_flops": train_gflops,
                 "parameters": parameters,
+                "seed": seed,
             }
             res.update(
                 {f"inferred {c} mean": samples[c].mean(axis=0) for c in cond_names}
@@ -387,10 +391,10 @@ def valid_step(rng, state, batch):
     return {"norm MSE": metrics["MSE"]}
 
 
-def gen_y_obs(rng: Array, s: Array):
+def gen_y_obs(rng: Array, s: Array, gt_ls: float):
     """generates a poisson observed data sample for inference"""
     rng_mu, rng_poiss = random.split(rng)
-    var, ls, beta = 1.0, 10.0, 1.0
+    var, ls, beta = 1.0, gt_ls, 1.0
     K = matern_1_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
     mu = dist.MultivariateNormal(0.0, K).sample(rng_mu)
     lambda_ = jnp.exp(beta + mu)
