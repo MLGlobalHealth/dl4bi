@@ -64,6 +64,7 @@ def main(seed=55, logged_priors=False, max_ls=100.0):
     L_train = 1024
 
     for model_name, nn_model in models.items():
+        (save_dir / f"{model_name}").mkdir(parents=True, exist_ok=True)
         infer_model, cond_names, s_train = inference_model_inducing_points(
             s, priors, obs_mask, L_train
         )
@@ -71,7 +72,6 @@ def main(seed=55, logged_priors=False, max_ls=100.0):
         eval_f_mse = None
         if nn_model is not None:
             loader = gen_train_dataloader(s, s_train, priors, batch_size=32)
-            (save_dir / f"{model_name}").mkdir(parents=True, exist_ok=True)
             train_time, eval_mse, surrogate_decoder, eval_f_mse = surrogate_model_train(
                 rng_train,
                 rng_test,

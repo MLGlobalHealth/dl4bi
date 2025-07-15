@@ -17,24 +17,14 @@ from jax import Array, jit, random
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig
-from reproduce_paper.deep_rv_plots import (
-    plot_models_predictive_means,
-    plot_posterior_predictive_comparisons,
-)
+from reproduce_paper.deep_rv_plots import plot_models_predictive_means
 from shapely.affinity import scale, translate
 from sps.kernels import matern_1_2
 from utils.plot_utils import plot_infer_trace
 
 import wandb
 from dl4bi.core.model_output import VAEOutput
-from dl4bi.core.train import (
-    PyTreeCheckpointer,
-    TrainState,
-    cosine_annealing_lr,
-    evaluate,
-    save_ckpt,
-    train,
-)
+from dl4bi.core.train import cosine_annealing_lr, evaluate, save_ckpt, train
 from dl4bi.vae import gMLPDeepRV
 from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
 
@@ -57,7 +47,7 @@ def main(seed=63, data_type: str = "Female"):
     priors = {
         "var": dist.Gamma(1.5, 1.5),
         "ls": dist.Uniform(1.0, 100.0),  # s is scaled 0-100
-        "beta": dist.Normal(),
+        "beta": dist.Normal(scale=2),
     }
     infer_model, cond_names = inference_model(s, priors, population)
     loader = gen_train_dataloader(s, priors)
@@ -95,9 +85,6 @@ def main(seed=63, data_type: str = "Female"):
             {f"ESS {c}": ess[c].mean().item() if ess else None for c in cond_names}
         )
         result.append(res)
-    # plot_posterior_predictive_comparisons(
-    #     all_samples, {}, priors, list(models.keys()), cond_names, save_dir / "comp"
-    # )
     plot_models_predictive_means(
         y_hats, map_data, save_dir / "obs_means.png", obs_mask, log=True
     )
@@ -136,22 +123,14 @@ def surrogate_model_train(
     loader: Callable,
     model: nn.Module,
     results_dir: Path,
-    train_num_steps: int = 300_000,
-    valid_interval: int = 50_000,
+    train_num_steps: int = 800_000,
+    valid_interval: int = 100_000,
     valid_steps: int = 5_000,
 ):
     train_step = deep_rv_train_step
     optimizer = optax.chain(
         optax.clip_by_global_norm(3.0),
         optax.yogi(cosine_annealing_lr(train_num_steps, 1e-2)),
-    )
-    ckptr = PyTreeCheckpointer()
-    ckpt = ckptr.restore(Path("results/msoa_circ/DeepRV + gMLP/model.ckpt").absolute())
-    state = TrainState.create(
-        apply_fn=model.apply,
-        tx=optimizer,
-        params=ckpt["state"]["params"],
-        kwargs=ckpt["state"]["kwargs"],
     )
     start = datetime.now()
     state = train(
@@ -170,9 +149,9 @@ def surrogate_model_train(
     )
     train_time = (datetime.now() - start).total_seconds()
     eval_mse = evaluate(rng_test, state, valid_step, loader, valid_steps)["norm MSE"]
-    # save_ckpt(state, DictConfig({}), results_dir / "model.ckpt")
-    # with open(results_dir / "train_metrics.pkl", "wb") as out_file:
-    #     pickle.dump({"train_time": train_time, "eval_mse": eval_mse}, out_file)
+    save_ckpt(state, DictConfig({}), results_dir / "model.ckpt")
+    with open(results_dir / "train_metrics.pkl", "wb") as out_file:
+        pickle.dump({"train_time": train_time, "eval_mse": eval_mse}, out_file)
     surrogate_decoder = generate_surrogate_decoder(state, model)
     return train_time, eval_mse, surrogate_decoder
 
@@ -208,7 +187,7 @@ def inference_model(s: Array, priors: dict, population: Array):
     """
     surrogate_kwargs = {"s": s}
 
-    def log_normal(surrogate_decoder=None, obs_mask=True, y=None):
+    def binomial(surrogate_decoder=None, obs_mask=True, y=None):
         var = numpyro.sample("var", priors["var"], sample_shape=())
         ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
@@ -228,7 +207,7 @@ def inference_model(s: Array, priors: dict, population: Array):
                 "obs", dist.Binomial(logits=eta, total_count=population), obs=y
             )
 
-    return log_normal, ["var", "ls", "beta"]
+    return binomial, ["var", "ls", "beta"]
 
 
 @jit
