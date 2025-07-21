@@ -27,7 +27,7 @@ from omegaconf import DictConfig
 from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
 from scipy.stats import wasserstein_distance
 from sklearn.cluster import KMeans
-from sps.kernels import matern_1_2
+from sps.kernels import matern_3_2
 from sps.utils import build_grid
 from utils.plot_utils import plot_infer_trace
 
@@ -330,7 +330,7 @@ def gen_train_dataloader(
 ):
     s_train = u if inducing else s
     jitter = 5e-4 * jnp.eye(s_train.shape[0])
-    kernel_jit = jit(lambda s, var, ls: matern_1_2(s, s, var, ls) + jitter)
+    kernel_jit = jit(lambda s, var, ls: matern_3_2(s, s, var, ls) + jitter)
     f_jit = jit(lambda L, z: jnp.einsum("ij,bj->bi", L, z))
 
     def dataloader(rng_data):
@@ -367,7 +367,7 @@ def inference_model(s: Array, priors: dict):
                 surrogate_decoder(z, jnp.array([ls]), **surrogate_kwargs).squeeze(),
             )
         else:
-            K = matern_1_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
+            K = matern_3_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
             L_chol = jnp.linalg.cholesky(K)
             mu = numpyro.deterministic("mu", jnp.matmul(L_chol, z[0]))
         lambda_ = jnp.exp(beta + mu)
@@ -389,12 +389,12 @@ def inference_model_inducing_points(
         var = 1.0
         ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
-        K_su = matern_1_2(s, u, var, ls)
+        K_su = matern_3_2(s, u, var, ls)
         z = numpyro.sample("z", dist.Normal(), sample_shape=(1, u.shape[0]))
         if surrogate_decoder is not None:
             f_u_bar = surrogate_decoder(z, jnp.array([ls]), **surr_kwargs).squeeze()
         else:
-            K_uu = matern_1_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
+            K_uu = matern_3_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
             L_uu = jnp.linalg.cholesky(K_uu)
             f_u_bar = solve_triangular(L_uu.T, z[0], lower=False)
         f = numpyro.deterministic("mu", K_su @ f_u_bar)
@@ -423,7 +423,7 @@ def gen_y_obs(rng: Array, s: Array, gt_ls: float):
     """generates a poisson observed data sample for inference"""
     rng_mu, rng_poiss = random.split(rng)
     var, ls, beta = 1.0, gt_ls, 1.0
-    K = matern_1_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
+    K = matern_3_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
     mu = dist.MultivariateNormal(0.0, K).sample(rng_mu)
     lambda_ = jnp.exp(beta + mu)
     return dist.Poisson(rate=lambda_).sample(rng_poiss)
