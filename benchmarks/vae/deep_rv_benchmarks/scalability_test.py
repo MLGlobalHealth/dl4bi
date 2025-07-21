@@ -59,7 +59,7 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
     )
     save_dir.mkdir(parents=True, exist_ok=True)
     grids = [
-        build_grid([{"start": 0.0, "stop": 100.0, "num": n}] * 2)
+        build_grid([{"start": 0.0, "stop": 100.0, "num": n}] * 2).reshape(-1, 2)
         for n in [16, 24, 32, 48, 64]
     ]
     models = {
@@ -180,7 +180,7 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
                 "train_flops": train_gflops,
                 "parameters": parameters,
                 "seed": seed,
-                "num_chains": 4 if L == 1024 else 1,
+                "num_chains": 4 if L == 32**2 else 1,
             }
             res.update(
                 {f"inferred {c} mean": samples[c].mean(axis=0) for c in cond_names}
@@ -229,7 +229,7 @@ def hmc(
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
     k1, k2 = random.split(rng)
     # mcmc = MCMC(nuts, num_chains=1, num_samples=1_000, num_warmup=4_00)
-    num_chains = 4 if grid_size == 1024 else 1
+    num_chains = 4 if grid_size == 32**2 else 1
     mcmc = MCMC(nuts, num_chains=num_chains, num_samples=10_000, num_warmup=4_000)
     start = datetime.now()
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=y_obs)
@@ -548,16 +548,16 @@ def posterior_wasserstein_distance(
 def gen_train_params(model_name, L, default_bs=32):
     default_steps = 300_000 if L >= 2048 else 200_000
     max_lr = {
-        "Inducing DeepRV + gMLP": 1e-3 if L <= 1024 else 5e-3,
-        "DeepRV + gMLP": 5e-3 if L <= 1024 else 1e-2,
-        "PriorCVAE": 1.0e-3 if L <= 1024 else 5e-3,
-        "DeepRV + MLP": 1.0e-3 if L <= 1024 else 5e-3,
+        "Inducing DeepRV + gMLP": 1e-3 if L <= 32**2 else 5e-3,
+        "DeepRV + gMLP": 5e-3 if L <= 32**2 else 1e-2,
+        "PriorCVAE": 1.0e-3 if L <= 32**2 else 5e-3,
+        "DeepRV + MLP": 1.0e-3 if L <= 32**2 else 5e-3,
     }[model_name]
     bs = {
         "Inducing DeepRV + gMLP": default_bs,
-        "DeepRV + gMLP": int(min(1, 2048 / L) * default_bs),
-        "PriorCVAE": int(min(1, 2048 / L) * default_bs),
-        "DeepRV + MLP": int(min(1, 2048 / L) * default_bs),
+        "DeepRV + gMLP": int(min(1, 48**2 / L) * default_bs),
+        "PriorCVAE": int(min(1, 48**2 / L) * default_bs),
+        "DeepRV + MLP": int(min(1, 48**2 / L) * default_bs),
     }[model_name]
     train_step = {
         "Inducing DeepRV + gMLP": inducing_deep_rv_train_step,
@@ -686,7 +686,7 @@ class LogScaleTransform(ParameterFreeTransform):
 
 
 def aggregate_csvs(base_path: Path):
-    levels = [256, 1024, 2048, 4096]
+    levels = [16**2, 32**2, 48**2, 64**2]
     df_list = []
     for L in levels:
         file_path = (base_path / f"grid_{L}") / "res.csv"
