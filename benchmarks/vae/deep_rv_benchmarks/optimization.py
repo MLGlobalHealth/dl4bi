@@ -19,7 +19,6 @@ from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, train
 from dl4bi.vae import (
-    DKADeepRV,
     MLPDeepRV,
     PriorCVAE,
     ScanTransformerDeepRV,
@@ -53,7 +52,6 @@ def main(seed=15):
             "DeepRV + gMLP Large": gMLPDeepRV(num_blks=4),
             "DeepRV + ScanTransfomer": ScanTransformerDeepRV(num_blks=2, dim=64),
             "DeepRV + ScanTransfomer Large": ScanTransformerDeepRV(num_blks=4, dim=64),
-            "DeepRV + DKA": DKADeepRV(num_blks=2, dim=64),
         }
         default_steps = 100_000 if L <= 1024 else 200_000
         rng_train, rng_test = random.split(rng, 2)
@@ -170,7 +168,6 @@ def gen_train_params(model_name, s, default_steps, default_bs=32):
         "DeepRV + gMLP Large": 5e-3,
         "DeepRV + ScanTransfomer": 1e-4,
         "DeepRV + ScanTransfomer Large": 1e-4,
-        "DeepRV + DKA": 1e-3,
     }[model_name]
     bs = int(min(1, 512 / L) * default_bs)
     train_steps = default_steps * (default_bs // bs)
@@ -178,7 +175,6 @@ def gen_train_params(model_name, s, default_steps, default_bs=32):
     if model_name in [
         "DeepRV + ScanTransfomer",
         "DeepRV + ScanTransfomer Large",
-        "DeepRV + DKA",
     ]:
         optimizer = optax.adamw(max_lr)
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optimizer)
