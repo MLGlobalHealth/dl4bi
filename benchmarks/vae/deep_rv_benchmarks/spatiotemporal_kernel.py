@@ -31,7 +31,7 @@ from utils.plot_utils import plot_infer_trace
 import wandb
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, save_ckpt, train
-from dl4bi.vae import gMLPActivDeepRV
+from dl4bi.vae import gMLPDeepRV
 from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
 
 
@@ -47,7 +47,7 @@ def main(seed=19, time_steps=5, grid_shape=(16, 16)):
     )
     D = s.shape[1]
     models = {
-        "DeepRV + gMLP act": gMLPActivDeepRV(num_blks=2),
+        "DeepRV + gMLP act": gMLPDeepRV(num_blks=2),
         "Baseline_GP": None,
         "ADVI": None,
         "Inducing Points": None,

@@ -44,7 +44,7 @@ def main(init_seed=42, num_seeds=5):
         "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
         "DeepRV + Transfomer": TransformerDeepRV(num_blks=2, dim=64),
     }
-    priors = {"ls": dist.Uniform(0.0, 100.0), "alpha": dist.Beta(4.0, 1.0)}
+    priors = {"ls": dist.Uniform(1.0, 100.0), "alpha": dist.Beta(4.0, 1.0)}
     result = []
     seeds = random.choice(
         random.key(init_seed), jnp.arange(100), shape=(num_seeds,), replace=False
@@ -84,7 +84,11 @@ def main(init_seed=42, num_seeds=5):
                     ["alpha" if kernel_n == "car" else "ls"],
                     save_dir,
                 )
-    pd.DataFrame(result).to_csv(save_dir / "res.csv")
+    result = pd.DataFrame(result)
+    latex_table = df_to_latex_table(result)
+    result.to_csv(save_dir / "res.csv")
+    with open(save_dir / "latex_table.txt", "w") as ff:
+        ff.write(latex_table)
 
 
 def surrogate_model_train(
@@ -250,6 +254,62 @@ def plot_reconstruction_comp(
         fig.savefig(save_dir / f"{kernel_n}_rec_{i}.png", dpi=125)
         plt.clf()
         plt.close(fig)
+
+
+def df_to_latex_table(df):
+    """
+    Given a DataFrame with columns: 'model_name', 'train_time', 'Test Norm MSE', 'kernel', 'seed',
+    generate a LaTeX table with:
+    - Rows as model_name
+    - Columns as kernels, each with two subcolumns: MSE (mean ± std), Train Time (mean ± std)
+    """
+
+    # Group by model and kernel
+    grouped = df.groupby(["model_name", "kernel"])
+
+    # Compute stats
+    stats = grouped.agg(
+        mse_mean=("Test Norm MSE", "mean"),
+        mse_std=("Test Norm MSE", "std"),
+        time_mean=("train_time", "mean"),
+        time_std=("train_time", "std"),
+    ).reset_index()
+
+    # Pivot to get the desired layout
+    kernels = sorted(df["kernel"].unique())
+    models = sorted(df["model_name"].unique())
+
+    table_rows = []
+    for model in models:
+        row = [model]
+        for kernel in kernels:
+            subset = stats[(stats["model_name"] == model) & (stats["kernel"] == kernel)]
+            if not subset.empty:
+                mse = subset.iloc[0]["mse_mean"]
+                mse_std = subset.iloc[0]["mse_std"]
+                time = subset.iloc[0]["time_mean"]
+                time_std = subset.iloc[0]["time_std"]
+                row.append(f"${mse:.3f} \\pm {mse_std:.3f}$")
+                row.append(f"${time:.2f} \\pm {time_std:.2f}$")
+            else:
+                row.extend(["-", "-"])
+        table_rows.append(row)
+    col_headers = ["Model"]
+    for kernel in kernels:
+        col_headers.append(f"\\multicolumn{{2}}{{c}}{{{kernel}}}")
+    sub_headers = [""]
+    for _ in kernels:
+        sub_headers.extend(["MSE", "Train Time"])
+    # Build LaTeX table
+    latex = "\\begin{tabular}{l" + "cc" * len(kernels) + "}\n"
+    latex += " & " + " & ".join(col_headers[1:]) + " \\\\\n"
+    latex += " & " + " & ".join(sub_headers[1:]) + " \\\\\n"
+    latex += "\\hline\n"
+    for row in table_rows:
+        latex += " & ".join(row) + " \\\\\n"
+    latex += "\\end{tabular}"
+    print(latex)
+    return latex
 
 
 if __name__ == "__main__":

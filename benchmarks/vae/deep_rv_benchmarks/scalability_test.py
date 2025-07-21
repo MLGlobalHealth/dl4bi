@@ -319,12 +319,6 @@ def surrogate_model_train(
     return train_time, eval_mse, surrogate_decoder, infer_flops, train_flops, parameters
 
 
-@partial(jit, static_argnames=["lower"])
-def jit_trin_solve_func(L_T, z, lower=False):
-    s_trin = partial(solve_triangular, lower=lower)
-    return vmap(s_trin, in_axes=(None, 0))(L_T, z)
-
-
 def gen_train_dataloader(
     s: Array, u: Array, priors: dict, inducing=False, batch_size=32
 ):
@@ -332,6 +326,8 @@ def gen_train_dataloader(
     jitter = 5e-4 * jnp.eye(s_train.shape[0])
     kernel_jit = jit(lambda s, var, ls: matern_3_2(s, s, var, ls) + jitter)
     f_jit = jit(lambda L, z: jnp.einsum("ij,bj->bi", L, z))
+    s_trin = partial(solve_triangular, lower=False)
+    jit_trin_solve_func = jit(vmap(s_trin, in_axes=(None, 0)))
 
     def dataloader(rng_data):
         while True:
@@ -342,10 +338,18 @@ def gen_train_dataloader(
             K = kernel_jit(s_train, var, ls)
             L = jnp.linalg.cholesky(K)
             if inducing:
-                f = jit_trin_solve_func(L.T, z, lower=False)
+                f = jit_trin_solve_func(L.T, z)
+                K_su = matern_3_2(s, s_train, var, ls)
+                yield {
+                    "s": s_train,
+                    "f": f,
+                    "z": z,
+                    "conditionals": jnp.array([ls]),
+                    "K_su": K_su,
+                }
             else:
                 f = f_jit(L, z)
-            yield {"s": s_train, "f": f, "z": z, "conditionals": jnp.array([ls])}
+                yield {"s": s_train, "f": f, "z": z, "conditionals": jnp.array([ls])}
 
     return dataloader
 
