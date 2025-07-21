@@ -584,8 +584,7 @@ def plot_model_scalability_metrics(result_df: pd.DataFrame, save_dir: Path):
     model_colors = {model: palette[i] for i, model in enumerate(models)}
 
     # Normalize FLOPs per sample
-    result_df["infer_flops"] = result_df["infer_flops"]
-    result_df["train_flops"] = result_df["train_flops"]
+    result_df["infer_time"] = result_df["infer_time"] / result_df["num_chains"]
 
     def _plot_metric_group(
         ax,
