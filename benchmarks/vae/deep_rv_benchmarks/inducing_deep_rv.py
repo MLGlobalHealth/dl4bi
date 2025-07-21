@@ -39,7 +39,7 @@ from dl4bi.vae.train_utils import (
 )
 
 
-def main(seed=55, logged_priors=False, max_ls=100.0):
+def main(seed=55, logged_priors=False, max_ls=50.0):
     wandb.init(mode="disabled")  # NOTE: downstream function assumes active wandb
     rng = random.key(seed)
     rng_train, rng_test, rng_infer, rng_idxs, rng_obs = random.split(rng, 5)
@@ -48,11 +48,11 @@ def main(seed=55, logged_priors=False, max_ls=100.0):
     grid_dim = 128
     s = build_grid([{"start": 0.0, "stop": 100.0, "num": grid_dim}] * 2).reshape(-1, 2)
     models = {
-        "DeepRV inv + gMLP": gMLPDeepRV(num_blks=2),
+        "DeepRV inv + gMLP": gMLPDeepRV(num_blks=4),
         "Inducing Points": None,
     }
     y_obs = gen_y_obs(rng_obs, s)
-    obs_mask = generate_obs_mask(rng_idxs, y_obs, 0.1)
+    obs_mask = generate_obs_mask(rng_idxs, y_obs, 0.3)
     log_ls = dist.TransformedDistribution(
         dist.Beta(4.0, 1.0), LogScaleTransform(max_ls=max_ls)
     )
@@ -61,23 +61,22 @@ def main(seed=55, logged_priors=False, max_ls=100.0):
         "beta": dist.Normal(),
     }
     y_hats, all_samples, result = [], [], []
-    L_train = 1024
-
+    L_train = 512
+    infer_model, cond_names, s_train = inference_model_inducing_points(
+        s, priors, obs_mask, L_train
+    )
+    with open(save_dir / "s_train.pkl", "wb") as ff:
+        pickle.dump(s_train, ff)
     for model_name, nn_model in models.items():
         (save_dir / f"{model_name}").mkdir(parents=True, exist_ok=True)
-        infer_model, cond_names, s_train = inference_model_inducing_points(
-            s, priors, obs_mask, L_train
-        )
-        train_time, eval_mse, surrogate_decoder, ess = None, None, None, {}
-        eval_f_mse = None
+        train_time, f_u_bar_mse, surrogate_decoder, ess = None, None, None, {}
+        eval_f_mse, cosine_sim = None, None
         if nn_model is not None:
             loader = gen_train_dataloader(s, s_train, priors, batch_size=32)
-            train_time, eval_mse, surrogate_decoder, eval_f_mse = surrogate_model_train(
-                rng_train,
-                rng_test,
-                loader,
-                nn_model,
-                save_dir / f"{model_name}",
+            train_time, f_u_bar_mse, surrogate_decoder, eval_f_mse, cosine_sim = (
+                surrogate_model_train(
+                    rng_train, rng_test, loader, nn_model, save_dir / f"{model_name}"
+                )
             )
         samples, mcmc, post, infer_time = hmc(
             rng_infer,
@@ -88,31 +87,36 @@ def main(seed=55, logged_priors=False, max_ls=100.0):
             surrogate_decoder,
         )
         ess = az.ess(mcmc, method="mean")
-        plot_infer_trace(
-            samples,
-            mcmc,
-            None,
-            cond_names,
-            save_dir / f"{model_name}_infer_trace.png",
-        )
+        try:
+            plot_infer_trace(
+                samples,
+                mcmc,
+                None,
+                cond_names,
+                save_dir / f"{model_name}_infer_trace.png",
+            )
+        except Exception:
+            pass
 
         y_hats.append(post["obs"])
         all_samples.append(samples)
-        result.append(
-            {
-                "model_name": model_name,
-                "train_time": train_time,
-                "Test Norm MSE": eval_mse,
-                "Test f MSE": eval_f_mse,
-                "infer_time": infer_time,
-                "inferred lengthscale mean": samples["ls"].mean(axis=0),
-                "inferred fixed effects": samples["beta"].mean(axis=0),
-                "MSE(y, y_hat)": ((y_obs - post["obs"].mean(axis=0)) ** 2).mean(),
-                "ESS spatial effects": ess["f"].mean().item() if ess else None,
-                "ESS lengthscale": ess["ls"].item() if ess else None,
-                "ESS fixed effects": ess["beta"].item() if ess else None,
-            }
-        )
+        res = {
+            "model_name": model_name,
+            "train_time": train_time,
+            "Test f_u_bar MSE": f_u_bar_mse,
+            "Test f MSE": eval_f_mse,
+            "Test loss cosine sim": cosine_sim,
+            "infer_time": infer_time,
+            "inferred lengthscale mean": samples["ls"].mean(axis=0),
+            "inferred fixed effects": samples["beta"].mean(axis=0),
+            "MSE(y, y_hat)": ((y_obs - post["obs"].mean(axis=0)) ** 2).mean(),
+            "ESS spatial effects": ess["f"].mean().item() if ess else None,
+            "ESS lengthscale": ess["ls"].item() if ess else None,
+            "ESS fixed effects": ess["beta"].item() if ess else None,
+        }
+        with open((save_dir / f"{model_name}") / "single_res.pkl", "wb") as ff:
+            pickle.dump(res, ff)
+        result.append(res)
     model_names = list(models.keys())
     try:
         plot_posterior_predictive_comparisons(
@@ -231,15 +235,21 @@ def surrogate_model_train(
     )
     train_time = (datetime.now() - start).total_seconds()
     metrics = evaluate(rng_test, state, inducing_valid_step, loader, valid_steps)
-    eval_mse, eval_f_mse = metrics["norm MSE"], metrics["f MSE"]
+    f_u_bar_mse, eval_f_mse = metrics["f_u_bar MSE"], metrics["f MSE"]
+    cosine_similarity = metrics["loss cosine_sim"]
     save_ckpt(state, DictConfig({}), results_dir / "model.ckpt")
     with open(results_dir / "train_time.pkl", "wb") as out_file:
         pickle.dump(
-            {"train_time": train_time, "eval_mse": eval_mse, "eval f mse": eval_f_mse},
+            {
+                "train_time": train_time,
+                "eval f_u_bar mse": f_u_bar_mse,
+                "eval f mse": eval_f_mse,
+                "eval loss cosine_sim": cosine_similarity,
+            },
             out_file,
         )
     surrogate_decoder = generate_surrogate_decoder(state, model)
-    return train_time, eval_mse, surrogate_decoder, eval_f_mse
+    return train_time, f_u_bar_mse, surrogate_decoder, eval_f_mse, cosine_similarity
 
 
 def gen_train_dataloader(s: Array, s_train: Array, priors: dict, batch_size: int):
@@ -309,9 +319,19 @@ def inducing_valid_step(rng, state, batch):
     f_bar_u = batch["f"]
     f_bar_u_hat = output.f_hat
     residuals = f_bar_u.squeeze() - f_bar_u_hat.squeeze()
-    f_mse = (0.5 * (jnp.einsum("ij, bj-> bi", batch["K_su"], residuals)) ** 2).mean()
-    metrics = output.metrics(batch["f"], 1.0)
-    return {"norm MSE": metrics["MSE"], "f MSE": f_mse}
+    f_bar_u_mse = 0.5 * (residuals**2).mean()
+    proj_error = jnp.einsum("ij, bj-> bi", batch["K_su"], residuals)
+    f_mse = 0.5 * (proj_error**2).mean()
+
+    back_proj = jnp.einsum("ij, bj-> bi", batch["K_su"].T, proj_error)
+    numerator = jnp.sum(back_proj * residuals, axis=1)
+    denom = jnp.linalg.norm(back_proj, axis=1) * jnp.linalg.norm(residuals, axis=1)
+    cosine_similarity = numerator / (denom + 1e-8)
+    return {
+        "f_u_bar MSE": f_bar_u_mse,
+        "f MSE": f_mse,
+        "loss cosine_sim": cosine_similarity.mean(),
+    }
 
 
 def gen_y_obs(rng: Array, s: Array):
@@ -427,6 +447,37 @@ def posterior_wasserstein_distance(
             else:
                 distances[model_name][var_name] = jnp.nan
     return distances
+
+
+# def load_surr_model_results(model, model_name):
+#     from orbax.checkpoint import PyTreeCheckpointer
+#     from dl4bi.core.train import TrainState
+
+#     optimizer = optax.chain(
+#         optax.clip_by_global_norm(3.0),
+#         optax.yogi(cosine_annealing_lr(1_000_000, 5e-3)),
+#     )
+#     model_path = Path(f"results/inducing_drv/{model_name}").absolute()
+#     ckptr = PyTreeCheckpointer()
+#     ckpt = ckptr.restore(model_path / "model.ckpt")
+#     print(model_path / "model.ckpt")
+#     state = TrainState.create(
+#         apply_fn=model.apply,
+#         tx=optimizer,
+#         params=ckpt["state"]["params"],
+#         kwargs=ckpt["state"]["kwargs"],
+#     )
+#     surrogate_decoder = generate_surrogate_decoder(state, model)
+#     res_df = pd.read_csv("results/inducing_drv/res.csv")
+#     res_df = res_df[res_df["model_name"] == model_name]
+#     train_time, f_u_bar_mse, eval_f_mse, cosine_similarity = (
+#         res_df["train_time"].values[0],
+#         res_df["Test f_u_bar MSE"].values[0],
+#         res_df["Test f MSE"].values[0],
+#         res_df["Test loss cosine sim"].values[0],
+#     )
+
+#     return train_time, f_u_bar_mse, surrogate_decoder, eval_f_mse, cosine_similarity
 
 
 if __name__ == "__main__":

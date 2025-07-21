@@ -321,3 +321,104 @@ def get_surr_decs(models_dict, save_dir):
         )
         surr_models[model_name] = generate_surrogate_decoder(state, nn_model)
     return surr_models
+
+
+def visualize_residuals(rng, gen_loader_fn, s, s_train, surrogate_decoder, save_dir):
+    for ls in [5.0, 10.0, 20.0, 30.0, 40.0, 50.0]:
+        rng, _ = random.split(rng)
+        load_p = {"ls": dist.Delta(ls)}
+        loader = gen_loader_fn(s, s_train, load_p, batch_size=32)
+        batch = loader(rng).__next__()
+        f_u_bar = batch["f"].squeeze()  # [B, U]
+        f_u_bar_pred = surrogate_decoder(**batch).squeeze()  # [B, U]
+        full_f = jnp.einsum("ij, bj-> bi", batch["K_su"], f_u_bar)
+        full_f_pred = jnp.einsum("ij, bj-> bi", batch["K_su"], f_u_bar_pred)
+        residuals = f_u_bar - f_u_bar_pred
+        f_bar_u_mse = 0.5 * (residuals**2).mean()
+        proj_error = jnp.einsum("ij, bj->bi", batch["K_su"], residuals)
+        f_mse = 0.5 * (proj_error**2).mean()
+        print("Eval MSE (inducing):", f_bar_u_mse)
+        print("Eval MSE (full f):", f_mse)
+        for i in range(8):
+            plot_example(
+                f_u_bar[i],
+                f_u_bar_pred[i],
+                full_f[i],
+                full_f_pred[i],
+                s_train,
+                s,
+                ls,
+                i,
+                save_dir,
+            )
+
+
+def plot_example(
+    f_u_bar, f_u_bar_pred, full_f, full_f_pred, u, s_grid, ls, num_plot, save_dir
+):
+    import matplotlib.pyplot as plt
+    from scipy.interpolate import griddata
+
+    # Interpolate f_u_bar and f_u_bar_pred to s_grid
+    f_u_bar_interp = griddata(u, f_u_bar, s_grid, method="cubic", fill_value=jnp.nan)
+    f_u_bar_pred_interp = griddata(
+        u, f_u_bar_pred, s_grid, method="cubic", fill_value=jnp.nan
+    )
+
+    residual_f = full_f - full_f_pred
+    residual_u = f_u_bar - f_u_bar_pred
+
+    # Reshape for 2D plots
+    grid_size = int(jnp.sqrt(s_grid.shape[0]))  # should be 128
+    full_f_img = full_f.reshape(grid_size, grid_size)
+    full_f_pred_img = full_f_pred.reshape(grid_size, grid_size)
+    residual_f_img = residual_f.reshape(grid_size, grid_size)
+    f_u_bar_img = f_u_bar_interp.reshape(grid_size, grid_size)
+    f_u_bar_pred_img = f_u_bar_pred_interp.reshape(grid_size, grid_size)
+
+    fig, axs = plt.subplots(2, 3, figsize=(15, 10))
+
+    # First row: full function
+    vmin_f = min(full_f.min(), full_f_pred.min())
+    vmax_f = max(full_f.max(), full_f_pred.max())
+    im0 = axs[0, 0].imshow(full_f_img, vmin=vmin_f, vmax=vmax_f, cmap="viridis")  #
+    axs[0, 0].set_title("full_f")
+    fig.colorbar(im0, ax=axs[0, 0], fraction=0.046)
+
+    im1 = axs[0, 1].imshow(full_f_pred_img, vmin=vmin_f, vmax=vmax_f, cmap="viridis")  #
+    axs[0, 1].set_title("full_f_pred")
+    fig.colorbar(im1, ax=axs[0, 1], fraction=0.046)
+
+    im2 = axs[0, 2].imshow(residual_f_img, cmap="coolwarm")
+    axs[0, 2].set_title(
+        f"residual: full_f - full_f_pred. mse: {(residual_f_img**2).mean():.2f}"
+    )
+    fig.colorbar(im2, ax=axs[0, 2], fraction=0.046)
+
+    # Second row: f_u_bar values
+    vmin_u = min(jnp.nanmin(f_u_bar_img), jnp.nanmin(f_u_bar_pred_img))
+    vmax_u = max(jnp.nanmax(f_u_bar_img), jnp.nanmax(f_u_bar_pred_img))
+    im3 = axs[1, 0].imshow(f_u_bar_img, vmin=vmin_u, vmax=vmax_u, cmap="viridis")
+    axs[1, 0].set_title("f_u_bar (interp)")
+    fig.colorbar(im3, ax=axs[1, 0], fraction=0.046)
+
+    im4 = axs[1, 1].imshow(f_u_bar_pred_img, vmin=vmin_u, vmax=vmax_u, cmap="viridis")
+    axs[1, 1].set_title("f_u_bar_pred (interp)")
+    fig.colorbar(im4, ax=axs[1, 1], fraction=0.046)
+    # Residual plot (inducing point values)
+    residual_u = jnp.asarray(residual_u).flatten()
+    axs[1, 2].plot(jnp.arange(len(residual_u)), residual_u, color="gray")
+    axs[1, 2].set_title(f"residual: f_u_bar - pred. mse: {(residual_u**2).mean():.2f}")
+    axs[1, 2].set_xlabel("Inducing point index")
+    axs[1, 2].set_ylabel("Residual")
+    for i, ax in enumerate(axs.flatten()):
+        if i < 5:
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+    fig.suptitle(f"Lengthscale {ls} | Example {num_plot}", fontsize=16)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])  # Leave room for suptitle
+    out_dir = save_dir / "example_plots" / f"{ls}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    plt.savefig(out_dir / f"{num_plot}.png", dpi=150)
+    plt.close()
