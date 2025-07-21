@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Optional, Union
 
 import flax.linen as nn
 import jax.numpy as jnp
@@ -67,21 +68,27 @@ class DeepRV(nn.Module):
 # NOTE: Explicit decoder definitions for DeepRV
 class gMLPDeepRV(nn.Module):
     num_blks: int = 2
+    s_embed: Union[Callable, nn.Module] = lambda s: s
+    proj_in: nn.Module = MLP([128, 128], nn.gelu)
+    proj_out: nn.Module = MLP([64, 64], nn.gelu)
+    attn: Optional[nn.Module] = None
+    gate_fn: Union[Callable, nn.Module] = lambda x: x
+    embed: nn.Module = MLP([64, 64], nn.gelu)
+    head: nn.Module = MLP([128, 1], nn.gelu)
 
     @nn.compact
     def __call__(self, z: Array, conditionals: Array, s: Array, **kwargs):
-        batched_s = jnp.repeat(s[None, ...], z.shape[0], axis=0)
+        s_embeded = self.s_embed(s)
+        batched_s = jnp.repeat(s_embeded[None, ...], z.shape[0], axis=0)
         x = jnp.concat([jnp.atleast_3d(z), batched_s], axis=-1)
         x = cond_as_feats(x, conditionals)
         return VAEOutput(
             gMLP(
                 num_blks=self.num_blks,
-                embed=MLP([64, 64], nn.gelu),
-                blk=gMLPBlock(
-                    proj_in=MLP([128, 128], nn.gelu),
-                    proj_out=MLP([64, 64], nn.gelu),
-                ),
-            )(x)
+                embed=self.embed,
+                blk=gMLPBlock(self.proj_in, self.proj_out, self.attn, self.gate_fn),
+                head=self.head,
+            )(x, **kwargs)
         )
 
     def decode(self, z: Array, conditionals: Array, s: Array, **kwargs):
@@ -151,36 +158,6 @@ class ScanTransformerDeepRV(nn.Module):
                 proj_vs=MLP([D * 2]),
                 proj_out=MLP([D]),
                 attn=BiasedScanAttention(bias={"s": Bias.build_rbf_network_bias()}),
-            )
-            ffn = MLP([D * 4, D])
-            x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(
-                x, mask=None, training=False, **kwargs
-            )
-        return VAEOutput(MLP([D * 4, D, 1])(x))
-
-    def decode(self, z: Array, conditionals: Array, **kwargs):
-        return self(z, conditionals, **kwargs).f_hat
-
-
-class DKADeepRV(nn.Module):
-    dim: int = 64
-    num_blks: int = 2
-
-    @nn.compact
-    def __call__(self, z: Array, conditionals: Array, s: Array, **kwargs):
-        (B, L), D, C = z.shape, self.dim, conditionals.shape[0]
-        s_batched = jnp.repeat(s[None, :], B, axis=0)
-        ids = jnp.repeat(jnp.arange(L, dtype=int)[None, :], B, axis=0)
-        ids_embed = nn.Embed(L, features=(D * 2) - (C + 1))(ids)
-        x = cond_as_feats(z, conditionals)
-        x = jnp.concat([ids_embed, x], axis=-1)
-        x = MLP([D * 4, D], nn.gelu)(x)
-        kwargs = {"qs_s": s_batched, "ks_s": s_batched}
-        for _ in range(self.num_blks):
-            attn = DeepKernelAttention(
-                num_heads=4,
-                proj_qks=MLP([D * 2, D * 2]),
-                proj_vs=MLP([D * 2, D]),
             )
             ffn = MLP([D * 4, D])
             x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(

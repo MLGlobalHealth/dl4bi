@@ -32,6 +32,7 @@ from sps.utils import build_grid
 from utils.plot_utils import plot_infer_trace
 
 import wandb
+from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import (
     TrainState,
@@ -41,8 +42,14 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
-from dl4bi.vae import ScanTransformerDeepRV, gMLPDeepRV
-from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
+from dl4bi.vae import MLPDeepRV, PriorCVAE, gMLPDeepRV
+from dl4bi.vae.train_utils import (
+    cond_as_locs,
+    deep_rv_train_step,
+    generate_surrogate_decoder,
+    inducing_deep_rv_train_step,
+    prior_cvae_train_step,
+)
 
 
 def main(seed=42, logged_priors=True, gt_ls=10.0):
@@ -52,14 +59,15 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
     )
     save_dir.mkdir(parents=True, exist_ok=True)
     grids = [
-        build_grid([{"start": 0.0, "stop": 100.0, "num": n}])
-        for n in [256, 1024, 2048, 4096]
+        build_grid([{"start": 0.0, "stop": 100.0, "num": n}] * 2)
+        for n in [16, 24, 32, 48, 64]
     ]
     models = {
         "Baseline_GP": None,
         "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
-        "DeepRV + ScanTransfomer": ScanTransformerDeepRV(num_blks=2, dim=64),
         "Inducing DeepRV + gMLP": gMLPDeepRV(num_blks=2),
+        "PriorCVAE": PriorCVAE,
+        "DeepRV + MLP": MLPDeepRV,
         "Inducing Points": None,
         "ADVI": None,
     }
@@ -72,27 +80,37 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
     for s in grids:
         result = []
         rng_train, rng_test, rng_infer, rng_idxs, rng_obs, rng = random.split(rng, 6)
-        L = s.shape[0]
+        L, sqrt_L = s.shape[0], int(jnp.sqrt(s.shape[0]))
         grid_s_path = save_dir / f"grid_{L}"
         grid_s_path.mkdir(parents=True, exist_ok=True)
         y_obs = gen_y_obs(rng_obs, s, gt_ls)
-        obs_mask = generate_obs_mask(rng_idxs, y_obs)
+        obs_mask = gen_spatial_obs_mask(rng_idxs, (sqrt_L, sqrt_L), obs_ratio=0.5)
         poisson_llk, cond_names = inference_model(s, priors)
         num_pts = int(min(int(2 * jnp.sqrt(L).item()), sum(obs_mask)))
         poiss_inducing, u = inference_model_inducing_points(
             s, priors, obs_mask, num_pts
         )
+        with open(grid_s_path / "GT_data.pkl", "wb") as ff:
+            pickle.dump({"s": s, "u": u, "obs_mask": obs_mask, "y_obs": y_obs}, ff)
         y_hats, all_samples = [], []
         for model_name, nn_model in models.items():
+            if model_name == "PriorCVAE":
+                nn_model = PriorCVAE(
+                    MLP(dims=[L, L]), MLP(dims=[L, L]), cond_as_locs, L
+                )
+            elif model_name == "DeepRV + MLP":
+                nn_model = MLPDeepRV(dims=[L, L])
             model_path = grid_s_path / f"{model_name}"
             model_path.mkdir(parents=True, exist_ok=True)
             is_inducing = "Inducing" in model_name
             infer_model = poiss_inducing if is_inducing else poisson_llk
             train_time, eval_mse, surrogate_decoder, ess = None, None, None, {}
             infer_gflops, train_gflops, parameters = None, None, None
-            max_lr, bs, train_steps = None, None, None
+            max_lr, bs, num_train_steps = None, None, None
             if nn_model is not None:
-                optimizer, max_lr, bs, train_steps = gen_train_params(model_name, s)
+                optimizer, max_lr, bs, num_train_steps, train_step = gen_train_params(
+                    model_name, L
+                )
                 wandb.init(
                     config={
                         "model_name": model_name,
@@ -118,10 +136,11 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
                     rng_train,
                     rng_test,
                     loader,
+                    train_step,
                     nn_model,
                     model_path,
                     optimizer,
-                    train_steps,
+                    num_train_steps,
                 )
                 wandb.log({"train_time": train_time, "Test Norm MSE": eval_mse})
             if model_name != "ADVI":
@@ -131,6 +150,7 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
                     y_obs,
                     obs_mask,
                     model_path,
+                    L,
                     surrogate_decoder,
                 )
                 ess = az.ess(mcmc, method="mean")
@@ -147,7 +167,7 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
                 "model_name": model_name,
                 "max_lr": max_lr,
                 "bs": bs,
-                "train_steps": train_steps,
+                "train_steps": num_train_steps,
                 "grid_size": L,
                 "train_time": train_time,
                 "Test Norm MSE": eval_mse,
@@ -160,6 +180,7 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
                 "train_flops": train_gflops,
                 "parameters": parameters,
                 "seed": seed,
+                "num_chains": 4 if L == 1024 else 1,
             }
             res.update(
                 {f"inferred {c} mean": samples[c].mean(axis=0) for c in cond_names}
@@ -184,7 +205,12 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
             all_samples, {}, priors, model_names, cond_names, grid_s_path / "comp"
         )
         plot_models_predictive_means(
-            y_obs, y_hats, obs_mask, model_names, grid_s_path / "obs_means.png"
+            int(jnp.sqrt(L)),
+            y_obs,
+            y_hats,
+            obs_mask,
+            model_names,
+            grid_s_path / "obs_means.png",
         )
     aggregated_df = aggregate_csvs(save_dir)
     plot_model_scalability_metrics(aggregated_df, save_dir)
@@ -196,13 +222,15 @@ def hmc(
     y_obs: Array,
     obs_mask: Union[bool, Array],
     results_dir: Path,
+    grid_size: int,
     surrogate_decoder: Optional[Callable] = None,
 ):
     """runs HMC on given inference model and observed f"""
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
     k1, k2 = random.split(rng)
     # mcmc = MCMC(nuts, num_chains=1, num_samples=1_000, num_warmup=4_00)
-    mcmc = MCMC(nuts, num_chains=1, num_samples=10_000, num_warmup=4_000)
+    num_chains = 4 if grid_size == 1024 else 1
+    mcmc = MCMC(nuts, num_chains=num_chains, num_samples=10_000, num_warmup=4_000)
     start = datetime.now()
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=y_obs)
     infer_time = (datetime.now() - start).total_seconds()
@@ -246,6 +274,7 @@ def surrogate_model_train(
     rng_train: Array,
     rng_test: Array,
     loader: Callable,
+    train_step: Callable,
     model: nn.Module,
     results_dir: Path,
     optimizer,
@@ -253,7 +282,6 @@ def surrogate_model_train(
     valid_interval: int = 25_000,
     valid_steps: int = 5_000,
 ):
-    train_step = deep_rv_train_step
     flop_batch = loader(rng_train).__next__()
     # NOTE: doesn't effect actual training
     rngs = {"params": rng_train, "extra": rng_test}
@@ -401,66 +429,93 @@ def gen_y_obs(rng: Array, s: Array, gt_ls: float):
     return dist.Poisson(rate=lambda_).sample(rng_poiss)
 
 
-def generate_obs_mask(rng: Array, y_obs: Array, obs_ratio: float = 0.15):
-    """Creates a mask which indicates to the inference model which locations to
-    observe. Randomly chooses a subset of location to be observed."""
-    L = y_obs.shape[0]
-    num_obs_locations = int(obs_ratio * L)
-    obs_idxs = random.choice(rng, jnp.arange(L), (num_obs_locations,), replace=False)
-    return jnp.isin(jnp.arange(L), obs_idxs)
+def gen_spatial_obs_mask(rng: Array, grid_shape: tuple, obs_ratio: float = 0.15):
+    """
+    Generates a spatial observation mask for a 2D grid. Keeps a certain percentage of the domain unmasked,
+    in the form of a few spatially-contiguous elliptical blobs. The output is a 1D boolean mask indicating
+    which locations are observed.
+
+    Args:
+        rng: JAX PRNG key
+        y_obs: Flattened signal (L,)
+        grid_shape: Tuple (H, W) for reshaping the 1D signal
+        obs_ratio: Fraction of the total grid to remain observed
+
+    Returns:
+        mask_flat: Flattened boolean mask of shape (L,), where True = observed, False = masked
+    """
+    H, W = grid_shape
+    total_points = H * W
+    num_obs_points = int(obs_ratio * total_points)
+    mask = jnp.zeros((H, W), dtype=bool)
+
+    points_collected = 0
+    blob_idx = 0
+    while points_collected < num_obs_points:
+        rng_blob, rng = random.split(rng)
+        rngs = random.split(rng_blob, 4)
+        center_x = random.randint(rngs[0], (), 0, H)
+        center_y = random.randint(rngs[1], (), 0, W)
+        radius_x = random.randint(rngs[2], (), H // 8, H // 4)
+        radius_y = random.randint(rngs[3], (), W // 8, W // 4)
+
+        yy, xx = jnp.meshgrid(jnp.arange(H), jnp.arange(W), indexing="ij")
+        ellipse = (
+            ((xx - center_x) / radius_x) ** 2 + ((yy - center_y) / radius_y) ** 2
+        ) <= 1.0
+        new_mask = jnp.logical_or(mask, ellipse)
+        added = jnp.sum(new_mask) - jnp.sum(mask)
+        mask = new_mask
+        points_collected += int(added)
+        blob_idx += 1
+
+    # NOTE: If we overshot, randomly drop extras
+    if points_collected > num_obs_points:
+        flat_idxs = jnp.argwhere(mask.flatten()).squeeze()
+        rng_trim, _ = random.split(rngs[-1])
+        selected = random.choice(
+            rng_trim, flat_idxs, shape=(num_obs_points,), replace=False
+        )
+        final_mask = jnp.zeros(total_points, dtype=bool).at[selected].set(True)
+    else:
+        final_mask = mask.flatten()
+
+    return final_mask
 
 
 def plot_models_predictive_means(
-    f_obs, f_hats, obs_mask, model_names, save_path: Path, log: bool = True
+    grid_size, f_obs, f_hats, obs_mask, model_names, save_path: Path, log=True
 ):
-    """
-    For each model (excluding 'Baseline_GP'), create a subplot with:
-    - f_obs
-    - Baseline_GP prediction
-    - Model prediction
-
-    The first subplot shows the observed ground truth with mask applied.
-    Plots are arranged in rows with up to 5 columns.
-    """
-    f_hat_means = [f.mean(axis=0).flatten() for f in f_hats]
-    f_obs = f_obs.flatten()
+    f_hat_means = [
+        f_mean.mean(axis=0).reshape(grid_size, grid_size) for f_mean in f_hats
+    ]
+    f_obs = f_obs.reshape(grid_size, grid_size)
     if log:
-        f_hat_means = [jnp.log1p(f) for f in f_hat_means]
-        f_obs = jnp.log1p(f_obs)
-    baseline_idx = model_names.index("Baseline_GP")
-    baseline_pred = f_hat_means[baseline_idx]
-    model_indices = [i for i, name in enumerate(model_names) if name != "Baseline_GP"]
-    num_models = len(model_indices)
-
-    cols = 5
-    total_plots = num_models + 1  # +1 for masked ground truth
-    rows = (total_plots + cols - 1) // cols
-
-    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 3 * rows), sharex=True)
-    axes = axes.flatten()
-
-    for ax in axes[total_plots:]:
-        ax.set_visible(False)  # Hide unused subplots
-
-    masked_f_obs = np.ma.masked_where(~obs_mask, f_obs)
-    ax = axes[0]
-    ax.plot(masked_f_obs, color="black", linewidth=1.5)
-    ax.set_title(r"$y_{obs}$", fontsize=10)
-    ax.tick_params(labelsize=8)
-    ax.legend(fontsize=8)
-
-    for plot_idx, model_idx in enumerate(model_indices, start=1):
-        model_name = model_names[model_idx]
-        model_pred = f_hat_means[model_idx]
-        ax = axes[plot_idx]
-        ax.plot(f_obs, label=r"$y$", color="black", linewidth=1.5)
-        ax.plot(baseline_pred, label="GP", linestyle="--", color="blue")
-        ax.plot(model_pred, label=model_name, linestyle="-", color="green")
-        ax.set_title(f"{model_name}" " Mean " r"$\hat{y}$ ", fontsize=10)
-        ax.tick_params(labelsize=8)
-        ax.legend(fontsize=8)
-
-    plt.tight_layout()
+        f_hat_means = [jnp.log(f + 1) for f in f_hat_means]
+        f_obs = jnp.log(f_obs + 1)
+    vmin = jnp.min(jnp.array([f_mean.min() for f_mean in f_hat_means])).item()
+    vmax = jnp.max(jnp.array([f_mean.max() for f_mean in f_hat_means])).item()
+    cols = 4
+    rows = int(jnp.ceil((len(f_hat_means) + 2) / cols))
+    fig, ax = plt.subplots(
+        rows, cols, figsize=(6 * cols, 7 * rows), constrained_layout=True
+    )
+    ax = ax.flatten()
+    masked_f_obs = np.ma.masked_where(~obs_mask.reshape(grid_size, grid_size), f_obs)
+    cmap = plt.cm.viridis
+    cmap.set_bad(color="black")
+    ax[0].imshow(masked_f_obs, origin="lower", cmap=cmap)
+    ax[0].set_title("y observed")
+    ax[1].imshow(f_obs, vmin=vmin, vmax=vmax, origin="lower")
+    ax[1].set_title("y")
+    for i, f_mean in enumerate(f_hat_means, start=2):
+        model_name = model_names[i - 2]
+        im = ax[i].imshow(f_mean, vmin=vmin, vmax=vmax, origin="lower")
+        ax[i].set_title("Mean " r"$\hat{y}$" f" {model_name}")
+    for i in range(len(ax)):
+        ax[i].set_axis_off()
+        if (i + 1) % cols == 0:
+            fig.colorbar(im, ax=ax[i])
     fig.savefig(save_path, dpi=200)
     plt.clf()
     plt.close(fig)
@@ -490,29 +545,32 @@ def posterior_wasserstein_distance(
     return distances
 
 
-def gen_train_params(model_name, s, default_bs=32):
-    L = s.shape[0]
-    default_steps = 200_000
+def gen_train_params(model_name, L, default_bs=32):
+    default_steps = 300_000 if L >= 2048 else 200_000
     max_lr = {
-        "Inducing DeepRV + gMLP": 5e-3,
+        "Inducing DeepRV + gMLP": 1e-3 if L <= 1024 else 5e-3,
         "DeepRV + gMLP": 5e-3 if L <= 1024 else 1e-2,
-        "DeepRV + ScanTransfomer": 1e-4,
-        "DeepRV + DKA": 5e-3,
+        "PriorCVAE": 1.0e-3 if L <= 1024 else 5e-3,
+        "DeepRV + MLP": 1.0e-3 if L <= 1024 else 5e-3,
     }[model_name]
     bs = {
         "Inducing DeepRV + gMLP": default_bs,
         "DeepRV + gMLP": int(min(1, 2048 / L) * default_bs),
-        "DeepRV + ScanTransfomer": int(min(1, 512 / L) * default_bs),
-        "DeepRV + DKA": int(min(1, 1024 / L) * default_bs),
+        "PriorCVAE": int(min(1, 2048 / L) * default_bs),
+        "DeepRV + MLP": int(min(1, 2048 / L) * default_bs),
     }[model_name]
-    train_steps = default_steps * (default_bs // bs)
+    train_step = {
+        "Inducing DeepRV + gMLP": inducing_deep_rv_train_step,
+        "DeepRV + gMLP": deep_rv_train_step,
+        "PriorCVAE": prior_cvae_train_step,
+        "DeepRV + MLP": deep_rv_train_step,
+    }[model_name]
+    train_num_steps = default_steps * (default_bs // bs)
     if model_name == "Inducing DeepRV + gMLP":
-        train_steps *= 2
-    optimizer = optax.yogi(cosine_annealing_lr(train_steps, max_lr))
-    if model_name in ["DeepRV + ScanTransfomer", "DeepRV + DKA"]:
-        optimizer = optax.adamw(max_lr)
+        train_num_steps *= 2
+    optimizer = optax.yogi(cosine_annealing_lr(train_num_steps, max_lr))
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optimizer)
-    return optimizer, max_lr, bs, train_steps
+    return optimizer, max_lr, bs, train_num_steps, train_step
 
 
 def plot_model_scalability_metrics(result_df: pd.DataFrame, save_dir: Path):
