@@ -107,36 +107,6 @@ class MLPDeepRV(nn.Module):
         return self(z, conditionals, **kwargs).f_hat
 
 
-class TransformerDeepRV(nn.Module):
-    dim: int = 64
-    num_blks: int = 2
-
-    @nn.compact
-    def __call__(self, z: Array, conditionals: Array, s: Array, **kwargs):
-        (B, L), D, C = z.shape, self.dim, conditionals.shape[0]
-        ids = jnp.repeat(jnp.arange(L, dtype=int)[None, :], B, axis=0)
-        ids_embed = nn.Embed(L, features=(D * 2) - (C + 1))(ids)
-        x = cond_as_feats(z, conditionals)
-        x = jnp.concat([ids_embed, x], axis=-1)
-        x = MLP([D * 4, D], nn.gelu)(x)
-        # TODO(jhonathan): cache d
-        d = jnp.repeat(l2_dist(s, s)[None, ...], B, axis=0)
-        for _ in range(self.num_blks):
-            attn = MultiHeadAttention(
-                proj_qs=MLP([D * 2]),
-                proj_ks=MLP([D * 2]),
-                proj_vs=MLP([D * 2]),
-                proj_out=MLP([D]),
-            )
-            ffn = MLP([D * 4, D])
-            bias = Bias.build_rbf_network_bias()(d)
-            x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(x, bias=bias)
-        return VAEOutput(MLP([D * 4, D, 1])(x))
-
-    def decode(self, z: Array, conditionals: Array, **kwargs):
-        return self(z, conditionals, **kwargs).f_hat
-
-
 class ScanTransformerDeepRV(nn.Module):
     dim: int = 64
     num_blks: int = 2

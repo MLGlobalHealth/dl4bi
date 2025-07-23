@@ -59,17 +59,17 @@ def main(gender="female", seed=42):
     )  # NOTE: dividing the population by 100 to improve numerical stability
     priors = {
         "var": dist.Gamma(1.5, 1.5),
-        "ls": dist.Uniform(0.0, 50.0),
+        "ls": dist.Uniform(1.0, 50.0),
         "beta": dist.Normal(),
     }
     binom_infer_model, cond_names = inference_model(s, priors, population)
     loader = gen_train_dataloader(s, priors)
     y_hats, all_samples, result = [y_obs], [], []
-    for model_name, model in models.items():
+    for model_name, nn_model in models.items():
         train_time, eval_mse, surrogate_decoder = None, None, None
-        if model_name != "Baseline_GP":
+        if nn_model is not None:
             train_time, eval_mse, surrogate_decoder = surrogate_model_train(
-                rng_train, rng_test, loader, model_name, model
+                rng_train, rng_test, loader, model_name, nn_model
             )
         samples, mcmc, post, infer_time = hmc(
             rng_infer, binom_infer_model, y_obs, surrogate_decoder
@@ -189,6 +189,7 @@ def inference_model(s: Array, priors: dict, population: Array):
     Returns:
         A NumPyro model function.
     """
+    surr_kwargs = {"s": s}
 
     def binomial(surrogate_decoder=None, obs_mask=True, y=None):
         var = numpyro.sample("var", priors["var"], sample_shape=())
@@ -197,7 +198,8 @@ def inference_model(s: Array, priors: dict, population: Array):
         if surrogate_decoder:  # whether to use a replacment for the GP
             z = numpyro.sample("z", dist.Normal(), sample_shape=(1, s.shape[0]))
             mu = numpyro.deterministic(
-                "mu", surrogate_decoder(z, jnp.array([var, ls])).squeeze()
+                "mu",
+                surrogate_decoder(z, jnp.array([var, ls]), **surr_kwargs).squeeze(),
             )
         else:
             K = matern_1_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
