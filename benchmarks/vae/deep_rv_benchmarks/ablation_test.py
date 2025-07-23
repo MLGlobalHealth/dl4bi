@@ -23,7 +23,7 @@ import wandb
 from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, train
-from dl4bi.vae import MLPDeepRV, PriorCVAE, TransformerDeepRV, gMLPDeepRV
+from dl4bi.vae import MLPDeepRV, PriorCVAE, ScanTransformerDeepRV, gMLPDeepRV
 from dl4bi.vae.train_utils import (
     cond_as_locs,
     deep_rv_train_step,
@@ -42,7 +42,7 @@ def main(init_seed=42, num_seeds=5):
         "PriorCVAE": PriorCVAE(MLP(dims=[L, L]), MLP(dims=[L, L]), cond_as_locs, L),
         "DeepRV + MLP": MLPDeepRV(dims=[L, L]),
         "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
-        "DeepRV + Transfomer": TransformerDeepRV(num_blks=2, dim=64),
+        "DeepRV + scanTransfomer": ScanTransformerDeepRV(num_blks=2, dim=64),
     }
     priors = {"ls": dist.Uniform(1.0, 100.0), "alpha": dist.Beta(4.0, 1.0)}
     result = []
@@ -152,7 +152,6 @@ def gen_car_dataloader(
     kernel_jit = jit(lambda tau, alpha: tau * (D - (alpha * adj_mat)))
     f_jit = jit(lambda K_inv, z: jnp.einsum("ij,bj->bi", cholesky_of_inverse(K_inv), z))
 
-    @jit
     def dataloader(rng_data):
         while True:
             rng_data, rng_alpha, rng_z = random.split(rng_data, 3)
