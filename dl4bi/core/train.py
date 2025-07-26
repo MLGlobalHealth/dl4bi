@@ -52,7 +52,7 @@ def train(
     return_state: str = "last",  # best, last, both
     state: Optional[TrainState] = None,
 ):
-    rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
+    rng_data, rng_params, rng_extra, rng_train, rng_valid = random.split(rng, 5)
     batches = train_dataloader(rng_data)
     batch = next(batches)
     rngs = {"params": rng_params, "extra": rng_extra}
@@ -92,9 +92,9 @@ def train(
             wandb.log({"Train Loss": train_loss})
         postfix["Train Loss"] = f"{train_loss:.4f}"
         if valid_interval and i % valid_interval == 0:
-            rng_valid, rng_train = random.split(rng_train)
+            rng_valid_step, rng_valid = random.split(rng_valid)
             metrics = evaluate(
-                rng_valid,
+                rng_valid_step,
                 state,
                 valid_step,
                 valid_dataloader,

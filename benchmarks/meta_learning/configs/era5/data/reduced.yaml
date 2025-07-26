@@ -15,7 +15,7 @@ train_dataloader:
   W_deg: 3.5 # 3.5 / 0.25 grid res = 14
   T_hrs: 30
   T_hrs_delta: 6
-  num_batches_per_subset: 50
+  num_batches_per_subset: 6 # 50 // 8
 valid_dataloader:
   batch_size: 8
   num_ctx_min_per_t: 45  # ~5% of 900 = 30 * 30
