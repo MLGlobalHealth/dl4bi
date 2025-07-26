@@ -118,7 +118,7 @@ def hmc(
     infer_time = (datetime.now() - start).total_seconds()
     mcmc.print_summary()
     samples = mcmc.get_samples()
-    post = Predictive(model, samples)(k2)
+    post = Predictive(model, samples)(k2, surrogate_decoder=surrogate_decoder)
     return samples, mcmc, post, infer_time
 
 

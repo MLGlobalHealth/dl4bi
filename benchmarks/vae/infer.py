@@ -105,7 +105,7 @@ def hmc(
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=f_obs)
     mcmc.print_summary()
     samples = mcmc.get_samples()
-    post = Predictive(model, samples)(k2)
+    post = Predictive(model, samples)(k2, surrogate_decoder=surrogate_decoder)
     return samples, mcmc, post
 
 

@@ -154,7 +154,7 @@ def hmc(
     infer_time = (datetime.now() - start).total_seconds()
     mcmc.print_summary()
     samples = mcmc.get_samples()
-    post = Predictive(model, samples)(k2)
+    post = Predictive(model, samples)(k2, surrogate_decoder=surrogate_decoder)
     post["infer_time"] = infer_time
     with open(model_path / "hmc_samples.pkl", "wb") as out_file:
         pickle.dump(samples, out_file)
