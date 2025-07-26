@@ -82,7 +82,7 @@ def main(cfg: DictConfig):
         state,
         model.valid_step,
         test_dataloader,
-        cfg.valid_num_steps,
+        cfg.data.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
