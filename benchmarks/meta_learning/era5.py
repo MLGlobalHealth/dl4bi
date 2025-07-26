@@ -19,6 +19,7 @@ from jax import random
 from matplotlib.colors import Normalize
 from omegaconf import DictConfig, OmegaConf
 
+from dl4bi.core.data import multiprocess_wrapper
 from dl4bi.core.train import (
     Callback,
     TrainState,
@@ -85,12 +86,16 @@ def build_dataloaders(
     num_ctx_min_per_t: int = 45,
     num_ctx_max_per_t: int = 225,
     num_test: int = 900,
+    H_deg: float = 7.5,
+    W_deg: float = 7.5,
+    T_hrs: int = 30,
+    T_hrs_delta: int = 6,
     train_region: str = "central_europe",
     valid_region: str = "northern_europe",
     test_region: str = "western_europe",
     num_batches_per_subset: int = 50,
 ):
-    grid_res, H_deg, W_deg, T_hrs, T_hrs_delta = 0.25, 7.5, 7.5, 30, 6
+    grid_res = 0.25
     H, W = int(H_deg / grid_res), int(W_deg / grid_res)
     df_train, df_valid, df_test, revert = load_data(
         train_region, valid_region, test_region

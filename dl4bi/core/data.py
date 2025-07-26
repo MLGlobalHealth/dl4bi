@@ -1,7 +1,12 @@
+import multiprocessing as mp
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields, replace
+from functools import partial
+from queue import Empty
+from typing import Callable
 
 import jax
+from jax import random
 
 
 @dataclass(frozen=True)
@@ -105,3 +110,76 @@ class Batch(Mapping):
 
     def __len__(self):
         return len(asdict(self))
+
+
+ctx = mp.get_context("spawn")
+
+
+def dataloader_worker(
+    rng: jax.Array,
+    dataloader: Callable,
+    input_queue: mp.Queue,
+    output_queue: mp.Queue,
+):
+    batches = dataloader(rng)
+    while True:
+        try:
+            cmd = input_queue.get(timeout=0.1)
+            if cmd == "STOP":
+                break
+        except Empty:
+            pass
+        try:
+            batch = next(batches)
+            output_queue.put(batch)
+        except Exception as e:
+            output_queue.put(e)
+            break
+
+
+def multiprocess_dataloader(
+    rng: jax.Array,
+    dataloader: Callable,
+    num_workers: int = 4,
+    queue_size: int = 32,
+):
+    output_queue = ctx.Queue(maxsize=queue_size)
+    input_queues = [ctx.Queue() for _ in range(num_workers)]
+    workers = []
+    for i in range(num_workers):
+        rng_i = random.fold_in(rng, i)
+        p = ctx.Process(
+            target=dataloader_worker,
+            args=(rng_i, dataloader, input_queues[i], output_queue),
+        )
+        p.daemon = True
+        p.start()
+        workers.append(p)
+
+    def generator():
+        try:
+            while True:
+                result = output_queue.get()
+                if isinstance(result, Exception):
+                    raise result
+                yield result
+        finally:
+            for q in input_queues:
+                q.put("STOP")
+            for w in workers:
+                w.join()
+
+    return generator()
+
+
+def multiprocess_wrapper(
+    dataloader: Callable,
+    num_workers: int = 4,
+    queue_size: int = 32,
+):
+    return partial(
+        multiprocess_dataloader,
+        dataloader=dataloader,
+        num_workers=num_workers,
+        queue_size=queue_size,
+    )
