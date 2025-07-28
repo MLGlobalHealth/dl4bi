@@ -176,6 +176,16 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
                 if train_time is None
                 else infer_time + train_time,
                 "MSE(y, y_hat)": ((y_obs - post["obs"].mean(axis=0)) ** 2).mean(),
+                "obs MSE(y, y_hat)": (
+                    (y_obs[obs_mask] - post["obs"].mean(axis=0)[obs_mask]) ** 2
+                ).mean(),
+                "unobs MSE(y, y_hat)": (
+                    (
+                        y_obs[jnp.logical_not(obs_mask)]
+                        - post["obs"].mean(axis=0)[jnp.logical_not(obs_mask)]
+                    )
+                    ** 2
+                ).mean(),
                 "infer_flops": infer_gflops,
                 "train_flops": train_gflops,
                 "parameters": parameters,
