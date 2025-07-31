@@ -30,10 +30,12 @@ from sps.utils import build_grid
 from utils.plot_utils import plot_infer_trace
 
 import wandb
+from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, save_ckpt, train
-from dl4bi.vae import gMLPDeepRV
+from dl4bi.vae import FixedKernelAttention, gMLPDeepRV
 from dl4bi.vae.train_utils import (
+    deep_rv_train_step,
     generate_surrogate_decoder,
     inducing_deep_rv_train_step,
 )
@@ -45,10 +47,16 @@ def main(seed=55, logged_priors=False, max_ls=50.0):
     rng_train, rng_test, rng_infer, rng_idxs, rng_obs = random.split(rng, 5)
     save_dir = Path(f"results/inducing_drv{'_log_priors' if logged_priors else ''}/")
     save_dir.mkdir(parents=True, exist_ok=True)
-    grid_dim = 128
+    grid_dim = 96
     s = build_grid([{"start": 0.0, "stop": 100.0, "num": grid_dim}] * 2).reshape(-1, 2)
     models = {
-        "DeepRV inv + gMLP": gMLPDeepRV(num_blks=4),
+        "DeepRV kernelAttn inv + gMLP": gMLPDeepRV(
+            num_blks=4, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
+        ),
+        "DeepRV kernelAttn inv + gMLP simple": gMLPDeepRV(
+            num_blks=4, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
+        ),
+        "DeepRV inv + gMLP simple": gMLPDeepRV(num_blks=4, head=MLP([128, 64, 1])),
         "Inducing Points": None,
     }
     y_obs = gen_y_obs(rng_obs, s)
@@ -62,9 +70,8 @@ def main(seed=55, logged_priors=False, max_ls=50.0):
     }
     y_hats, all_samples, result = [], [], []
     L_train = 512
-    infer_model, cond_names, s_train = inference_model_inducing_points(
-        s, priors, obs_mask, L_train
-    )
+    kmeans = KMeans(n_clusters=L_train, random_state=0)
+    s_train = kmeans.fit(s[obs_mask]).cluster_centers_  # shape (num_points, s.shape[1])
     with open(save_dir / "s_train.pkl", "wb") as ff:
         pickle.dump(s_train, ff)
     for model_name, nn_model in models.items():
@@ -78,6 +85,9 @@ def main(seed=55, logged_priors=False, max_ls=50.0):
                     rng_train, rng_test, loader, nn_model, save_dir / f"{model_name}"
                 )
             )
+        infer_model, cond_names, s_train = inference_model_inducing_points(
+            s, s_train, priors, model_name
+        )
         samples, mcmc, post, infer_time = hmc(
             rng_infer,
             infer_model,
@@ -100,6 +110,7 @@ def main(seed=55, logged_priors=False, max_ls=50.0):
 
         y_hats.append(post["obs"])
         all_samples.append(samples)
+        sq_res = (y_obs - post["obs"].mean(axis=0)) ** 2
         res = {
             "model_name": model_name,
             "train_time": train_time,
@@ -109,7 +120,9 @@ def main(seed=55, logged_priors=False, max_ls=50.0):
             "infer_time": infer_time,
             "inferred lengthscale mean": samples["ls"].mean(axis=0),
             "inferred fixed effects": samples["beta"].mean(axis=0),
-            "MSE(y, y_hat)": ((y_obs - post["obs"].mean(axis=0)) ** 2).mean(),
+            "MSE(y, y_hat)": (sq_res).mean(),
+            "obs MSE(y, y_hat)": (sq_res[obs_mask]).mean(),
+            "unobs MSE(y, y_hat)": (sq_res[jnp.logical_not(obs_mask)]).mean(),
             "ESS spatial effects": ess["f"].mean().item() if ess else None,
             "ESS lengthscale": ess["ls"].item() if ess else None,
             "ESS fixed effects": ess["beta"].item() if ess else None,
@@ -216,14 +229,16 @@ def surrogate_model_train(
     valid_interval: int = 100_000,
     valid_steps: int = 5_000,
 ):
-    lr_schedule = cosine_annealing_lr(train_num_steps, 5e-3)
-    optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
+    lr_schedule = cosine_annealing_lr(train_num_steps, 1e-3)
+    optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.adamw(lr_schedule))
     start = datetime.now()
     state = train(
         rng_train,
         model,
         optimizer,
-        inducing_deep_rv_train_step,
+        deep_rv_train_step
+        if "simple" in str(results_dir)
+        else inducing_deep_rv_train_step,
         train_num_steps,
         loader,
         inducing_valid_step,
@@ -274,18 +289,17 @@ def gen_train_dataloader(s: Array, s_train: Array, priors: dict, batch_size: int
                 "z": z,
                 "conditionals": jnp.array([ls]),
                 "K_su": K_su,
+                "K": K_uu,
             }
 
     return dataloader
 
 
-def inference_model_inducing_points(
-    s: Array, priors: dict, obs_mask: Array, num_points: int
-):
+def inference_model_inducing_points(s: Array, u: Array, priors: dict, model_name: str):
     """Builds a poisson likelihood inference model for inducing points"""
-    kmeans = KMeans(n_clusters=num_points, random_state=0)
-    u = kmeans.fit(s[obs_mask]).cluster_centers_  # shape (num_points, s.shape[1])
     surr_kwargs = {"s": u}  # we train deepRV with u
+    if "kernelAttn" in model_name:
+        surr_kwargs["K"] = None
     jitter = 5e-4 * jnp.eye(u.shape[0])
 
     def poisson_inducing(surrogate_decoder=None, obs_mask=True, y=None):
@@ -294,11 +308,13 @@ def inference_model_inducing_points(
         beta = sample("beta", priors["beta"], sample_shape=())
         K_su = matern_1_2(s, u, var, ls)
         z = sample("z", dist.Normal(), sample_shape=(1, u.shape[0]))
+        if "K" in surr_kwargs or surrogate_decoder is None:
+            K_uu = matern_1_2(u, u, var, ls) + jitter
+            surr_kwargs["K"] = K_uu
         if surrogate_decoder is not None:
             f_bar_u = surrogate_decoder(z, jnp.array([ls]), **surr_kwargs).squeeze()
             f_bar_u = deterministic("f_u_bar", f_bar_u)
         else:
-            K_uu = matern_1_2(u, u, var, ls) + jitter
             L_uu = jnp.linalg.cholesky(K_uu)
             f_bar_u = deterministic(
                 "f_u_bar", solve_triangular(L_uu.T, z[0], lower=False)

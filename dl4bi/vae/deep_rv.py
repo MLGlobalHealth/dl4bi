@@ -137,3 +137,16 @@ class ScanTransformerDeepRV(nn.Module):
 
     def decode(self, z: Array, conditionals: Array, **kwargs):
         return self(z, conditionals, **kwargs).f_hat
+
+
+class FixedKernelAttention(nn.Module):
+    proj_vs: nn.Module = MLP([64], nn.gelu)
+    gate_fn: Callable = lambda x: x
+
+    @nn.compact
+    def __call__(self, qs, ks, vs, valid_lens: Optional[Array] = None, **kwargs):
+        attn_scores = nn.softmax(kwargs["K"], axis=-1)
+        attn_res = jnp.einsum("ij,bjd->bid", attn_scores, self.proj_vs(vs))
+        attn_w = self.param("kernel_attn_scale", lambda k: jnp.array(0.1))
+        attn_res = attn_w.clip(0.0, 10.0) * attn_res
+        return attn_res, attn_scores

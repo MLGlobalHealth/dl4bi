@@ -172,6 +172,7 @@ def diff_per_loader(models_dict, s, s_train, kernel, save_dir, max_ls=50.0, bs=3
         # Precompute SVD of K_su for residual projection
         U, S, Vh = jnp.linalg.svd(K_su, full_matrices=False)
         K_uu_cond_num.append(jnp.linalg.cond(K_uu))
+        kwargs["K"] = K_uu
         for m_name, surr_dec in surr_models.items():
             pred_f_u_bar = surr_dec(batch["z"], jnp.array([ls_val]), **kwargs).squeeze()
             if "inv" not in m_name:
@@ -294,6 +295,7 @@ def gen_loader(kernel: Callable, s_train: Array, priors: dict, batch_size: int):
             yield {
                 "s": s_train,
                 "K_uu": K_uu,
+                "K": K_uu,
                 "L_uu": L_uu,
                 "f_u_bar": f_u_bar,
                 "f_u": f_u,

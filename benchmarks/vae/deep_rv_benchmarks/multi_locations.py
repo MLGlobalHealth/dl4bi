@@ -3,7 +3,7 @@ import sys
 sys.path.append("benchmarks/vae")
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Union
 
 import flax.linen as nn
 import jax.numpy as jnp
@@ -17,7 +17,7 @@ import wandb
 from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, train
-from dl4bi.vae import gMLPDeepRV
+from dl4bi.vae import FixedKernelAttention, gMLPDeepRV
 from dl4bi.vae.train_utils import deep_rv_train_step
 
 
@@ -229,6 +229,7 @@ def gen_train_params(grid_size, default_steps, default_bs=32):
 class FourierEmbed(nn.Module):
     num_bands: int = 6
     include_original: bool = True
+    head: Union[Callable, nn.Module] = lambda x: x
 
     @nn.compact
     def __call__(self, s: Array):
@@ -241,13 +242,14 @@ class FourierEmbed(nn.Module):
         s_encoded = jnp.concatenate([sin, cos], axis=-1).reshape(s.shape[0], -1)
         if self.include_original:
             s_encoded = jnp.concatenate([s, s_encoded], axis=-1)
-        return s_encoded
+        return self.head(s_encoded)
 
 
 class RFFEmbed(nn.Module):
     num_features: int = 128
     scale: float = 1.0
     include_original: bool = True
+    head: Union[Callable, nn.Module] = lambda x: x
 
     @nn.compact
     def __call__(self, s: Array):
@@ -268,20 +270,7 @@ class RFFEmbed(nn.Module):
             s_encoded = jnp.concatenate([s, rff], axis=-1)
         else:
             s_encoded = rff
-        return s_encoded
-
-
-class FixedKernelAttention(nn.Module):
-    proj_vs: nn.Module = MLP([64], nn.gelu)
-    gate_fn: Callable = lambda x: x
-
-    @nn.compact
-    def __call__(self, qs, ks, vs, valid_lens: Optional[Array] = None, **kwargs):
-        attn_scores = nn.softmax(kwargs["K"], axis=-1)
-        attn_res = jnp.einsum("ij,bjd->bid", attn_scores, self.proj_vs(vs))
-        attn_w = self.param("kernel_attn_scale", lambda k: jnp.array(0.1))
-        attn_res = attn_w.clip(0.0, 10.0) * attn_res
-        return attn_res, attn_scores
+        return self.head(s_encoded)
 
 
 # TODO(jhoott): move to batched training if it shows improvement, else remove

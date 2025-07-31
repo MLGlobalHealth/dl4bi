@@ -29,10 +29,15 @@ from sps.utils import build_grid
 from utils.plot_utils import plot_infer_trace
 
 import wandb
+from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, save_ckpt, train
-from dl4bi.vae import gMLPDeepRV
-from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
+from dl4bi.vae import FixedKernelAttention, PriorCVAE, gMLPDeepRV
+from dl4bi.vae.train_utils import (
+    cond_as_locs,
+    deep_rv_train_step,
+    generate_surrogate_decoder,
+)
 
 
 def main(seed=19, time_steps=5, grid_shape=(16, 16)):
@@ -45,9 +50,16 @@ def main(seed=19, time_steps=5, grid_shape=(16, 16)):
     s = build_grid([{"start": 0.0, "stop": 100.0, "num": grid_shape[0]}] * 2).reshape(
         -1, 2
     )
-    D = s.shape[1]
+    L, D = s.shape[0], s.shape[1]
+    T = time_steps
     models = {
-        "DeepRV + gMLP act": gMLPDeepRV(num_blks=2),
+        "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
+        "DeepRV + gMLP kernelAttn": gMLPDeepRV(
+            num_blks=2, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
+        ),
+        "PriorCVAE": PriorCVAE(
+            MLP(dims=[T * L, T * L]), MLP(dims=[T * L, T * L]), cond_as_locs, T * L
+        ),
         "Baseline_GP": None,
         "ADVI": None,
         "Inducing Points": None,
@@ -65,13 +77,13 @@ def main(seed=19, time_steps=5, grid_shape=(16, 16)):
         "nu": dist.Uniform(D, 2 * D),
         "beta": dist.Normal(),
     }
-    poisson_llk, cond_names = inference_model(s, t, priors)
     poisson_inducing_llk = inference_model_inducing_points(
         s, t, priors, spat_obs_mask, t_obs_mask, num_spatial_pts=32, num_t_pts=2
     )
     loader = gen_train_dataloader(s, t, priors, batch_size=16)
     y_hats, all_samples, result = [], [], []
     for model_name, nn_model in models.items():
+        poisson_llk, cond_names = inference_model(s, t, priors, model_name)
         model_path = save_dir / f"{model_name}"
         model_path.mkdir(parents=True, exist_ok=True)
         infer_model = (
@@ -255,13 +267,14 @@ def gen_train_dataloader(s: Array, t: Array, priors: dict, batch_size=32):
                 "s": st,
                 "f": f,
                 "z": z,
+                "K": K,
                 "conditionals": jnp.array([ls, a, alpha, nu]),
             }
 
     return dataloader
 
 
-def inference_model(s: Array, t: Array, priors: dict):
+def inference_model(s: Array, t: Array, priors: dict, model_name):
     """
     Builds a poisson likelihood inference model for GP and surrogate models
     """
@@ -270,6 +283,8 @@ def inference_model(s: Array, t: Array, priors: dict):
     t_expanded = t[:, None, None] * jnp.ones((1, L, 1))
     st = jnp.concatenate([s_expanded, t_expanded], axis=-1).reshape(T * L, D + 1)
     surrogate_kwargs = {"s": st}
+    if "kernelAttn" in model_name:
+        surrogate_kwargs["K"] = None
 
     def poisson(surrogate_decoder=None, obs_mask=True, y=None):
         var, b = 1.0, 1.0
@@ -279,6 +294,10 @@ def inference_model(s: Array, t: Array, priors: dict):
         nu = numpyro.sample("nu", priors["nu"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
         z = numpyro.sample("z", dist.Normal(), sample_shape=(1, T * L))
+        if "K" in surrogate_kwargs or surrogate_decoder is None:
+            K = gneiting_covariance_matrix(s, t, s, t, var, ls, a, alpha, b, nu)
+            K += 5e-4 * jnp.eye(T * L)
+            surrogate_kwargs["K"] = K
         if surrogate_decoder:  # NOTE: whether to use a replacment for the GP
             mu = numpyro.deterministic(
                 "mu",
@@ -287,8 +306,6 @@ def inference_model(s: Array, t: Array, priors: dict):
                 ).reshape(T, L),
             )
         else:
-            K = gneiting_covariance_matrix(s, t, s, t, var, ls, a, alpha, b, nu)
-            K += 5e-4 * jnp.eye(T * L)
             L_chol = jnp.linalg.cholesky(K)
             mu = numpyro.deterministic("mu", jnp.matmul(L_chol, z[0])).reshape(T, L)
         lambda_ = jnp.exp(beta + mu)
