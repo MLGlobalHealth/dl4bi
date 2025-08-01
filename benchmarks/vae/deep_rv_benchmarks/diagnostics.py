@@ -25,7 +25,7 @@ def compare_grads(
     s: Array,
     infer_model_fn: Callable,
     priors: dict[str, dist.Distribution],
-    obs_mask: Union[bool, Array],
+    s_train: Array,
     num_points: int,
     save_dir: Path,
     target: str = "f",
@@ -38,7 +38,7 @@ def compare_grads(
     surr_models = get_surr_decs(models_dict, save_dir)
     results_dict = {}
     for model_name in models_dict.keys():
-        infer_model, _, _ = infer_model_fn(s, priors, obs_mask, num_points)
+        infer_model, _, _ = infer_model_fn(s, s_train, priors, model_name)
         surr_dec = surr_models.get(model_name, None)
         results_dict[model_name] = compute_gradients_for_target(
             infer_model, rng, num_points, target, surr_dec, max_ls

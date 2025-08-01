@@ -165,14 +165,13 @@ def main(seed=55, logged_priors=False, max_ls=50.0):
     result.to_csv(save_dir / "res.csv")
     # from diagnostics import compare_grads, diff_per_loader
 
-    # _, _, s_train = inference_model_inducing_points(s, priors, obs_mask, L_train)
     # diff_per_loader(models, s, s_train, matern_1_2, save_dir, max_ls)
     # compare_grads(
     #     models,
     #     s,
     #     inference_model_inducing_points,
     #     priors,
-    #     obs_mask,
+    #     s_train,
     #     L_train,
     #     save_dir,
     #     target="f",
@@ -183,13 +182,12 @@ def main(seed=55, logged_priors=False, max_ls=50.0):
     #     s,
     #     inference_model_inducing_points,
     #     priors,
-    #     obs_mask,
+    #     s_train,
     #     L_train,
     #     save_dir,
     #     target="f_u_bar",
     #     max_ls=max_ls,
     # )
-    # exit(0)
 
 
 def hmc(
