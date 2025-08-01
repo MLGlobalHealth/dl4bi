@@ -580,7 +580,9 @@ def gen_train_params(model_name, L, default_bs=32):
     return optimizer, max_lr, bs, train_num_steps, train_step
 
 
-def plot_model_scalability_metrics(result_df: pd.DataFrame, save_dir: Path):
+def plot_model_scalability_metrics(
+    result_df: pd.DataFrame, save_dir: Path, prefix: str = ""
+):
     """
     Plots scalability and performance metrics across grid sizes for multiple models.
     Assumes 'grid_size' and 'model_name' columns exist in `result_df`.
@@ -652,7 +654,7 @@ def plot_model_scalability_metrics(result_df: pd.DataFrame, save_dir: Path):
         loc="upper left",
     )
     plt.tight_layout()
-    plt.savefig(save_dir / "speed.png")
+    plt.savefig(save_dir / f"{prefix}speed.png")
 
     # --- Scalability metrics
     _, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True)
@@ -660,20 +662,59 @@ def plot_model_scalability_metrics(result_df: pd.DataFrame, save_dir: Path):
     _plot_metric_group(axes[1], "infer_flops", "Inference FLOPs per Sample", "GFLOPs")
     _plot_metric_group(axes[2], "train_flops", "Training FLOPs per Sample", "GFLOPs")
     plt.tight_layout()
-    plt.savefig(save_dir / "flops.png")
+    plt.savefig(save_dir / f"{prefix}flops.png")
 
-    # --- Performance metrics
+    # --- Performance metrics: Row 1
     _, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True)
-    _plot_metric_group(axes[0], "MSE(y, y_hat)", "Prediction MSE", "MSE")
+    _plot_metric_group(
+        axes[0],
+        "MSE(y_hat_gp, y_hat)",
+        "MSE Mean Prediction vs. GP Mean Prediction",
+        "MSE",
+        loc="upper left",
+    )
     _plot_metric_group(
         axes[1],
         "ls wasserstein distance",
         "Lengthscale Wasserstein Distance",
         "Distance",
+        loc="upper left",
     )
-    _plot_metric_group(axes[2], "ESS ls", "Lengthscale ESS", "ESS")
+    _plot_metric_group(
+        axes[2],
+        "ESS ls",
+        "Lengthscale ESS",
+        "ESS",
+        loc="upper left",
+    )
     plt.tight_layout()
-    plt.savefig(save_dir / "performance.png")
+    plt.savefig(save_dir / f"{prefix}performance_row1.png")
+
+    # --- Performance metrics: Row 2
+    _, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True)
+    _plot_metric_group(
+        axes[0],
+        "MSE(y, y_hat)",
+        "Mean Prediction MSE (All Locations)",
+        "MSE",
+        loc="upper left",
+    )
+    _plot_metric_group(
+        axes[1],
+        "obs MSE(y, y_hat)",
+        "Mean Prediction MSE (Observed Locations)",
+        "MSE",
+        loc="upper left",
+    )
+    _plot_metric_group(
+        axes[2],
+        "unobs MSE(y, y_hat)",
+        "Mean Prediction MSE (Unobserved Locations)",
+        "MSE",
+        loc="upper left",
+    )
+    plt.tight_layout()
+    plt.savefig(save_dir / f"{prefix}performance_row2.png")
 
 
 class LogScaleTransform(ParameterFreeTransform):
