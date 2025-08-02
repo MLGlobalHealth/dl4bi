@@ -136,9 +136,9 @@ class BiasedFlexAttention(nn.Module):
 
 
 def sample_batch(B: int, H: int, L: int, D: int, D_s: int):
-    qs, ks, vs = torch.randn(3, B, H, L, D, dtype=torch.bfloat16)
-    qs_s, ks_s = torch.randn(2, B, L, D_s, dtype=torch.bfloat16)
-    qs_t, ks_t = torch.randn(2, B, L, 1, dtype=torch.bfloat16)
+    qs, ks, vs = torch.randn(3, B, H, L, D)
+    qs_s, ks_s = torch.randn(2, B, L, D_s)
+    qs_t, ks_t = torch.randn(2, B, L, 1)
     return {
         "qs": qs,
         "ks": ks,
