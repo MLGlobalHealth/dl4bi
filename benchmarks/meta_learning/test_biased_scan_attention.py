@@ -86,7 +86,7 @@ def parse_args(argv):
     parser.add_argument(
         "-N",
         type=int,
-        default=1000,
+        default=100,
         help="Number of trials.",
     )
     parser.add_argument(

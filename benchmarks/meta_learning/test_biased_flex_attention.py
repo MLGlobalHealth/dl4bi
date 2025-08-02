@@ -52,14 +52,37 @@ def main(seed: int, N: int, B: int, H: int, L: int, D: int, D_s: int):
     )
 
 
-# NOTE: this seems to have trouble with the backward pass, even without
-# reductions; performance for biased flex attention and biased scan attention
-# for N=100, and various L:
-# L=256 BFA: (0.000252, 0.024034), BSA: (0.000169, 0.000492), BFA / BSA: (1.49, 48.8)
-# L=512 BFA: (0.000395, 0.089612), BSA: (0.001139, 0.00391), BFA / BSA: (0.35, 22.92)
-# L=1024 BFA: (0.001151, 0.386958), BSA: (0.005063, 0.016702), BFA / BSA: (0.23, 23.2)
-# L=2048 BFA: (0.003596, 1.050770), BSA: (0.020340, 0.086891), BFA / BSA: (0.18, 12.1)
-# L=4096 BFA: (0.013071, 4.199244), BSA: (0.080129, 0.329538), BFA / BSA: (0.16, 12.7)
+# NOTE: while FlexAttention can be up to ~2x faster in the forward pass, it is
+# typically 12-50x slower in the backward pass (on 4090), with N=100 for each:
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=128
+# BFA: 0.000268±0.000081s, 0.010269±0.035988s
+# BSA: 0.000090±0.000007s, 0.000182±0.000009s
+# BFA / BSA: (2.98, 56.42)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=256
+# BFA: 0.000443±0.000018s, 0.024941±0.040403s
+# BSA: 0.000177±0.000017s, 0.000500±0.000022s
+# BFA / BSA: (2.50, 49.89)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=512
+# BFA: 0.001138±0.000025s, 0.086045±0.042373s
+# BSA: 0.001447±0.000049s, 0.003369±0.000077s
+# BFA / BSA: (0.79, 25.54)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=1024
+# BFA: 0.003752±0.000031s, 0.394077±0.073106s
+# BSA: 0.005365±0.000078s, 0.016964±0.000079s
+# BFA / BSA: (0.70, 23.23)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=2048
+# BFA: 0.013611±0.000095s, 1.091492±0.087978s
+# BSA: 0.022590±0.000165s, 0.089980±0.000110s
+# BFA / BSA: (0.60, 12.13)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=4096
+#
+# BFA / BSA: ()
 class RBFBias(nn.Module):
     def __init__(self, num_heads: int, num_s: int, num_t: int):
         super().__init__()
