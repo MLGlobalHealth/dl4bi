@@ -3,10 +3,6 @@ train_num_steps: 100000
 valid_num_steps: 100 # exhaust valid dataloader
 valid_interval: 5000
 plot_interval: 20000
-splits:
-  train_years: [2018, 2019, 2020, 2021]
-  valid_years: [2023]
-  test_years: [2023]
 train_dataloader:
   img_size: 32
   num_ctx_min_per_t: 50

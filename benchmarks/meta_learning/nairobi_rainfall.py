@@ -45,15 +45,14 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    ds_train, ds_valid, ds_test, revert = load_data(**cfg.data.splits)
+    ds_train, ds_test = load_data()
     train_dataloader = partial(dataloader, ds=ds_train, **cfg.data.train_dataloader)
-    valid_dataloader = partial(dataloader, ds=ds_valid, **cfg.data.valid_dataloader)
+    valid_dataloader = partial(dataloader, ds=ds_test, **cfg.data.valid_dataloader)
     test_dataloader = partial(dataloader, ds=ds_test, **cfg.data.test_dataloader)
     callback_dataloader = partial(
         dataloader,
-        ds=ds_valid,
+        ds=ds_test,
         is_callback=True,
-        revert=revert,
         **cfg.data.callback_dataloader,
     )
     optimizer = instantiate(cfg.optimizer)
@@ -103,6 +102,19 @@ def dataloader(
 ):
     R, H, W, S = ds.region.size, ds.i.size, ds.j.size, img_size
     minval, maxval = jnp.array([0, 0]), jnp.array([H - S, W - S])
+
+    def revert_t(t: jax.Array):
+        half_hours = np.rint(
+            t * ds.half_hour_since_start_std.values + ds.half_hour_since_start_mu.values
+        )
+        return ds.t_min.values + (half_hours * np.timedelta64(30, "m"))
+
+    def revert_f(f: jax.Array):
+        return jnp.expm1(
+            f * ds.precip_log1p_std.values.item() + ds.precip_log1p_mu.values.item()
+        )
+
+    revert = {"t": revert_t, "f": revert_f}
     while True:
         rng_r, rng_t, rng_pos, rng = random.split(rng, 4)
         r = random.choice(rng_r, R, (1,)).item()
@@ -113,7 +125,7 @@ def dataloader(
             region=r,
             i=slice(i, i + S),
             j=slice(j, j + S),
-            time=t_mask,
+            time=t_mask.compute(),
         )
         precip_std = ds_subset.precip_log1p_standardized
         subset = SpatiotemporalData(
@@ -141,21 +153,37 @@ def dataloader(
             yield (batch, revert) if is_callback else batch
 
 
-def load_data(
-    train_years: Sequence[int] = [2018, 2019, 2020, 2021],
-    valid_years: Sequence[int] = [2023],
-    test_years: Sequence[int] = [2023],
-):
-    ds = xr.open_zarr("cache/nairobi_rainfall", consolidated=True)
-    half_hour_of_day = ds.time.dt.hour.data * 2 + ds.time.dt.minute.data // 30
-    ds = ds.assign_coords({"half_hour_of_day": ("time", half_hour_of_day)})
-    # NOTE: overwrite to save space (this is huge)
-    ds["precipitation"] = xr.ufuncs.log1p(ds.precipitation)
-    ds_train, ds_valid, ds_test = split_train_valid_test(
-        ds, train_years, valid_years, test_years
+def load_data():
+    path = Path("cache/nairobi_rainfall")
+    if not (path / "train.zarr").exists():
+        return download_and_preprocess()
+    return (
+        xr.open_zarr(path / "train.zarr", consolidated=True),
+        xr.open_zarr(path / "test.zarr", consolidated=True),
     )
+
+
+def download_and_preprocess():
+    path = "cache/nairobi_rainfall/raw.zarr"
+    if not Path(path).exists():
+        raise Exception("Missing data! See 'download' function in this file!")
+    ds = xr.open_zarr("cache/nairobi_rainfall/raw.zarr", consolidated=True)
     print("\nStandardizing data based on training set; may take a bit...")
-    return standardize_using_train(ds_train, ds_valid, ds_test)
+    ds_train, ds_test = preprocess(ds)
+    print("\nSaving preprocessed datasets to .zarr's...")
+    ds_train.to_zarr(
+        "cache/nairobi_rainfall/train.zarr",
+        mode="w",
+        consolidated=True,
+        zarr_version=2,
+    )
+    ds_test.to_zarr(
+        "cache/nairobi_rainfall/test.zarr",
+        mode="w",
+        consolidated=True,
+        zarr_version=2,
+    )
+    return ds_train, ds_test
 
 
 def download(bucket_name):  # bucket_name is private for now
@@ -167,27 +195,28 @@ def download(bucket_name):  # bucket_name is private for now
     for blob in blobs:
         if blob.name.endswith("/"):
             continue  # skip "folders"
-        local_path = os.path.join("cache/nairobi_rainfall", blob.name)
+        local_path = os.path.join("cache/nairobi_rainfall/raw.zarr", blob.name)
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         blob.download_to_filename(local_path)
         print(f"Downloaded {blob.name} to {local_path}")
 
 
-def split_train_valid_test(
+def split_train_test(
     ds: xr.Dataset,
-    train_years: Sequence[int] = [2018, 2019, 2020, 2021],
-    valid_years: Sequence[int] = [2023],
-    test_years: Sequence[int] = [2023],
+    train_years: Sequence[int],
+    test_years: Sequence[int],
 ):
     extract = lambda years: ds.isel(time=ds.time.dt.year.isin(years))
-    return extract(train_years), extract(valid_years), extract(test_years)
+    return extract(train_years), extract(test_years)
 
 
-def standardize_using_train(
-    ds_train: xr.Dataset,
-    ds_valid: xr.Dataset,
-    ds_test: xr.Dataset,
-):
+def preprocess(ds: xr.Dataset):
+    train_years = [2018, 2019, 2020, 2021]
+    test_years = [2023]
+    half_hour_of_day = ds.time.dt.hour.data * 2 + ds.time.dt.minute.data // 30
+    ds = ds.assign_coords({"half_hour_of_day": ("time", half_hour_of_day)})
+    ds["precip_log1p"] = xr.ufuncs.log1p(ds.precipitation)
+    ds_train, ds_test = split_train_test(ds, train_years, test_years)
     t_min = ds_train.time.min().values
 
     def _half_hour(ds: xr.Dataset):
@@ -199,15 +228,21 @@ def standardize_using_train(
     def _stdize(arr, mu, std):
         return ((arr - mu) / std).data.astype("float32")
 
-    precip_mu, precip_std = _mu_std(ds_train.precipitation)
+    precip_mu, precip_std = _mu_std(ds_train.precip_log1p)
     half_hour_mu, half_hour_std = _mu_std(_half_hour(ds_train))
 
-    def standardize(ds: xr.Dataset):
-        return ds.assign(
+    def standardize_and_filter(ds: xr.Dataset):
+        keep = [
+            "precip_log1p_standardized",
+            "half_hour_since_start_standardized",
+            "half_hour_of_day_normalized",
+            "spherical_coords",
+        ]
+        ds = ds.assign(
             {
                 "precip_log1p_standardized": (
                     ("region", "time", "i", "j"),
-                    _stdize(ds.precipitation, precip_mu, precip_std),
+                    _stdize(ds.precip_log1p, precip_mu, precip_std),
                 ),
                 "half_hour_since_start_standardized": (
                     "time",
@@ -218,18 +253,15 @@ def standardize_using_train(
                     (ds.half_hour_of_day / 47.0).data.astype("float32"),
                 ),
             }
-        )
+        )[keep]
+        ds["precip_log1p_mu"] = precip_mu
+        ds["precip_log1p_std"] = precip_std
+        ds["half_hour_since_start_mu"] = half_hour_mu
+        ds["half_hour_since_start_std"] = half_hour_std
+        ds["t_min"] = t_min
+        return ds
 
-    def revert_t(t: jax.Array):
-        half_hours = np.rint(t * half_hour_std + half_hour_mu)
-        return t_min + (half_hours * np.timedelta64(30, "m"))
-
-    return (
-        standardize(ds_train),
-        standardize(ds_valid),
-        standardize(ds_test),
-        {"t": revert_t},
-    )
+    return standardize_and_filter(ds_train), standardize_and_filter(ds_test)
 
 
 def plot(
@@ -252,6 +284,8 @@ def plot(
         batch,
         t_ctx=t_to_label(revert["t"](batch.t_ctx)),
         t_test=t_to_label(revert["t"](batch.t_test)),
+        f_ctx=revert["f"](batch.f_ctx),
+        f_test=revert["f"](batch.f_test),
     )
     f_pred, f_std = output.mu, output.std
     cmap = mpl.colormaps.get_cmap("Spectral_r")
