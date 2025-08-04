@@ -87,65 +87,45 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-# TODO(danj): implement
 def dataloader(
     rng: jax.Array,
     ds: xr.Dataset,
+    img_size: int = 32,
+    num_ctx_min_per_t: int = 50,
+    num_ctx_max_per_t: int = 256,
+    num_test: int = 1024,
+    num_t: int = 5,
+    t_interval: int = 2,  # every hour (values are every half hour)
     batch_size: int = 16,
-    num_ctx_min_per_t: int = 45,
-    num_ctx_max_per_t: int = 225,
-    num_test: int = 900,
-    H_deg: float = 7.5,
-    W_deg: float = 7.5,
-    T_hrs: int = 30,
-    T_hrs_delta: int = 6,
     num_batches_per_subset: int = 50,
     is_callback: bool = False,
     revert: Optional[Callable] = None,
 ):
-    lat_uniq, lng_uniq = ds.latitude.data, ds.longitude.data
-    lat_choices = lat_uniq[lat_uniq <= lat_uniq.max() - H_deg]
-    lng_choices = lng_uniq[lng_uniq <= lng_uniq.max() - W_deg]
+    R, H, W, S = ds.region.size, ds.i.size, ds.j.size, img_size
+    minval, maxval = jnp.array([0, 0]), jnp.array([H - S, W - S])
     while True:
-        # filter to random starting time and lat/lng block
-        rng_t, rng_lat, rng_lng, rng_b, rng = random.split(rng, 5)
-        hr_start = random.choice(rng_t, T_hrs_delta, (1,)).item()
-        lat_start = random.choice(rng_lat, lat_choices, (1,)).item()
-        lng_start = random.choice(rng_lng, lng_choices, (1,)).item()
-        time_idx = (ds.hour_of_day + hr_start) % T_hrs_delta == 0
-        ds_subset = ds.sel(
-            time=ds.time[time_idx],
-            # add or subtract 1e-6 because upper bounds are exclusive
-            latitude=slice(lat_start + H_deg, lat_start + 1e-6),  # lats are decreasing
-            longitude=slice(lng_start, lng_start + W_deg - 1e-6),  # lngs are increasing
-        )
-        elev_std = ds_subset.elevation_standardized
+        rng_r, rng_t, rng_pos, rng = random.split(rng, 4)
+        r = random.choice(rng_r, R, (1,)).item()
+        t_start = random.choice(rng_t, 48, (1,)).item()
+        t_idx = (ds.half_hour_of_day + t_start) % t_interval == 0
+        i, j = random.randint(rng_pos, (2,), minval, maxval)
+        ds_subset = ds.sel(region=r, time=ds.time[t_idx])
+        ds_subset = ds_subset.isel(i=slice(i, i + S), j=slice(j, j + S))
+        precip_std = ds_subset.precip_log1p_standardized
         subset = SpatiotemporalData(
-            x=jnp.stack(
-                [
-                    elev_std.values,
-                    ds_subset.hour_of_day_normalized.broadcast_like(elev_std).values,
-                ],
-                axis=-1,
-            ),
-            s=jnp.stack(
-                [
-                    ds_subset.latitude_standardized.broadcast_like(elev_std).values,
-                    ds_subset.longitude_standardized.broadcast_like(elev_std).values,
-                ],
-                axis=-1,
-            ),
-            t=ds_subset.hour_since_start_standardized.values,
-            f=ds_subset.temperature_standardized.broadcast_like(elev_std).values[
+            x=ds_subset.half_hour_of_day_normalized.broadcast_like(precip_std).values[
                 ..., None
             ],
+            s=ds_subset.spherical_coords.broadcast_like(precip_std).values,
+            t=ds_subset.half_hour_since_start_standardized.values,
+            f=ds_subset.precip_log1p_standardized.values[..., None],
         )
         # create a number of batches from this filtered subset
         for _ in range(num_batches_per_subset):
             rng_b, rng = random.split(rng)
             batch = subset.batch(
                 rng=rng_b,
-                num_t=T_hrs // T_hrs_delta,
+                num_t=num_t,
                 random_t=False,
                 num_ctx_min_per_t=num_ctx_min_per_t,
                 num_ctx_max_per_t=num_ctx_max_per_t,
@@ -158,14 +138,19 @@ def dataloader(
 
 
 def load_data(
-    train_years: Sequence[int],
-    valid_years: Sequence[int],
-    test_years: Sequence[int],
+    train_years: Sequence[int] = [2018, 2019, 2020, 2021],
+    valid_years: Sequence[int] = [2023],
+    test_years: Sequence[int] = [2023],
 ):
     ds = xr.open_zarr("cache/nairobi_rainfall", consolidated=True)
+    half_hour_of_day = ds.time.dt.hour.data * 2 + ds.time.dt.minute.data // 30
+    ds = ds.assign_coords({"half_hour_of_day": ("time", half_hour_of_day)})
+    # NOTE: overwrite to save space (this is huge)
+    ds["precipitation"] = xr.ufuncs.log1p(ds.precipitation)
     ds_train, ds_valid, ds_test = split_train_valid_test(
         ds, train_years, valid_years, test_years
     )
+    print("\nStandardizing data based on training set; may take a bit...")
     return standardize_using_train(ds_train, ds_valid, ds_test)
 
 
@@ -185,12 +170,12 @@ def download(bucket_name):  # bucket_name is private for now
 
 def split_train_valid_test(
     ds: xr.Dataset,
-    train_years: Sequence[int],
-    valid_years: Sequence[int],
-    test_years: Sequence[int],
+    train_years: Sequence[int] = [2018, 2019, 2020, 2021],
+    valid_years: Sequence[int] = [2023],
+    test_years: Sequence[int] = [2023],
 ):
-    # TODO(danj): implement
-    return ds_train, ds_valid, ds_test
+    extract = lambda years: ds.sel(time=ds.time.dt.year.isin(years))
+    return extract(train_years), extract(valid_years), extract(test_years)
 
 
 def standardize_using_train(
@@ -204,23 +189,28 @@ def standardize_using_train(
         return (ds.time - t_min) / np.timedelta64(30, "m")
 
     def _mu_std(arr: xr.DataArray):
-        return arr.mean().item(), arr.std().item()
+        return arr.mean().compute().item(), arr.std().compute().item()
 
     def _stdize(arr, mu, std):
         return ((arr - mu) / std).data.astype("float32")
 
+    precip_mu, precip_std = _mu_std(ds_train.precipitation)
     half_hour_mu, half_hour_std = _mu_std(_half_hour(ds_train))
 
     def standardize(ds: xr.Dataset):
         return ds.assign(
             {
+                "precip_log1p_standardized": (
+                    ("region", "time", "i", "j"),
+                    _stdize(ds.precipitation, precip_mu, precip_std),
+                ),
                 "half_hour_since_start_standardized": (
                     "time",
                     _stdize(_half_hour(ds), half_hour_mu, half_hour_std),
                 ),
-                "hour_of_day_normalized": (
+                "half_hour_of_day_normalized": (
                     "time",
-                    (ds.time.dt.hour / 23.0).data.astype("float32"),
+                    (ds.half_hour_of_day / 47.0).data.astype("float32"),
                 ),
             }
         )

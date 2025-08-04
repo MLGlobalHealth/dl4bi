@@ -3,13 +3,13 @@ defaults:
   - model: bsa_tnp
   - data: reduced
 seed: 42
-wandb: True
+wandb: False
 project: Nairobi Rainfall
 optimizer:
   _target_: optax.chain
   _args_:
     - _target_: optax.clip_by_global_norm
-      max_norm: 0.5
+      max_norm: 1.0
     - _target_: optax.adamw
       learning_rate: 5.0e-4
       b1: 0.9

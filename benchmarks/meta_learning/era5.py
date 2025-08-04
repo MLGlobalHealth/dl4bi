@@ -109,7 +109,7 @@ def dataloader(
     lng_choices = lng_uniq[lng_uniq <= lng_uniq.max() - W_deg]
     while True:
         # filter to random starting time and lat/lng block
-        rng_t, rng_lat, rng_lng, rng_b, rng = random.split(rng, 5)
+        rng_t, rng_lat, rng_lng, rng = random.split(rng, 4)
         hr_start = random.choice(rng_t, T_hrs_delta, (1,)).item()
         lat_start = random.choice(rng_lat, lat_choices, (1,)).item()
         lng_start = random.choice(rng_lng, lng_choices, (1,)).item()
