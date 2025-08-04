@@ -11,7 +11,8 @@ torch.set_default_device("cuda:0")
 
 
 # NOTE (2025-09-02): while FlexAttention can be up to 40% faster in the forward
-# pass, it is typically 12-50x slower in the backward pass (on 4090), with N=100:
+# pass, it is typically 12-50x slower in the backward pass (on 4090), with
+# N=100, 5 spatial bias functions and 3 temporal bias functions:
 #
 # B=32, H=4, D=64, D_s=2, D_t=1, L=128
 # BFA: 0.000259±0.000093s, 0.010199±0.036357s
@@ -42,6 +43,39 @@ torch.set_default_device("cuda:0")
 # BFA: 0.052779±0.000342s, 4.291944±0.037363s
 # BSA: 0.086497±0.000157s, 0.342182±0.000353s
 # BFA / BSA: (0.61, 12.54)
+#
+#
+# With N=100, 1 spatial bias function and 1 temporal bias function:
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=128
+# BFA: 0.000236±0.000110s, 0.006798±0.022840s
+# BSA: 0.000080±0.000010s, 0.000126±0.000015s
+# BFA / BSA: (2.95, 53.95)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=256 (16x16 images)
+# BFA: 0.000386±0.000018s, 0.018491±0.021535s
+# BSA: 0.000160±0.000037s, 0.000244±0.000026s
+# BFA / BSA: (2.41, 75.78)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=512
+# BFA: 0.000987±0.000028s, 0.066082±0.023154s
+# BSA: 0.001138±0.000049s, 0.002020±0.000070s
+# BFA / BSA: (0.86, 32.71)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=1024 (32x32 images)
+# BFA: 0.003276±0.000035s, 0.256531±0.024699s
+# BSA: 0.004149±0.000070s, 0.007567±0.000111s
+# BFA / BSA: (0.79, 33.90)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=2048
+# BFA: 0.011905±0.000099s, 1.016791±0.024317s
+# BSA: 0.017520±0.000104s, 0.048058±0.000224s
+# BFA / BSA: (0.68, 21.16)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=4096 (64x64 images)
+# BFA: 0.046604±0.000314s, 4.086736±0.020091s
+# BSA: 0.067204±0.000104s, 0.181440±0.000291s
+# BFA / BSA: (0.69, 22.52)
 
 
 def main(seed: int, N: int, B: int, H: int, L: int, D: int, D_s: int):

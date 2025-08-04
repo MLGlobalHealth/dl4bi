@@ -42,7 +42,7 @@ def main(seed: int, N: int, B: int, H: int, L: int, D: int, D_s: int):
 
         start_bwd = time.perf_counter()
         grads = jit_bwd(params, **b)
-        grads["params"]["s_bias_a"].block_until_ready()
+        jax.tree_util.tree_map(lambda x: x.block_until_ready(), grads)
         stop_bwd = time.perf_counter()
         times_bwd = times_bwd.at[i].set(stop_bwd - start_bwd)
     print(
