@@ -96,6 +96,7 @@ def dataloader(
     num_t: int = 5,
     t_interval: int = 2,  # every hour (values are every half hour)
     batch_size: int = 16,
+    chunk_size: int = 2048,
     num_batches_per_subset: int = 50,
     is_callback: bool = False,
     revert: Optional[Callable] = None,
@@ -116,29 +117,31 @@ def dataloader(
 
     revert = {"t": revert_t, "f": revert_f}
     while True:
-        rng_r, rng_t, rng_pos, rng = random.split(rng, 4)
-        r = random.choice(rng_r, R, (1,)).item()
-        t_start = random.choice(rng_t, 48, (1,)).item()
-        t_mask = (ds.half_hour_of_day + t_start) % t_interval == 0
+        rng_hr, rng_t, rng_pos, rng = random.split(rng, 4)
+        half_hr_start = random.choice(rng_hr, 48, (1,)).item()
+        t_start = random.choice(rng_t, ds.time.size - chunk_size, (1,)).item()
         i, j = random.randint(rng_pos, (2,), minval, maxval)
         ds_subset = ds.isel(
-            region=r,
             i=slice(i, i + S),
             j=slice(j, j + S),
-            time=t_mask.compute(),
+            time=slice(t_start, t_start + chunk_size),
         )
-        precip_std = ds_subset.precip_log1p_standardized
-        subset = SpatiotemporalData(
-            x=ds_subset.half_hour_of_day_normalized.broadcast_like(precip_std).values[
-                ..., None
-            ],
-            s=ds_subset.spherical_coords.broadcast_like(precip_std).values,
-            t=ds_subset.half_hour_since_start_standardized.values,
-            f=ds_subset.precip_log1p_standardized.values[..., None],
-        )
+        t_mask = (ds_subset.half_hour_of_day + half_hr_start) % t_interval == 0
+        ds_subset = ds_subset.sel(time=t_mask.compute())
         # create a number of batches from this filtered subset
         for _ in range(num_batches_per_subset):
-            rng_b, rng = random.split(rng)
+            rng_r, rng_b, rng = random.split(rng, 3)
+            r = random.choice(rng_r, ds.region.size, (1,)).item()
+            ds_subset_r = ds_subset.sel(region=r)
+            precip_std = ds_subset_r.precip_log1p_standardized
+            subset = SpatiotemporalData(
+                x=ds_subset_r.half_hour_of_day_normalized.broadcast_like(
+                    precip_std
+                ).values[..., None],
+                s=ds_subset_r.spherical_coords.broadcast_like(precip_std).values,
+                t=ds_subset_r.half_hour_since_start_standardized.values,
+                f=ds_subset_r.precip_log1p_standardized.values[..., None],
+            )
             batch = subset.batch(
                 rng=rng_b,
                 num_t=num_t,

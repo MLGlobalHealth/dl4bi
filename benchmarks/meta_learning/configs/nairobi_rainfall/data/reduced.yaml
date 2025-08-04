@@ -5,12 +5,12 @@ valid_interval: 5000
 plot_interval: 20000
 train_dataloader:
   img_size: 32
-  num_ctx_min_per_t: 50
-  num_ctx_max_per_t: 256
+  num_ctx_min_per_t: 1024
+  num_ctx_max_per_t: 1024
   num_test: 1024
   num_t: 5
   t_interval: 2  # every hour (values are every half hour)
-  batch_size: 16
+  batch_size: 8
   num_batches_per_subset: 50
 valid_dataloader: ${.train_dataloader}
 test_dataloader: ${.train_dataloader}
