@@ -54,7 +54,7 @@ def main(cfg: DictConfig):
         ds=ds_valid,
         is_callback=True,
         revert=revert,
-        **cfg.data.valid_dataloader,
+        **cfg.data.callback_dataloader,
     )
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
@@ -107,10 +107,14 @@ def dataloader(
         rng_r, rng_t, rng_pos, rng = random.split(rng, 4)
         r = random.choice(rng_r, R, (1,)).item()
         t_start = random.choice(rng_t, 48, (1,)).item()
-        t_idx = (ds.half_hour_of_day + t_start) % t_interval == 0
+        t_mask = (ds.half_hour_of_day + t_start) % t_interval == 0
         i, j = random.randint(rng_pos, (2,), minval, maxval)
-        ds_subset = ds.sel(region=r, time=ds.time[t_idx])
-        ds_subset = ds_subset.isel(i=slice(i, i + S), j=slice(j, j + S))
+        ds_subset = ds.isel(
+            region=r,
+            i=slice(i, i + S),
+            j=slice(j, j + S),
+            time=t_mask,
+        )
         precip_std = ds_subset.precip_log1p_standardized
         subset = SpatiotemporalData(
             x=ds_subset.half_hour_of_day_normalized.broadcast_like(precip_std).values[
@@ -174,7 +178,7 @@ def split_train_valid_test(
     valid_years: Sequence[int] = [2023],
     test_years: Sequence[int] = [2023],
 ):
-    extract = lambda years: ds.sel(time=ds.time.dt.year.isin(years))
+    extract = lambda years: ds.isel(time=ds.time.dt.year.isin(years))
     return extract(train_years), extract(valid_years), extract(test_years)
 
 
@@ -216,12 +220,8 @@ def standardize_using_train(
         )
 
     def revert_t(t: jax.Array):
-        half_hours = (
-            np.rint(t * half_hour_std + half_hour_mu)
-            .astype(int)
-            .astype(np.timedelta64(30, "m"))
-        )
-        return t_min + half_hours
+        half_hours = np.rint(t * half_hour_std + half_hour_mu)
+        return t_min + (half_hours * np.timedelta64(30, "m"))
 
     return (
         standardize(ds_train),

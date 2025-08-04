@@ -1,8 +1,8 @@
 name: reduced
-train_num_steps: 25000 # 100000 / 4 because batch size is 8x larger
+train_num_steps: 100000
 valid_num_steps: 100 # exhaust valid dataloader
 valid_interval: 5000
-plot_interval: 25000
+plot_interval: 20000
 splits:
   train_years: [2018, 2019, 2020, 2021]
   valid_years: [2023]
@@ -18,3 +18,4 @@ train_dataloader:
   num_batches_per_subset: 50
 valid_dataloader: ${.train_dataloader}
 test_dataloader: ${.train_dataloader}
+callback_dataloader: ${.train_dataloader} # TODO(danj): update to full-res
