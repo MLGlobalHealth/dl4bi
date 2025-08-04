@@ -159,6 +159,7 @@ def load_data(
 
 
 def download(bucket_name):  # bucket_name is private for now
+    # pip install google-cloud-storage
     from google.cloud import storage
 
     client = storage.Client.create_anonymous_client()
