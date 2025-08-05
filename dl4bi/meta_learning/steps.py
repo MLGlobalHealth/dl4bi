@@ -51,6 +51,50 @@ def likelihood_valid_step(
     return output.metrics(batch["f_test"], mask)
 
 
+@jit
+def quantile_train_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: MetaLearningBatch,
+    q: jax.Array = jnp.array([0.01, 0.05, 0.5, 0.95, 0.99]),
+    **kwargs,
+):
+    rng_dropout, rng_extra = random.split(rng)
+
+    def loss_fn(params):
+        output = state.apply_fn(
+            {"params": params, **state.kwargs},
+            **batch,
+            training=True,
+            rngs={"dropout": rng_dropout, "extra": rng_extra},
+        )
+        mask = None if batch.mask_test is None else batch.mask_test[..., None]
+        return output.loss(batch["f_test"], mask, q)
+
+    loss, grads = jax.value_and_grad(loss_fn)(state.params)
+    return state.apply_gradients(grads=grads), loss
+
+
+@jit
+def quantile_valid_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: MetaLearningBatch,
+    q: jax.Array = jnp.array([0.01, 0.05, 0.5, 0.95, 0.99]),
+    **kwargs,
+):
+    output = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        **batch,
+        training=False,
+        rngs={"extra": rng},
+    )
+    if isinstance(output, tuple):
+        output, _ = output  # latent output not used here
+    mask = None if batch.mask_test is None else batch.mask_test[..., None]
+    return output.metrics(batch["f_test"], mask, q)
+
+
 @partial(jit, static_argnames=("weight_fn",))
 def weighted_likelihood_train_step(
     rng: jax.Array,

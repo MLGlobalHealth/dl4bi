@@ -1,0 +1,65 @@
+_target_: dl4bi.meta_learning.BSATNP
+num_blks: 8
+num_reps: 1
+embed_s:
+  _target_: dl4bi.meta_learning.utils.x_to_none
+  _partial_: true
+embed_t:
+  _target_: dl4bi.meta_learning.utils.x_to_none
+  _partial_: true
+embed_all:
+  _target_: dl4bi.mlp.MLP
+  dims: [512, 256, 128]
+  act_fn:
+    _target_: jax.nn.gelu
+    _partial_: true
+blk:
+  _target_: dl4bi.transformer.KRBlock
+  attn:
+    _target_: dl4bi.attention.MultiHeadAttention
+    num_heads: 8
+    attn:
+      _target_: dl4bi.attention.BiasedScanAttention
+      bias:
+        _target_: builtins.dict
+        s:
+          _target_: dl4bi.bias.Bias.build_rbf_network_bias
+          num_heads: 8
+          num_basis: 1
+        t:
+          _target_: dl4bi.bias.Bias.build_rbf_network_bias
+          num_heads: 8
+          num_basis: 1
+    proj_qs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_ks:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_vs:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+    proj_out:
+      _target_: dl4bi.mlp.MLP
+      dims: [128]
+  ffn:
+    _target_: dl4bi.mlp.MLP
+    dims: [512, 128]
+    act_fn:
+      _target_: jax.nn.gelu
+      _partial_: true
+head:
+  _target_: dl4bi.mlp.MLP
+  dims: [512, 64, 5]
+  act_fn:
+    _target_: jax.nn.gelu
+    _partial_: true
+output_fn:
+  _target_: dl4bi.core.model_output.QuantileOutput
+  _partial_: true
+train_step:
+  _target_: dl4bi.meta_learning.steps.quantile_train_step
+  _partial_: true
+valid_step:
+  _target_: dl4bi.meta_learning.steps.quantile_valid_step
+  _partial_: true

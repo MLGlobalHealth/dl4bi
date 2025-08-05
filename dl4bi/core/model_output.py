@@ -292,6 +292,43 @@ jax.tree_util.register_pytree_node(
 
 
 @dataclass(frozen=True)
+class QuantileOutput(ModelOutput):
+    q_hat: jnp.ndarray
+
+    def loss(
+        self,
+        x: jax.Array,
+        mask: Optional[jnp.ndarray] = None,
+        q: jax.Array = jnp.array([0.01, 0.05, 0.5, 0.95, 0.99]),
+    ) -> jnp.ndarray:
+        err = x - self.q_hat
+        loss = jnp.maximum(q * err, (q - 1) * err)
+        return loss.mean(where=mask)
+
+    def metrics(
+        self,
+        x: jax.Array,
+        mask: Optional[jnp.ndarray] = None,
+        q: jax.Array = jnp.array([0.01, 0.05, 0.5, 0.95, 0.99]),
+    ) -> dict:
+        err = x - self.q_hat
+        loss = jnp.maximum(q * err, (q - 1) * err)
+        if mask is None:
+            loss = loss.mean(axis=(0, 1))
+        else:
+            loss = (loss * mask).sum(axis=(0, 1)) / mask.sum(axis=(0, 1))
+        return {f"q_{k.item():0.2f}": v.item() for k, v in zip(q, loss)}
+
+
+# register to use in jitted functions
+jax.tree_util.register_pytree_node(
+    QuantileOutput,
+    lambda d: ((d.q_hat,), None),
+    lambda _aux, children: QuantileOutput(*children),
+)
+
+
+@dataclass(frozen=True)
 class MDNOutput(DistributionOutput):
     pi_logits: jax.Array  # [B, K]
     mu: jax.Array  # [B, K]
