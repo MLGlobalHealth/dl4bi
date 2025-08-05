@@ -14,4 +14,12 @@ train_dataloader:
   num_batches_per_subset: 50
 valid_dataloader: ${.train_dataloader}
 test_dataloader: ${.train_dataloader}
-callback_dataloader: ${.train_dataloader} # TODO(danj): update to full-res
+callback_dataloader: # TODO(danj): full 128x128 resolution?
+  img_size: 32
+  num_ctx_min_per_t: 1024
+  num_ctx_max_per_t: 1024
+  num_test: 1024
+  num_t: 5
+  t_interval: 2  # every hour (values are every half hour)
+  batch_size: 8
+  num_batches_per_subset: 50
