@@ -247,7 +247,7 @@ def plot(
     )
     if isinstance(output, QuantileOutput):
         # NOTE: assumes q_hat = [0.01, 0.05, 0.5, 0.95, 0.99]
-        q_50, q_95 = output.q_hat[2], output.q_hat[3]
+        q_50, q_95 = output.q_hat[:, :, [2]], output.q_hat[:, :, [3]]
         f_pred, f_std = q_50, q_95 - q_50  # hack
     f_min = min(batch.f_ctx.min(), batch.f_test.min(), f_pred.min())
     f_max = max(batch.f_ctx.max(), batch.f_test.max(), f_pred.max())
