@@ -1,6 +1,12 @@
 _target_: dl4bi.meta_learning.BSATNP
 num_blks: 6
 num_reps: 1
+embed_s:
+  _target_: dl4bi.meta_learning.utils.x_to_none
+  _partial_: true
+embed_t:
+  _target_: dl4bi.meta_learning.utils.x_to_none
+  _partial_: true
 embed_all:
   _target_: dl4bi.mlp.MLP
   dims: [256, 128, 64]
@@ -46,4 +52,10 @@ head:
   dims: [256, 64, 2]
   act_fn:
     _target_: jax.nn.gelu
+    _partial_: true
+train_step:
+  _target_: dl4bi.meta_learning.steps.weighted_likelihood_train_step
+  _partial_: true
+  weight_fn:
+    _target_: dl4bi.meta_learning.steps.weight_by_exp_f
     _partial_: true

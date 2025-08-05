@@ -4,7 +4,7 @@ from dataclasses import replace
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable
 
 import hydra
 import jax
@@ -16,6 +16,7 @@ import wandb
 import xarray as xr
 from hydra.utils import instantiate
 from jax import random
+from matplotlib.colors import Normalize
 from omegaconf import DictConfig, OmegaConf
 
 from dl4bi.core.train import (
@@ -96,51 +97,51 @@ def dataloader(
     num_t: int = 5,
     t_interval: int = 2,  # every hour (values are every half hour)
     batch_size: int = 16,
-    chunk_size: int = 2048,
+    chunk_size: int = 1024,
     num_batches_per_subset: int = 50,
     is_callback: bool = False,
-    revert: Optional[Callable] = None,
 ):
-    R, H, W, S = ds.region.size, ds.i.size, ds.j.size, img_size
+    R, T, H, W, S = ds.region.size, ds.t.size, ds.i.size, ds.j.size, img_size
     minval, maxval = jnp.array([0, 0]), jnp.array([H - S, W - S])
 
     def revert_t(t: jax.Array):
-        half_hours = np.rint(
-            t * ds.half_hour_since_start_std.values + ds.half_hour_since_start_mu.values
-        )
-        return ds.t_min.values + (half_hours * np.timedelta64(30, "m"))
+        return ds.t_min.values + np.array(t) * np.timedelta64(1, "h")
 
-    def revert_f(f: jax.Array):
-        return jnp.expm1(
-            f * ds.precip_log1p_std.values.item() + ds.precip_log1p_mu.values.item()
-        )
-
-    revert = {"t": revert_t, "f": revert_f}
     while True:
-        rng_hr, rng_t, rng_pos, rng = random.split(rng, 4)
-        half_hr_start = random.choice(rng_hr, 48, (1,)).item()
-        t_start = random.choice(rng_t, ds.time.size - chunk_size, (1,)).item()
+        rng_t, rng_pos, rng = random.split(rng, 3)
+        t_start = random.choice(rng_t, T - (chunk_size * t_interval), (1,)).item()
         i, j = random.randint(rng_pos, (2,), minval, maxval)
         ds_subset = ds.isel(
             i=slice(i, i + S),
             j=slice(j, j + S),
-            time=slice(t_start, t_start + chunk_size),
-        )
-        t_mask = (ds_subset.half_hour_of_day + half_hr_start) % t_interval == 0
-        ds_subset = ds_subset.sel(time=t_mask.compute())
+            time=slice(t_start, t_start + (chunk_size * t_interval), t_interval),
+        ).load()
         # create a number of batches from this filtered subset
         for _ in range(num_batches_per_subset):
             rng_r, rng_b, rng = random.split(rng, 3)
-            r = random.choice(rng_r, ds.region.size, (1,)).item()
+            r = random.choice(rng_r, R, (1,)).item()
             ds_subset_r = ds_subset.sel(region=r)
-            precip_std = ds_subset_r.precip_log1p_standardized
+            precip = ds_subset_r.precip_log1p
             subset = SpatiotemporalData(
-                x=ds_subset_r.half_hour_of_day_normalized.broadcast_like(
-                    precip_std
-                ).values[..., None],
-                s=ds_subset_r.spherical_coords.broadcast_like(precip_std).values,
-                t=ds_subset_r.half_hour_since_start_standardized.values,
-                f=ds_subset_r.precip_log1p_standardized.values[..., None],
+                x=None,
+                # x=jnp.concat(
+                #     [
+                #         ds_subset_r.t_day.broadcast_like(precip).values[..., None],
+                #         ds_subset_r.t_year.broadcast_like(precip).values[..., None],
+                #         ds_subset_r.region.broadcast_like(precip).values[..., None],
+                #         ds_subset_r.spherical_coords.broadcast_like(precip).values,
+                #     ],
+                #     axis=-1,
+                # ),
+                s=jnp.concat(
+                    [
+                        ds_subset_r.i.broadcast_like(precip).values[..., None] / H,
+                        ds_subset_r.j.broadcast_like(precip).values[..., None] / W,
+                    ],
+                    axis=-1,
+                ),
+                t=ds_subset_r.t.values,
+                f=ds_subset_r.precip_log1p.values[..., None],
             )
             batch = subset.batch(
                 rng=rng_b,
@@ -153,7 +154,7 @@ def dataloader(
                 forecast=True,
                 batch_size=batch_size,
             )
-            yield (batch, revert) if is_callback else batch
+            yield (batch, revert_t) if is_callback else batch
 
 
 def load_data():
@@ -171,9 +172,7 @@ def download_and_preprocess():
     if not Path(path).exists():
         raise Exception("Missing data! See 'download' function in this file!")
     ds = xr.open_zarr("cache/nairobi_rainfall/raw.zarr", consolidated=True)
-    print("\nStandardizing data based on training set; may take a bit...")
     ds_train, ds_test = preprocess(ds)
-    print("\nSaving preprocessed datasets to .zarr's...")
     ds_train.to_zarr(
         "cache/nairobi_rainfall/train.zarr",
         mode="w",
@@ -204,67 +203,16 @@ def download(bucket_name):  # bucket_name is private for now
         print(f"Downloaded {blob.name} to {local_path}")
 
 
-def split_train_test(
-    ds: xr.Dataset,
-    train_years: Sequence[int],
-    test_years: Sequence[int],
-):
+def preprocess(ds: xr.Dataset, train_years=[2018, 2019, 2020, 2021], test_years=[2023]):
+    t_min = np.datetime64(f"{train_years[0]}-01-01", "s")
+    ds["precip_log1p"] = xr.ufuncs.log1p(ds.precipitation)
+    ds = ds.assign_coords({"t": (ds.time - t_min) / np.timedelta64(1, "h")})
+    ds = ds.assign_coords({"t_day": ds.time.dt.hour / 23.0})
+    ds = ds.assign_coords({"t_year": ds.time.dt.dayofyear / 365})
+    ds["t_min"] = t_min
+    ds = ds[["precip_log1p", "t", "t_day", "t_year", "spherical_coords", "t_min"]]
     extract = lambda years: ds.isel(time=ds.time.dt.year.isin(years))
     return extract(train_years), extract(test_years)
-
-
-def preprocess(ds: xr.Dataset):
-    train_years = [2018, 2019, 2020, 2021]
-    test_years = [2023]
-    half_hour_of_day = ds.time.dt.hour.data * 2 + ds.time.dt.minute.data // 30
-    ds = ds.assign_coords({"half_hour_of_day": ("time", half_hour_of_day)})
-    ds["precip_log1p"] = xr.ufuncs.log1p(ds.precipitation)
-    ds_train, ds_test = split_train_test(ds, train_years, test_years)
-    t_min = ds_train.time.min().values
-
-    def _half_hour(ds: xr.Dataset):
-        return (ds.time - t_min) / np.timedelta64(30, "m")
-
-    def _mu_std(arr: xr.DataArray):
-        return arr.mean().compute().item(), arr.std().compute().item()
-
-    def _stdize(arr, mu, std):
-        return ((arr - mu) / std).data.astype("float32")
-
-    precip_mu, precip_std = _mu_std(ds_train.precip_log1p)
-    half_hour_mu, half_hour_std = _mu_std(_half_hour(ds_train))
-
-    def standardize_and_filter(ds: xr.Dataset):
-        keep = [
-            "precip_log1p_standardized",
-            "half_hour_since_start_standardized",
-            "half_hour_of_day_normalized",
-            "spherical_coords",
-        ]
-        ds = ds.assign(
-            {
-                "precip_log1p_standardized": (
-                    ("region", "time", "i", "j"),
-                    _stdize(ds.precip_log1p, precip_mu, precip_std),
-                ),
-                "half_hour_since_start_standardized": (
-                    "time",
-                    _stdize(_half_hour(ds), half_hour_mu, half_hour_std),
-                ),
-                "half_hour_of_day_normalized": (
-                    "time",
-                    (ds.half_hour_of_day / 47.0).data.astype("float32"),
-                ),
-            }
-        )[keep]
-        ds["precip_log1p_mu"] = precip_mu
-        ds["precip_log1p_std"] = precip_std
-        ds["half_hour_since_start_mu"] = half_hour_mu
-        ds["half_hour_since_start_std"] = half_hour_std
-        ds["t_min"] = t_min
-        return ds
-
-    return standardize_and_filter(ds_train), standardize_and_filter(ds_test)
 
 
 def plot(
@@ -272,7 +220,7 @@ def plot(
     rng_step: int,
     state: TrainState,
     batch: SpatiotemporalBatch,
-    revert: dict,
+    revert_t: Callable,
     **kwargs,
 ):
     """Logs `num_plots` from the given batch for 2D GPs."""
@@ -282,15 +230,16 @@ def plot(
         **batch,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
-    # revert standardized locations and times for plotting
     batch = replace(
         batch,
-        t_ctx=t_to_label(revert["t"](batch.t_ctx)),
-        t_test=t_to_label(revert["t"](batch.t_test)),
-        f_ctx=revert["f"](batch.f_ctx),
-        f_test=revert["f"](batch.f_test),
+        t_ctx=t_to_label(revert_t(batch.t_ctx)),
+        t_test=t_to_label(revert_t(batch.t_test)),
     )
     f_pred, f_std = output.mu, output.std
+    f_min = min(batch.f_ctx.min(), batch.f_test.min(), f_pred.min())
+    f_max = max(batch.f_ctx.max(), batch.f_test.max(), f_pred.max())
+    norm = Normalize(f_min, f_max)
+    norm_std = Normalize(f_std.min(), f_std.max())
     cmap = mpl.colormaps.get_cmap("Spectral_r")
     cmap.set_bad("grey")
     path = f"/tmp/nairobi_rainfall_{step}_{datetime.now().isoformat()}.png"
@@ -298,6 +247,8 @@ def plot(
         f_pred,
         f_std,
         cmap=cmap,
+        norm=norm,
+        norm_std=norm_std,
         **kwargs,
     )
     # TODO(danj): add tick labels for lat/lng
@@ -306,7 +257,7 @@ def plot(
     wandb.log({f"Step {step}": wandb.Image(path)})
 
 
-def t_to_label(t: jax.Array):
+def t_to_label(t: np.ndarray):
     t = t.astype("M8[s]").astype(object)
     return np.vectorize(lambda x: x.strftime("%H:%M, %b %d"))(t)
 

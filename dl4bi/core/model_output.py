@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 import flax.linen as nn
 import jax
@@ -57,6 +57,17 @@ class DiagonalMVNOutput(DistributionOutput):
 
     def nll(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
         return -stats.norm.logpdf(x, self.mu, self.std).mean(where=mask)
+
+    def weighted_nll(
+        self,
+        x: jax.Array,
+        mask: Optional[jax.Array] = None,
+        weight_fn: Callable = lambda f, f_mu, f_std: 1.0,
+        **kwargs,
+    ):
+        weights = weight_fn(x, self.mu, self.std)
+        log_p = stats.norm.logpdf(x, self.mu, self.std)
+        return -(weights * log_p).mean(where=mask)
 
     def metrics(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
         hdi_prob = kwargs.get("hdi_prob", 0.95)

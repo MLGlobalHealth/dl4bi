@@ -1,4 +1,8 @@
+from functools import partial
+from typing import Callable
+
 import jax
+import jax.numpy as jnp
 from jax import jit, random
 
 from ..core.train import TrainState
@@ -45,6 +49,34 @@ def likelihood_valid_step(
         output, _ = output  # latent output not used here
     mask = None if batch.mask_test is None else batch.mask_test[..., None]
     return output.metrics(batch["f_test"], mask)
+
+
+@partial(jit, static_argnames=("weight_fn",))
+def weighted_likelihood_train_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: MetaLearningBatch,
+    weight_fn: Callable = lambda f, f_mu, f_std: 1.0,
+    **kwargs,
+):
+    rng_dropout, rng_extra = random.split(rng)
+
+    def loss_fn(params):
+        output = state.apply_fn(
+            {"params": params, **state.kwargs},
+            **batch,
+            training=True,
+            rngs={"dropout": rng_dropout, "extra": rng_extra},
+        )
+        mask = None if batch.mask_test is None else batch.mask_test[..., None]
+        return output.weighted_nll(batch["f_test"], mask, weight_fn)
+
+    nll, grads = jax.value_and_grad(loss_fn)(state.params)
+    return state.apply_gradients(grads=grads), nll
+
+
+def weight_by_exp_f(f: jax.Array, *args, **kwargs):
+    return jnp.exp(f)
 
 
 @jit
