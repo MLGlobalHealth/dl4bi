@@ -143,7 +143,7 @@ def dataloader(
                 f=ds_subset_r.precip_log1p.values[..., None],
             )
             # try num_tries to get min_pct rainfall
-            num_tries, min_pct = 10, 0.02
+            num_tries, min_pct = 10, 0.05
             best_batch, best_pct = None, 0.0
             for _ in range(num_tries):
                 batch = subset.batch(
