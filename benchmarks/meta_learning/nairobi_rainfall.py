@@ -72,7 +72,7 @@ def main(cfg: DictConfig):
         valid_dataloader,
         callbacks=[clbk],
         callback_dataloader=callback_dataloader,
-        return_state="best",
+        return_state="last",
     )
     metrics = evaluate(
         rng_test,
