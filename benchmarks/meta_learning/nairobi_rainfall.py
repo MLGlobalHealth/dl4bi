@@ -123,16 +123,15 @@ def dataloader(
             ds_subset_r = ds_subset.sel(region=r)
             precip = ds_subset_r.precip_log1p
             subset = SpatiotemporalData(
-                x=None,
-                # x=jnp.concat(
-                #     [
-                #         ds_subset_r.t_day.broadcast_like(precip).values[..., None],
-                #         ds_subset_r.t_year.broadcast_like(precip).values[..., None],
-                #         ds_subset_r.region.broadcast_like(precip).values[..., None],
-                #         ds_subset_r.spherical_coords.broadcast_like(precip).values,
-                #     ],
-                #     axis=-1,
-                # ),
+                x=jnp.concat(
+                    [
+                        ds_subset_r.t_day.broadcast_like(precip).values[..., None],
+                        ds_subset_r.t_year.broadcast_like(precip).values[..., None],
+                        ds_subset_r.region.broadcast_like(precip).values[..., None],
+                        ds_subset_r.spherical_coords.broadcast_like(precip).values,
+                    ],
+                    axis=-1,
+                ),
                 s=jnp.concat(
                     [
                         ds_subset_r.i.broadcast_like(precip).values[..., None] / H,

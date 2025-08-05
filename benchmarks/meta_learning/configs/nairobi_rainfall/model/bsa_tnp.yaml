@@ -1,5 +1,5 @@
 _target_: dl4bi.meta_learning.BSATNP
-num_blks: 6
+num_blks: 8
 num_reps: 1
 embed_s:
   _target_: dl4bi.meta_learning.utils.x_to_none
@@ -9,7 +9,7 @@ embed_t:
   _partial_: true
 embed_all:
   _target_: dl4bi.mlp.MLP
-  dims: [256, 128, 64]
+  dims: [512, 256, 128]
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
@@ -17,18 +17,19 @@ blk:
   _target_: dl4bi.transformer.KRBlock
   attn:
     _target_: dl4bi.attention.MultiHeadAttention
+    num_heads: 8
     attn:
       _target_: dl4bi.attention.BiasedScanAttention
       bias:
         _target_: builtins.dict
         s:
           _target_: dl4bi.bias.Bias.build_rbf_network_bias
-          num_heads: 4
-          num_basis: 5
+          num_heads: 8
+          num_basis: 1
         t:
           _target_: dl4bi.bias.Bias.build_rbf_network_bias
-          num_heads: 4
-          num_basis: 3
+          num_heads: 8
+          num_basis: 1
     proj_qs:
       _target_: dl4bi.mlp.MLP
       dims: [128]
@@ -40,16 +41,16 @@ blk:
       dims: [128]
     proj_out:
       _target_: dl4bi.mlp.MLP
-      dims: [64]
+      dims: [128]
   ffn:
     _target_: dl4bi.mlp.MLP
-    dims: [256, 64]
+    dims: [512, 128]
     act_fn:
       _target_: jax.nn.gelu
       _partial_: true
 head:
   _target_: dl4bi.mlp.MLP
-  dims: [256, 64, 2]
+  dims: [512, 64, 2]
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
