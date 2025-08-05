@@ -145,7 +145,7 @@ def dataloader(
             )
             # try num_tries to get min_pct rainfall
             num_tries, min_pct = 10, 0.02
-            best_batch, best_pct = None, 0
+            best_batch, best_pct = None, 0.0
             for _ in range(num_tries):
                 batch = subset.batch(
                     rng=rng_b,
@@ -162,7 +162,7 @@ def dataloader(
                 if pct >= best_pct:
                     best_batch = batch
                     best_pct = pct
-                if pct > min_pct:
+                if best_pct > min_pct:
                     break
             yield (best_batch, revert_t) if is_callback else best_batch
 
