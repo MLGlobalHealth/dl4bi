@@ -1,8 +1,8 @@
 name: reduced
 train_num_steps: 100000
 valid_num_steps: 100 # exhaust valid dataloader
-valid_interval: 5000
-plot_interval: 20000
+valid_interval: 1000
+plot_interval: 1000
 train_dataloader:
   img_size: 32
   num_ctx_min_per_t: 1024
