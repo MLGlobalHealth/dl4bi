@@ -143,18 +143,28 @@ def dataloader(
                 t=ds_subset_r.t.values,
                 f=ds_subset_r.precip_log1p.values[..., None],
             )
-            batch = subset.batch(
-                rng=rng_b,
-                num_t=num_t,
-                random_t=False,
-                num_ctx_min_per_t=num_ctx_min_per_t,
-                num_ctx_max_per_t=num_ctx_max_per_t,
-                independent_t_masks=True,
-                num_test=num_test,
-                forecast=True,
-                batch_size=batch_size,
-            )
-            yield (batch, revert_t) if is_callback else batch
+            # try num_tries to get min_pct rainfall
+            num_tries, min_pct = 10, 0.02
+            best_batch, best_pct = None, 0
+            for _ in range(num_tries):
+                batch = subset.batch(
+                    rng=rng_b,
+                    num_t=num_t,
+                    random_t=False,
+                    num_ctx_min_per_t=num_ctx_min_per_t,
+                    num_ctx_max_per_t=num_ctx_max_per_t,
+                    independent_t_masks=True,
+                    num_test=num_test,
+                    forecast=True,
+                    batch_size=batch_size,
+                )
+                pct = batch.f_ctx.sum() / batch.f_ctx.size
+                if pct >= best_pct:
+                    best_batch = batch
+                    best_pct = pct
+                if pct > min_pct:
+                    break
+            yield (best_batch, revert_t) if is_callback else best_batch
 
 
 def load_data():
