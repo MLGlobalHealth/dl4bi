@@ -42,7 +42,7 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
-from dl4bi.vae import MLPDeepRV, PriorCVAE, gMLPDeepRV
+from dl4bi.vae import FixedKernelAttention, MLPDeepRV, PriorCVAE, gMLPDeepRV
 from dl4bi.vae.train_utils import (
     cond_as_locs,
     deep_rv_train_step,
@@ -52,7 +52,7 @@ from dl4bi.vae.train_utils import (
 )
 
 
-def main(seed=42, logged_priors=True, gt_ls=10.0):
+def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
     rng = random.key(seed)
     save_dir = Path(
         f"results/scalability{'_log_priors' if logged_priors else ''}_ls_{gt_ls}/"
@@ -60,11 +60,13 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
     save_dir.mkdir(parents=True, exist_ok=True)
     grids = [
         build_grid([{"start": 0.0, "stop": 100.0, "num": n}] * 2).reshape(-1, 2)
-        for n in [16, 24, 32, 48, 64]
+        for n in grids
     ]
     models = {
         "Baseline_GP": None,
         "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
+        "DeepRV + gMLP kAttn": gMLPDeepRV(num_blks=2, attn=FixedKernelAttention()),
+        "DeepRV + gMLP adamw": gMLPDeepRV(num_blks=2),
         "Inducing DeepRV + gMLP": gMLPDeepRV(num_blks=2),
         "PriorCVAE": PriorCVAE,
         "DeepRV + MLP": MLPDeepRV,
@@ -81,15 +83,15 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
         result = []
         rng_train, rng_test, rng_infer, rng_idxs, rng_obs, rng = random.split(rng, 6)
         L, sqrt_L = s.shape[0], int(jnp.sqrt(s.shape[0]))
+        if L == 1:  # NOTE: placeholder for fixing the rngs for gt_ls=50
+            continue
         grid_s_path = save_dir / f"grid_{L}"
         grid_s_path.mkdir(parents=True, exist_ok=True)
         y_obs = gen_y_obs(rng_obs, s, gt_ls)
         obs_mask = gen_spatial_obs_mask(rng_idxs, (sqrt_L, sqrt_L), obs_ratio=0.5)
-        poisson_llk, cond_names = inference_model(s, priors)
         num_pts = int(min(int(2 * jnp.sqrt(L).item()), sum(obs_mask)))
-        poiss_inducing, u = inference_model_inducing_points(
-            s, priors, obs_mask, num_pts
-        )
+        kmeans = KMeans(n_clusters=num_pts, random_state=0)
+        u = kmeans.fit(s[obs_mask]).cluster_centers_  # inducing points+
         with open(grid_s_path / "GT_data.pkl", "wb") as ff:
             pickle.dump({"s": s, "u": u, "obs_mask": obs_mask, "y_obs": y_obs}, ff)
         y_hats, all_samples = [], []
@@ -102,7 +104,9 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
                 nn_model = MLPDeepRV(dims=[L, L])
             model_path = grid_s_path / f"{model_name}"
             model_path.mkdir(parents=True, exist_ok=True)
-            is_inducing = "Inducing" in model_name
+            is_inducing, kernel_attn = "Inducing" in model_name, "kAttn" in model_name
+            poisson_llk, cond_names = inference_model(s, priors, kernel_attn)
+            poiss_inducing = inference_model_inducing_points(s, priors, u, kernel_attn)
             infer_model = poiss_inducing if is_inducing else poisson_llk
             train_time, eval_mse, surrogate_decoder, ess = None, None, None, {}
             infer_gflops, train_gflops, parameters = None, None, None
@@ -124,7 +128,9 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
                     project="deep_rv_optimizations",
                     reinit=True,
                 )
-                loader = gen_train_dataloader(s, u, priors, is_inducing, batch_size=bs)
+                loader = gen_train_dataloader(
+                    s, u, priors, is_inducing, kernel_attn, batch_size=bs
+                )
                 (
                     train_time,
                     eval_mse,
@@ -195,10 +201,14 @@ def main(seed=42, logged_priors=True, gt_ls=10.0):
                 pickle.dump(res, out_file)
             result.append(res)
         wass_dist = posterior_wasserstein_distance(all_samples, model_names, cond_names)
+        gp_y_hat_dist = posterior_mean_gp_dist(y_hats, model_names)
         result = pd.DataFrame(result)
         for model_name in model_names:
             if model_name == "Baseline_GP":
                 continue
+            result.loc[result["model_name"] == model_name, "MSE(y_hat_gp, y_hat)"] = (
+                gp_y_hat_dist[model_name]
+            )
             for n in cond_names:
                 result.loc[
                     result["model_name"] == model_name, f"{n} wasserstein distance"
@@ -245,6 +255,7 @@ def hmc(
         pickle.dump(samples, out_file)
     with open(results_dir / "hmc_pp.pkl", "wb") as out_file:
         pickle.dump(post, out_file)
+    samples = {k: it for k, it in samples.items() if k in ["ls", "beta"]}
     return samples, mcmc, post, infer_time
 
 
@@ -323,7 +334,7 @@ def surrogate_model_train(
 
 
 def gen_train_dataloader(
-    s: Array, u: Array, priors: dict, inducing=False, batch_size=32
+    s: Array, u: Array, priors: dict, inducing=False, kernel_attn=False, batch_size=32
 ):
     s_train = u if inducing else s
     jitter = 5e-4 * jnp.eye(s_train.shape[0])
@@ -340,24 +351,21 @@ def gen_train_dataloader(
             z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s_train.shape[0]))
             K = kernel_jit(s_train, var, ls)
             L = jnp.linalg.cholesky(K)
+            batch = {"s": s_train, "z": z, "conditionals": jnp.array([ls])}
             if inducing:
                 f = jit_trin_solve_func(L.T, z)
                 K_su = matern_3_2(s, s_train, var, ls)
-                yield {
-                    "s": s_train,
-                    "f": f,
-                    "z": z,
-                    "conditionals": jnp.array([ls]),
-                    "K_su": K_su,
-                }
+                batch.update({"f": f, "K_su": K_su})
             else:
-                f = f_jit(L, z)
-                yield {"s": s_train, "f": f, "z": z, "conditionals": jnp.array([ls])}
+                batch["f"] = f_jit(L, z)
+            if kernel_attn:
+                batch["K"] = K
+            yield batch
 
     return dataloader
 
 
-def inference_model(s: Array, priors: dict):
+def inference_model(s: Array, priors: dict, kernel_attn: bool):
     """
     Builds a poisson likelihood inference model for GP and surrogate models
     """
@@ -368,13 +376,15 @@ def inference_model(s: Array, priors: dict):
         ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
         z = numpyro.sample("z", dist.Normal(), sample_shape=(1, s.shape[0]))
+        if kernel_attn or surrogate_decoder is None:
+            K = matern_3_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
+            surrogate_kwargs["K"] = K
         if surrogate_decoder:  # NOTE: whether to use a replacment for the GP
             mu = numpyro.deterministic(
                 "mu",
                 surrogate_decoder(z, jnp.array([ls]), **surrogate_kwargs).squeeze(),
             )
         else:
-            K = matern_3_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
             L_chol = jnp.linalg.cholesky(K)
             mu = numpyro.deterministic("mu", jnp.matmul(L_chol, z[0]))
         lambda_ = jnp.exp(beta + mu)
@@ -384,12 +394,8 @@ def inference_model(s: Array, priors: dict):
     return poisson, ["ls", "beta"]
 
 
-def inference_model_inducing_points(
-    s: Array, priors: dict, obs_mask: Array, num_points: int
-):
+def inference_model_inducing_points(s: Array, priors: dict, u: Array, kernel_attn):
     """Builds a poisson likelihood inference model for inducing points"""
-    kmeans = KMeans(n_clusters=num_points, random_state=0)
-    u = kmeans.fit(s[obs_mask]).cluster_centers_  # shape (num_points, s.shape[1])
     surr_kwargs = {"s": u}
 
     def poisson_inducing(surrogate_decoder=None, obs_mask=True, y=None):
@@ -398,23 +404,20 @@ def inference_model_inducing_points(
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
         K_su = matern_3_2(s, u, var, ls)
         z = numpyro.sample("z", dist.Normal(), sample_shape=(1, u.shape[0]))
+        if kernel_attn or surrogate_decoder is None:
+            K_uu = matern_3_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
+            surr_kwargs["K"] = K_uu
         if surrogate_decoder is not None:
             f_u_bar = surrogate_decoder(z, jnp.array([ls]), **surr_kwargs).squeeze()
         else:
-            K_uu = matern_3_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
             L_uu = jnp.linalg.cholesky(K_uu)
             f_u_bar = solve_triangular(L_uu.T, z[0], lower=False)
         f = numpyro.deterministic("mu", K_su @ f_u_bar)
-        # NOTE: uncomment to perform FITC correction for marginal variances
-        # K_uu_inv_K_us = jnp.linalg.solve(K_uu, K_su.T)
-        # Q_ss_diag = jnp.sum(K_su * K_uu_inv_K_us.T, axis=1)
-        # delta = jnp.clip(var - Q_ss_diag, 1.0e-6, jnp.inf)  # K_ss_diag = var
-        # f_mu = numpyro.sample("f_mu", dist.Normal(f_mu, jnp.sqrt(delta)).to_event(1))
         lambda_ = jnp.exp(f + beta)
         with numpyro.handlers.mask(mask=obs_mask):
             numpyro.sample("obs", dist.Poisson(lambda_), obs=y)
 
-    return poisson_inducing, u
+    return poisson_inducing
 
 
 @jit
@@ -513,11 +516,11 @@ def plot_models_predictive_means(
     cmap.set_bad(color="black")
     ax[0].imshow(masked_f_obs, origin="lower", cmap=cmap)
     ax[0].set_title("y observed")
-    ax[1].imshow(f_obs, vmin=vmin, vmax=vmax, origin="lower")
+    ax[1].imshow(f_obs, vmin=vmin, vmax=vmax, origin="lower", cmap=cmap)
     ax[1].set_title("y")
     for i, f_mean in enumerate(f_hat_means, start=2):
         model_name = model_names[i - 2]
-        im = ax[i].imshow(f_mean, vmin=vmin, vmax=vmax, origin="lower")
+        im = ax[i].imshow(f_mean, vmin=vmin, vmax=vmax, origin="lower", cmap=cmap)
         ax[i].set_title("Mean " r"$\hat{y}$" f" {model_name}")
     for i in range(len(ax)):
         ax[i].set_axis_off()
@@ -552,6 +555,15 @@ def posterior_wasserstein_distance(
     return distances
 
 
+def posterior_mean_gp_dist(y_hats: list, model_names: list[str]):
+    baseline_index = model_names.index("Baseline_GP")
+    y_hat_gp = y_hats[baseline_index].mean(axis=0)
+    distances = {m: None for m in model_names if m != "Baseline_GP"}
+    for model_name, y_hat in zip(model_names, y_hats):
+        distances[model_name] = jnp.mean((y_hat_gp - y_hat.mean(axis=0)) ** 2)
+    return distances
+
+
 def gen_train_params(model_name, L, default_bs=32):
     default_steps = 300_000 if L >= 2048 else 200_000
     max_lr = {
@@ -559,24 +571,24 @@ def gen_train_params(model_name, L, default_bs=32):
         "DeepRV + gMLP": 5e-3 if L <= 32**2 else 1e-2,
         "PriorCVAE": 1.0e-3 if L <= 32**2 else 5e-3,
         "DeepRV + MLP": 1.0e-3 if L <= 32**2 else 5e-3,
+        "DeepRV + gMLP kAttn": 1.0e-3 if L <= 32**2 else 2e-3,
+        "DeepRV + gMLP adamw": 1.0e-3 if L <= 32**2 else 2e-3,
     }[model_name]
-    bs = {
-        "Inducing DeepRV + gMLP": default_bs,
-        "DeepRV + gMLP": int(min(1, 48**2 / L) * default_bs),
-        "PriorCVAE": int(min(1, 48**2 / L) * default_bs),
-        "DeepRV + MLP": int(min(1, 48**2 / L) * default_bs),
-    }[model_name]
+    bs = default_bs if L < 64**2 else default_bs // 2
+    if model_name == "Inducing DeepRV + gMLP":
+        bs = default_bs
     train_step = {
         "Inducing DeepRV + gMLP": inducing_deep_rv_train_step,
-        "DeepRV + gMLP": deep_rv_train_step,
         "PriorCVAE": prior_cvae_train_step,
-        "DeepRV + MLP": deep_rv_train_step,
-    }[model_name]
+    }.get(model_name, deep_rv_train_step)
     train_num_steps = default_steps * (default_bs // bs)
     if model_name == "Inducing DeepRV + gMLP":
         train_num_steps *= 2
-    optimizer = optax.yogi(cosine_annealing_lr(train_num_steps, max_lr))
-    optimizer = optax.chain(optax.clip_by_global_norm(3.0), optimizer)
+    lr_schedule = cosine_annealing_lr(train_num_steps, max_lr)
+    optimizer, clip = optax.yogi(lr_schedule), 3.0
+    if model_name in ["DeepRV + gMLP kAttn", "DeepRV + gMLP adamw"]:
+        optimizer, clip = optax.adamw(lr_schedule, weight_decay=1e-2), 3.0
+    optimizer = optax.chain(optax.clip_by_global_norm(clip), optimizer)
     return optimizer, max_lr, bs, train_num_steps, train_step
 
 
@@ -807,4 +819,9 @@ def aggregate_csvs(base_path: Path):
 
 
 if __name__ == "__main__":
-    main()
+    main(seed=42, gt_ls=10)
+    main(seed=78, gt_ls=30)
+    # NOTE: I messed up the rngs in gt_ls=50, and don't want to rerun GP (71h for 4096 grid)
+    # NOTE: Running gt_ls in these two intervals breaks the rngs correctly to reproduce results
+    main(seed=34, gt_ls=50, grids=[24, 48, 64])
+    main(seed=34, gt_ls=50, grids=[16, 1, 32])
