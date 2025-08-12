@@ -4,7 +4,7 @@ from jax import random
 from sps.kernels import rbf
 from sps.utils import build_grid
 
-from dl4bi.embed import RBFRandomFourierFeatures
+from dl4bi.embed import FixedSinusoidalEmbedding, RBFRandomFourierFeatures
 
 
 def test_rbf_random_fourier_features():
@@ -32,3 +32,21 @@ def test_rbf_random_fourier_features():
     # plt.colorbar()
     # plt.savefig("/tmp/rbf_rff_dist.png")
     # plt.clf()
+
+
+def test_plot_fixed_sinusoidal_embeddings():
+    rng = random.key(42)
+    s = jnp.arange(100)[None, :, None]  # [B=1, L=100, D=1]
+    max_lens = [100, 10000]
+    fig, axes = plt.subplots(1, len(max_lens))
+    for i, max_len in enumerate(max_lens):
+        pe, _ = FixedSinusoidalEmbedding(max_len=max_len).init_with_output(rng, s)
+        axes[i].set_title(f"max_len={max_len}")
+        axes[i].set_xlabel("position")
+        if i == 0:
+            axes[i].set_ylabel("embed dim")
+        axes[i].imshow(pe.T)
+    plt.suptitle("FixedSinusoidalEmbedding")
+    plt.tight_layout()
+    plt.savefig("/tmp/fixed_sinusoidal_embeddings.png")
+    plt.clf()
