@@ -745,16 +745,16 @@ class LogScaleTransform(ParameterFreeTransform):
 
 
 def aggregate_csvs(base_path: Path):
-    levels = [16**2, 32**2, 48**2, 64**2]
+    levels = [16**2, 24**2, 32**2, 48**2, 64**2]
     df_list = []
     for L in levels:
         file_path = (base_path / f"grid_{L}") / "res.csv"
         df = pd.read_csv(file_path)
-        df["grid_level"] = L
         df_list.append(df)
     aggregated_df = pd.concat(df_list, ignore_index=True)
-    if "Unnamed: 0" in aggregated_df.columns:
-        aggregated_df.drop(columns=["Unnamed: 0"], inplace=True)
+    aggregated_df.drop(
+        columns=[k for k in aggregated_df.columns if k.startswith("Unna")], inplace=True
+    )
     output_path = base_path / "aggregated_results.csv"
     aggregated_df.to_csv(output_path, index=False)
     print(f"Aggregated results saved to {output_path}")
