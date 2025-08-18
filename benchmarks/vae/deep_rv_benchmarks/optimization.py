@@ -163,7 +163,7 @@ def gen_train_params(model_name, s, default_steps, default_bs=32):
     clip_vals = {
         "0.5": optax.clip_by_global_norm(0.5),
         "1.0": optax.clip_by_global_norm(1.0),
-        "3.0": optax.clip_by_global_norm(2.0),
+        "3.0": optax.clip_by_global_norm(3.0),
     }
     optimizer = {
         f"DeepRV + gMLP AdamW clip={clip_k} decay={decay} lr={lr}": optax.chain(
