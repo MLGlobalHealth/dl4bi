@@ -47,7 +47,6 @@ from dl4bi.vae.train_utils import (
     cond_as_locs,
     deep_rv_train_step,
     generate_surrogate_decoder,
-    inducing_deep_rv_train_step,
     prior_cvae_train_step,
 )
 
@@ -67,11 +66,16 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
         "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
         "DeepRV + gMLP kAttn": gMLPDeepRV(num_blks=2, attn=FixedKernelAttention()),
         "DeepRV + gMLP adamw": gMLPDeepRV(num_blks=2),
-        "Inducing DeepRV + gMLP": gMLPDeepRV(num_blks=2),
         "PriorCVAE": PriorCVAE,
+        "PriorCVAE adamw": PriorCVAE,
         "DeepRV + MLP": MLPDeepRV,
         "Inducing Points": None,
+        "Inducing Points Large": None,
+        "Inducing DeepRV + gMLP kAttn": gMLPDeepRV(
+            num_blks=3, attn=FixedKernelAttention()
+        ),
         "ADVI": None,
+        "RFF": None,
     }
     model_names = list(models.keys())
     log_ls = dist.TransformedDistribution(dist.Beta(4.0, 1.0), LogScaleTransform())
@@ -79,6 +83,7 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
         "ls": log_ls if logged_priors else dist.Uniform(1.0, 100.0),
         "beta": dist.Normal(),
     }
+    cond_names = list(priors.keys())
     for s in grids:
         result = []
         rng_train, rng_test, rng_infer, rng_idxs, rng_obs, rng = random.split(rng, 6)
@@ -89,14 +94,13 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
         grid_s_path.mkdir(parents=True, exist_ok=True)
         y_obs = gen_y_obs(rng_obs, s, gt_ls)
         obs_mask = gen_spatial_obs_mask(rng_idxs, (sqrt_L, sqrt_L), obs_ratio=0.5)
-        num_pts = int(min(int(2 * jnp.sqrt(L).item()), sum(obs_mask)))
-        kmeans = KMeans(n_clusters=num_pts, random_state=0)
-        u = kmeans.fit(s[obs_mask]).cluster_centers_  # inducing points+
+        u, u_large = get_inducing_points(s, obs_mask, L)
+        gt_data = {"s": s, "u": u, "u_l": u_large, "obs_mask": obs_mask, "y_obs": y_obs}
         with open(grid_s_path / "GT_data.pkl", "wb") as ff:
-            pickle.dump({"s": s, "u": u, "obs_mask": obs_mask, "y_obs": y_obs}, ff)
+            pickle.dump(gt_data, ff)
         y_hats, all_samples = [], []
         for model_name, nn_model in models.items():
-            if model_name == "PriorCVAE":
+            if "PriorCVAE" in model_name:
                 nn_model = PriorCVAE(
                     MLP(dims=[L, L]), MLP(dims=[L, L]), cond_as_locs, L
                 )
@@ -105,9 +109,17 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
             model_path = grid_s_path / f"{model_name}"
             model_path.mkdir(parents=True, exist_ok=True)
             is_inducing, kernel_attn = "Inducing" in model_name, "kAttn" in model_name
-            poisson_llk, cond_names = inference_model(s, priors, kernel_attn)
-            poiss_inducing = inference_model_inducing_points(s, priors, u, kernel_attn)
-            infer_model = poiss_inducing if is_inducing else poisson_llk
+            infer_model = gen_infer_model(
+                rng_infer,
+                model_name,
+                s,
+                u,
+                u_large,
+                priors,
+                L,
+                is_inducing,
+                kernel_attn,
+            )
             train_time, eval_mse, surrogate_decoder, ess = None, None, None, {}
             infer_gflops, train_gflops, parameters = None, None, None
             max_lr, bs, num_train_steps = None, None, None
@@ -129,7 +141,7 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
                     reinit=True,
                 )
                 loader = gen_train_dataloader(
-                    s, u, priors, is_inducing, kernel_attn, batch_size=bs
+                    s, u_large, priors, is_inducing, kernel_attn, batch_size=bs
                 )
                 (
                     train_time,
@@ -200,30 +212,16 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
             with open(model_path / "single_res.pkl", "wb") as out_file:
                 pickle.dump(res, out_file)
             result.append(res)
-        wass_dist = posterior_wasserstein_distance(all_samples, model_names, cond_names)
-        gp_y_hat_dist = posterior_mean_gp_dist(y_hats, model_names)
-        result = pd.DataFrame(result)
-        for model_name in model_names:
-            if model_name == "Baseline_GP":
-                continue
-            result.loc[result["model_name"] == model_name, "MSE(y_hat_gp, y_hat)"] = (
-                gp_y_hat_dist[model_name]
-            )
-            for n in cond_names:
-                result.loc[
-                    result["model_name"] == model_name, f"{n} wasserstein distance"
-                ] = wass_dist[model_name][n]
-        result.to_csv(grid_s_path / "res.csv")
+        result = posterior_wasserstein_distance(
+            result, all_samples, model_names, cond_names
+        )
+        result = posterior_mean_gp_dist(result, y_hats, model_names)
+        result = pd.DataFrame(result).to_csv(grid_s_path / "res.csv")
         plot_posterior_predictive_comparisons(
             all_samples, {}, priors, model_names, cond_names, grid_s_path / "comp"
         )
         plot_models_predictive_means(
-            int(jnp.sqrt(L)),
-            y_obs,
-            y_hats,
-            obs_mask,
-            model_names,
-            grid_s_path / "obs_means.png",
+            sqrt_L, y_obs, y_hats, obs_mask, model_names, grid_s_path / "obs_means.png"
         )
     aggregated_df = aggregate_csvs(save_dir)
     plot_model_scalability_metrics(aggregated_df, save_dir)
@@ -365,6 +363,19 @@ def gen_train_dataloader(
     return dataloader
 
 
+def gen_infer_model(
+    rng_infer, model_name, s, u, u_large, priors, L, is_inducing, kernel_attn
+):
+    if model_name == "RFF":
+        return inference_model_rff(rng_infer, s, priors, L * 2)
+    if is_inducing:
+        indc_pts = u
+        if model_name in ["Inducing Points Large", "Inducing DeepRV + gMLP kAttn"]:
+            indc_pts = u_large
+        return inference_model_inducing_points(s, priors, indc_pts, kernel_attn)
+    return inference_model(s, priors, kernel_attn)
+
+
 def inference_model(s: Array, priors: dict, kernel_attn: bool):
     """
     Builds a poisson likelihood inference model for GP and surrogate models
@@ -391,7 +402,17 @@ def inference_model(s: Array, priors: dict, kernel_attn: bool):
         with numpyro.handlers.mask(mask=obs_mask):
             numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
 
-    return poisson, ["ls", "beta"]
+    return poisson
+
+
+def get_inducing_points(s, obs_mask, L):
+    num_pts = int(min(int(2 * jnp.sqrt(L).item()), sum(obs_mask)))
+    num_pts_large = int(min(int(2 * jnp.pow(L, 2 / 3).item()), sum(obs_mask)))
+    kmeans = KMeans(n_clusters=num_pts, random_state=0)
+    u = kmeans.fit(s[obs_mask]).cluster_centers_  # inducing points
+    kmeans = KMeans(n_clusters=num_pts_large, random_state=0)
+    u_large = kmeans.fit(s[obs_mask]).cluster_centers_  # inducing points large
+    return u, u_large
 
 
 def inference_model_inducing_points(s: Array, priors: dict, u: Array, kernel_attn):
@@ -418,6 +439,48 @@ def inference_model_inducing_points(s: Array, priors: dict, u: Array, kernel_att
             numpyro.sample("obs", dist.Poisson(lambda_), obs=y)
 
     return poisson_inducing
+
+
+def sample_matern32_omegas(key, M, d, ell=1.0):
+    """Sample M base omegas for Matérn-3/2 with lengthscale `ell` (use ell=1.0 for base)."""
+    nu = 1.5
+    alpha = 2.0 * nu / (ell**2)  # = 3 / ell^2
+    beta = nu + d / 2.0  # = (d+3)/2
+    key_t, key_z = random.split(key)
+    t = dist.Gamma(concentration=beta, rate=alpha).sample(key_t, (M,))
+    z = random.normal(key_z, (M, d))
+    omegas = z / jnp.sqrt(2.0 * t)[:, None]
+    return omegas  # shape (M, d)
+
+
+def inference_model_rff(rng, s, priors, feature_size=500):
+    """
+    Build a NumPyro Poisson-GP model using fixed RFF for Matérn-3/2.
+    """
+    M = feature_size
+    # NOTE: sample RFF features once
+    rng_omega, rng_phase = random.split(rng)
+    base_omegas = sample_matern32_omegas(rng_omega, M, d=2, ell=1.0)
+    phases = random.uniform(rng_phase, (M,), minval=0.0, maxval=2 * jnp.pi)
+    base_proj = jnp.dot(s, base_omegas.T)
+    jitter = 5e-4
+
+    def poisson_rff(surrogate_decoder=None, obs_mask=True, y=None):
+        ls = numpyro.sample("ls", priors["ls"], sample_shape=())
+        beta = numpyro.sample("beta", priors["beta"], sample_shape=())
+        proj = base_proj / ls  # NOTE: = s @ (base_omegas / ls).T
+        Phi = jnp.sqrt(2.0) * jnp.cos(proj + phases) / jnp.sqrt(M)
+        z = numpyro.sample("z", dist.Normal(0.0, 1.0), sample_shape=(M,))
+        mu_feat = jnp.dot(Phi, z)
+        eps = numpyro.sample(
+            "eps_jitter", dist.Normal(0.0, jnp.sqrt(jitter)), sample_shape=(s.shape[0],)
+        )  # NOTE: the equivalent of adding jitter to GP
+        mu = numpyro.deterministic("mu", mu_feat + eps)
+        lambda_ = jnp.exp(beta + mu)
+        with numpyro.handlers.mask(mask=obs_mask):
+            numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
+
+    return poisson_rff
 
 
 @jit
@@ -532,7 +595,7 @@ def plot_models_predictive_means(
 
 
 def posterior_wasserstein_distance(
-    samples: list, model_names: list[str], var_names: list[str]
+    result: list[dict], samples: list, model_names: list[str], var_names: list[str]
 ):
     """
     Computes Wasserstein distance for each variable between the posterior distributions
@@ -540,53 +603,56 @@ def posterior_wasserstein_distance(
     """
     baseline_index = model_names.index("Baseline_GP")
     baseline_samples = samples[baseline_index]
-    distances = {m: {} for m in model_names if m != "Baseline_GP"}
-    for model_name, model_sample in zip(model_names, samples):
-        if model_name == "Baseline_GP":
-            continue
+    for model_res, model_sample in zip(result, samples):
         for var_name in var_names:
+            model_res[f"{var_name} wasserstein distance"] = jnp.nan
+            if model_res["model_name"] == "Baseline_GP":
+                continue
             baseline_var_samples = baseline_samples.get(var_name)
             model_var_samples = model_sample.get(var_name)
             if baseline_var_samples is not None and model_var_samples is not None:
                 dist = wasserstein_distance(baseline_var_samples, model_var_samples)
-                distances[model_name][var_name] = dist
-            else:
-                distances[model_name][var_name] = jnp.nan
-    return distances
+                model_res[f"{var_name} wasserstein distance"] = dist
+    return result
 
 
-def posterior_mean_gp_dist(y_hats: list, model_names: list[str]):
+def posterior_mean_gp_dist(result: list[dict], y_hats: list, model_names: list[str]):
     baseline_index = model_names.index("Baseline_GP")
     y_hat_gp = y_hats[baseline_index].mean(axis=0)
-    distances = {m: None for m in model_names if m != "Baseline_GP"}
-    for model_name, y_hat in zip(model_names, y_hats):
-        distances[model_name] = jnp.mean((y_hat_gp - y_hat.mean(axis=0)) ** 2)
-    return distances
+    for model_res, y_hat in zip(result, y_hats):
+        if model_res["model_name"] == "Baseline_GP":
+            model_res["MSE(y_hat_gp, y_hat)"] = jnp.nan
+        else:
+            model_res["MSE(y_hat_gp, y_hat)"] = jnp.mean(
+                (y_hat_gp - y_hat.mean(axis=0)) ** 2
+            )
+    return result
 
 
 def gen_train_params(model_name, L, default_bs=32):
     default_steps = 300_000 if L >= 2048 else 200_000
     max_lr = {
-        "Inducing DeepRV + gMLP": 1e-3 if L <= 32**2 else 5e-3,
+        "Inducing DeepRV + gMLP kAttn": 1e-3,
         "DeepRV + gMLP": 5e-3 if L <= 32**2 else 1e-2,
         "PriorCVAE": 1.0e-3 if L <= 32**2 else 5e-3,
+        "PriorCVAE adamw": 1.0e-3 if L <= 32**2 else 2e-3,
         "DeepRV + MLP": 1.0e-3 if L <= 32**2 else 5e-3,
         "DeepRV + gMLP kAttn": 1.0e-3 if L <= 32**2 else 2e-3,
         "DeepRV + gMLP adamw": 1.0e-3 if L <= 32**2 else 2e-3,
     }[model_name]
     bs = default_bs if L < 64**2 else default_bs // 2
-    if model_name == "Inducing DeepRV + gMLP":
+    if model_name == "Inducing DeepRV + gMLP kAttn":
         bs = default_bs
     train_step = {
-        "Inducing DeepRV + gMLP": inducing_deep_rv_train_step,
         "PriorCVAE": prior_cvae_train_step,
+        "PriorCVAE adamw": partial(prior_cvae_train_step, mse_weight=5),
     }.get(model_name, deep_rv_train_step)
     train_num_steps = default_steps * (default_bs // bs)
-    if model_name == "Inducing DeepRV + gMLP":
+    if model_name == "Inducing DeepRV + gMLP kAttn":
         train_num_steps *= 2
     lr_schedule = cosine_annealing_lr(train_num_steps, max_lr)
     optimizer, clip = optax.yogi(lr_schedule), 3.0
-    if model_name in ["DeepRV + gMLP kAttn", "DeepRV + gMLP adamw"]:
+    if "kAttn" in model_name or "adamw" in model_name:
         optimizer, clip = optax.adamw(lr_schedule, weight_decay=1e-2), 3.0
     optimizer = optax.chain(optax.clip_by_global_norm(clip), optimizer)
     return optimizer, max_lr, bs, train_num_steps, train_step
