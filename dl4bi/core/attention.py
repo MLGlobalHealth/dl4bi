@@ -864,6 +864,60 @@ class AdaptiveMultiHeadSelfAttention(nn.Module):
         return self.proj_out(ctx, ctx), attn  # ctx is condition
 
 
+class AdaptiveMultiHeadAttention(nn.Module):
+    r"""Performs multihead query-key-value attention.
+
+    Args:
+        attn: An attention module.
+        num_heads: Number of heads for attention module.
+        proj_qs: A module for projecting queries.
+        proj_ks: A module for projecting keys.
+        proj_vs: A module for projecting values.
+        proj_out: A module for projecting output.
+
+    Returns:
+        A `MultiHeadAttention` module.
+    """
+
+    attn: nn.Module = Attention()
+    num_heads: int = 4
+    proj_qs: nn.Module = HyperLoRA(64)
+    proj_ks: nn.Module = HyperLoRA(64)
+    proj_vs: nn.Module = HyperLoRA(64)
+    proj_out: nn.Module = HyperLoRA(64)
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, D_q]
+        ks: jax.Array,  # [B, K, D_k]
+        vs: jax.Array,  # [B, K, D_v]
+        mask: Optional[jax.Array] = None,  # [B, K]
+        training: bool = False,
+        **kwargs,
+    ):
+        r"""Performs forward pass of network.
+
+        Args:
+            qs: Queries of shape [B, Q, D_q].
+            ks: Keys of shape [B, K, D_k].
+            vs: Values of shape [B, K, D_v].
+            mask: Mask for keys and values of shape [B, K].
+            training: Boolean indicating whether currently training.
+            kwargs: Additional kwargs passed on to attention module.
+
+        Returns:
+            `ctx` and `attn`, the updated values and attention weights.
+        """
+        H = self.num_heads
+        qs, ks, vs = self.proj_qs(qs, qs), self.proj_ks(ks, ks), self.proj_vs(vs, vs)
+        reshape = jit(lambda x: rearrange(x, "B L (H D) -> B H L D", H=H))
+        qs, ks, vs = map(reshape, (qs, ks, vs))
+        ctx, attn = self.attn(qs, ks, vs, mask, training, **kwargs)
+        ctx = rearrange(ctx, "B H L D -> B L (H D)")
+        return self.proj_out(ctx, ctx), attn
+
+
 class TEMultiHeadAttention(nn.Module):
     """
     Translation Equivariant MultiHeadAttention from [Translation Equivariant Neural Processes](https://arxiv.org/abs/2406.12409).
