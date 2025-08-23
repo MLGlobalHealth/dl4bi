@@ -35,11 +35,11 @@ class AdaptiveMultiheadCausalAttention(nn.Module):
     @nn.compact
     def __call__(self, x: jax.Array):
         (B, L, _), D, H = x.shape, self.d_model, self.num_heads
-        qs, ks, vs = HyperLoRAqkv(D // 4)(x, x)  # x is condition
+        qs, ks, vs = HyperLoRAqkv(D // 4, jnp.bfloat16)(x, x)  # x is condition
         qs, ks, vs = map(lambda x: x.reshape(B, L, H, D // H), (qs, ks, vs))
         ctx = dot_product_attention(qs, ks, vs, is_causal=True, implementation="cudnn")
         ctx = ctx.reshape(B, L, D)
-        return HyperLoRA(D)(ctx, ctx)
+        return HyperLoRA(D, D // 4, jnp.bfloat16)(ctx, ctx)
 
 
 class FFN(nn.Module):
