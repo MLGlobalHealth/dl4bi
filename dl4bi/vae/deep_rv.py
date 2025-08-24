@@ -9,6 +9,7 @@ from sps.kernels import l2_dist
 from ..core.attention import (
     BiasedScanAttention,
     DeepKernelAttention,
+    Attention,
     MultiHeadAttention,
 )
 from ..core.bias import Bias
@@ -134,6 +135,49 @@ class ScanTransformerDeepRV(nn.Module):
                 x, mask=None, training=False, **kwargs
             )
         return VAEOutput(MLP([D * 4, D, 1])(x))
+
+    def decode(self, z: Array, conditionals: Array, **kwargs):
+        return self(z, conditionals, **kwargs).f_hat
+
+
+class KernelBiasTransformerDeepRV(nn.Module):
+    max_locations: int
+    dim: int = 64
+    num_blks: int = 2
+    s_embed: Union[Callable, nn.Module] = lambda x: x
+    head: Union[Callable, nn.Module] = MLP([256, 64])
+
+    @nn.compact
+    def __call__(
+        self,
+        z: Array,
+        conditionals: Array,
+        s: Array,
+        K: Array,
+        mask: Optional[Array] = None,
+        **kwargs,
+    ):
+        (B, L), D, C = z.shape, self.dim, conditionals.shape[0]
+        batched_s = jnp.repeat(s[None, ...], z.shape[0], axis=0)
+        s_embeded = self.s_embed(batched_s)
+        ids = jnp.repeat(jnp.arange(L, dtype=int)[None, :], B, axis=0)
+        ids_embed = nn.Embed(self.max_locations, features=(D * 2) - (C + 1))(ids)
+        x = jnp.concat([jnp.atleast_3d(z), s_embeded, ids_embed], axis=-1)
+        x = cond_as_feats(x, conditionals)
+        x = MLP([D * 4, D], nn.gelu)(x)
+        for _ in range(self.num_blks):
+            kwargs = {"bias": Bias.build_scalar_bias()(jnp.repeat(K[None], B, axis=0))}
+            attn = MultiHeadAttention(
+                proj_qs=MLP([D * 2]),
+                proj_ks=MLP([D * 2]),
+                proj_vs=MLP([D * 2]),
+                proj_out=MLP([D]),
+            )
+            ffn = MLP([D * 4, D])
+            x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(
+                x, mask=mask, training=False, **kwargs
+            )
+        return VAEOutput(self.head(x))
 
     def decode(self, z: Array, conditionals: Array, **kwargs):
         return self(z, conditionals, **kwargs).f_hat
