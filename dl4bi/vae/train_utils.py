@@ -194,3 +194,102 @@ def cond_as_locs(x: jax.Array, cond: jax.Array):
     B, L = x.shape[:2]
     # NOTE: reshape x in case x's shape is [B,L,1]
     return jnp.concat([x.reshape(B, L), jnp.tile(cond.flatten(), (B, 1))], axis=-1)
+
+
+@partial(jax.jit, static_argnames=["train_num_steps", "warmup_frac", "max_f_w"])
+def inducing_deep_rv_train_step_curric(
+    rng: jax.Array,
+    state: TrainState,
+    batch: dict,
+    train_num_steps: int = 100_000,
+    warmup_frac: float = 0.5,
+    max_f_w: float = 0.5,
+):
+    """Curriculum: (1-λ)*MSE(f*,f*_hat) + λ*MSE(K_su f*, K_su f*_hat), λ ramps with step."""
+
+    def loss_fn(params):
+        f_bar_u, K_su, step = batch["f"], batch["K_su"], batch["step"]
+        output: VAEOutput = state.apply_fn(
+            {"params": params}, **batch, rngs={"extra": rng}
+        )
+        residuals = f_bar_u.squeeze() - output.f_hat.squeeze()
+        f_bar_u_mse = (residuals**2).mean()
+        f_mse = (jnp.einsum("ij, bj-> bi", K_su, residuals)) ** 2
+        # λ ramp: 0 → 1 over warmup_frac * train_num_steps
+        warmup_steps = warmup_frac * train_num_steps
+        lam = jnp.clip((step / warmup_steps) - 1, 0.0, 1.0) * max_f_w
+        loss = (1.0 - lam) * f_bar_u_mse + lam * f_mse.mean()
+        return loss
+
+    loss, grads = value_and_grad(loss_fn)(state.params)
+    return state.apply_gradients(grads=grads), loss
+
+
+@partial(jax.jit, static_argnames=["r", "noise_std", "consistency_weight"])
+def inducing_deep_rv_train_step_noise(
+    rng: jax.Array,
+    state: TrainState,
+    batch: dict,
+    r: int = 64,  # how many top right-singular vectors to use
+    noise_std: float = 0.05,  # std of noise coefficients in that subspace
+    consistency_weight: float = 1.0,  # weight on the consistency term
+):
+    """Noise injection in top-r right-singular subspace (batch['V_r'] expected as [U, r])."""
+
+    def loss_fn(params):
+        f_u_bar, K_su = batch["f"], batch["K_su"]
+        # NOTE: r largest eigenvectors, decending order
+        eigvecs, _ = jax.lax.linalg.eigh(K_su.T @ K_su)
+        V_r = eigvecs[:, -r:][:, ::-1]
+        out: VAEOutput = state.apply_fn(
+            {"params": params}, **batch, rngs={"extra": rng}
+        )
+        # Base losses
+        residuals = f_u_bar.squeeze() - out.f_hat.squeeze()
+        f_u_bar_mse = (residuals**2).mean()
+        f_res = jnp.einsum("ij,bj->bi", K_su, residuals)
+        f_mse = (f_res**2).mean()
+        # Noise in high-gain subspace (same for the whole batch or per-sample; here per-batch):
+        rng_noise, _ = jax.random.split(rng)
+        eta = noise_std * jax.random.normal(rng_noise, (r,))  # [r]
+        epsilon = jnp.einsum("ur,r->u", V_r, eta)  # [U]
+        # Noisy target in latent → mapped to f
+        f_u_bar_noisy = f_u_bar + epsilon  # broadcast to [B, U]
+        f_noisy = jnp.einsum("ij,bj->bi", K_su, f_u_bar_noisy)  # [B, S]
+        f_pred = jnp.einsum("ij,bj->bi", K_su, out.f_hat.squeeze())  # [B, S]
+        # Consistency: prediction should stay close to noisy target in f-space
+        consistency = ((f_pred - f_noisy) ** 2).mean()
+        loss = f_mse + f_u_bar_mse + consistency_weight * consistency
+        return loss
+
+    loss, grads = value_and_grad(loss_fn)(state.params)
+    return state.apply_gradients(grads=grads), loss
+
+
+@partial(jax.jit, static_argnames=["r", "residual_weight"])
+def inducing_deep_rv_train_step_latent_plus_residual(
+    rng: jax.Array,
+    state: TrainState,
+    batch: dict,
+    r: int = 64,
+    residual_weight: float = 1.0,
+):
+    """Loss = MSE(f*, f*_hat) + residual_weight * ||V_r^T (f* - f*_hat)||^2."""
+
+    def loss_fn(params):
+        f_u_bar, K_su = batch["f"], batch["K_su"]
+        # NOTE: r largest eigenvectors, decending order
+        eigvecs, _ = jax.lax.linalg.eigh(K_su.T @ K_su)
+        V_r = eigvecs[:, -r:][:, ::-1]
+        out: VAEOutput = state.apply_fn(
+            {"params": params}, **batch, rngs={"extra": rng}
+        )
+        residuals = f_u_bar.squeeze() - out.f_hat.squeeze()  # [B, U]
+        f_u_bar_mse = (residuals**2).mean()
+        res_top = jnp.einsum("ur,bu->br", V_r, residuals)  # [B, r]
+        residual_align = (res_top**2).mean()
+        loss = f_u_bar_mse + residual_weight * residual_align
+        return loss
+
+    loss, grads = value_and_grad(loss_fn)(state.params)
+    return state.apply_gradients(grads=grads), loss

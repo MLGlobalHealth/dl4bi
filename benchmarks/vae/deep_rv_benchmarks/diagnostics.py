@@ -38,7 +38,7 @@ def compare_grads(
     surr_models = get_surr_decs(models_dict, save_dir)
     results_dict = {}
     for model_name in models_dict.keys():
-        infer_model, _, _ = infer_model_fn(s, s_train, priors, model_name)
+        infer_model, _ = infer_model_fn(s, s_train, priors, model_name)
         surr_dec = surr_models.get(model_name, None)
         results_dict[model_name] = compute_gradients_for_target(
             infer_model, rng, num_points, target, surr_dec, max_ls
@@ -183,12 +183,23 @@ def diff_per_loader(models_dict, s, s_train, kernel, save_dir, max_ls=50.0, bs=3
 
             if ls_idx in selected_ls_indices:
                 residuals = f_u_bar - pred_f_u_bar
-                f_residuals = jnp.einsum("ij,bj->bi", K_su, residuals)  # f - pred_f
+                f_residuals = f - pred_f
                 ls_folder = plot_dir / m_name / f"ls_{float(ls_val):.1f}"
                 ls_folder.mkdir(parents=True, exist_ok=True)
                 plot_residuals(residuals, f_residuals, m_name, ls_val, ls_folder)
-                plot_energies(U, f_residuals, m_name, ls_val, ls_folder)
-
+                plot_energies(
+                    U, f_residuals, m_name, ls_val, ls_folder, q_name="Residuals"
+                )
+                plot_energies(U, f, m_name, ls_val, ls_folder, q_name="f")
+                plot_energies(U, pred_f, m_name, ls_val, ls_folder, q_name="pred f")
+                plot_energies(
+                    U,
+                    random.normal(rng, shape=f.shape),
+                    m_name,
+                    ls_val,
+                    ls_folder,
+                    q_name="rand",
+                )
             mse_jit = optax.l2_loss(pred_f_u_bar, f_u_bar).mean()
             f_u_bar_mses[m_name].append(mse_jit)
             f_mses[m_name].append(optax.l2_loss(pred_f, f).mean())
@@ -196,16 +207,16 @@ def diff_per_loader(models_dict, s, s_train, kernel, save_dir, max_ls=50.0, bs=3
     plot_mses(f_u_bar_mses, ls_grid, plot_dir, f_mses)
 
 
-def plot_energies(U, f_residuals, m_name, ls_val, ls_folder):
+def plot_energies(U, f_residuals, m_name, ls_val, ls_folder, q_name):
     proj = f_residuals @ U  # Shape: (B, U)
     proj_energy = jnp.mean(proj.T**2, axis=1)  # Mean energy per SVD mode
     plt.figure(figsize=(6, 4))
     plt.semilogy(proj_energy, marker="o")
-    plt.title(f"Residual Energy in SVD basis\nModel: {m_name}, ls={ls_val:.1f}")
+    plt.title(f"{q_name} Energy in SVD basis\nModel: {m_name}, ls={ls_val:.1f}")
     plt.xlabel("SVD Mode")
     plt.ylabel("Mean Energy")
     plt.tight_layout()
-    plt.savefig(ls_folder / "svd_residual_energy.png")
+    plt.savefig(ls_folder / f"{q_name}_svd_residual_energy.png")
     plt.close()
 
 

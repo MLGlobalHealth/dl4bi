@@ -38,72 +38,87 @@ from dl4bi.vae.train_utils import (
     deep_rv_train_step,
     generate_surrogate_decoder,
     inducing_deep_rv_train_step,
+    inducing_deep_rv_train_step_latent_plus_residual,
 )
 
 
-def main(seed=55, logged_priors=False, max_ls=50.0):
+def main(seed=55, logged_priors=False, max_ls=40.0, grid_dim=100, L_train=512):
     wandb.init(mode="disabled")  # NOTE: downstream function assumes active wandb
     rng = random.key(seed)
     rng_train, rng_test, rng_infer, rng_idxs, rng_obs = random.split(rng, 5)
-    save_dir = Path(f"results/inducing_drv{'_log_priors' if logged_priors else ''}/")
+    save_dir = Path(
+        f"results/inducing_drv{'_log_priors' if logged_priors else ''}"
+        f"_{L_train}_{grid_dim**2}/"
+    )
     save_dir.mkdir(parents=True, exist_ok=True)
-    grid_dim = 96
     s = build_grid([{"start": 0.0, "stop": 100.0, "num": grid_dim}] * 2).reshape(-1, 2)
     models = {
+        "Inducing Points": None,
+        "DeepRV kernelAttn inv + gMLP latent": gMLPDeepRV(
+            num_blks=4, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
+        ),
         "DeepRV kernelAttn inv + gMLP": gMLPDeepRV(
             num_blks=4, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
         ),
         "DeepRV kernelAttn inv + gMLP simple": gMLPDeepRV(
             num_blks=4, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
         ),
-        "DeepRV inv + gMLP simple": gMLPDeepRV(num_blks=4, head=MLP([128, 64, 1])),
-        "Inducing Points": None,
+        "DeepRV kernelAttn inv + gMLP ksu loss": gMLPDeepRV(
+            num_blks=4, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
+        ),
     }
     y_obs = gen_y_obs(rng_obs, s)
     obs_mask = generate_obs_mask(rng_idxs, y_obs, 0.3)
     log_ls = dist.TransformedDistribution(
         dist.Beta(4.0, 1.0), LogScaleTransform(max_ls=max_ls)
     )
-    priors = {
+    train_priors = {"ls": dist.Uniform(1.0, max_ls + 10.0)}
+    infer_priors = {
         "ls": log_ls if logged_priors else dist.Uniform(1.0, max_ls),
         "beta": dist.Normal(),
     }
     y_hats, all_samples, result = [], [], []
-    L_train = 512
     kmeans = KMeans(n_clusters=L_train, random_state=0)
     s_train = kmeans.fit(s[obs_mask]).cluster_centers_  # shape (num_points, s.shape[1])
+    # old_res = pd.read_csv(save_dir / "res.csv")
     with open(save_dir / "s_train.pkl", "wb") as ff:
         pickle.dump(s_train, ff)
     for model_name, nn_model in models.items():
-        (save_dir / f"{model_name}").mkdir(parents=True, exist_ok=True)
+        model_dir = save_dir / f"{model_name}"
+        # if (model_dir / "single_res.pkl").exists():
+        #     with open(model_dir / "hmc_samples.pkl", "rb") as out_file:
+        #         samples = pickle.load(out_file)
+        #     with open(model_dir / "hmc_pp.pkl", "rb") as out_file:
+        #         post = pickle.load(out_file)
+        #     with open(model_dir / "single_res.pkl", "rb") as out_file:
+        #         res = pickle.load(out_file)
+        #     samples = {k: it for k, it in samples.items() if k in ["beta", "ls"]}
+        #     y_hats.append(post["obs"])
+        #     all_samples.append(samples)
+        #     if len(old_res[old_res.model_name == model_name]) > 0:
+        #         res = dict(old_res[old_res.model_name == model_name].iloc[0])
+        #     result.append(res)
+        #     continue
+        model_dir.mkdir(parents=True, exist_ok=True)
         train_time, f_u_bar_mse, surrogate_decoder, ess = None, None, None, {}
         eval_f_mse, cosine_sim = None, None
         if nn_model is not None:
-            loader = gen_train_dataloader(s, s_train, priors, batch_size=32)
+            loader = gen_train_dataloader(s, s_train, train_priors, batch_size=32)
             train_time, f_u_bar_mse, surrogate_decoder, eval_f_mse, cosine_sim = (
                 surrogate_model_train(
-                    rng_train, rng_test, loader, nn_model, save_dir / f"{model_name}"
+                    rng_train, rng_test, loader, nn_model, model_dir, model_name
                 )
             )
-        infer_model, cond_names, s_train = inference_model_inducing_points(
-            s, s_train, priors, model_name
+        infer_model, cond_names = inference_model_inducing_points(
+            s, s_train, infer_priors, model_name
         )
         samples, mcmc, post, infer_time = hmc(
-            rng_infer,
-            infer_model,
-            y_obs,
-            obs_mask,
-            save_dir / f"{model_name}",
-            surrogate_decoder,
+            rng_infer, infer_model, y_obs, obs_mask, model_dir, surrogate_decoder
         )
         ess = az.ess(mcmc, method="mean")
         try:
             plot_infer_trace(
-                samples,
-                mcmc,
-                None,
-                cond_names,
-                save_dir / f"{model_name}_infer_trace.png",
+                samples, mcmc, None, cond_names, model_dir / "infer_trace.png"
             )
         except Exception:
             pass
@@ -127,7 +142,7 @@ def main(seed=55, logged_priors=False, max_ls=50.0):
             "ESS lengthscale": ess["ls"].item() if ess else None,
             "ESS fixed effects": ess["beta"].item() if ess else None,
         }
-        with open((save_dir / f"{model_name}") / "single_res.pkl", "wb") as ff:
+        with open(model_dir / "single_res.pkl", "wb") as ff:
             pickle.dump(res, ff)
         result.append(res)
     model_names = list(models.keys())
@@ -135,7 +150,7 @@ def main(seed=55, logged_priors=False, max_ls=50.0):
         plot_posterior_predictive_comparisons(
             all_samples,
             {},
-            priors,
+            infer_priors,
             model_names,
             cond_names,
             save_dir / "comp",
@@ -153,16 +168,11 @@ def main(seed=55, logged_priors=False, max_ls=50.0):
         model_names,
         save_dir / "obs_means.png",
     )
-    wass_dist = posterior_wasserstein_distance(all_samples, model_names, cond_names)
-    result = pd.DataFrame(result)
-    for model_name in model_names:
-        if model_name == "Inducing Points":
-            continue
-        for n in cond_names:
-            result.loc[
-                result["model_name"] == model_name, f"{n} wasserstein distance"
-            ] = wass_dist[model_name][n]
-    result.to_csv(save_dir / "res.csv")
+    result = posterior_wasserstein_distance(
+        result, all_samples, model_names, cond_names
+    )
+    result = posterior_mean_inducing_dist(result, y_hats, model_names)
+    pd.DataFrame(result).to_csv(save_dir / "res.csv")
     # from diagnostics import compare_grads, diff_per_loader
 
     # diff_per_loader(models, s, s_train, matern_1_2, save_dir, max_ls)
@@ -170,7 +180,7 @@ def main(seed=55, logged_priors=False, max_ls=50.0):
     #     models,
     #     s,
     #     inference_model_inducing_points,
-    #     priors,
+    #     infer_priors,
     #     s_train,
     #     L_train,
     #     save_dir,
@@ -181,7 +191,7 @@ def main(seed=55, logged_priors=False, max_ls=50.0):
     #     models,
     #     s,
     #     inference_model_inducing_points,
-    #     priors,
+    #     infer_priors,
     #     s_train,
     #     L_train,
     #     save_dir,
@@ -201,8 +211,8 @@ def hmc(
     """runs HMC on given inference model and observed f"""
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=50))
     k1, k2 = random.split(rng)
-    # mcmc = MCMC(nuts, num_chains=1, num_samples=1_000, num_warmup=4_00)
-    mcmc = MCMC(nuts, num_chains=2, num_samples=10_000, num_warmup=4_000)
+    mcmc = MCMC(nuts, num_chains=2, num_samples=5_000, num_warmup=2_000)
+    # mcmc = MCMC(nuts, num_chains=2, num_samples=10_000, num_warmup=4_000)
     start = datetime.now()
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=y_obs)
     infer_time = (datetime.now() - start).total_seconds()
@@ -214,6 +224,7 @@ def hmc(
         pickle.dump(samples, out_file)
     with open(results_dir / "hmc_pp.pkl", "wb") as out_file:
         pickle.dump(post, out_file)
+    samples = {k: it for k, it in samples.items() if k in ["beta", "ls"]}
     return samples, mcmc, post, infer_time
 
 
@@ -223,20 +234,27 @@ def surrogate_model_train(
     loader: Callable,
     model: nn.Module,
     results_dir: Path,
+    model_name: str,
     train_num_steps: int = 800_000,
     valid_interval: int = 100_000,
     valid_steps: int = 5_000,
 ):
     lr_schedule = cosine_annealing_lr(train_num_steps, 1e-3)
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.adamw(lr_schedule))
+    train_step = {
+        "DeepRV kernelAttn inv + gMLP simple": deep_rv_train_step,
+        "DeepRV kernelAttn inv + gMLP": inducing_deep_rv_train_step,
+        "DeepRV kernelAttn inv + gMLP latent": inducing_deep_rv_train_step_latent_plus_residual,
+        "DeepRV kernelAttn inv + gMLP ksu loss": partial(
+            inducing_deep_rv_train_step, weight=0.01
+        ),
+    }[model_name]
     start = datetime.now()
     state = train(
         rng_train,
         model,
         optimizer,
-        deep_rv_train_step
-        if "simple" in str(results_dir)
-        else inducing_deep_rv_train_step,
+        train_step,
         train_num_steps,
         loader,
         inducing_valid_step,
@@ -322,7 +340,7 @@ def inference_model_inducing_points(s: Array, u: Array, priors: dict, model_name
         with numpyro.handlers.mask(mask=obs_mask):
             return sample("obs", dist.Poisson(lambda_), obs=y)
 
-    return poisson_inducing, ["ls", "beta"], u
+    return poisson_inducing, ["ls", "beta"]
 
 
 @jit
@@ -440,7 +458,7 @@ class LogScaleTransform(ParameterFreeTransform):
 
 
 def posterior_wasserstein_distance(
-    samples: list, model_names: list[str], var_names: list[str]
+    result: list[dict], samples: list, model_names: list[str], var_names: list[str]
 ):
     """
     Computes Wasserstein distance for each variable between the posterior distributions
@@ -448,30 +466,43 @@ def posterior_wasserstein_distance(
     """
     baseline_index = model_names.index("Inducing Points")
     baseline_samples = samples[baseline_index]
-    distances = {m: {} for m in model_names if m != "Inducing Points"}
-    for model_name, model_sample in zip(model_names, samples):
-        if model_name == "Inducing Points":
-            continue
+    for model_res, model_sample in zip(result, samples):
         for var_name in var_names:
+            model_res[f"{var_name} wasserstein distance"] = jnp.nan
+            if model_res["model_name"] == "Inducing Points":
+                continue
             baseline_var_samples = baseline_samples.get(var_name)
             model_var_samples = model_sample.get(var_name)
             if baseline_var_samples is not None and model_var_samples is not None:
                 dist = wasserstein_distance(baseline_var_samples, model_var_samples)
-                distances[model_name][var_name] = dist
-            else:
-                distances[model_name][var_name] = jnp.nan
-    return distances
+                model_res[f"{var_name} wasserstein distance"] = dist
+    return result
 
 
-# def load_surr_model_results(model, model_name):
+def posterior_mean_inducing_dist(
+    result: list[dict], y_hats: list, model_names: list[str]
+):
+    baseline_index = model_names.index("Inducing Points")
+    y_hat_gp = y_hats[baseline_index].mean(axis=0)
+    for model_res, y_hat in zip(result, y_hats):
+        if model_res["model_name"] == "Inducing Points":
+            model_res["MSE(y_hat_gp, y_hat)"] = jnp.nan
+        else:
+            model_res["MSE(y_hat_gp, y_hat)"] = jnp.mean(
+                (y_hat_gp - y_hat.mean(axis=0)) ** 2
+            )
+    return result
+
+
+# def load_surr_model_results(model, model_name, L, L_train ):
 #     from orbax.checkpoint import PyTreeCheckpointer
 #     from dl4bi.core.train import TrainState
 
 #     optimizer = optax.chain(
 #         optax.clip_by_global_norm(3.0),
-#         optax.yogi(cosine_annealing_lr(1_000_000, 5e-3)),
+#         optax.adamw(cosine_annealing_lr(1_200_000, 1e-3), weight_decay=1e-2),
 #     )
-#     model_path = Path(f"results/inducing_drv/{model_name}").absolute()
+#     model_path = Path(f"results/inducing_drv_{L_train}_{L}/{model_name}").absolute()
 #     ckptr = PyTreeCheckpointer()
 #     ckpt = ckptr.restore(model_path / "model.ckpt")
 #     print(model_path / "model.ckpt")
@@ -482,7 +513,7 @@ def posterior_wasserstein_distance(
 #         kwargs=ckpt["state"]["kwargs"],
 #     )
 #     surrogate_decoder = generate_surrogate_decoder(state, model)
-#     res_df = pd.read_csv("results/inducing_drv/res.csv")
+#     res_df = pd.read_csv("results/inducing_drv_{L_train}_{L}/res.csv")
 #     res_df = res_df[res_df["model_name"] == model_name]
 #     train_time, f_u_bar_mse, eval_f_mse, cosine_similarity = (
 #         res_df["train_time"].values[0],
@@ -490,7 +521,6 @@ def posterior_wasserstein_distance(
 #         res_df["Test f MSE"].values[0],
 #         res_df["Test loss cosine sim"].values[0],
 #     )
-
 #     return train_time, f_u_bar_mse, surrogate_decoder, eval_f_mse, cosine_similarity
 
 
