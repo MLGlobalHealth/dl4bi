@@ -5,6 +5,7 @@ from .deep_rv import (
     MLPDeepRV,
     ScanTransformerDeepRV,
     gMLPDeepRV,
+    KernelBiasTransformerDeepRV,
 )
 from .pi_vae import Phi, PiVAE
 from .prior_cvae import PriorCVAE
