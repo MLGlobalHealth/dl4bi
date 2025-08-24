@@ -67,13 +67,9 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
         "DeepRV + gMLP kAttn": gMLPDeepRV(num_blks=2, attn=FixedKernelAttention()),
         "DeepRV + gMLP adamw": gMLPDeepRV(num_blks=2),
         "PriorCVAE": PriorCVAE,
-        "PriorCVAE adamw": PriorCVAE,
         "DeepRV + MLP": MLPDeepRV,
         "Inducing Points": None,
         "Inducing Points Large": None,
-        "Inducing DeepRV + gMLP kAttn": gMLPDeepRV(
-            num_blks=3, attn=FixedKernelAttention()
-        ),
         "ADVI": None,
         "RFF": None,
     }

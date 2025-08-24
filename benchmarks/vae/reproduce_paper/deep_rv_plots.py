@@ -405,7 +405,12 @@ def plot_models_predictive_means(
     if not isinstance(obs_mask, bool):
         f_hat_means = [np.ma.masked_where(~obs_mask, f_hat_means[0])] + f_hat_means
     fig, ax = plt.subplots(
-        1, len(f_hat_means), figsize=(6 * len(f_hat_means), 7), constrained_layout=True
+        1,
+        len(f_hat_means),
+        figsize=(6 * len(f_hat_means), 7),
+        constrained_layout=True,
+        sharex=True,
+        sharey=True,
     )
     for i, f_mean in enumerate(f_hat_means):
         legend = i == len(f_hat_means) - 1
