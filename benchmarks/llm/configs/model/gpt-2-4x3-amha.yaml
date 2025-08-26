@@ -1,8 +1,9 @@
 d_model: 768
+d_rank: 64
+mlp_ratio: 6
 num_blks: 4
 num_reps: 3
 num_heads: 12
 num_vocab: 50304
 num_context_window: 1024
 p_dropout: 0.0
-adaptive: True

@@ -8,6 +8,7 @@ from jax.nn import dot_product_attention
 from jax.tree_util import Partial
 
 from dl4bi.core.hyper import HyperLoRA, HyperLoRAqkv
+from dl4bi.core.mlp import MLP
 
 resid_init = init.normal(0.02 / jnp.sqrt(2 * 12))  # 2 resid for each of 12 layers
 Embed = Partial(nn.Embed, dtype=jnp.bfloat16, embedding_init=init.normal(0.02))
@@ -47,11 +48,12 @@ class AdaptiveMultiheadCausalAttention(nn.Module):
 
 class FFN(nn.Module):
     d_model: int = 128
+    mlp_ratio: int = 4
     p_dropout: float = 0.0
 
     @nn.compact
     def __call__(self, x: jax.Array, training: bool = False):
-        x = Dense(4 * self.d_model)(x)
+        x = Dense(self.mlp_ratio * self.d_model)(x)
         x = nn.gelu(x)
         x = DenseResid(self.d_model)(x)
         return nn.Dropout(self.p_dropout, deterministic=not training)(x)
@@ -61,6 +63,7 @@ class Block(nn.Module):
     num_heads: int = 4
     d_model: int = 128
     d_rank: int = 0
+    mlp_ratio: int = 4
     p_dropout: float = 0.0
 
     @nn.compact
@@ -71,13 +74,17 @@ class Block(nn.Module):
             else MultiheadCausalAttention
         )
         x += attn(self.num_heads, self.d_model)(LayerNorm()(x))
-        x += FFN(self.d_model, self.p_dropout)(LayerNorm()(x), training)
+        x += MLP(
+            [self.d_model * 4, self.d_model], nn.gelu, kernel_init=init.orthogonal()
+        )(LayerNorm()(x), training)
+        # x += FFN(self.d_model, self.mlp_ratio, self.p_dropout)(LayerNorm()(x), training)
         return x
 
 
 class GPT(nn.Module):
     d_model: int = 768
     d_rank: int = 0
+    mlp_ratio: int = 4
     num_blks: int = 12
     num_reps: int = 1
     num_heads: int = 12
@@ -92,7 +99,13 @@ class GPT(nn.Module):
         x = embed_tok(token_ids) + embed_pos(jnp.arange(self.num_context_window))
         x = nn.Dropout(self.p_dropout, deterministic=not training)(x)
         for _ in range(self.num_blks):
-            blk = Block(self.num_heads, self.d_model, self.d_rank, self.p_dropout)
+            blk = Block(
+                self.num_heads,
+                self.d_model,
+                self.d_rank,
+                self.mlp_ratio,
+                self.p_dropout,
+            )
             for _ in range(self.num_reps):
                 x = blk(x, training)
         x = LayerNorm()(x)

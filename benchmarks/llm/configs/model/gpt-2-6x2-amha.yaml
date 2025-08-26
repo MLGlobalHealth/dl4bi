@@ -1,5 +1,6 @@
 d_model: 768
 d_rank: 32
+mlp_ratio: 8
 num_blks: 6
 num_reps: 2
 num_heads: 12

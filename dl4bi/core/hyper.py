@@ -1,3 +1,5 @@
+from typing import Callable
+
 import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
@@ -7,18 +9,19 @@ from flax import linen as nn
 class HyperLoRAqkv(nn.Module):
     rank: int = 16
     dtype: jnp.dtype = jnp.float32
+    kernel_init: Callable = init.orthogonal()
 
     @nn.compact
     def __call__(self, x: jax.Array, z: jax.Array):
         (B, L, D), D_z, R = x.shape, z.shape[-1], self.rank
         # shared base projection
-        qkv = nn.Dense(3 * D, dtype=self.dtype)(x)
+        qkv = nn.Dense(3 * D, dtype=self.dtype, kernel_init=self.kernel_init)(x)
         q, k, v = jnp.split(qkv, 3, axis=-1)
         # shared down projection for LoRA update
-        V = self.param("V", init.lecun_normal(), (R, D), self.dtype)
+        V = self.param("V", self.kernel_init, (R, D), self.dtype)
         xV = jnp.einsum("B L D, R D -> B L R", x, V)
         # independent scales and up projections for LoRA update
-        scale = nn.Dense(3 * R, dtype=self.dtype)
+        scale = nn.Dense(3 * R, dtype=self.dtype, kernel_init=self.kernel_init)
         if z.ndim == 3:  # per token condition
             h = scale(z.reshape(B * L, D_z)).reshape(B, L, 3, R)
             s_q, s_k, s_v = jnp.split(h, 3, axis=2)  # [B, L, 1, R]
@@ -45,14 +48,15 @@ class HyperLoRA(nn.Module):
     out_dim: int = 128
     rank: int = 16
     dtype: jnp.dtype = jnp.float32
+    kernel_init: Callable = init.orthogonal()
 
     @nn.compact
     def __call__(self, x: jax.Array, z: jax.Array):
         (B, L, D_in), D_out, D_z, R = x.shape, self.out_dim, z.shape[-1], self.rank
-        V = self.param("V", init.lecun_normal(), (R, D_in), self.dtype)
+        V = self.param("V", self.kernel_init, (R, D_in), self.dtype)
         U = self.param("U", init.zeros, (D_out, R), self.dtype)
-        scale = nn.Dense(R, dtype=self.dtype)
-        h = nn.Dense(D_out, dtype=self.dtype)(x)
+        scale = nn.Dense(R, dtype=self.dtype, kernel_init=self.kernel_init)
+        h = nn.Dense(D_out, dtype=self.dtype, kernel_init=self.kernel_init)(x)
         xV = jnp.einsum("B L D, R D -> B L R", x, V)
         if z.ndim == 3:  # per token condition
             s = scale(z.reshape(B * L, D_z)).reshape(B, L, R)

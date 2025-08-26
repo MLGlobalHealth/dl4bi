@@ -1,12 +1,14 @@
 _target_: dl4bi.meta_learning.BTNP
-num_blks: 6
-num_reps: 1
+num_blks: 1
+num_reps: 6
 embed_all:
   _target_: dl4bi.mlp.MLP
   dims: [256, 128, 64]
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
+  kernel_init:
+    _target_: jax.nn.initializers.orthogonal
 s_sim:
   _target_: dl4bi.sim.l2_dist
   _partial_: true
@@ -40,6 +42,8 @@ blk:
   ffn:
     _target_: dl4bi.mlp.MLP
     dims: [256, 64]
+    kernel_init:
+      _target_: jax.nn.initializers.orthogonal
     act_fn:
       _target_: jax.nn.gelu
       _partial_: true
@@ -49,3 +53,5 @@ head:
   act_fn:
     _target_: jax.nn.gelu
     _partial_: true
+  kernel_init:
+    _target_: jax.nn.initializers.orthogonal

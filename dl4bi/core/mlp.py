@@ -14,14 +14,20 @@ class MLP(nn.Module):
     act_fn: Callable = nn.relu
     p_dropout: float = 0.0
     dtype: jnp.dtype = jnp.float32
+    # kernel_init: Callable = init.lecun_normal()
+    kernel_init: Callable = init.orthogonal()
 
     @nn.compact
     def __call__(self, x, training: bool = False, **kwargs):
         for dim in self.dims[:-1]:
-            x = nn.Dense(dim, dtype=self.dtype)(x)
+            x = nn.Dense(dim, dtype=self.dtype, kernel_init=self.kernel_init)(x)
             x = self.act_fn(x)
             x = nn.Dropout(self.p_dropout, deterministic=not training)(x)
-        return nn.Dense(self.dims[-1], dtype=self.dtype)(x)
+        return nn.Dense(
+            self.dims[-1],
+            dtype=self.dtype,
+            kernel_init=self.kernel_init,
+        )(x)
 
 
 class MLPMixerBlock(nn.Module):
