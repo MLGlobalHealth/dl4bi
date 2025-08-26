@@ -75,7 +75,9 @@ class Block(nn.Module):
         )
         x += attn(self.num_heads, self.d_model)(LayerNorm()(x))
         x += MLP(
-            [self.d_model * 4, self.d_model], nn.gelu, kernel_init=init.orthogonal()
+            [self.d_model * self.mlp_ratio, self.d_model],
+            nn.gelu,
+            kernel_init=init.orthogonal(),
         )(LayerNorm()(x), training)
         # x += FFN(self.d_model, self.mlp_ratio, self.p_dropout)(LayerNorm()(x), training)
         return x

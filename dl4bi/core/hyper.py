@@ -18,7 +18,7 @@ class HyperLoRAqkv(nn.Module):
         qkv = nn.Dense(3 * D, dtype=self.dtype, kernel_init=self.kernel_init)(x)
         q, k, v = jnp.split(qkv, 3, axis=-1)
         # shared down projection for LoRA update
-        V = self.param("V", self.kernel_init, (R, D), self.dtype)
+        V = self.param("V", init.lecun_normal(), (R, D), self.dtype)
         xV = jnp.einsum("B L D, R D -> B L R", x, V)
         # independent scales and up projections for LoRA update
         scale = nn.Dense(3 * R, dtype=self.dtype, kernel_init=self.kernel_init)
@@ -53,7 +53,7 @@ class HyperLoRA(nn.Module):
     @nn.compact
     def __call__(self, x: jax.Array, z: jax.Array):
         (B, L, D_in), D_out, D_z, R = x.shape, self.out_dim, z.shape[-1], self.rank
-        V = self.param("V", self.kernel_init, (R, D_in), self.dtype)
+        V = self.param("V", init.lecun_normal(), (R, D_in), self.dtype)
         U = self.param("U", init.zeros, (D_out, R), self.dtype)
         scale = nn.Dense(R, dtype=self.dtype, kernel_init=self.kernel_init)
         h = nn.Dense(D_out, dtype=self.dtype, kernel_init=self.kernel_init)(x)
