@@ -17,6 +17,7 @@ from jax import Array, jit, random, value_and_grad
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig
+from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
 from scipy.stats import wasserstein_distance
 from sps.kernels import matern_1_2
 from sps.utils import build_grid
@@ -180,6 +181,16 @@ def main(seed=15):
             with open(model_s_path / "single_res.pkl", "wb") as out_file:
                 pickle.dump(res, out_file)
             result.append(res)
+    model_names = list(models.keys())
+    for i in range(len(s_per_loc)):
+        plot_posterior_predictive_comparisons(
+            [samp for j, samp in enumerate(all_samples) if j % len(s_per_loc) == i],
+            {},
+            priors,
+            model_names,
+            cond_names,
+            save_dir / f"comp_{s_per_loc[i].shape[0]}",
+        )
     pd.DataFrame(result).to_csv(save_dir / "res.csv")
 
 
