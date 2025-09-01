@@ -53,16 +53,15 @@ def main(seed=19, time_steps=5, grid_shape=(16, 16)):
     L, D = s.shape[0], s.shape[1]
     T = time_steps
     models = {
-        "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
-        "DeepRV + gMLP kernelAttn": gMLPDeepRV(
-            num_blks=2, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
-        ),
+        "Baseline_GP": None,
+        # "Inducing Points": None,
+        "Inducing Points Large": None,
         "PriorCVAE": PriorCVAE(
             MLP(dims=[T * L, T * L]), MLP(dims=[T * L, T * L]), cond_as_locs, T * L
         ),
-        "Baseline_GP": None,
         "ADVI": None,
-        "Inducing Points": None,
+        "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
+        "DeepRV + gMLP kAttn": gMLPDeepRV(num_blks=2, attn=FixedKernelAttention()),
     }
     y_obs = gen_y_obs(rng_obs, s, t)
     spat_obs_mask = gen_spatial_obs_mask(rng_idxs, grid_shape, obs_ratio=0.5)
@@ -80,15 +79,19 @@ def main(seed=19, time_steps=5, grid_shape=(16, 16)):
     poisson_inducing_llk = inference_model_inducing_points(
         s, t, priors, spat_obs_mask, t_obs_mask, num_spatial_pts=32, num_t_pts=2
     )
+    poisson_inducing_llk_large = inference_model_inducing_points(
+        s, t, priors, spat_obs_mask, t_obs_mask, num_spatial_pts=64, num_t_pts=2
+    )
     loader = gen_train_dataloader(s, t, priors, batch_size=16)
     y_hats, all_samples, result = [], [], []
     for model_name, nn_model in models.items():
         poisson_llk, cond_names = inference_model(s, t, priors, model_name)
         model_path = save_dir / f"{model_name}"
         model_path.mkdir(parents=True, exist_ok=True)
-        infer_model = (
-            poisson_inducing_llk if model_name == "Inducing Points" else poisson_llk
-        )
+        infer_model = {
+            "Inducing Points": poisson_inducing_llk,
+            "Inducing Points Large": poisson_inducing_llk_large,
+        }.get(model_name, poisson_llk)
         train_time, eval_mse, surrogate_decoder, ess = None, None, None, {}
         if nn_model is not None:
             train_time, eval_mse, surrogate_decoder = surrogate_model_train(
@@ -108,12 +111,15 @@ def main(seed=19, time_steps=5, grid_shape=(16, 16)):
             )
         y_hats.append(post["obs"])
         all_samples.append(samples)
+        sq_res = (y_obs - post["obs"].mean(axis=0)) ** 2
         res = {
             "model_name": model_name,
             "train_time": train_time,
             "Test Norm MSE": eval_mse,
             "infer_time": infer_time,
-            "MSE(y, y_hat)": ((y_obs - post["obs"].mean(axis=0)) ** 2).mean(),
+            "MSE(y, y_hat)": (sq_res).mean(),
+            "obs MSE(y, y_hat)": (sq_res[obs_mask]).mean(),
+            "unobs MSE(y, y_hat)": (sq_res[jnp.logical_not(obs_mask)]).mean(),
         }
         res.update({f"inferred {c} mean": samples[c].mean(axis=0) for c in cond_names})
         res.update(
@@ -136,16 +142,11 @@ def main(seed=19, time_steps=5, grid_shape=(16, 16)):
         save_dir / "obs_means.png",
         grid_shape,
     )
-    wass_dist = posterior_wasserstein_distance(all_samples, model_names, cond_names)
-    result = pd.DataFrame(result)
-    for model_name in model_names:
-        if model_name == "Baseline_GP":
-            continue
-        for n in cond_names:
-            result.loc[
-                result["model_name"] == model_name, f"{n} wasserstein distance"
-            ] = wass_dist[model_name][n]
-    result.to_csv(save_dir / "res.csv")
+    result = posterior_wasserstein_distance(
+        result, all_samples, model_names, cond_names
+    )
+    result = posterior_mean_gp_dist(result, y_hats, model_names)
+    result = pd.DataFrame(result).to_csv(save_dir / "res.csv")
 
 
 def hmc(
@@ -471,7 +472,7 @@ def plot_models_predictive_means(
     fig, ax = plt.subplots(
         n_rows,
         time_steps,
-        figsize=(5 * time_steps, 4 * n_rows),
+        figsize=(4 * time_steps, 4 * n_rows),
         constrained_layout=True,
     )
     for t in range(time_steps):
@@ -496,30 +497,6 @@ def plot_models_predictive_means(
     fig.savefig(save_path, dpi=200)
     plt.clf()
     plt.close(fig)
-
-
-def posterior_wasserstein_distance(
-    samples: list, model_names: list[str], var_names: list[str]
-):
-    """
-    Computes Wasserstein distance for each variable between the posterior distributions
-    of each model and the baseline "Baseline_GP".
-    """
-    baseline_index = model_names.index("Baseline_GP")
-    baseline_samples = samples[baseline_index]
-    distances = {m: {} for m in model_names if m != "Baseline_GP"}
-    for model_name, model_sample in zip(model_names, samples):
-        if model_name == "Baseline_GP":
-            continue
-        for var_name in var_names:
-            baseline_var_samples = baseline_samples.get(var_name)
-            model_var_samples = model_sample.get(var_name)
-            if baseline_var_samples is not None and model_var_samples is not None:
-                dist = wasserstein_distance(baseline_var_samples, model_var_samples)
-                distances[model_name][var_name] = dist
-            else:
-                distances[model_name][var_name] = jnp.nan
-    return distances
 
 
 class LogScaleTransform(ParameterFreeTransform):
@@ -573,6 +550,41 @@ def gneiting_covariance_matrix(
     K = var / (g**nu) * jnp.exp(-h2_exp / (ls**2 * g**b))
     K = K.transpose(0, 2, 1, 3).reshape(T1 * L1, T2 * L2)
     return K
+
+
+def posterior_wasserstein_distance(
+    result: list[dict], samples: list, model_names: list[str], var_names: list[str]
+):
+    """
+    Computes Wasserstein distance for each variable between the posterior distributions
+    of each model and the baseline "Baseline_GP".
+    """
+    baseline_index = model_names.index("Baseline_GP")
+    baseline_samples = samples[baseline_index]
+    for model_res, model_sample in zip(result, samples):
+        for var_name in var_names:
+            model_res[f"{var_name} wasserstein distance"] = jnp.nan
+            if model_res["model_name"] == "Baseline_GP":
+                continue
+            baseline_var_samples = baseline_samples.get(var_name)
+            model_var_samples = model_sample.get(var_name)
+            if baseline_var_samples is not None and model_var_samples is not None:
+                dist = wasserstein_distance(baseline_var_samples, model_var_samples)
+                model_res[f"{var_name} wasserstein distance"] = dist
+    return result
+
+
+def posterior_mean_gp_dist(result: list[dict], y_hats: list, model_names: list[str]):
+    baseline_index = model_names.index("Baseline_GP")
+    y_hat_gp = y_hats[baseline_index].mean(axis=0)
+    for model_res, y_hat in zip(result, y_hats):
+        if model_res["model_name"] == "Baseline_GP":
+            model_res["MSE(y_hat_gp, y_hat)"] = jnp.nan
+        else:
+            model_res["MSE(y_hat_gp, y_hat)"] = jnp.mean(
+                (y_hat_gp - y_hat.mean(axis=0)) ** 2
+            )
+    return result
 
 
 if __name__ == "__main__":

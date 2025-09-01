@@ -63,12 +63,9 @@ def main(seed=55, logged_priors=False, max_ls=40.0, grid_dim=100, L_train=512):
         "DeepRV kernelAttn inv + gMLP simple": gMLPDeepRV(
             num_blks=4, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
         ),
-        "DeepRV kernelAttn inv + gMLP ksu loss": gMLPDeepRV(
-            num_blks=4, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
-        ),
     }
     y_obs = gen_y_obs(rng_obs, s)
-    obs_mask = generate_obs_mask(rng_idxs, y_obs, 0.3)
+    obs_mask = generate_obs_mask(rng_idxs, y_obs, 0.5)
     log_ls = dist.TransformedDistribution(
         dist.Beta(4.0, 1.0), LogScaleTransform(max_ls=max_ls)
     )
@@ -173,7 +170,7 @@ def main(seed=55, logged_priors=False, max_ls=40.0, grid_dim=100, L_train=512):
     )
     result = posterior_mean_inducing_dist(result, y_hats, model_names)
     pd.DataFrame(result).to_csv(save_dir / "res.csv")
-    # from diagnostics import compare_grads, diff_per_loader
+    # from inducing_drv_diagnostics import compare_grads, diff_per_loader
 
     # diff_per_loader(models, s, s_train, matern_1_2, save_dir, max_ls)
     # compare_grads(
@@ -494,8 +491,9 @@ def posterior_mean_inducing_dist(
     return result
 
 
-# def load_surr_model_results(model, model_name, L, L_train ):
+# def load_surr_model_results(model, model_name, L, L_train):
 #     from orbax.checkpoint import PyTreeCheckpointer
+
 #     from dl4bi.core.train import TrainState
 
 #     optimizer = optax.chain(
@@ -513,13 +511,13 @@ def posterior_mean_inducing_dist(
 #         kwargs=ckpt["state"]["kwargs"],
 #     )
 #     surrogate_decoder = generate_surrogate_decoder(state, model)
-#     res_df = pd.read_csv("results/inducing_drv_{L_train}_{L}/res.csv")
-#     res_df = res_df[res_df["model_name"] == model_name]
+#     with open(model_path / "train_time.pkl", "rb") as out_file:
+#         dd = pickle.load(out_file)
 #     train_time, f_u_bar_mse, eval_f_mse, cosine_similarity = (
-#         res_df["train_time"].values[0],
-#         res_df["Test f_u_bar MSE"].values[0],
-#         res_df["Test f MSE"].values[0],
-#         res_df["Test loss cosine sim"].values[0],
+#         dd["train_time"],
+#         dd["eval f_u_bar mse"],
+#         dd["eval f mse"],
+#         dd["eval loss cosine_sim"],
 #     )
 #     return train_time, f_u_bar_mse, surrogate_decoder, eval_f_mse, cosine_similarity
 
