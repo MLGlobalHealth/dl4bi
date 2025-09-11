@@ -20,31 +20,27 @@ from omegaconf import DictConfig
 from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
 from scipy.stats import wasserstein_distance
 from sps.kernels import matern_1_2
-from sps.utils import build_grid
 from utils.plot_utils import plot_infer_trace
 
 import wandb
 from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import TrainState, cosine_annealing_lr, evaluate, save_ckpt, train
-from dl4bi.vae import KernelBiasTransformerDeepRV
+from dl4bi.vae import FixedKernelAttention, KernelBiasTransformerDeepRV, gMLPDeepRV
 from dl4bi.vae.train_utils import generate_surrogate_decoder
 
 
-def main(seed=15):
+def main(seed=23):
     save_dir = Path("results/multi_location/")
     save_dir.mkdir(parents=True, exist_ok=True)
-    max_train_locations = 1024
-    num_infer_locations = [256, 1024, 2048]
-    max_s = 100.0
+    max_train_locations = 1600
+    num_infer_locations = [1024, 1600, 2048]
+    max_s = 50.0
     rng = random.key(seed)
     kernel = matern_1_2
     rng_train, rng_test, rng_infer, rng_s, rng_obs = random.split(rng, 5)
     result, y_hats, all_samples = [], [], []
     default_steps = 1_200_000
-    optimizer, max_lr, bs, train_steps = gen_train_params(
-        max_train_locations, default_steps
-    )
     s_per_loc = [
         random.uniform(random.fold_in(rng_s, i), (n, 2), maxval=max_s)
         for i, n in enumerate(num_infer_locations)
@@ -55,36 +51,57 @@ def main(seed=15):
     ]
     D = 128
     models = {
-        "DeepRV + trans 4 RFF kernelAttn w:0,1": KernelBiasTransformerDeepRV(
+        "Baseline_GP": None,
+        "DeepRV + trans RFF interp kernelAttn": KernelBiasTransformerDeepRV(
             num_blks=4,
             dim=D,
             s_embed=RFFEmbed(num_features=512),
             head=MLP([D * 4, D * 2, D // 2, 1]),
             max_locations=max(num_infer_locations),
         ),
-        "Baseline_GP": None,
+        "DeepRV + trans RFF kernelAttn": KernelBiasTransformerDeepRV(
+            num_blks=4,
+            dim=D,
+            s_embed=RFFEmbed(num_features=512),
+            head=MLP([D * 4, D * 2, D // 2, 1]),
+            max_locations=max(num_infer_locations),
+        ),
+        "DeepRV + gMLP fourier kAttn": gMLPDeepRV(
+            s_embed=FourierEmbed(num_bands=14),
+            proj_in=MLP([D * 2, D * 2], nn.gelu),
+            proj_out=MLP([D, D], nn.gelu),
+            embed=MLP([D, D], nn.gelu),
+            num_blks=4,
+            attn=FixedKernelAttention(proj_vs=MLP([D], nn.gelu)),
+            head=MLP([D, D // 2, 1]),
+        ),
     }
     for model_name, nn_model in models.items():
         model_path = save_dir / model_name
         model_path.mkdir(parents=True, exist_ok=True)
         train_time, eval_mse, surrogate_decoder = None, None, None
+        max_lr, bs, train_steps = None, None, None
         if nn_model is not None:
-            loaders = [
-                gen_dataloader(
+            optimizer, max_lr, bs, train_steps = gen_train_params(
+                model_name,
+                max_train_locations,
+                default_steps,
+            )
+            pr = {"ls": dist.Uniform(1.0, max_s)}
+            if "trans" in model_name:
+                loader = gen_dataloader(
                     max_train_locations,
                     pr,
                     kernel,
                     max_s,
-                    batch_size=bs,
-                    uniform_s=True,
-                    min_locations=min_locations,
+                    bs,
+                    min_train_locs=1024,
+                    max_train_locs=max_train_locations
+                    if "interp" in model_name
+                    else None,
                 )
-                for (min_locations, pr) in [
-                    (128, {"ls": dist.Delta(30.0)}),
-                    (128, {"ls": dist.Uniform(1.0, max_s)}),
-                ]
-            ]
-            loaders_w = [float(w) for w in model_name.split("w:")[-1].split(",")]
+            else:
+                loader = gen_dataloader(max(num_infer_locations), pr, kernel, max_s, bs)
             wandb.init(
                 config={
                     "model_name": model_name,
@@ -102,14 +119,13 @@ def main(seed=15):
                 surrogate_model_train(
                     rng_train,
                     rng_test,
-                    loaders,
-                    loaders_w,
+                    loader,
                     nn_model,
                     optimizer,
                     train_steps,
                     model_path,
                 )
-                if model_name != "DeepRV + trans 4 RFF kernelAttn w:0,1"
+                if not (model_path / "model.ckpt").exists()
                 else load_surr_model_results(nn_model, optimizer, model_path)
             )
             wandb.log({"train_time": train_time, "Test Norm MSE": eval_mse})
@@ -118,8 +134,10 @@ def main(seed=15):
             model_s_path.mkdir(parents=True, exist_ok=True)
             obs_mask = True
             priors = {"ls": dist.Uniform(1.0, max_s), "beta": dist.Normal()}
-            infer_model, cond_names = inference_model(s, priors)
-            # if (model_s_path / "hmc_samples.pkl").exists():
+            infer_model, cond_names = inference_model(
+                s, priors, model_name, max(num_infer_locations)
+            )
+            # if (model_s_path / "single_res.pkl").exists():
             #     with open(model_s_path / "hmc_samples.pkl", "rb") as out_file:
             #         samples = pickle.load(out_file)
             #     with open(model_s_path / "hmc_pp.pkl", "rb") as out_file:
@@ -206,7 +224,7 @@ def hmc(
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
     k1, k2 = random.split(rng)
     # mcmc = MCMC(nuts, num_chains=1, num_samples=30, num_warmup=10)
-    mcmc = MCMC(nuts, num_chains=2, num_samples=10_000, num_warmup=4_000)
+    mcmc = MCMC(nuts, num_chains=2, num_samples=4_000, num_warmup=2_000)
     start = datetime.now()
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=y_obs)
     infer_time = (datetime.now() - start).total_seconds()
@@ -225,8 +243,7 @@ def hmc(
 def surrogate_model_train(
     rng_train: Array,
     rng_test: Array,
-    loaders: list[Callable],
-    loaders_w: list[float],
+    loader: Callable,
     model: nn.Module,
     optimizer,
     train_num_steps: int,
@@ -234,64 +251,62 @@ def surrogate_model_train(
     valid_interval: int = 100_000,
     valid_steps: int = 5_000,
 ):
-    state = None
     start = datetime.now()
-    for i, loader in enumerate(loaders):
-        if loaders_w[i] == 0:
-            continue
-        state = train(
-            rng_train,
-            model,
-            optimizer,
-            masked_deep_rv_train_step,
-            int((train_num_steps * loaders_w[i]) / sum(loaders_w)),
-            loader,
-            valid_step,
-            valid_interval,
-            valid_steps,
-            loader,
-            return_state="best",
-            valid_monitor_metric="norm MSE",
-            state=state,
-        )
-        save_ckpt(state, DictConfig({}), results_dir / "model.ckpt")
+    state = train(
+        rng_train,
+        model,
+        optimizer,
+        masked_deep_rv_train_step,
+        train_num_steps,
+        loader,
+        valid_step,
+        valid_interval,
+        valid_steps,
+        loader,
+        return_state="best",
+        valid_monitor_metric="norm MSE",
+    )
+    save_ckpt(state, DictConfig({}), results_dir / "model.ckpt")
     train_time = (datetime.now() - start).total_seconds()
-    eval_mse = evaluate(rng_test, state, valid_step, loaders[-1], valid_steps)[
-        "norm MSE"
-    ]
+    eval_mse = evaluate(rng_test, state, valid_step, loader, valid_steps)["norm MSE"]
     with open(results_dir / "train.pkl", "wb") as ff:
         pickle.dump({"eval_mse": eval_mse, "train_time": train_time}, ff)
     return train_time, eval_mse, generate_surrogate_decoder(state, model)
 
 
-@partial(jit, static_argnames=["max_s", "min_locations", "max_locations"])
-def sample_uniform_s(rng, max_s, min_locations, max_locations):
+@partial(
+    jit, static_argnames=["max_s", "grid_size", "min_train_locs", "max_train_locs"]
+)
+def sample_uniform_s(rng, max_s, grid_size, min_train_locs, max_train_locs):
     rng_loc, rng_s = random.split(rng)
-    s = random.uniform(rng_s, (max_locations, 2), maxval=max_s)
-    num_locs = max_locations
-    if min_locations < max_locations:
+    s = random.uniform(rng_s, (grid_size, 2), maxval=max_s)
+    num_locs = max_train_locs
+    if min_train_locs < max_train_locs:
         num_locs = random.randint(
-            rng_loc, shape=tuple(), minval=min_locations, maxval=max_locations + 1
+            rng_loc, shape=tuple(), minval=min_train_locs, maxval=max_train_locs + 1
         )
     return s, num_locs
 
 
 def gen_dataloader(
-    grid_size, priors, kernel, max_s, batch_size=32, uniform_s=True, min_locations=None
+    grid_size,
+    priors,
+    kernel,
+    max_s,
+    batch_size=32,
+    min_train_locs=None,
+    max_train_locs=None,
 ):
     jitter = 5e-4 * jnp.eye(grid_size)
-    if uniform_s:
-        s_jit = partial(
-            sample_uniform_s,
-            max_s=max_s,
-            min_locations=grid_size if min_locations is None else min_locations,
-            max_locations=grid_size,
-        )
-    else:
-        s_fixed = build_grid(
-            [{"start": 0.0, "stop": max_s, "num": int(jnp.sqrt(grid_size))}] * 2
-        ).reshape(-1, 2)
-        s_jit = jit(lambda rng: s_fixed, grid_size)
+    max_train_locs = grid_size if max_train_locs is None else max_train_locs
+    min_train_locs = max_train_locs if min_train_locs is None else min_train_locs
+    s_jit = partial(
+        sample_uniform_s,
+        max_s=max_s,
+        grid_size=grid_size,
+        min_train_locs=min_train_locs,
+        max_train_locs=max_train_locs,
+    )
     kernel_jit = jit(lambda s, var, ls: kernel(s, s, var, ls) + jitter)
     f_jit = jit(lambda K, z: jnp.einsum("ij,bj->bi", jnp.linalg.cholesky(K), z))
 
@@ -376,11 +391,14 @@ def gen_y_obs(rng: Array, s: Array, gt_ls: float, kernel: Callable):
     return dist.Poisson(rate=lambda_).sample(rng_poiss)
 
 
-def gen_train_params(grid_size, default_steps, default_bs=32):
+def gen_train_params(model_name, grid_size, default_steps, default_bs=32):
     L = grid_size
-    bs = int(min(1, 1024 / L) * default_bs)
+    bs = default_bs
+    max_lr = 2e-3
+    if "trans" in model_name:
+        bs = int(min(1, 1024 / L) * default_bs)
+        max_lr = 1e-4
     train_steps = default_steps * (default_bs // bs)
-    max_lr = 1e-4
     optimizer = optax.chain(
         optax.clip_by_global_norm(3.0),
         optax.adamw(cosine_annealing_lr(train_steps, max_lr)),
@@ -388,22 +406,28 @@ def gen_train_params(grid_size, default_steps, default_bs=32):
     return optimizer, max_lr, bs, train_steps
 
 
-def inference_model(s: Array, priors: dict):
+def inference_model(s: Array, priors: dict, model_name: str, max_infer_locs: int):
     """
     Builds a poisson likelihood inference model for GP and surrogate models
     """
+    L_inf = s.shape[0]
+    if "gMLP" in model_name and s.shape[0] < max_infer_locs:
+        s = jnp.concatenate([s, s[: max_infer_locs - s.shape[0]]], axis=0)
     surrogate_kwargs = {"s": s}
+    L = s.shape[0]
 
     def poisson(surrogate_decoder=None, obs_mask=True, y=None):
         ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
-        z = numpyro.sample("z", dist.Normal(), sample_shape=(1, s.shape[0]))
-        K = matern_1_2(s, s, 1.0, ls) + 5e-4 * jnp.eye(s.shape[0])
+        z = numpyro.sample("z", dist.Normal(), sample_shape=(1, L))
+        K = matern_1_2(s, s, 1.0, ls) + 5e-4 * jnp.eye(L)
         if surrogate_decoder:  # NOTE: whether to use a replacment for the GP
             surrogate_kwargs["K"] = K
             mu = numpyro.deterministic(
                 "mu",
-                surrogate_decoder(z, jnp.array([ls]), **surrogate_kwargs).squeeze(),
+                surrogate_decoder(z, jnp.array([ls]), **surrogate_kwargs).squeeze()[
+                    :L_inf
+                ],
             )
         else:
             L_chol = jnp.linalg.cholesky(K)
