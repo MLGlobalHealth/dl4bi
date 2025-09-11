@@ -38,11 +38,10 @@ from dl4bi.vae.train_utils import (
     deep_rv_train_step,
     generate_surrogate_decoder,
     inducing_deep_rv_train_step,
-    inducing_deep_rv_train_step_latent_plus_residual,
 )
 
 
-def main(seed=55, logged_priors=False, max_ls=40.0, grid_dim=100, L_train=512):
+def main(seed=67, logged_priors=False, max_ls=30.0, grid_dim=100, L_train=1024):
     wandb.init(mode="disabled")  # NOTE: downstream function assumes active wandb
     rng = random.key(seed)
     rng_train, rng_test, rng_infer, rng_idxs, rng_obs = random.split(rng, 5)
@@ -54,13 +53,10 @@ def main(seed=55, logged_priors=False, max_ls=40.0, grid_dim=100, L_train=512):
     s = build_grid([{"start": 0.0, "stop": 100.0, "num": grid_dim}] * 2).reshape(-1, 2)
     models = {
         "Inducing Points": None,
-        "DeepRV kernelAttn inv + gMLP latent": gMLPDeepRV(
+        "DeepRV kernelAttn inv + gMLP simple": gMLPDeepRV(
             num_blks=4, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
         ),
         "DeepRV kernelAttn inv + gMLP": gMLPDeepRV(
-            num_blks=4, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
-        ),
-        "DeepRV kernelAttn inv + gMLP simple": gMLPDeepRV(
             num_blks=4, attn=FixedKernelAttention(), head=MLP([128, 64, 1])
         ),
     }
@@ -76,10 +72,12 @@ def main(seed=55, logged_priors=False, max_ls=40.0, grid_dim=100, L_train=512):
     }
     y_hats, all_samples, result = [], [], []
     kmeans = KMeans(n_clusters=L_train, random_state=0)
-    s_train = kmeans.fit(s[obs_mask]).cluster_centers_  # shape (num_points, s.shape[1])
+    s_train = kmeans.fit(s[obs_mask]).cluster_centers_
     # old_res = pd.read_csv(save_dir / "res.csv")
     with open(save_dir / "s_train.pkl", "wb") as ff:
-        pickle.dump(s_train, ff)
+        pickle.dump(
+            {"s_train": s_train, "obs_mask": obs_mask, "seed": seed, "y_obs": y_obs}, ff
+        )
     for model_name, nn_model in models.items():
         model_dir = save_dir / f"{model_name}"
         # if (model_dir / "single_res.pkl").exists():
@@ -105,6 +103,8 @@ def main(seed=55, logged_priors=False, max_ls=40.0, grid_dim=100, L_train=512):
                 surrogate_model_train(
                     rng_train, rng_test, loader, nn_model, model_dir, model_name
                 )
+                if not (model_dir / "model.ckpt").exists()
+                else load_surr_model_results(nn_model, model_name, grid_dim**2, L_train)
             )
         infer_model, cond_names = inference_model_inducing_points(
             s, s_train, infer_priors, model_name
@@ -125,6 +125,7 @@ def main(seed=55, logged_priors=False, max_ls=40.0, grid_dim=100, L_train=512):
         sq_res = (y_obs - post["obs"].mean(axis=0)) ** 2
         res = {
             "model_name": model_name,
+            "seed": seed,
             "train_time": train_time,
             "Test f_u_bar MSE": f_u_bar_mse,
             "Test f MSE": eval_f_mse,
@@ -143,18 +144,15 @@ def main(seed=55, logged_priors=False, max_ls=40.0, grid_dim=100, L_train=512):
             pickle.dump(res, ff)
         result.append(res)
     model_names = list(models.keys())
-    try:
-        plot_posterior_predictive_comparisons(
-            all_samples,
-            {},
-            infer_priors,
-            model_names,
-            cond_names,
-            save_dir / "comp",
-            "Inducing Points",
-        )
-    except Exception:
-        pass
+    plot_posterior_predictive_comparisons(
+        all_samples,
+        {},
+        infer_priors,
+        model_names,
+        list(infer_priors.keys()),
+        save_dir / "comp",
+        "Inducing Points",
+    )
     plot_models_predictive_means(
         s,
         s_train,
@@ -182,7 +180,7 @@ def main(seed=55, logged_priors=False, max_ls=40.0, grid_dim=100, L_train=512):
     #     L_train,
     #     save_dir,
     #     target="f",
-    #     max_ls=max_ls,
+    #     max_ls=max_ls + 10.0,
     # )
     # compare_grads(
     #     models,
@@ -193,7 +191,7 @@ def main(seed=55, logged_priors=False, max_ls=40.0, grid_dim=100, L_train=512):
     #     L_train,
     #     save_dir,
     #     target="f_u_bar",
-    #     max_ls=max_ls,
+    #     max_ls=max_ls + 10.0,
     # )
 
 
@@ -206,10 +204,11 @@ def hmc(
     surrogate_decoder: Optional[Callable] = None,
 ):
     """runs HMC on given inference model and observed f"""
-    nuts = NUTS(model, init_strategy=init_to_median(num_samples=50))
+    nuts = NUTS(
+        model, init_strategy=init_to_median(num_samples=50), target_accept_prob=0.9
+    )
     k1, k2 = random.split(rng)
-    mcmc = MCMC(nuts, num_chains=2, num_samples=5_000, num_warmup=2_000)
-    # mcmc = MCMC(nuts, num_chains=2, num_samples=10_000, num_warmup=4_000)
+    mcmc = MCMC(nuts, num_chains=2, num_samples=4_000, num_warmup=2_500)
     start = datetime.now()
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=y_obs)
     infer_time = (datetime.now() - start).total_seconds()
@@ -232,20 +231,15 @@ def surrogate_model_train(
     model: nn.Module,
     results_dir: Path,
     model_name: str,
-    train_num_steps: int = 800_000,
+    train_num_steps: int = 1_000_000,
     valid_interval: int = 100_000,
     valid_steps: int = 5_000,
 ):
     lr_schedule = cosine_annealing_lr(train_num_steps, 1e-3)
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.adamw(lr_schedule))
-    train_step = {
-        "DeepRV kernelAttn inv + gMLP simple": deep_rv_train_step,
-        "DeepRV kernelAttn inv + gMLP": inducing_deep_rv_train_step,
-        "DeepRV kernelAttn inv + gMLP latent": inducing_deep_rv_train_step_latent_plus_residual,
-        "DeepRV kernelAttn inv + gMLP ksu loss": partial(
-            inducing_deep_rv_train_step, weight=0.01
-        ),
-    }[model_name]
+    train_step = inducing_deep_rv_train_step
+    if "simple" in model_name:
+        train_step = deep_rv_train_step
     start = datetime.now()
     state = train(
         rng_train,
@@ -491,35 +485,35 @@ def posterior_mean_inducing_dist(
     return result
 
 
-# def load_surr_model_results(model, model_name, L, L_train):
-#     from orbax.checkpoint import PyTreeCheckpointer
+def load_surr_model_results(model, model_name, L, L_train):
+    from orbax.checkpoint import PyTreeCheckpointer
 
-#     from dl4bi.core.train import TrainState
+    from dl4bi.core.train import TrainState
 
-#     optimizer = optax.chain(
-#         optax.clip_by_global_norm(3.0),
-#         optax.adamw(cosine_annealing_lr(1_200_000, 1e-3), weight_decay=1e-2),
-#     )
-#     model_path = Path(f"results/inducing_drv_{L_train}_{L}/{model_name}").absolute()
-#     ckptr = PyTreeCheckpointer()
-#     ckpt = ckptr.restore(model_path / "model.ckpt")
-#     print(model_path / "model.ckpt")
-#     state = TrainState.create(
-#         apply_fn=model.apply,
-#         tx=optimizer,
-#         params=ckpt["state"]["params"],
-#         kwargs=ckpt["state"]["kwargs"],
-#     )
-#     surrogate_decoder = generate_surrogate_decoder(state, model)
-#     with open(model_path / "train_time.pkl", "rb") as out_file:
-#         dd = pickle.load(out_file)
-#     train_time, f_u_bar_mse, eval_f_mse, cosine_similarity = (
-#         dd["train_time"],
-#         dd["eval f_u_bar mse"],
-#         dd["eval f mse"],
-#         dd["eval loss cosine_sim"],
-#     )
-#     return train_time, f_u_bar_mse, surrogate_decoder, eval_f_mse, cosine_similarity
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(3.0),
+        optax.adamw(cosine_annealing_lr(1_200_000, 1e-3), weight_decay=1e-2),
+    )
+    model_path = Path(f"results/inducing_drv_{L_train}_{L}/{model_name}").absolute()
+    ckptr = PyTreeCheckpointer()
+    ckpt = ckptr.restore(model_path / "model.ckpt")
+    print(model_path / "model.ckpt")
+    state = TrainState.create(
+        apply_fn=model.apply,
+        tx=optimizer,
+        params=ckpt["state"]["params"],
+        kwargs=ckpt["state"]["kwargs"],
+    )
+    surrogate_decoder = generate_surrogate_decoder(state, model)
+    with open(model_path / "train_time.pkl", "rb") as out_file:
+        dd = pickle.load(out_file)
+    train_time, f_u_bar_mse, eval_f_mse, cosine_similarity = (
+        dd["train_time"],
+        dd["eval f_u_bar mse"],
+        dd["eval f mse"],
+        dd["eval loss cosine_sim"],
+    )
+    return train_time, f_u_bar_mse, surrogate_decoder, eval_f_mse, cosine_similarity
 
 
 if __name__ == "__main__":
