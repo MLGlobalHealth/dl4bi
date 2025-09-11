@@ -20,21 +20,16 @@ from reproduce_paper.deep_rv_plots import (
     plot_models_predictive_means,
     plot_posterior_predictive_comparisons,
 )
+from scipy.stats import wasserstein_distance
 from shapely.affinity import scale, translate
 from sps.kernels import matern_1_2
 from utils.plot_utils import plot_infer_trace
 
 import wandb
-from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, train
-from dl4bi.vae import PriorCVAE, gMLPDeepRV
-from dl4bi.vae.train_utils import (
-    cond_as_locs,
-    deep_rv_train_step,
-    generate_surrogate_decoder,
-    prior_cvae_train_step,
-)
+from dl4bi.vae import gMLPDeepRV
+from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
 
 
 def main(seed=42):
@@ -45,10 +40,8 @@ def main(seed=42):
     save_dir.mkdir(parents=True, exist_ok=True)
     map_data = gpd.read_file("benchmarks/vae/maps/zwe2016phia_fixed.geojson")
     s = gen_spatial_structure(map_data)
-    L = s.shape[0]
     models = {
         "Baseline_GP": None,
-        "PriorCVAE": PriorCVAE(MLP(dims=[L, L]), MLP(dims=[L, L]), cond_as_locs, L),
         "DeepRV": gMLPDeepRV(num_blks=2),
     }
     y_obs = jnp.array(map_data.data, dtype=jnp.float32)
@@ -65,7 +58,7 @@ def main(seed=42):
         train_time, eval_mse, surrogate_decoder = None, None, None
         if nn_model is not None:
             train_time, eval_mse, surrogate_decoder = surrogate_model_train(
-                rng_train, rng_test, loader, model_name, nn_model
+                rng_train, rng_test, loader, nn_model
             )
         samples, mcmc, post, infer_time = hmc(
             rng_infer, binom_infer_model, y_obs, surrogate_decoder
@@ -76,22 +69,26 @@ def main(seed=42):
         plot_infer_trace(
             samples, mcmc, None, cond_names, save_dir / f"{model_name}_infer_trace.png"
         )
-        result.append(
+        res = {
+            "model_name": model_name,
+            "train_time": train_time,
+            "Test Norm MSE": eval_mse,
+            "infer_time": infer_time,
+            "MSE(y, y_hat)": ((y_obs - post["obs"].mean(axis=0)) ** 2).mean(),
+            "seed": seed,
+        }
+        res.update({f"inferred {c} mean": samples[c].mean(axis=0) for c in cond_names})
+        res.update(
             {
-                "model_name": model_name,
-                "train_time": train_time,
-                "Test Norm MSE": eval_mse,
-                "infer_time": infer_time,
-                "inferred lengthscale mean": samples["ls"].mean(axis=0),
-                "inferred fixed effects": samples["beta"].mean(axis=0),
-                "inferred variance": samples["var"].mean(axis=0),
-                "MSE(y, y_hat)": ((y_obs - post["obs"].mean(axis=0)) ** 2).mean(),
-                "ESS spatial effects": ess["mu"].mean().item(),
-                "ESS lengthscale": ess["ls"].item(),
-                "ESS variance": ess["var"].item(),
-                "ESS fixed effects": ess["beta"].item(),
+                f"ESS {c}": ess[c].mean().item() if ess else None
+                for c in cond_names + ["mu"]
             }
         )
+        result.append(res)
+    result = posterior_wasserstein_distance(
+        result, all_samples, list(models.keys()), cond_names
+    )
+    result = posterior_mean_gp_dist(result, y_hats, list(models.keys()))
     plot_posterior_predictive_comparisons(
         all_samples, {}, priors, list(models.keys()), cond_names, save_dir / "comp"
     )
@@ -122,17 +119,16 @@ def surrogate_model_train(
     rng_train: Array,
     rng_test: Array,
     loader: Callable,
-    model_name: str,
     model: nn.Module,
-    train_num_steps: int = 100_000,
+    train_num_steps: int = 200_000,
     valid_interval: int = 25_000,
     valid_steps: int = 5_000,
 ):
-    train_step = prior_cvae_train_step
-    lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-3)
-    if model_name != "PriorCVAE":
-        train_step = partial(deep_rv_train_step, var_idx=0)
-    optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
+    lr_schedule = cosine_annealing_lr(train_num_steps, 5e-4)
+    train_step = partial(deep_rv_train_step, var_idx=0)
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(3.0), optax.adamw(lr_schedule, weight_decay=1e-2)
+    )
     start = datetime.now()
     state = train(
         rng_train,
@@ -235,6 +231,41 @@ def gen_spatial_structure(map_data: gpd.GeoDataFrame, s_max=100):
     norm_map["geometry"] = norm_map.geometry.apply(norm_geom)
     centroids = norm_map.geometry.centroid
     return jnp.stack([centroids.x.values, centroids.y.values], axis=-1)
+
+
+def posterior_wasserstein_distance(
+    result: list[dict], samples: list, model_names: list[str], var_names: list[str]
+):
+    """
+    Computes Wasserstein distance for each variable between the posterior distributions
+    of each model and the baseline "Baseline_GP".
+    """
+    baseline_index = model_names.index("Baseline_GP")
+    baseline_samples = samples[baseline_index]
+    for model_res, model_sample in zip(result, samples):
+        for var_name in var_names:
+            model_res[f"{var_name} wasserstein distance"] = jnp.nan
+            if model_res["model_name"] == "Baseline_GP":
+                continue
+            baseline_var_samples = baseline_samples.get(var_name)
+            model_var_samples = model_sample.get(var_name)
+            if baseline_var_samples is not None and model_var_samples is not None:
+                dist = wasserstein_distance(baseline_var_samples, model_var_samples)
+                model_res[f"{var_name} wasserstein distance"] = dist
+    return result
+
+
+def posterior_mean_gp_dist(result: list[dict], y_hats: list, model_names: list[str]):
+    baseline_index = model_names.index("Baseline_GP")
+    y_hat_gp = y_hats[baseline_index].mean(axis=0)
+    for model_res, y_hat in zip(result, y_hats):
+        if model_res["model_name"] == "Baseline_GP":
+            model_res["MSE(y_hat_gp, y_hat)"] = jnp.nan
+        else:
+            model_res["MSE(y_hat_gp, y_hat)"] = jnp.mean(
+                (y_hat_gp - y_hat.mean(axis=0)) ** 2
+            )
+    return result
 
 
 if __name__ == "__main__":
