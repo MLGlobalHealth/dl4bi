@@ -13,66 +13,97 @@ import jax.numpy as jnp
 import numpyro
 import optax
 import pandas as pd
-from jax import Array, jit, random
+from jax import Array, jit, random, value_and_grad
 from numpyro import distributions as dist
-from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
+from numpyro.distributions.transforms import biject_to
+from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 from omegaconf import DictConfig
-from reproduce_paper.deep_rv_plots import plot_models_predictive_means
+from reproduce_paper.deep_rv_plots import (
+    plot_models_predictive_means,
+    plot_posterior_predictive_comparisons,
+)
 from shapely.affinity import scale, translate
 from sps.kernels import matern_1_2
 from utils.plot_utils import plot_infer_trace
 
 import wandb
 from dl4bi.core.model_output import VAEOutput
-from dl4bi.core.train import cosine_annealing_lr, evaluate, save_ckpt, train
+from dl4bi.core.train import TrainState, cosine_annealing_lr, evaluate, save_ckpt, train
 from dl4bi.vae import gMLPDeepRV
 from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
 
 
-def main(seed=63, data_type: str = "Female"):
+def main(data_type, seed=59):
     wandb.init(mode="disabled")
     rng = random.key(seed)
-    rng_train, rng_test, rng_infer, rng_idxs = random.split(rng, 4)
-    save_dir = Path("results/msoa_circ/")
+    rng_train, rng_test, rng_infer, rng_idxs, rng_init = random.split(rng, 5)
+    save_dir = Path(f"results/{data_type}/")
     save_dir.mkdir(parents=True, exist_ok=True)
-    map_data = gpd.read_file("benchmarks/vae/maps/msoa_circ")
-    s = gen_spatial_structure(map_data, s_max=100)
-    models = {
-        "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
-        # "Baseline_GP": None,
-    }
-    y_obs = jnp.array(map_data[f"{data_type} dt"], dtype=jnp.float32)
-    population = jnp.array(map_data[data_type], dtype=jnp.int32)
-    obs_mask = generate_obs_mask(rng_idxs, y_obs)
-    priors = {
-        "var": dist.Gamma(1.5, 1.5),
-        "ls": dist.Uniform(1.0, 100.0),  # s is scaled 0-100
-        "beta": dist.Normal(scale=2),
-    }
+    map_data = gpd.read_file(f"benchmarks/vae/maps/{data_type}")
+    s_max = 100
+    s = gen_spatial_structure(map_data, s_max=s_max)
+    models = {"DeepRV + gMLP": gMLPDeepRV(num_blks=2)}
+    if s.shape[0] < 2500:
+        models["Baseline_GP"] = None
+    y_obs = jnp.array(map_data["data"], dtype=jnp.float32)
+    population = jnp.array(map_data.population, dtype=jnp.int32)
+    areas = jnp.array(map_data.geometry.area)
+    obs_mask = gen_spatial_obs_mask(rng_idxs, s, areas, 0.75, 1)
+    priors, init_vals = joint_map_init(rng_init, s, population, y_obs, obs_mask)
     infer_model, cond_names = inference_model(s, priors, population)
-    loader = gen_train_dataloader(s, priors)
+    loader = gen_train_dataloader(
+        s,
+        {"ls": dist.Uniform(1.0, s_max / 2 + 5.0)},
+        batch_size=32 if s.shape[0] < 2500 else 16,
+    )
     y_hats, all_samples, result = [y_obs], [], []
     for model_name, model in models.items():
-        (save_dir / f"{model_name}").mkdir(parents=True, exist_ok=True)
+        model_path = save_dir / f"{model_name}"
+        # if (model_path / "single_res.pkl").exists():
+        #     with open(model_path / "hmc_samples.pkl", "rb") as out_file:
+        #         samples = pickle.load(out_file)
+        #     with open(model_path / "hmc_pp.pkl", "rb") as out_file:
+        #         post = pickle.load(out_file)
+        #     with open(model_path / "single_res.pkl", "rb") as out_file:
+        #         res = pickle.load(out_file)
+        #     y_hats.append(post["obs"])
+        #     all_samples.append(samples)
+        #     result.append(res)
+        #     continue
+        model_path.mkdir(parents=True, exist_ok=True)
         train_time, eval_mse, surrogate_decoder = None, None, None
-        if model_name != "Baseline_GP":
-            train_time, eval_mse, surrogate_decoder = surrogate_model_train(
-                rng_train, rng_test, loader, model, save_dir / f"{model_name}"
+        if model is not None:
+            # train_time, eval_mse, surrogate_decoder = load_surr_model_results(model)
+            train_time, eval_mse, surrogate_decoder = (
+                load_surr_model_results(model, model_name, data_type)
+                if (model_path / "model.ckpt").exists()
+                else surrogate_model_train(
+                    rng_train,
+                    rng_test,
+                    s.shape[0],
+                    loader,
+                    model,
+                    save_dir / f"{model_name}",
+                )
             )
         samples, mcmc, post, infer_time = hmc(
             rng_infer,
             infer_model,
             y_obs,
             obs_mask,
-            save_dir / f"{model_name}",
+            model_path,
             surrogate_decoder,
+            init_vals,
         )
         y_hats.append(post["obs"])
         all_samples.append(samples)
         ess = az.ess(mcmc, method="mean")
-        plot_infer_trace(
-            samples, mcmc, None, cond_names, save_dir / f"{model_name}_infer_trace.png"
-        )
+        try:
+            plot_infer_trace(
+                samples, mcmc, None, cond_names, model_path / "infer_trace.png"
+            )
+        except Exception:
+            pass
         res = {
             "model_name": model_name,
             "train_time": train_time,
@@ -84,9 +115,20 @@ def main(seed=63, data_type: str = "Female"):
         res.update(
             {f"ESS {c}": ess[c].mean().item() if ess else None for c in cond_names}
         )
+        with open(model_path / "single_res.pkl", "wb") as out_file:
+            pickle.dump(res, out_file)
         result.append(res)
     plot_models_predictive_means(
         y_hats, map_data, save_dir / "obs_means.png", obs_mask, log=True
+    )
+    plot_posterior_predictive_comparisons(
+        all_samples,
+        {},
+        priors,
+        list(models.keys()),
+        cond_names,
+        save_dir / "comp",
+        baseline_model="DeepRV + gMLP" if s.shape[0] > 2500 else "Baseline_GP",
     )
     pd.DataFrame(result).to_csv(save_dir / "res.csv")
 
@@ -98,11 +140,13 @@ def hmc(
     obs_mask: Union[Array, bool],
     results_dir: Path,
     surrogate_decoder: Optional[Callable] = None,
+    init_vals: Optional[list[dict]] = [],
 ):
     """runs HMC on given inference model and observed f"""
-    nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
+    init_strat = init_to_value(values=init_vals)
+    nuts = NUTS(model, init_strategy=init_strat, target_accept_prob=0.9)
     k1, k2 = random.split(rng)
-    mcmc = MCMC(nuts, num_chains=2, num_samples=10000, num_warmup=4000)
+    mcmc = MCMC(nuts, num_chains=2, num_samples=4000, num_warmup=4000)
     start = datetime.now()
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, y=y_obs, obs_mask=obs_mask)
     infer_time = (datetime.now() - start).total_seconds()
@@ -120,17 +164,26 @@ def hmc(
 def surrogate_model_train(
     rng_train: Array,
     rng_test: Array,
+    grid_size: int,
     loader: Callable,
     model: nn.Module,
     results_dir: Path,
-    train_num_steps: int = 800_000,
+    train_num_steps: int = 500_000,
     valid_interval: int = 100_000,
     valid_steps: int = 5_000,
+    state=None,
 ):
     train_step = deep_rv_train_step
+    train_num_steps = train_num_steps if state is None else 120_000
+    lr = 1e-3 if grid_size < 2500 else 2e-3
+    train_num_steps = (
+        train_num_steps if grid_size < 2500 else int(train_num_steps * 1.2)
+    )
+    if state is not None:
+        lr = lr / 10
     optimizer = optax.chain(
         optax.clip_by_global_norm(3.0),
-        optax.yogi(cosine_annealing_lr(train_num_steps, 1e-2)),
+        optax.adamw(cosine_annealing_lr(train_num_steps, lr), weight_decay=1e-2),
     )
     start = datetime.now()
     state = train(
@@ -146,6 +199,7 @@ def surrogate_model_train(
         loader,
         return_state="best",
         valid_monitor_metric="norm MSE",
+        state=state,
     )
     train_time = (datetime.now() - start).total_seconds()
     eval_mse = evaluate(rng_test, state, valid_step, loader, valid_steps)["norm MSE"]
@@ -156,7 +210,7 @@ def surrogate_model_train(
     return train_time, eval_mse, surrogate_decoder
 
 
-def gen_train_dataloader(s: Array, priors: dict[str, dist.Distribution], batch_size=16):
+def gen_train_dataloader(s: Array, priors: dict[str, dist.Distribution], batch_size):
     jitter = 5e-4 * jnp.eye(s.shape[0])
     kernel_jit = jit(lambda s, var, ls: matern_1_2(s, s, var, ls) + jitter)
     f_jit = jit(lambda K, z: jnp.einsum("ij,bj->bi", jnp.linalg.cholesky(K), z))
@@ -176,32 +230,29 @@ def gen_train_dataloader(s: Array, priors: dict[str, dist.Distribution], batch_s
 
 def inference_model(s: Array, priors: dict, population: Array):
     """
-    Builds a Binomial inference model for either actual GP or a surrogate.
-
-    Args:
-        s: Locations (n, dim_s).
-        norm_areas: array of normalized areas per location
-
-    Returns:
-        A NumPyro model function, and the parameter names
+    Binomial inference model with spatial GP + covariates (area, avg_room_num, interaction).
     """
+
     surrogate_kwargs = {"s": s}
+    jitter = 5e-4 * jnp.eye(s.shape[0])
 
     def binomial(surrogate_decoder=None, obs_mask=True, y=None):
-        var = numpyro.sample("var", priors["var"], sample_shape=())
-        ls = numpyro.sample("ls", priors["ls"], sample_shape=())
-        beta = numpyro.sample("beta", priors["beta"], sample_shape=())
-        if surrogate_decoder:  # whether to use a replacment for the GP
-            z = numpyro.sample("z", dist.Normal(), sample_shape=(1, s.shape[0]))
+        var = numpyro.sample("var", priors["var"])
+        ls = numpyro.sample("ls", priors["ls"])
+        beta = numpyro.sample("beta", priors["beta"])
+        z = numpyro.sample("z", dist.Normal(), sample_shape=(s.shape[0],))
+        if surrogate_decoder is None:
+            K = matern_1_2(s, s, 1.0, ls) + jitter
+            L_chol = jnp.linalg.cholesky(K)
+            mu = numpyro.deterministic("mu", jnp.matmul(L_chol, z))
+        else:
             mu = numpyro.deterministic(
                 "mu",
-                jnp.sqrt(var)
-                * surrogate_decoder(z, jnp.array([ls]), **surrogate_kwargs).squeeze(),
+                surrogate_decoder(
+                    z[None], jnp.array([ls]), **surrogate_kwargs
+                ).squeeze(),
             )
-        else:
-            K = matern_1_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
-            mu = numpyro.sample("mu", dist.MultivariateNormal(0.0, K))
-        eta = mu + beta
+        eta = jnp.sqrt(var) * mu + beta
         with numpyro.handlers.mask(mask=obs_mask):
             numpyro.sample(
                 "obs", dist.Binomial(logits=eta, total_count=population), obs=y
@@ -240,13 +291,221 @@ def gen_spatial_structure(map_data: gpd.GeoDataFrame, s_max: int):
     return jnp.stack([centroids.x.values, centroids.y.values], axis=-1)
 
 
-def generate_obs_mask(rng: Array, y_obs: Array, obs_ratio: float = 0.6):
-    """Generate a boolean mask selecting a subset of locations to observe."""
-    L = y_obs.shape[0]
-    num_obs_locations = int(obs_ratio * L)
-    obs_idxs = random.choice(rng, L, shape=(num_obs_locations,), replace=False)
-    return jnp.isin(jnp.arange(L), obs_idxs)
+def gen_spatial_obs_mask(
+    rng: Array, s: Array, areas: Array, obs_ratio: float, num_blobs: int
+):
+    n = s.shape[0]
+    total_area = areas.sum()
+    target_area = obs_ratio * total_area
+    mask = jnp.ones(n, dtype=bool)
+    area_remaining = total_area
+    for _ in range(num_blobs):
+        if area_remaining <= target_area:
+            break
+        rng, rng_center = random.split(rng, 2)
+        observed_idxs = jnp.where(mask)[0]
+        center_idx = random.choice(rng_center, observed_idxs)
+        center = s[center_idx]
+        dist = jnp.sqrt(jnp.sum((s - center) ** 2, axis=1))
+        sorted_idx = jnp.argsort(dist)
+        cum_area = jnp.cumsum(areas[sorted_idx])
+        cutoff = jnp.searchsorted(
+            cum_area, (area_remaining - target_area) / (num_blobs)
+        )
+        blob_idx = sorted_idx[:cutoff]
+        mask = mask.at[blob_idx].set(False)
+        area_remaining = areas[mask].sum()
+    return mask
+
+
+def load_surr_model_results(model, model_name, data_type):
+    from orbax.checkpoint import PyTreeCheckpointer
+
+    model_path = Path(f"results/{data_type}/{model_name}").absolute()
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(3.0),
+        optax.adamw(cosine_annealing_lr(500_000, 1e-3), weight_decay=1e-2),
+    )
+    ckptr = PyTreeCheckpointer()
+    ckpt = ckptr.restore(model_path / "model.ckpt")
+    state = TrainState.create(
+        apply_fn=model.apply,
+        tx=optimizer,
+        params=ckpt["state"]["params"],
+        kwargs=ckpt["state"]["kwargs"],
+    )
+    surrogate_decoder = generate_surrogate_decoder(state, model)
+    with open(model_path / "train_metrics.pkl", "rb") as ff:
+        train_metrics = pickle.load(ff)
+    return train_metrics["train_time"], train_metrics["eval_mse"], surrogate_decoder
+
+
+def joint_map_init(
+    rng,
+    s,
+    population,
+    y_obs,
+    obs_mask,
+    ls_init=5.5,
+    var_init=0.5,
+    beta_init=-1.5,
+    opt_steps=1200,
+    lr=5e-3,
+):
+    """
+    Joint MAP for z, log_ls, log_var, beta.
+    Returns:
+      - priors dict (LogNormal for ls/var centered at MAP)
+      - init_vals dict, with arrays of shape [num_chains, ...]
+    """
+    L = s.shape[0]
+    N = population
+    # param initializations (optimize in unconstrained space)
+    z = random.normal(rng, (L,)) * 0.1
+    log_ls = jnp.log(ls_init)
+    log_var = jnp.log(var_init)
+    beta = jnp.array(beta_init)
+
+    def neg_logpost(params):
+        z, log_ls, log_var, beta = params
+        ls = jnp.exp(log_ls)
+        var = jnp.exp(log_var)
+        K = matern_1_2(s, s, 1.0, ls) + 5e-4 * jnp.eye(L)
+        L_chol = jnp.linalg.cholesky(K)
+        mu = L_chol @ z
+        # priors
+        log_prior_z = -0.5 * jnp.sum(z**2)
+        log_prior_logls = -0.5 * ((log_ls - jnp.log(ls_init)) ** 2) / (0.8**2)
+        log_prior_logvar = -0.5 * ((log_var - jnp.log(var_init)) ** 2) / (1.0**2)
+        log_prior_beta = -0.5 * ((beta - beta_init) ** 2) / (2.0**2)
+        # likelihood
+        logits = jnp.sqrt(var) * mu + beta
+        log_sig = -nn.softplus(-logits)
+        log_one_minus_sig = -nn.softplus(logits)
+        log_like = jnp.sum(
+            obs_mask * (y_obs * log_sig + (N - y_obs) * log_one_minus_sig)
+        )
+        return -(
+            log_prior_z + log_prior_logls + log_prior_logvar + log_prior_beta + log_like
+        )
+
+    params = (z, log_ls, log_var, beta)
+    opt = optax.adam(lr)
+    opt_state = opt.init(params)
+
+    @jit
+    def step(params, opt_state):
+        loss, grads = value_and_grad(neg_logpost)(params)
+        updates, opt_state = opt.update(grads, opt_state)
+        params = optax.apply_updates(params, updates)
+        return params, opt_state, loss
+
+    # optimize
+    for i in range(int(opt_steps * (1 if L < 2500 else 1.5))):
+        params, opt_state, loss = step(params, opt_state)
+        if (i % 200) == 0:
+            print(f"iter {i}, neg_logpost {float(loss)}")
+    z_map, log_ls_map, log_var_map, beta_map = params
+    ls_map = float(jnp.exp(log_ls_map))
+    var_map = float(jnp.exp(log_var_map))
+    beta_map = float(beta_map)
+    # diagnostics
+    L_chol_map = jnp.linalg.cholesky(matern_1_2(s, s, 1.0, ls_map) + 5e-4 * jnp.eye(L))
+    p_pred = nn.sigmoid(jnp.sqrt(var_map) * (L_chol_map @ z_map) + beta_map)
+    prev_obs = y_obs / N
+    unweighted_mse = float(jnp.mean(((p_pred - prev_obs) ** 2)[obs_mask]))
+    weighted_mse = float(jnp.sum(N * (p_pred - prev_obs) ** 2) / jnp.sum(N))
+    print(f"MAP ls={ls_map:.3f}, var={var_map:.3f}, beta={beta_map:.3f}")
+    print(f"MAP unweighted MSE {unweighted_mse:.6f}, weighted MSE {weighted_mse:.6f}")
+    print("p_pred min/max:", float(p_pred.min()), float(p_pred.max()))
+    print("||z||:", float(jnp.linalg.norm(z_map)))
+    priors = {
+        "var": dist.LogNormal(jnp.log(max(var_map, 1e-3)), 0.75),
+        "ls": dist.Gamma(4, 4 / ls_map),
+        "beta": dist.Normal(beta_map, 1.0),
+    }
+    map_vals = {"var": var_map, "ls": ls_map, "beta": beta_map, "z": z_map}
+    for k in map_vals.keys():
+        rng, _ = random.split(rng)
+        eps = 1e-2 if k != "z" else 1e-3
+        shape = tuple() if k != "z" else map_vals[k].shape
+        map_vals[k] += eps * random.normal(rng, shape)
+    # build per-chain init values
+    # init_vals = []
+    # for i in range(num_chains):
+    #     chain_val = {}
+    #     for k in map_vals.keys():
+    #         chain_val[k] = map_vals[k]
+    #         if preturb:
+    #             rng, _ = random.split(rng)
+    #             shape = tuple() if k != "z" else chain_val[k].shape
+    #             chain_val[k] += eps * random.normal(rng, shape)
+    #     init_vals.append(chain_val)
+    return priors, map_vals
+
+
+def analyze_chains(path, params_to_check=("ls", "beta", "var"), nc=2):
+    import numpy as np
+    from scipy.stats import ks_2samp
+
+    with open(path, "rb") as f:
+        d = pickle.load(f)
+
+    print("=" * 80)
+    print(f"Diagnostics for {path}")
+    print("=" * 80)
+
+    def split_chains(arr, num_chains=nc):
+        arr = np.array(arr)
+        if arr.ndim == 1:
+            return np.array_split(arr, num_chains)
+        elif arr.ndim == 2:
+            return np.array_split(arr, num_chains, axis=0)
+        else:
+            raise ValueError(f"Unexpected shape for array: {arr.shape}")
+
+    # Check scalar/vector params
+    for p in params_to_check:
+        if p not in d:
+            continue
+        cs = split_chains(d[p])
+        for i in range(nc):
+            print(f"\n--- {p} ---")
+            print(f"chain{i} mean={cs[i].mean():.3f}, var={cs[i].var():.3f}")
+        if nc > 1:
+            ks_stat, ks_p = ks_2samp(cs[0].ravel(), cs[1].ravel())
+            print(f"KS chain 0-1 test: stat={ks_stat:.3f}, p={ks_p:.3g}")
+
+    # Special handling for mu (spatial field)
+    if "mu" in d:
+        print("\n--- mu ---")
+        cs = split_chains(d["mu"])
+        for i in range(nc):
+            print(f"chain{i} mean of mean(mu)={cs[i].mean(axis=0).mean():.3f}")
+        if nc > 1:
+            mu_mean0 = cs[0].mean(axis=0)
+            mu_mean1 = cs[1].mean(axis=0)
+            corr = np.corrcoef(mu_mean0, mu_mean1)[0, 1]
+            print(f"mean(mu) correlation across chains 0-1 = {corr:.3f}")
+
+    print("=" * 80)
 
 
 if __name__ == "__main__":
-    main()
+    dt = "London_MSOA_education_deprivation_parsed_thrs_0"
+    main(seed=59, data_type=dt)
+    analyze_chains(f"results/{dt}/DeepRV + gMLP/hmc_samples.pkl", nc=2)
+    dt = "London_LSOA_education_deprivation_parsed_thrs_0"
+    main(seed=59, data_type=dt)
+    analyze_chains(f"results/{dt}/DeepRV + gMLP/hmc_samples.pkl", nc=2)
+
+# mcmc = MCMC(nuts, num_chains=2, num_samples=1, num_warmup=0)
+# mcmc.run(rng, y=y_obs, obs_mask=obs_mask)
+# ff = mcmc.get_samples(group_by_chain=True)
+# for k, it in ff.items():
+#     if k not in init_vals[0]:
+#         continue
+#     if 'z' != k:
+#         print(f'{k} chain1 {ff[k][0]:.2f}, chain2 {ff[k][1]:.2f}, init val1 {init_vals[0][k]:.2f}, init val2 {init_vals[1][k]:.2f}')
+#     else:
+#         print(f'{k} diff chain1,2  {jnp.abs(ff['z'][0] - ff['z'][1]).mean():.2f}, diff init vals {jnp.abs(init_vals[0]['z'] - init_vals[1]['z']).mean():.2f}')
