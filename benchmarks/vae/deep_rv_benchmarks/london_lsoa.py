@@ -15,7 +15,6 @@ import optax
 import pandas as pd
 from jax import Array, jit, random, value_and_grad
 from numpyro import distributions as dist
-from numpyro.distributions.transforms import biject_to
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 from omegaconf import DictConfig
 from reproduce_paper.deep_rv_plots import (
@@ -33,7 +32,7 @@ from dl4bi.vae import gMLPDeepRV
 from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
 
 
-def main(data_type, seed=59):
+def main(data_type, seed=59, num_chains=2, obs_ratio=0.5):
     wandb.init(mode="disabled")
     rng = random.key(seed)
     rng_train, rng_test, rng_infer, rng_idxs, rng_init = random.split(rng, 5)
@@ -47,9 +46,10 @@ def main(data_type, seed=59):
         models["Baseline_GP"] = None
     y_obs = jnp.array(map_data["data"], dtype=jnp.float32)
     population = jnp.array(map_data.population, dtype=jnp.int32)
-    areas = jnp.array(map_data.geometry.area)
-    obs_mask = gen_spatial_obs_mask(rng_idxs, s, areas, 0.75, 1)
-    priors, init_vals = joint_map_init(rng_init, s, population, y_obs, obs_mask)
+    obs_mask = gen_spatial_obs_mask(rng_idxs, s, obs_ratio)
+    priors, init_vals = joint_map_init(
+        rng_init, s, population, y_obs, obs_mask, num_chains
+    )
     infer_model, cond_names = inference_model(s, priors, population)
     loader = gen_train_dataloader(
         s,
@@ -73,7 +73,6 @@ def main(data_type, seed=59):
         model_path.mkdir(parents=True, exist_ok=True)
         train_time, eval_mse, surrogate_decoder = None, None, None
         if model is not None:
-            # train_time, eval_mse, surrogate_decoder = load_surr_model_results(model)
             train_time, eval_mse, surrogate_decoder = (
                 load_surr_model_results(model, model_name, data_type)
                 if (model_path / "model.ckpt").exists()
@@ -106,6 +105,7 @@ def main(data_type, seed=59):
             pass
         res = {
             "model_name": model_name,
+            "seed": seed,
             "train_time": train_time,
             "Test Norm MSE": eval_mse,
             "infer_time": infer_time,
@@ -142,23 +142,47 @@ def hmc(
     surrogate_decoder: Optional[Callable] = None,
     init_vals: Optional[list[dict]] = [],
 ):
-    """runs HMC on given inference model and observed f"""
-    init_strat = init_to_value(values=init_vals)
-    nuts = NUTS(model, init_strategy=init_strat, target_accept_prob=0.9)
-    k1, k2 = random.split(rng)
-    mcmc = MCMC(nuts, num_chains=2, num_samples=4000, num_warmup=4000)
-    start = datetime.now()
-    mcmc.run(k1, surrogate_decoder=surrogate_decoder, y=y_obs, obs_mask=obs_mask)
-    infer_time = (datetime.now() - start).total_seconds()
-    mcmc.print_summary()
-    samples = mcmc.get_samples()
-    post = Predictive(model, samples)(k2, surrogate_decoder=surrogate_decoder)
-    post["infer_time"] = infer_time
+    """Run HMC with multiple independent single-chain runs and merge results."""
+    num_chains, n_samples, n_warmup = len(init_vals), 4000, 4000
+    all_samples, all_posts = [], []
+    total_time = 0.0
+
+    for i, chain_init in enumerate(init_vals):
+        print(f"Running chain {i} ...")
+        rng, subrng = random.split(rng)
+        init_strat = init_to_value(values=chain_init)
+        nuts = NUTS(model, init_strategy=init_strat, target_accept_prob=0.9)
+        mcmc = MCMC(nuts, num_chains=1, num_samples=n_samples, num_warmup=n_warmup)
+        k1, k2 = random.split(subrng)
+        start = datetime.now()
+        mcmc.run(k1, surrogate_decoder=surrogate_decoder, y=y_obs, obs_mask=obs_mask)
+        total_time += (datetime.now() - start).total_seconds()
+        samples = mcmc.get_samples()
+        post = Predictive(model, samples)(k2, surrogate_decoder=surrogate_decoder)
+        all_samples.append(samples)
+        all_posts.append(post)
+    combined_samples = {
+        k: jnp.concatenate([s[k] for s in all_samples], axis=0) for k in all_samples[0]
+    }
+    combined_post = {
+        k: jnp.concatenate([p[k] for p in all_posts], axis=0) for k in all_posts[0]
+    }
+    idata = az.from_dict(
+        posterior={
+            k: it.reshape((num_chains, n_samples, -1)).squeeze()
+            for k, it in combined_samples.items()
+        },
+        posterior_predictive={
+            k: it.reshape((num_chains, n_samples, -1)).squeeze()
+            for k, it in combined_post.items()
+        },
+    )
+    combined_post["infer_time"] = total_time
     with open(results_dir / "hmc_samples.pkl", "wb") as out_file:
-        pickle.dump(samples, out_file)
+        pickle.dump(combined_samples, out_file)
     with open(results_dir / "hmc_pp.pkl", "wb") as out_file:
-        pickle.dump(post, out_file)
-    return samples, mcmc, post, infer_time
+        pickle.dump(combined_post, out_file)
+    return combined_samples, idata, combined_post, total_time
 
 
 def surrogate_model_train(
@@ -291,31 +315,11 @@ def gen_spatial_structure(map_data: gpd.GeoDataFrame, s_max: int):
     return jnp.stack([centroids.x.values, centroids.y.values], axis=-1)
 
 
-def gen_spatial_obs_mask(
-    rng: Array, s: Array, areas: Array, obs_ratio: float, num_blobs: int
-):
-    n = s.shape[0]
-    total_area = areas.sum()
-    target_area = obs_ratio * total_area
-    mask = jnp.ones(n, dtype=bool)
-    area_remaining = total_area
-    for _ in range(num_blobs):
-        if area_remaining <= target_area:
-            break
-        rng, rng_center = random.split(rng, 2)
-        observed_idxs = jnp.where(mask)[0]
-        center_idx = random.choice(rng_center, observed_idxs)
-        center = s[center_idx]
-        dist = jnp.sqrt(jnp.sum((s - center) ** 2, axis=1))
-        sorted_idx = jnp.argsort(dist)
-        cum_area = jnp.cumsum(areas[sorted_idx])
-        cutoff = jnp.searchsorted(
-            cum_area, (area_remaining - target_area) / (num_blobs)
-        )
-        blob_idx = sorted_idx[:cutoff]
-        mask = mask.at[blob_idx].set(False)
-        area_remaining = areas[mask].sum()
-    return mask
+def gen_spatial_obs_mask(rng: Array, s: Array, obs_ratio: float):
+    L = s.shape[0]
+    num_obs_locations = int(obs_ratio * L)
+    obs_idxs = random.choice(rng, jnp.arange(L), (num_obs_locations,), replace=False)
+    return jnp.isin(jnp.arange(L), obs_idxs)
 
 
 def load_surr_model_results(model, model_name, data_type):
@@ -346,6 +350,7 @@ def joint_map_init(
     population,
     y_obs,
     obs_mask,
+    num_chains,
     ls_init=5.5,
     var_init=0.5,
     beta_init=-1.5,
@@ -425,23 +430,23 @@ def joint_map_init(
         "beta": dist.Normal(beta_map, 1.0),
     }
     map_vals = {"var": var_map, "ls": ls_map, "beta": beta_map, "z": z_map}
-    for k in map_vals.keys():
-        rng, _ = random.split(rng)
-        eps = 1e-2 if k != "z" else 1e-3
-        shape = tuple() if k != "z" else map_vals[k].shape
-        map_vals[k] += eps * random.normal(rng, shape)
-    # build per-chain init values
-    # init_vals = []
-    # for i in range(num_chains):
-    #     chain_val = {}
-    #     for k in map_vals.keys():
-    #         chain_val[k] = map_vals[k]
-    #         if preturb:
-    #             rng, _ = random.split(rng)
-    #             shape = tuple() if k != "z" else chain_val[k].shape
-    #             chain_val[k] += eps * random.normal(rng, shape)
-    #     init_vals.append(chain_val)
-    return priors, map_vals
+    min_vals = {"var": 0.1, "ls": 1.2}
+    init_vals = []
+    for i in range(num_chains):
+        init_vals.append({})
+        for k in map_vals.keys():
+            rng, _ = random.split(rng)
+            eps = 1e-2 if k != "z" else 1e-3
+            shape = tuple() if k != "z" else map_vals[k].shape
+            init_vals[i][k] = map_vals[k] + eps * random.normal(rng, shape)
+            if k in min_vals:
+                init_vals[i][k] = max(min_vals[k], init_vals[i][k])
+        print(
+            f"Chain {i} ls={init_vals[i]['ls']:.3f},"
+            f"var={init_vals[i]['var']:.3f},"
+            f" beta={init_vals[i]['beta']:.3f}"
+        )
+    return priors, init_vals
 
 
 def analyze_chains(path, params_to_check=("ls", "beta", "var"), nc=2):
@@ -493,19 +498,8 @@ def analyze_chains(path, params_to_check=("ls", "beta", "var"), nc=2):
 
 if __name__ == "__main__":
     dt = "London_MSOA_education_deprivation_parsed_thrs_0"
-    main(seed=59, data_type=dt)
-    analyze_chains(f"results/{dt}/DeepRV + gMLP/hmc_samples.pkl", nc=2)
+    main(seed=81, data_type=dt, num_chains=4, obs_ratio=0.5)
+    analyze_chains(f"results/{dt}/DeepRV + gMLP/hmc_samples.pkl", nc=4)
     dt = "London_LSOA_education_deprivation_parsed_thrs_0"
-    main(seed=59, data_type=dt)
-    analyze_chains(f"results/{dt}/DeepRV + gMLP/hmc_samples.pkl", nc=2)
-
-# mcmc = MCMC(nuts, num_chains=2, num_samples=1, num_warmup=0)
-# mcmc.run(rng, y=y_obs, obs_mask=obs_mask)
-# ff = mcmc.get_samples(group_by_chain=True)
-# for k, it in ff.items():
-#     if k not in init_vals[0]:
-#         continue
-#     if 'z' != k:
-#         print(f'{k} chain1 {ff[k][0]:.2f}, chain2 {ff[k][1]:.2f}, init val1 {init_vals[0][k]:.2f}, init val2 {init_vals[1][k]:.2f}')
-#     else:
-#         print(f'{k} diff chain1,2  {jnp.abs(ff['z'][0] - ff['z'][1]).mean():.2f}, diff init vals {jnp.abs(init_vals[0]['z'] - init_vals[1]['z']).mean():.2f}')
+    main(seed=62, data_type=dt, num_chains=4, obs_ratio=0.5)
+    analyze_chains(f"results/{dt}/DeepRV + gMLP/hmc_samples.pkl", nc=4)
