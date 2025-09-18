@@ -66,8 +66,8 @@ def main(seed=23):
             head=MLP([D * 4, D * 2, D // 2, 1]),
             max_locations=max(num_infer_locations),
         ),
-        "DeepRV + gMLP fourier kAttn": gMLPDeepRV(
-            s_embed=FourierEmbed(num_bands=14),
+        "DeepRV + gMLP RFF kAttn": gMLPDeepRV(
+            s_embed=RFFEmbed(num_features=512),
             proj_in=MLP([D * 2, D * 2], nn.gelu),
             proj_out=MLP([D, D], nn.gelu),
             embed=MLP([D, D], nn.gelu),
@@ -439,26 +439,6 @@ def inference_model(s: Array, priors: dict, model_name: str, max_infer_locs: int
     return poisson, ["ls", "beta"]
 
 
-class FourierEmbed(nn.Module):
-    num_bands: int = 6
-    include_original: bool = True
-    head: Union[Callable, nn.Module] = lambda x: x
-
-    @nn.compact
-    def __call__(self, s: Array):
-        # Fourier encode s: (L, D) -> (L, D_encoded)
-        B, L = s.shape[0], s.shape[1]
-        freq_bands = 2.0 ** jnp.arange(self.num_bands)
-        s_expanded = s[..., None] * freq_bands
-        s_expanded = jnp.pi * s_expanded
-        sin = jnp.sin(s_expanded)
-        cos = jnp.cos(s_expanded)
-        s_encoded = jnp.concatenate([sin, cos], axis=-1).reshape(B, L, -1)
-        if self.include_original:
-            s_encoded = jnp.concatenate([s, s_encoded], axis=-1)
-        return self.head(s_encoded)
-
-
 class RFFEmbed(nn.Module):
     num_features: int = 128
     scale: float = 1.0
@@ -485,22 +465,6 @@ class RFFEmbed(nn.Module):
         else:
             s_encoded = rff
         return self.head(s_encoded)
-
-
-@partial(jit, static_argnames=["embed_dim", "max_wavelength"])
-def sinusoidal_embedding(
-    positions: Array, embed_dim: int, max_wavelength: int
-) -> Array:
-    B, L, D = positions.shape
-    dim_per_input = embed_dim // D
-    K = dim_per_input // 2  # embed dim for each, loc dim and for each sin, cos
-    i = jnp.arange(K)
-    wavelengths = max_wavelength ** (2 * i / dim_per_input)  # (K,)
-    phases = 2 * jnp.pi * positions[..., None] / wavelengths  # (B,L,D,K)
-    # (B,L,D,2K)
-    sinusoids = jnp.concatenate([jnp.sin(phases), jnp.cos(phases)], axis=-1)
-    pe = sinusoids.reshape(B, L, embed_dim)  # (B,L,embed_dim)
-    return pe
 
 
 def load_surr_model_results(model, optimizer, model_path: Path):

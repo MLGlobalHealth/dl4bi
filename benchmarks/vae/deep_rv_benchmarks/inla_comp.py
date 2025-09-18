@@ -27,8 +27,7 @@ from omegaconf import DictConfig
 from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
 from scipy.stats import wasserstein_distance
 from sklearn.cluster import KMeans
-from sps.kernels import matern_3_2
-from sps.utils import build_grid
+from sps.kernels import matern_1_2
 from utils.plot_utils import plot_infer_trace
 
 import wandb
@@ -51,49 +50,37 @@ from dl4bi.vae.train_utils import (
 )
 
 
-def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
+def main(seed=42, gt_ls=10, grids=[16, 24, 32, 48, 64]):
     rng = random.key(seed)
-    save_dir = Path(
-        f"results/scalability{'_log_priors' if logged_priors else ''}_ls_{gt_ls}/"
-    )
+    save_dir = Path(f"results/scalability_ls_{gt_ls}/")
     save_dir.mkdir(parents=True, exist_ok=True)
-    grids = [
-        build_grid([{"start": 0.0, "stop": 100.0, "num": n}] * 2).reshape(-1, 2)
-        for n in grids
-    ]
+    prep_INLA_R_script_res(gt_ls, grids, save_dir)
     models = {
         "Baseline_GP": None,
-        "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
+        "INLA": None,
         "DeepRV + gMLP kAttn": gMLPDeepRV(num_blks=2, attn=FixedKernelAttention()),
         "DeepRV + gMLP adamw": gMLPDeepRV(num_blks=2),
         "PriorCVAE": PriorCVAE,
         "DeepRV + MLP": MLPDeepRV,
-        "Inducing Points": None,
         "Inducing Points Large": None,
         "ADVI": None,
         "RFF": None,
     }
     model_names = list(models.keys())
-    log_ls = dist.TransformedDistribution(dist.Beta(4.0, 1.0), LogScaleTransform())
-    priors = {
-        "ls": log_ls if logged_priors else dist.Uniform(1.0, 100.0),
-        "beta": dist.Normal(),
-    }
+    log_ls = dist.LogNormal(loc=3.0, scale=0.4)
+    priors = {"ls": log_ls, "beta": dist.Normal()}
     cond_names = list(priors.keys())
-    for s in grids:
+    for gs in grids:
+        grid_s_path = save_dir / f"grid_{gs**2}"
+        with open(grid_s_path / "GT_data.pkl", "rb") as ff:
+            gt_data = pickle.load(ff)
+        s, u, u_large = gt_data["s"], gt_data["u"], gt_data["u_l"]
+        obs_mask, y_obs = gt_data["obs_mask"], gt_data["y_obs"]
         result = []
-        rng_train, rng_test, rng_infer, rng_idxs, rng_obs, rng = random.split(rng, 6)
+        rng_train, rng_test, rng_infer, rng = random.split(rng, 4)
         L, sqrt_L = s.shape[0], int(jnp.sqrt(s.shape[0]))
-        if L == 1:  # NOTE: placeholder for fixing the rngs for gt_ls=50
-            continue
         grid_s_path = save_dir / f"grid_{L}"
         grid_s_path.mkdir(parents=True, exist_ok=True)
-        y_obs = gen_y_obs(rng_obs, s, gt_ls)
-        obs_mask = gen_spatial_obs_mask(rng_idxs, (sqrt_L, sqrt_L), obs_ratio=0.5)
-        u, u_large = get_inducing_points(s, obs_mask, L)
-        gt_data = {"s": s, "u": u, "u_l": u_large, "obs_mask": obs_mask, "y_obs": y_obs}
-        with open(grid_s_path / "GT_data.pkl", "wb") as ff:
-            pickle.dump(gt_data, ff)
         y_hats, all_samples = [], []
         for model_name, nn_model in models.items():
             if "PriorCVAE" in model_name:
@@ -104,6 +91,17 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
                 nn_model = MLPDeepRV(dims=[L, L])
             model_path = grid_s_path / f"{model_name}"
             model_path.mkdir(parents=True, exist_ok=True)
+            if model_name != "INLA" and (model_path / "single_res.pkl").exists():
+                with open(model_path / "hmc_samples.pkl", "rb") as ff:
+                    samples = pickle.load(ff)
+                with open(model_path / "hmc_pp.pkl", "rb") as ff:
+                    post = pickle.load(ff)
+                with open(model_path / "single_res.pkl", "rb") as ff:
+                    res = pickle.load(ff)
+                y_hats.append(post["obs"])
+                all_samples.append(samples)
+                result.append(res)
+                continue
             is_inducing, kernel_attn = "Inducing" in model_name, "kAttn" in model_name
             infer_model = gen_infer_model(
                 rng_infer,
@@ -146,34 +144,43 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
                     infer_gflops,
                     train_gflops,
                     parameters,
-                ) = surrogate_model_train(
-                    rng_train,
-                    rng_test,
-                    loader,
-                    train_step,
-                    nn_model,
-                    model_path,
-                    optimizer,
-                    num_train_steps,
+                ) = (
+                    surrogate_model_train(
+                        rng_train,
+                        rng_test,
+                        loader,
+                        train_step,
+                        nn_model,
+                        model_path,
+                        optimizer,
+                        num_train_steps,
+                    )
+                    if not (model_path / "model.ckpt").exists()
+                    else load_surr_model_results(nn_model, model_name, L, optimizer)
                 )
                 wandb.log({"train_time": train_time, "Test Norm MSE": eval_mse})
-            if model_name != "ADVI":
+            if model_name == "ADVI":
+                samples, post, infer_time = advi(
+                    rng_infer, infer_model, y_obs, obs_mask, model_path
+                )
+            elif model_name == "INLA":
+                with open(model_path / "hmc_samples.pkl", "rb") as ff:
+                    samples = pickle.load(ff)
+                with open(model_path / "hmc_pp.pkl", "rb") as ff:
+                    post = pickle.load(ff)
+                infer_time = post["infer_time"]
+            else:
                 samples, mcmc, post, infer_time = hmc(
                     rng_infer,
                     infer_model,
                     y_obs,
                     obs_mask,
                     model_path,
-                    L,
                     surrogate_decoder,
                 )
                 ess = az.ess(mcmc, method="mean")
                 plot_infer_trace(
                     samples, mcmc, None, cond_names, model_path / "infer_trace.png"
-                )
-            else:
-                samples, post, infer_time = advi(
-                    rng_infer, infer_model, y_obs, obs_mask, model_path
                 )
             y_hats.append(post["obs"])
             all_samples.append(samples)
@@ -197,7 +204,7 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
                 "train_flops": train_gflops,
                 "parameters": parameters,
                 "seed": seed,
-                "num_chains": 4 if L == 32**2 else 1,
+                "num_chains": 2 if L <= 32**2 else 1,
             }
             res.update(
                 {f"inferred {c} mean": samples[c].mean(axis=0) for c in cond_names}
@@ -229,15 +236,14 @@ def hmc(
     y_obs: Array,
     obs_mask: Union[bool, Array],
     results_dir: Path,
-    grid_size: int,
     surrogate_decoder: Optional[Callable] = None,
 ):
     """runs HMC on given inference model and observed f"""
     nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
     k1, k2 = random.split(rng)
     # mcmc = MCMC(nuts, num_chains=1, num_samples=1_000, num_warmup=4_00)
-    num_chains = 4 if grid_size == 32**2 else 1
-    mcmc = MCMC(nuts, num_chains=num_chains, num_samples=10_000, num_warmup=4_000)
+    num_chains = 2 if y_obs.shape[0] <= 32**2 else 1
+    mcmc = MCMC(nuts, num_chains=num_chains, num_samples=6_000, num_warmup=4_000)
     start = datetime.now()
     mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=y_obs)
     infer_time = (datetime.now() - start).total_seconds()
@@ -332,7 +338,7 @@ def gen_train_dataloader(
 ):
     s_train = u if inducing else s
     jitter = 5e-4 * jnp.eye(s_train.shape[0])
-    kernel_jit = jit(lambda s, var, ls: matern_3_2(s, s, var, ls) + jitter)
+    kernel_jit = jit(lambda s, var, ls: matern_1_2(s, s, var, ls) + jitter)
     f_jit = jit(lambda L, z: jnp.einsum("ij,bj->bi", L, z))
     s_trin = partial(solve_triangular, lower=False)
     jit_trin_solve_func = jit(vmap(s_trin, in_axes=(None, 0)))
@@ -348,7 +354,7 @@ def gen_train_dataloader(
             batch = {"s": s_train, "z": z, "conditionals": jnp.array([ls])}
             if inducing:
                 f = jit_trin_solve_func(L.T, z)
-                K_su = matern_3_2(s, s_train, var, ls)
+                K_su = matern_1_2(s, s_train, var, ls)
                 batch.update({"f": f, "K_su": K_su})
             else:
                 batch["f"] = f_jit(L, z)
@@ -384,7 +390,7 @@ def inference_model(s: Array, priors: dict, kernel_attn: bool):
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
         z = numpyro.sample("z", dist.Normal(), sample_shape=(1, s.shape[0]))
         if kernel_attn or surrogate_decoder is None:
-            K = matern_3_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
+            K = matern_1_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
             surrogate_kwargs["K"] = K
         if surrogate_decoder:  # NOTE: whether to use a replacment for the GP
             mu = numpyro.deterministic(
@@ -419,10 +425,10 @@ def inference_model_inducing_points(s: Array, priors: dict, u: Array, kernel_att
         var = 1.0
         ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
-        K_su = matern_3_2(s, u, var, ls)
+        K_su = matern_1_2(s, u, var, ls)
         z = numpyro.sample("z", dist.Normal(), sample_shape=(1, u.shape[0]))
         if kernel_attn or surrogate_decoder is None:
-            K_uu = matern_3_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
+            K_uu = matern_1_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
             surr_kwargs["K"] = K_uu
         if surrogate_decoder is not None:
             f_u_bar = surrogate_decoder(z, jnp.array([ls]), **surr_kwargs).squeeze()
@@ -449,14 +455,16 @@ def sample_matern32_omegas(key, M, d, ell=1.0):
     return omegas  # shape (M, d)
 
 
+def sample_matern12_omegas(key, M, d, ell=1.0):
+    u = random.uniform(key, shape=(M, d), minval=-0.5, maxval=0.5)
+    omegas = jnp.tan(jnp.pi * u) / ell
+    return omegas
+
+
 def inference_model_rff(rng, s, priors, feature_size=500):
-    """
-    Build a NumPyro Poisson-GP model using fixed RFF for Matérn-3/2.
-    """
     M = feature_size
-    # NOTE: sample RFF features once
     rng_omega, rng_phase = random.split(rng)
-    base_omegas = sample_matern32_omegas(rng_omega, M, d=2, ell=1.0)
+    base_omegas = sample_matern12_omegas(rng_omega, M, d=s.shape[1], ell=1.0)
     phases = random.uniform(rng_phase, (M,), minval=0.0, maxval=2 * jnp.pi)
     base_proj = jnp.dot(s, base_omegas.T)
     jitter = 5e-4
@@ -492,7 +500,7 @@ def gen_y_obs(rng: Array, s: Array, gt_ls: float):
     """generates a poisson observed data sample for inference"""
     rng_mu, rng_poiss = random.split(rng)
     var, ls, beta = 1.0, gt_ls, 1.0
-    K = matern_3_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
+    K = matern_1_2(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
     mu = dist.MultivariateNormal(0.0, K).sample(rng_mu)
     lambda_ = jnp.exp(beta + mu)
     return dist.Poisson(rate=lambda_).sample(rng_poiss)
@@ -823,10 +831,80 @@ def aggregate_csvs(base_path: Path):
     return aggregated_df
 
 
+def prep_INLA_R_script_res(
+    ls: int,
+    grids: list[int],
+    save_dir: Path,
+    prefix: str = "results/INLA_raw_batch_results/",
+):
+    for g_size in grids:
+        L = g_size**2
+        grid_s_path = save_dir / f"grid_{L}"
+        grid_s_path.mkdir(parents=True, exist_ok=True)
+        y_data = pd.read_csv(f"{prefix}ell_{ls}/n_{L}/masked_y_and_fitted.csv")
+        s = jnp.stack([jnp.array(y_data["x"]), jnp.array(y_data["y"])], axis=1)
+        y_obs = jnp.array(y_data["observed_full"])
+        obs_mask = jnp.array(y_data["mask_obs"], dtype=bool)
+        u, u_large = get_inducing_points(s, obs_mask, L)
+        gt_data = {"s": s, "u": u, "u_l": u_large, "obs_mask": obs_mask, "y_obs": y_obs}
+        with open(grid_s_path / "GT_data.pkl", "wb") as ff:
+            pickle.dump(gt_data, ff)
+
+        model_path = grid_s_path / "INLA"
+        model_path.mkdir(parents=True, exist_ok=True)
+
+        ls_post = pd.read_csv(
+            f"{prefix}ell_{ls}/n_{L}/lengthscale_posterior_samples.csv"
+        ).values
+        beta_post = pd.read_csv(
+            f"{prefix}ell_{ls}/n_{L}/intercept_posterior_samples.csv"
+        ).values
+        with open(f"{prefix}ell_{ls}/n_{L}/runtime.txt", "r") as ff:
+            infer_time = float(ff.readlines()[0].split(": ")[-1])
+        post = {
+            "obs": jnp.array(y_data["y_hat"]).reshape(1, -1),
+            "infer_time": infer_time,
+        }
+        samples = {
+            "beta": jnp.array(beta_post).squeeze(),
+            "ls": jnp.array(ls_post).squeeze(),
+        }
+
+        with open(model_path / "hmc_pp.pkl", "wb") as ff:
+            pickle.dump(post, ff)
+        with open(model_path / "hmc_samples.pkl", "wb") as ff:
+            pickle.dump(samples, ff)
+
+
+def load_surr_model_results(model, model_name, grid_size, optimizer, ls=10):
+    from orbax.checkpoint import PyTreeCheckpointer
+
+    grid_path = Path(f"results/scalability_ls_{ls}/grid_{grid_size}").absolute()
+    model_path = grid_path / f"{model_name}"
+    ckptr = PyTreeCheckpointer()
+    ckpt = ckptr.restore(model_path / "model.ckpt")
+    state = TrainState.create(
+        apply_fn=model.apply,
+        tx=optimizer,
+        params=ckpt["state"]["params"],
+        kwargs=ckpt["state"]["kwargs"],
+    )
+    surrogate_decoder = generate_surrogate_decoder(state, model)
+    res_df = pd.read_csv(grid_path / "res.csv")
+    res_df = res_df[res_df["model_name"] == model_name]
+    train_time, eval_mse = (
+        res_df["train_time"].values[0],
+        res_df["Test Norm MSE"].values[0],
+    )
+    infer_flops, train_flops = (
+        res_df["infer_flops"].values[0],
+        res_df["train_flops"].values[0],
+    )
+    parameters = res_df["parameters"].values[0]
+    return train_time, eval_mse, surrogate_decoder, infer_flops, train_flops, parameters
+
+
 if __name__ == "__main__":
     main(seed=42, gt_ls=10)
     main(seed=78, gt_ls=30)
-    # NOTE: I messed up the rngs in gt_ls=50, and don't want to rerun GP (71h for 4096 grid)
-    # NOTE: Running gt_ls in these two intervals breaks the rngs correctly to reproduce results
-    main(seed=34, gt_ls=50, grids=[24, 48, 64])
-    main(seed=34, gt_ls=50, grids=[16, 1, 32])
+    main(seed=34, gt_ls=50)
