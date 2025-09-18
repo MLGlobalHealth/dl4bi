@@ -10,6 +10,7 @@ import arviz as az
 import flax.linen as nn
 import geopandas as gpd
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import numpyro
 import optax
 import pandas as pd
@@ -120,6 +121,9 @@ def main(data_type, seed=59, num_chains=2, obs_ratio=0.5):
         result.append(res)
     plot_models_predictive_means(
         y_hats, map_data, save_dir / "obs_means.png", obs_mask, log=True
+    )
+    scatter_plot_prevalence(
+        y_obs, population, all_samples, list(models.keys()), obs_mask, save_dir
     )
     plot_posterior_predictive_comparisons(
         all_samples,
@@ -494,6 +498,65 @@ def analyze_chains(path, params_to_check=("ls", "beta", "var"), nc=2):
             print(f"mean(mu) correlation across chains 0-1 = {corr:.3f}")
 
     print("=" * 80)
+
+
+def scatter_plot_prevalence(
+    y_obs, population, all_samples, model_names: list, obs_mask, save_dir
+):
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    p_obs = y_obs / population
+    p_hat_means = []
+    for i in range(len(model_names)):
+        mu = jnp.asarray(all_samples[i]["mu"])  # (S, L)
+        beta = jnp.asarray(all_samples[i]["beta"])[:, None]  # (S,1)
+        var = jnp.asarray(all_samples[i]["var"])[:, None]  # (S,1)
+        mean_logit = jnp.mean(jnp.sqrt(var) * mu + beta, axis=0)
+        p_hat = nn.sigmoid(mean_logit)
+        p_hat_means.append(jnp.clip(p_hat, 0.0, 1.0))
+    plot_types = {
+        "all": jnp.ones_like(p_obs, dtype=bool),
+        "observed": obs_mask,
+        "unobserved": ~obs_mask,
+    }
+    markers = ["x", "o", "s", "D", "^", "v", "P"]
+    for name, mask in plot_types.items():
+        fig, ax = plt.subplots(figsize=(5, 5), constrained_layout=True)
+        for i, model_name in enumerate(model_names):
+            label = model_name.replace("Baseline_", "")
+            marker = markers[i % len(markers)]
+            ax.scatter(
+                p_obs[mask],
+                p_hat_means[i][mask],
+                label=label,
+                alpha=0.5,
+                s=20,
+                marker=marker,
+            )
+        min_val = float(jnp.nanmin(p_obs[mask]))
+        max_val = float(jnp.nanmax(p_obs[mask]))
+        ax.plot([min_val, max_val], [min_val, max_val], "k--", lw=1)
+        if name == "unobserved":
+            x = p_obs[mask]
+            y = p_hat_means[model_names.index("DeepRV + gMLP")][mask]
+            slope, intercept = jnp.polyfit(x, y, 1)
+            ax.plot(
+                [min_val, max_val],
+                intercept + slope * jnp.array([min_val, max_val]),
+                "r-",
+                lw=1,
+            )
+        ax.set_xlabel(r"Observed prevalence ($\frac{y}{N}$)")
+        ax.set_ylabel("Predicted prevalence")
+        ax.set_xlim(min_val, max_val)
+        ax.set_ylim(min_val, max_val)
+        ax.grid(alpha=0.3)
+        if len(model_names) > 1:
+            ax.legend(loc="upper left", frameon=False)
+        fig.savefig(
+            save_dir / f"scatter_prevalence_{name}.png", dpi=300, bbox_inches="tight"
+        )
+        plt.close(fig)
 
 
 if __name__ == "__main__":
