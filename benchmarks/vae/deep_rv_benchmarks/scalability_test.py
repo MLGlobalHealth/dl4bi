@@ -631,7 +631,6 @@ def gen_train_params(model_name, L, default_bs=32):
         "Inducing DeepRV + gMLP kAttn": 1e-3,
         "DeepRV + gMLP": 5e-3 if L <= 32**2 else 1e-2,
         "PriorCVAE": 1.0e-3 if L <= 32**2 else 5e-3,
-        "PriorCVAE adamw": 1.0e-3 if L <= 32**2 else 2e-3,
         "DeepRV + MLP": 1.0e-3 if L <= 32**2 else 5e-3,
         "DeepRV + gMLP kAttn": 1.0e-3 if L <= 32**2 else 2e-3,
         "DeepRV + gMLP adamw": 1.0e-3 if L <= 32**2 else 2e-3,
@@ -639,10 +638,9 @@ def gen_train_params(model_name, L, default_bs=32):
     bs = default_bs if L < 64**2 else default_bs // 2
     if model_name == "Inducing DeepRV + gMLP kAttn":
         bs = default_bs
-    train_step = {
-        "PriorCVAE": prior_cvae_train_step,
-        "PriorCVAE adamw": partial(prior_cvae_train_step, mse_weight=5),
-    }.get(model_name, deep_rv_train_step)
+    train_step = {"PriorCVAE": prior_cvae_train_step}.get(
+        model_name, deep_rv_train_step
+    )
     train_num_steps = default_steps * (default_bs // bs)
     if model_name == "Inducing DeepRV + gMLP kAttn":
         train_num_steps *= 2

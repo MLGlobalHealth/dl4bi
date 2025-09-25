@@ -3,7 +3,6 @@ from .deep_rv import (
     DeepRV,
     FixedKernelAttention,
     MLPDeepRV,
-    ScanTransformerDeepRV,
     gMLPDeepRV,
     KernelBiasTransformerDeepRV,
 )

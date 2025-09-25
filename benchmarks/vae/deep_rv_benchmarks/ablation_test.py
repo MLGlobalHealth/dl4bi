@@ -3,30 +3,42 @@ import sys
 sys.path.append("benchmarks/vae")
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional, Union
 
+import arviz as az
 import flax.linen as nn
 import geopandas as gpd
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpyro
 import optax
 import pandas as pd
 from jax import Array, jit, random
 from numpyro import distributions as dist
-from numpyro.distributions.util import cholesky_of_inverse
-from shapely.affinity import scale, translate
-from sps.kernels import matern_1_2, rbf
-from utils.map_utils import generate_adjacency_matrix
+from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
+from scipy.stats import wasserstein_distance
+from sps.kernels import matern_1_2, matern_5_2
+from sps.utils import build_grid
 from utils.plot_utils import conds_to_title, plot_on_map
 
 import wandb
+from dl4bi.core.attention import MultiHeadAttention
 from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, train
-from dl4bi.vae import MLPDeepRV, PriorCVAE, ScanTransformerDeepRV, gMLPDeepRV
+from dl4bi.core.transformer import TransformerEncoderBlock
+from dl4bi.vae import (
+    FixedKernelAttention,
+    KernelBiasTransformerDeepRV,
+    MLPDeepRV,
+    PriorCVAE,
+    gMLPDeepRV,
+)
 from dl4bi.vae.train_utils import (
+    cond_as_feats,
     cond_as_locs,
     deep_rv_train_step,
+    generate_surrogate_decoder,
     prior_cvae_train_step,
 )
 
@@ -35,35 +47,80 @@ def main(init_seed=42, num_seeds=5):
     wandb.init(mode="disabled")  # NOTE: downstream function assume active wandb
     save_dir = Path("results/ablation_test/")
     save_dir.mkdir(parents=True, exist_ok=True)
-    map_data = gpd.read_file("benchmarks/vae/maps/UK")
-    s = gen_spatial_structure(map_data)
+    s = build_grid([{"start": 0.0, "stop": 100.0, "num": 32}] * 2).reshape(-1, 2)
     L = s.shape[0]
     models = {
+        "GP": None,
         "PriorCVAE": PriorCVAE(MLP(dims=[L, L]), MLP(dims=[L, L]), cond_as_locs, L),
         "DeepRV + MLP": MLPDeepRV(dims=[L, L]),
         "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
-        "DeepRV + scanTransfomer": ScanTransformerDeepRV(num_blks=2, dim=64),
+        "DeepRV + gMLP kAttn": gMLPDeepRV(num_blks=2, attn=FixedKernelAttention()),
+        "DeepRV + trans": TransformerDeepRV(max_locations=L),
+        "DeepRV + trans kAttn": KernelBiasTransformerDeepRV(max_locations=L),
+        "DeepRV + trans kAttn no ID": KernelBiasTransformerDeepRV(max_locations=1),
     }
-    priors = {"ls": dist.Uniform(1.0, 100.0), "alpha": dist.Beta(4.0, 1.0)}
+    kernels = [matern_1_2, matern_5_2]
+    priors = {"ls": dist.Uniform(1.0, 100.0), "beta": dist.Normal()}
+    # NOTE: > 5 so PriorCVAE won't break, < 50 so it would have some variability
+    gen_data_priors = {
+        "ls": dist.Uniform(5.0, 50.0),
+        "beta": dist.Uniform(low=0.6, high=2.0),
+    }
     result = []
     seeds = random.choice(
         random.key(init_seed), jnp.arange(100), shape=(num_seeds,), replace=False
     )
     for seed in seeds:
         rng = random.key(seed)
-        rng_train, rng_test, rng_plot = random.split(rng, 3)
-        for kernel in [rbf, matern_1_2, car]:
+        rng_obs, rng_idx, rng_infer, rng_train, rng_test, rng_beta, rng_ls = (
+            random.split(rng, 7)
+        )
+        for kernel in kernels:
             kernel_n = kernel.__name__
-            if kernel_n == "car":
-                loader = gen_car_dataloader(s, priors, map_data)
-            else:
-                loader = gen_gp_dataloader(s, priors, kernel)
             states = []
+            gt_ls = float(gen_data_priors["ls"].sample(rng_ls))
+            gt_beta = float(gen_data_priors["beta"].sample(rng_beta))
+            obs_mask = gen_random_obs_mask(rng_idx, s, 0.4)
+            y_obs = gen_y_obs(rng_obs, s, kernel, gt_ls, gt_beta)
             for model_name, nn_model in models.items():
-                train_time, eval_mse, state = surrogate_model_train(
-                    rng_train, rng_test, loader, model_name, nn_model
+                infer_model = inference_model(s, kernel, priors, "kAttn" in model_name)
+                train_time, eval_mse, surrogate_decoder = None, None, None
+                if nn_model is not None:
+                    loader = gen_gp_dataloader(s, priors, kernel, "kAttn" in model_name)
+                    optimizer, train_num_steps, train_step = gen_train_params(
+                        model_name
+                    )
+                    start = datetime.now()
+                    state = train(
+                        rng_train,
+                        nn_model,
+                        optimizer,
+                        train_step,
+                        train_num_steps,
+                        loader,
+                        valid_step,
+                        50_000,
+                        5_000,
+                        loader,
+                        return_state="best",
+                        valid_monitor_metric="norm MSE",
+                    )
+                    train_time = (datetime.now() - start).total_seconds()
+                    eval_mse = evaluate(rng_test, state, valid_step, loader, 5_000)[
+                        "norm MSE"
+                    ]
+                    surrogate_decoder = generate_surrogate_decoder(state, nn_model)
+                    states.append(state)
+
+                samples, mcmc, post, infer_time = hmc(
+                    rng_infer, infer_model, y_obs, obs_mask, surrogate_decoder
                 )
-                states.append(state)
+                if nn_model is None:
+                    gp_mean_obs = post["obs"].mean(axis=0)
+                    beta_gp, ls_gp = samples["beta"], samples["ls"]
+                ess = az.ess(mcmc, method="mean")
+                mean_obs = post["obs"].mean(axis=0)
+                sq_res = (y_obs - mean_obs) ** 2
                 result.append(
                     {
                         "model_name": model_name,
@@ -71,62 +128,82 @@ def main(init_seed=42, num_seeds=5):
                         "Test Norm MSE": eval_mse,
                         "kernel": kernel_n,
                         "seed": seed,
+                        "gt_ls": gt_ls,
+                        "infer_time": infer_time,
+                        "MSE(y, y_hat)": (sq_res).mean(),
+                        "obs MSE(y, y_hat)": (sq_res[obs_mask]).mean(),
+                        "unobs MSE(y, y_hat)": (
+                            sq_res[jnp.logical_not(obs_mask)]
+                        ).mean(),
+                        "num_chains": 2,
+                        "MSE(y_hat_gp, y_hat)": (gp_mean_obs - mean_obs) ** 2,
+                        "ls wasserstein distance": wasserstein_distance(
+                            ls_gp, samples["ls"]
+                        ),
+                        "beta wasserstein distance": wasserstein_distance(
+                            beta_gp, samples["beta"]
+                        ),
+                        "ESS ls": ess["ls"].mean().item(),
+                        "ESS beta": ess["beta"].mean().item(),
                     }
                 )
-            if seed == seeds[0]:
-                plot_reconstruction_comp(
-                    rng_plot,
-                    map_data,
-                    kernel_n,
-                    states,
-                    list(models.keys()),
-                    loader,
-                    ["alpha" if kernel_n == "car" else "ls"],
-                    save_dir,
-                )
     result = pd.DataFrame(result)
-    latex_table = df_to_latex_table(result)
     result.to_csv(save_dir / "res.csv")
-    with open(save_dir / "latex_table.txt", "w") as ff:
-        ff.write(latex_table)
 
 
-def surrogate_model_train(
-    rng_train: Array,
-    rng_test: Array,
-    loader: Callable,
-    model_name: str,
-    model: nn.Module,
-    train_num_steps: int = 100_000,
-    valid_interval: int = 25_000,
-    valid_steps: int = 5_000,
+def hmc(
+    rng: Array,
+    model: Callable,
+    y_obs: Array,
+    obs_mask: Union[bool, Array],
+    surrogate_decoder: Optional[Callable] = None,
 ):
-    train_step = prior_cvae_train_step
-    lr_schedule = cosine_annealing_lr(train_num_steps, 1.0e-3, 1.0e-5)
-    if model_name != "PriorCVAE":
-        train_step = deep_rv_train_step
-    optimizer = optax.chain(optax.clip_by_global_norm(3.0), optax.yogi(lr_schedule))
+    """runs HMC on given inference model and observed f"""
+    nuts = NUTS(model, init_strategy=init_to_median(num_samples=10))
+    k1, k2 = random.split(rng)
+    num_chains = 2
+    mcmc = MCMC(nuts, num_chains=num_chains, num_samples=3_000, num_warmup=2_000)
     start = datetime.now()
-    state = train(
-        rng_train,
-        model,
-        optimizer,
-        train_step,
-        train_num_steps,
-        loader,
-        valid_step,
-        valid_interval,
-        valid_steps,
-        loader,
-        return_state="best",
-        valid_monitor_metric="norm MSE",
-    )
-    train_time = (datetime.now() - start).total_seconds()
-    eval_mse = evaluate(rng_test, state, valid_step, loader, valid_steps)["norm MSE"]
-    return train_time, eval_mse, state
+    mcmc.run(k1, surrogate_decoder=surrogate_decoder, obs_mask=obs_mask, y=y_obs)
+    infer_time = (datetime.now() - start).total_seconds()
+    mcmc.print_summary()
+    samples = mcmc.get_samples()
+    post = Predictive(model, samples)(k2, surrogate_decoder=surrogate_decoder)
+    return samples, mcmc, post, infer_time
 
 
-def gen_gp_dataloader(s: Array, priors: dict, kernel: Callable, batch_size=32):
+def inference_model(s: Array, kernel: Callable, priors: dict, kernel_attn: bool):
+    """
+    Builds a poisson likelihood inference model for GP and surrogate models
+    """
+    surrogate_kwargs = {"s": s}
+
+    def poisson(surrogate_decoder=None, obs_mask=True, y=None):
+        var = 1.0
+        ls = numpyro.sample("ls", priors["ls"], sample_shape=())
+        beta = numpyro.sample("beta", priors["beta"], sample_shape=())
+        z = numpyro.sample("z", dist.Normal(), sample_shape=(1, s.shape[0]))
+        if kernel_attn or surrogate_decoder is None:
+            K = kernel(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
+            surrogate_kwargs["K"] = K
+        if surrogate_decoder:  # NOTE: whether to use a replacment for the GP
+            mu = numpyro.deterministic(
+                "mu",
+                surrogate_decoder(z, jnp.array([ls]), **surrogate_kwargs).squeeze(),
+            )
+        else:
+            L_chol = jnp.linalg.cholesky(K)
+            mu = numpyro.deterministic("mu", jnp.matmul(L_chol, z[0]))
+        lambda_ = jnp.exp(beta + mu)
+        with numpyro.handlers.mask(mask=obs_mask):
+            numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
+
+    return poisson
+
+
+def gen_gp_dataloader(
+    s: Array, priors: dict, kernel: Callable, kAttn: bool, batch_size=32
+):
     jitter = 5e-4 * jnp.eye(s.shape[0])
     kernel_jit = jit(lambda s, var, ls: kernel(s, s, var, ls) + jitter)
     f_jit = jit(lambda K, z: jnp.einsum("ij,bj->bi", jnp.linalg.cholesky(K), z))
@@ -139,28 +216,10 @@ def gen_gp_dataloader(s: Array, priors: dict, kernel: Callable, batch_size=32):
             z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s.shape[0]))
             K = kernel_jit(s, var, ls)
             f = f_jit(K, z)
-            yield {"s": s, "f": f, "z": z, "conditionals": jnp.array([ls])}
-
-    return dataloader
-
-
-def gen_car_dataloader(
-    s: Array, priors: dict, map_data: gpd.GeoDataFrame, batch_size=32
-):
-    adj_mat = generate_adjacency_matrix(map_data, self_loops=False)
-    D = jnp.diag(adj_mat.sum(axis=1))
-    kernel_jit = jit(lambda tau, alpha: tau * (D - (alpha * adj_mat)))
-    f_jit = jit(lambda K_inv, z: jnp.einsum("ij,bj->bi", cholesky_of_inverse(K_inv), z))
-
-    def dataloader(rng_data):
-        while True:
-            rng_data, rng_alpha, rng_z = random.split(rng_data, 3)
-            tau = 1.0
-            alpha = priors["alpha"].sample(rng_alpha)
-            z = dist.Normal().sample(rng_z, sample_shape=(batch_size, s.shape[0]))
-            precision_mat = kernel_jit(tau, alpha)
-            f = f_jit(precision_mat, z)
-            yield {"s": s, "f": f, "z": z, "conditionals": jnp.array([alpha])}
+            batch = {"s": s, "f": f, "z": z, "conditionals": jnp.array([ls])}
+            if kAttn:
+                batch["K"] = K
+            yield batch
 
     return dataloader
 
@@ -174,29 +233,40 @@ def valid_step(rng, state, batch):
     return {"norm MSE": metrics["MSE"]}
 
 
-def car():
-    pass
+def gen_train_params(model_name):
+    train_num_steps = 200_000
+    max_lr = {
+        "DeepRV + gMLP": 5e-3,
+        "DeepRV + trans": 1e-4,
+        "DeepRV + trans kAttn": 1e-4,
+        "DeepRV + trans kAttn no ID": 1e-4,
+    }.get(model_name, 1e-3)
+    train_step = {
+        "PriorCVAE": prior_cvae_train_step,
+    }.get(model_name, deep_rv_train_step)
+    lr_schedule = cosine_annealing_lr(train_num_steps, max_lr)
+    optimizer, clip = optax.adamw(lr_schedule, weight_decay=1e-2), 3.0
+    if model_name in ["PriorCVAE", "DeepRV + MLP"]:
+        optimizer, clip = optax.yogi(lr_schedule), 3.0
+    optimizer = optax.chain(optax.clip_by_global_norm(clip), optimizer)
+    return optimizer, train_num_steps, train_step
 
 
-def gen_spatial_structure(map_data: gpd.GeoDataFrame, s_max=100):
-    """generates a 0-s_max range locations from the geo-locations centroids"""
-    centroids = map_data.geometry.centroid
-    minx, maxx = centroids.x.min(), centroids.x.max()
-    miny, maxy = centroids.y.min(), centroids.y.max()
-    x_tran, x_div = minx, (maxx - minx) / s_max
-    y_tran, y_div = miny, (maxy - miny) / s_max
+def gen_y_obs(rng: Array, s: Array, kernel: Callable, gt_ls: float, gt_beta: float):
+    """generates a poisson observed data sample for inference"""
+    rng_mu, rng_poiss = random.split(rng)
+    var, ls, beta = 1.0, gt_ls, gt_beta
+    K = kernel(s, s, var, ls) + 5e-4 * jnp.eye(s.shape[0])
+    mu = dist.MultivariateNormal(0.0, K).sample(rng_mu)
+    lambda_ = jnp.exp(beta + mu)
+    return dist.Poisson(rate=lambda_).sample(rng_poiss)
 
-    def norm_geom(geom):
-        centered_geom = translate(geom, xoff=-x_tran, yoff=-y_tran)
-        normalized_geom = scale(
-            centered_geom, xfact=1 / x_div, yfact=1 / y_div, origin=(0, 0)
-        )
-        return normalized_geom
 
-    norm_map = map_data.copy()
-    norm_map["geometry"] = norm_map.geometry.apply(norm_geom)
-    centroids = norm_map.geometry.centroid
-    return jnp.stack([centroids.x.values, centroids.y.values], axis=-1)
+def gen_random_obs_mask(rng: Array, s: Array, obs_ratio: float):
+    L = s.shape[0]
+    num_obs_locations = int(obs_ratio * L)
+    obs_idxs = random.choice(rng, jnp.arange(L), (num_obs_locations,), replace=False)
+    return jnp.isin(jnp.arange(L), obs_idxs)
 
 
 def plot_reconstruction_comp(
@@ -255,60 +325,45 @@ def plot_reconstruction_comp(
         plt.close(fig)
 
 
-def df_to_latex_table(df):
-    """
-    Given a DataFrame with columns: 'model_name', 'train_time', 'Test Norm MSE', 'kernel', 'seed',
-    generate a LaTeX table with:
-    - Rows as model_name
-    - Columns as kernels, each with two subcolumns: MSE (mean ± std), Train Time (mean ± std)
-    """
+class TransformerDeepRV(nn.Module):
+    max_locations: int
+    dim: int = 64
+    num_blks: int = 2
+    s_embed: Union[Callable, nn.Module] = lambda x: x
+    head: Union[Callable, nn.Module] = MLP([128, 1], nn.gelu)
 
-    # Group by model and kernel
-    grouped = df.groupby(["model_name", "kernel"])
+    @nn.compact
+    def __call__(
+        self,
+        z: Array,
+        conditionals: Array,
+        s: Array,
+        mask: Optional[Array] = None,
+        **kwargs,
+    ):
+        (B, L), D, C = z.shape, self.dim, conditionals.shape[0]
+        batched_s = jnp.repeat(s[None, ...], z.shape[0], axis=0)
+        s_embeded = self.s_embed(batched_s)
+        ids = jnp.repeat(jnp.arange(L, dtype=int)[None, :], B, axis=0)
+        ids_embed = nn.Embed(self.max_locations, features=(D * 2) - (C + 1))(ids)
+        x = jnp.concat([jnp.atleast_3d(z), s_embeded, ids_embed], axis=-1)
+        x = cond_as_feats(x, conditionals)
+        x = MLP([D * 4, D], nn.gelu)(x)
+        for _ in range(self.num_blks):
+            attn = MultiHeadAttention(
+                proj_qs=MLP([D * 2]),
+                proj_ks=MLP([D * 2]),
+                proj_vs=MLP([D * 2]),
+                proj_out=MLP([D]),
+            )
+            ffn = MLP([D * 4, D])
+            x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(
+                x, mask=mask, training=False, **kwargs
+            )
+        return VAEOutput(self.head(x))
 
-    # Compute stats
-    stats = grouped.agg(
-        mse_mean=("Test Norm MSE", "mean"),
-        mse_std=("Test Norm MSE", "std"),
-        time_mean=("train_time", "mean"),
-        time_std=("train_time", "std"),
-    ).reset_index()
-
-    # Pivot to get the desired layout
-    kernels = sorted(df["kernel"].unique())
-    models = sorted(df["model_name"].unique())
-
-    table_rows = []
-    for model in models:
-        row = [model]
-        for kernel in kernels:
-            subset = stats[(stats["model_name"] == model) & (stats["kernel"] == kernel)]
-            if not subset.empty:
-                mse = subset.iloc[0]["mse_mean"]
-                mse_std = subset.iloc[0]["mse_std"]
-                time = subset.iloc[0]["time_mean"]
-                time_std = subset.iloc[0]["time_std"]
-                row.append(f"${mse:.3f} \\pm {mse_std:.3f}$")
-                row.append(f"${time:.2f} \\pm {time_std:.2f}$")
-            else:
-                row.extend(["-", "-"])
-        table_rows.append(row)
-    col_headers = ["Model"]
-    for kernel in kernels:
-        col_headers.append(f"\\multicolumn{{2}}{{c}}{{{kernel}}}")
-    sub_headers = [""]
-    for _ in kernels:
-        sub_headers.extend(["MSE", "Train Time"])
-    # Build LaTeX table
-    latex = "\\begin{tabular}{l" + "cc" * len(kernels) + "}\n"
-    latex += " & " + " & ".join(col_headers[1:]) + " \\\\\n"
-    latex += " & " + " & ".join(sub_headers[1:]) + " \\\\\n"
-    latex += "\\hline\n"
-    for row in table_rows:
-        latex += " & ".join(row) + " \\\\\n"
-    latex += "\\end{tabular}"
-    print(latex)
-    return latex
+    def decode(self, z: Array, conditionals: Array, **kwargs):
+        return self(z, conditionals, **kwargs).f_hat
 
 
 if __name__ == "__main__":

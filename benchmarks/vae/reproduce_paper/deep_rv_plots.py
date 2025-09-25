@@ -399,27 +399,19 @@ def plot_posterior_predictive_comparisons(
 def plot_models_predictive_means(
     f_hats, map_data, save_path: Path, obs_mask: Union[jax.Array, bool] = True, log=True
 ):
-    # Precompute stds on original scale
     std_vals = [f.std(axis=0) for f in f_hats[1:]]
-
-    # Log-transform only for mean plots if requested
     if log:
         f_hats = [jnp.log(f_mean + 1) for f_mean in f_hats]
-
     observed_y = f_hats[0]
     true_y = f_hats[0]
     n_models = len(f_hats) - 1
-
     if not isinstance(obs_mask, bool):
         observed_y = np.ma.masked_where(~obs_mask, observed_y)
-
     mean_vals = [observed_y, true_y] + [f.mean(axis=0) for f in f_hats[1:]]
     vmin_mean = float(jnp.min(jnp.array([m.min() for m in mean_vals])))
     vmax_mean = float(jnp.max(jnp.array([m.max() for m in mean_vals])))
-
     vmin_std = float(jnp.min(jnp.array([s.min() for s in std_vals])))
     vmax_std = float(jnp.max(jnp.array([s.max() for s in std_vals])))
-
     n_cols = 2 + n_models * 2
     fig, ax = plt.subplots(
         1,
@@ -429,27 +421,20 @@ def plot_models_predictive_means(
         sharex=True,
         sharey=True,
     )
-
-    # Observed y
     plot_on_map(
         ax[0], map_data, observed_y, vmin=vmin_mean, vmax=vmax_mean, legend=False
     )
     ax[0].set_title("Observed y")
     ax[0].set_axis_off()
-
-    # True y
     plot_on_map(ax[1], map_data, true_y, vmin=vmin_mean, vmax=vmax_mean, legend=False)
     ax[1].set_title("True y")
     ax[1].set_axis_off()
-
     for i in range(n_models):
         mean_i = f_hats[i + 1].mean(axis=0)
         std_i = std_vals[i]
         col_mean = 2 + i * 2
         col_std = 2 + i * 2 + 1
         last_model = i == n_models - 1
-
-        # Mean plot
         plot_on_map(
             ax[col_mean], map_data, mean_i, vmin=vmin_mean, vmax=vmax_mean, legend=False
         )
@@ -460,8 +445,6 @@ def plot_models_predictive_means(
                 norm=Normalize(vmin=vmin_mean, vmax=vmax_mean), cmap="viridis"
             )
             fig.colorbar(sm, ax=ax[col_mean], shrink=0.35)
-
-        # Std plot
         plot_on_map(
             ax[col_std],
             map_data,
@@ -478,7 +461,6 @@ def plot_models_predictive_means(
                 norm=Normalize(vmin=vmin_std, vmax=vmax_std), cmap="magma"
             )
             fig.colorbar(sm, ax=ax[col_std], shrink=0.35)
-
     fig.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.clf()
     plt.close(fig)

@@ -47,7 +47,7 @@ def main(data_type, seed=59, num_chains=2, obs_ratio=0.5):
         models["Baseline_GP"] = None
     y_obs = jnp.array(map_data["data"], dtype=jnp.float32)
     population = jnp.array(map_data.population, dtype=jnp.int32)
-    obs_mask = gen_spatial_obs_mask(rng_idxs, s, obs_ratio)
+    obs_mask = gen_random_obs_mask(rng_idxs, s, obs_ratio)
     priors, init_vals = joint_map_init(
         rng_init, s, population, y_obs, obs_mask, num_chains
     )
@@ -319,7 +319,7 @@ def gen_spatial_structure(map_data: gpd.GeoDataFrame, s_max: int):
     return jnp.stack([centroids.x.values, centroids.y.values], axis=-1)
 
 
-def gen_spatial_obs_mask(rng: Array, s: Array, obs_ratio: float):
+def gen_random_obs_mask(rng: Array, s: Array, obs_ratio: float):
     L = s.shape[0]
     num_obs_locations = int(obs_ratio * L)
     obs_idxs = random.choice(rng, jnp.arange(L), (num_obs_locations,), replace=False)
