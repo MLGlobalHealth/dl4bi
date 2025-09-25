@@ -33,10 +33,10 @@ from typing import Dict, Optional, Sequence
 
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 # ----------------------------
 # Configuration / Shortcuts
@@ -49,12 +49,16 @@ DEFAULT_PLOT_METRICS = [
     "ESS ls",
     "ESS beta",
     "unobs MSE(y, y_hat)",
+    "obs MSE(y, y_hat)",
+    "unobs MSE(y, y_hat)",
 ]
 
 DEFAULT_MAIN_TABLE_METRICS = [
     "MSE(y_hat_gp, y_hat)",
     "ls wasserstein distance",
     "ESS ls",
+    "obs MSE(y, y_hat)",
+    "unobs MSE(y, y_hat)",
 ]
 
 DEFAULT_APPENDIX_TABLE_METRICS = [
@@ -169,20 +173,18 @@ def _ensure_dir(path: Path):
 # ----------------------------
 
 
-def load_all_results(base_dir: Path, lengthscales: Sequence[int]) -> pd.DataFrame:
+def load_all_results(
+    base_dir: Path, dir_prefix: str, lengthscales: Sequence[int]
+) -> pd.DataFrame:
     dfs = []
     for ls in lengthscales:
-        csv_path = (
-            base_dir / f"scalability_log_priors_ls_{ls}" / "aggregated_results.csv"
-        )
+        csv_path = base_dir / f"{dir_prefix}_ls_{ls}" / "aggregated_results.csv"
         if not csv_path.exists():
             raise FileNotFoundError(f"Missing results CSV: {csv_path}")
         df = pd.read_csv(csv_path)
         df["ls"] = ls
         dfs.append(df)
     out = pd.concat(dfs, axis=0, ignore_index=True)
-    if "num_chains" in out.columns and "infer_time" in out.columns:
-        out["infer_time"] = out["infer_time"] / out["num_chains"].replace(0, np.nan)
     return out
 
 
@@ -443,7 +445,6 @@ def plot_aggregated_bar(
     save_path: Path,
     models: Optional[Sequence[str]] = None,
     base_model_name: Optional[str] = "Baseline_GP",
-    topk_inset: Optional[int] = None,
 ):
     _apply_theme()
     work = df.copy()
@@ -454,66 +455,28 @@ def plot_aggregated_bar(
     if metric not in work.columns:
         print(f"[plot_aggregated_bar] Metric {metric} not found; skipping.")
         return
-
     agg = work.groupby("model_name")[metric].mean().reset_index()
+    agg = agg[~pd.isna(agg[metric])].reset_index(drop=True)
     agg["model_display"] = agg["model_name"].map(display_name)
-    agg = agg.sort_values("mean" if "mean" in agg.columns else metric)
-
+    agg = agg.sort_values(metric)
+    y_vals = jnp.log(jnp.maximum(agg[metric].values, 1e-12))
+    shift = 0.2
+    y_min = y_vals.min()
+    y_shifted = y_vals - y_min + shift  # shift slightly above lowest tick
+    y_vals = y_vals - y_min
     plt.figure(figsize=(6, 4))
-    ax = sns.barplot(
-        data=agg,
-        x="model_display",
-        y=metric,
-        ci=None,
-        palette="tab10",
-    )
-    ax.set_ylabel(display_metric(metric))
+    ax = sns.barplot(x=agg["model_display"], y=y_shifted, ci=None, palette="tab10")
     ax.set_xlabel("")
     ax.set_title(f"{r'$\text{Mean}_{\ell, L}$'} {display_metric(metric)}")
     plt.xticks(rotation=45, ha="right", fontsize=8)
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda val, _: f"{int(val)}"))
-    plt.tight_layout()
-
-    # ---- NEW: optional inset with top-K models ----
-    if topk_inset is not None and topk_inset > 0:
-        # pick top-k (depending on better direction)
-        lower_better = is_lower_better(metric)
-        topk = (
-            agg.nsmallest(topk_inset, metric)
-            if lower_better
-            else agg.nlargest(topk_inset, metric)
-        )
-
-        # inset position: slightly down & right from upper-left corner
-        axins = inset_axes(
-            ax,
-            width="90%",
-            height="120%",
-            bbox_to_anchor=(0.05, 0.52, 0.4, 0.4),
-            bbox_transform=ax.transAxes,
-            loc="upper left",
-        )
-
-        sns.barplot(
-            data=topk,
-            x="model_display",
-            y=metric,
-            ci=None,
-            palette="tab10",
-            ax=axins,
-        )
-        axins.set_xlabel("")
-        axins.set_ylabel("")
-        axins.set_title(f"Top {topk_inset} models", fontsize=8)
-        # ticks
-        axins.set_xticklabels([])
-        axins.tick_params(axis="x", labelrotation=45, labelsize=6)
-        axins.tick_params(axis="y", labelsize=6, pad=0.5)
-        axins.yaxis.set_major_formatter(plt.FuncFormatter(lambda val, _: f"{val:.1f}"))
-        axins.set_facecolor("none")
-        axins.grid(False)
-
+    # Force 5 ticks
+    yticks = jnp.linspace(y_shifted.min(), y_shifted.max(), 5)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(
+        [f"$e^{{{round(float(tick + y_min - shift), 2)}}}$" for tick in yticks]
+    )
     save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
     plt.savefig(save_path, dpi=300)
     plt.close()
 
@@ -536,7 +499,11 @@ def plot_mean_infer_time(
         kind="line",
         marker="o",
     )
-    g.set_axis_labels("Grid Size", "Log Mean Inference Time (s)")
+    g.set_axis_labels("Grid Size", "Mean Inference Time (s)")
+    for ax in g.axes.flat:
+        ax.yaxis.set_major_formatter(
+            mticker.FuncFormatter(lambda y, _: f"$e^{{{int(round(y))}}}$")
+        )
     g._legend.set_title("")
     for t in g._legend.texts:
         t.set_fontsize(8)
@@ -569,7 +536,7 @@ def plot_posterior_predictive_comparisons_kde(
                     model_samples = model_samples[model_samples <= 2]
                 min_val = min(min_val, model_samples.min())
                 max_val = max(max_val, model_samples.max())
-                model_n = display_name(model_name)
+                model_n = model_name.split(" +")[0]
                 sns.kdeplot(
                     model_samples, label=model_n, linewidth=1.2, alpha=0.7, ax=ax
                 )
@@ -614,6 +581,7 @@ def build_dirs(base_out: Path) -> Dict[str, Path]:
 
 def run_pipeline(
     base_dir: Path,
+    dir_prefix: str,
     out_dir: Path,
     lengthscales: Sequence[int],
     grid_sizes: Optional[Sequence[int]],
@@ -624,7 +592,7 @@ def run_pipeline(
     highlight_models: Optional[Sequence[str]],
     line_or_bar: str = "line",
 ):
-    df = load_all_results(base_dir, lengthscales)
+    df = load_all_results(base_dir, dir_prefix, lengthscales)
     df = ensure_grid_sizes(df, grid_sizes)
     df = df[~df.model_name.isin(exclude_models)].reset_index(drop=True)
     df.num_chains[df.model_name == "ADVI"] = 4
@@ -663,11 +631,7 @@ def run_pipeline(
     )
     for s_metric in plot_metrics:
         plot_aggregated_bar(
-            df,
-            s_metric,
-            dirs["main_plots_aggregated"] / f"{s_metric}.png",
-            # highlight_models,
-            topk_inset=3 if ("wass" in s_metric or "y_hat_gp" in s_metric) else None,
+            df, s_metric, dirs["main_plots_aggregated"] / f"{s_metric}.png"
         )
     plot_mean_infer_time(
         df, dirs["main_plots_lines"] / "mean_infer_time.png", highlight_models
@@ -702,7 +666,8 @@ def run_pipeline(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Scalability analysis tables & plots.")
     parser.add_argument("--base_dir", type=Path, default=Path("results"))
-    parser.add_argument("--out_dir", type=Path, default=Path("outputs"))
+    parser.add_argument("--dir_prefix", type=str, default="scalability_log_priors")
+    parser.add_argument("--out_dir", type=Path, default=Path("outputs/scalability"))
     parser.add_argument("--lengthscales", type=int, nargs="+", default=[10, 30, 50])
     parser.add_argument(
         "--grid_sizes", type=int, nargs="*", default=[16**2, 24**2, 32**2, 48**2, 64**2]
@@ -714,7 +679,7 @@ def parse_args() -> argparse.Namespace:
         nargs="*",
         default=[
             "Baseline_GP",
-            "DeepRV + gMLP kAttn",
+            "INLA",
             "DeepRV + gMLP adamw",
             "Inducing Points Large",
         ],
@@ -726,6 +691,8 @@ def parse_args() -> argparse.Namespace:
         default=[
             "DeepRV + gMLP",
             "Inducing Points",
+            "DeepRV + gMLP kAttn",
+            "INLA Dense",
         ],
     )
     return parser.parse_args()
@@ -735,6 +702,7 @@ def main():
     args = parse_args()
     run_pipeline(
         args.base_dir,
+        args.dir_prefix,
         args.out_dir,
         args.lengthscales,
         args.grid_sizes,

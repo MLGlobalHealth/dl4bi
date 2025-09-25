@@ -22,6 +22,7 @@ from numpyro.infer import MCMC, NUTS, SVI, Predictive, Trace_ELBO, init_to_media
 from numpyro.infer.autoguide import AutoMultivariateNormal
 from numpyro.optim import Adam
 from omegaconf import DictConfig
+from paper_analysis import plot_posterior_predictive_comparisons_kde
 from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
 from scipy.stats import wasserstein_distance
 from sklearn.cluster import KMeans
@@ -32,7 +33,7 @@ import wandb
 from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, save_ckpt, train
-from dl4bi.vae import FixedKernelAttention, PriorCVAE, gMLPDeepRV
+from dl4bi.vae import PriorCVAE, gMLPDeepRV
 from dl4bi.vae.train_utils import (
     cond_as_locs,
     deep_rv_train_step,
@@ -54,14 +55,12 @@ def main(seed=19, time_steps=5, grid_shape=(16, 16)):
     T = time_steps
     models = {
         "Baseline_GP": None,
-        # "Inducing Points": None,
         "Inducing Points Large": None,
         "PriorCVAE": PriorCVAE(
             MLP(dims=[T * L, T * L]), MLP(dims=[T * L, T * L]), cond_as_locs, T * L
         ),
         "ADVI": None,
         "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
-        "DeepRV + gMLP kAttn": gMLPDeepRV(num_blks=2, attn=FixedKernelAttention()),
     }
     y_obs = gen_y_obs(rng_obs, s, t)
     spat_obs_mask = gen_spatial_obs_mask(rng_idxs, grid_shape, obs_ratio=0.5)
@@ -141,6 +140,22 @@ def main(seed=19, time_steps=5, grid_shape=(16, 16)):
         time_steps,
         save_dir / "obs_means.png",
         grid_shape,
+    )
+    plot_models_predictive_means(
+        y_obs,
+        [
+            ys
+            for i, ys in enumerate(y_hats)
+            if model_names[i] not in ["ADVI", "PriorCVAE"]
+        ],
+        obs_mask,
+        [m for m in model_names if m not in ["ADVI", "PriorCVAE"]],
+        time_steps,
+        save_dir / "top_obs_means.png",
+        grid_shape,
+    )
+    plot_posterior_predictive_comparisons_kde(
+        all_samples, model_names, cond_names, save_dir / "comp"
     )
     result = posterior_wasserstein_distance(
         result, all_samples, model_names, cond_names

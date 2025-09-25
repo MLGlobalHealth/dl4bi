@@ -52,7 +52,7 @@ from dl4bi.vae.train_utils import (
 
 def main(seed=42, gt_ls=10, grids=[16, 24, 32, 48, 64]):
     rng = random.key(seed)
-    save_dir = Path(f"results/scalability_ls_{gt_ls}/")
+    save_dir = Path(f"results/INLA_comp_ls_{gt_ls}/")
     save_dir.mkdir(parents=True, exist_ok=True)
     prep_INLA_R_script_res(gt_ls, grids, save_dir)
     models = {
