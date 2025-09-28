@@ -56,7 +56,7 @@ DEFAULT_PLOT_METRICS = [
 DEFAULT_MAIN_TABLE_METRICS = [
     "MSE(y_hat_gp, y_hat)",
     "ls wasserstein distance",
-    "ESS ls",
+    "ESS ls per second",
     "obs MSE(y, y_hat)",
     "unobs MSE(y, y_hat)",
 ]
@@ -89,8 +89,10 @@ metric_display_names: Dict[str, str] = {
     "ls wasserstein distance": r"Wass($\hat{\ell}_{gp}, \hat{\ell}$)",
     "beta wasserstein distance": r"Wass($\hat{\beta}_{gp}, \hat{\beta}$)",
     "infer_time": "Inference Time (s)",
-    "ESS ls": "ESS (lengthscale)",
+    "ESS ls": r"ESS ($\ell$)",
     "ESS beta": r"ESS ($\beta$)",
+    "ESS ls per second": r"$\text{ESS } (\ell)/{\text{sec}}$",
+    "ESS beta per second": r"$\text{ESS } (\beta)/{\text{sec}}$",
     "MSE(y, y_hat)": r"MSE($\mathbf{y}, \mathbf{\hat{y}}$)",
     "obs MSE(y, y_hat)": r"Observed MSE($\mathbf{y}, \mathbf{\hat{y}}$)",
     "unobs MSE(y, y_hat)": r"Unobserved MSE($\mathbf{y}, \mathbf{\hat{y}}$)",
@@ -561,6 +563,70 @@ def plot_posterior_predictive_comparisons_kde(
     plt.close(fig)
 
 
+def plot_accuracy_vs_speed_quadrant(
+    df: pd.DataFrame,
+    save_path: Path,
+    accuracy_metrics: Optional[Sequence[str]] = [
+        "MSE(y_hat_gp, y_hat)",
+        "ls wasserstein distance",
+    ],
+    models: Optional[Sequence[str]] = None,
+):
+    _apply_theme()
+    work = filter_models(df, models)
+    if any("gp" in m or "wass" in m for m in accuracy_metrics):
+        work = work[work.model_name != "Baseline_GP"].reset_index(drop=True)
+    required_cols = ["infer_time"] + list(accuracy_metrics)
+    if not all(col in work.columns for col in required_cols):
+        print("[plot_accuracy_vs_speed_quadrant] Required columns not found.")
+        return
+    agg = work.groupby("model_name", as_index=False)[required_cols].mean()
+    agg["model_display"] = agg["model_name"].map(display_name)
+    x = agg["infer_time"].values
+    x_scaled = (x - x.mean()) / x.std()
+    agg["infer_time_scaled"] = x_scaled
+    acc_norms = []
+    for m in accuracy_metrics:
+        vals = agg[m].values
+        vals_scaled = (vals - vals.mean()) / vals.std()
+        acc_norms.append(vals_scaled)
+    y_combined = np.sum(acc_norms, axis=0)
+    y_scaled = (y_combined - y_combined.mean()) / y_combined.std()
+    agg["accuracy_scaled"] = y_scaled
+    x_med, y_med = np.median(x_scaled), np.median(y_scaled)
+    points = np.column_stack([x_scaled, y_scaled])
+    is_efficient = np.ones(points.shape[0], dtype=bool)
+    for i, (xi, yi) in enumerate(points):
+        if np.any(
+            (x_scaled <= xi) & (y_scaled <= yi) & ((x_scaled < xi) | (y_scaled < yi))
+        ):
+            is_efficient[i] = False
+    pareto_points = points[is_efficient]
+    pareto_points = pareto_points[np.argsort(pareto_points[:, 0])]
+    plt.figure(figsize=(5, 4))
+    ax = plt.gca()
+    sns.scatterplot(
+        data=agg,
+        x="infer_time_scaled",
+        y="accuracy_scaled",
+        hue="model_display",
+        style="model_display",
+        s=60,
+        ax=ax,
+    )
+    ax.axvline(x_med, ls="--", lw=1, c="grey")
+    ax.axhline(y_med, ls="--", lw=1, c="grey")
+    ax.set_xlabel(f"Speed (normalized {display_metric('infer_time')})")
+    acc_title = " + ".join(display_metric(m) for m in accuracy_metrics)
+    ax.set_ylabel("Accuracy (normalized sum of metrics)")
+    ax.set_title(f"Accuracy vs Speed ({acc_title})")
+    ax.legend(fontsize=7, frameon=False)
+    plt.tight_layout()
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+
+
 # ----------------------------
 # Orchestration
 # ----------------------------
@@ -599,6 +665,9 @@ def run_pipeline(
     for col in df.columns:
         if "ess" in col.lower() or col.lower() == "infer_time":
             df[col] = df[col] / df["num_chains"]
+    for col in df.columns:
+        if "ess" in col.lower():
+            df[col + " per second"] = df[col] / df["infer_time"]
     dirs = build_dirs(out_dir)
 
     # ----------------------------
@@ -655,6 +724,10 @@ def run_pipeline(
     plot_lines_or_bars_for_metrics(
         df, plot_metrics, dirs["appendix_plots_lines"], None, style
     )
+    plot_accuracy_vs_speed_quadrant(
+        df,
+        dirs["main_plots_lines"] / "quadrant_acc_vs_speed.png",
+    )
     print(f"✅ Done. Outputs saved under: {out_dir.resolve()}")
 
 
@@ -681,6 +754,7 @@ def parse_args() -> argparse.Namespace:
             "Baseline_GP",
             "INLA",
             "DeepRV + gMLP adamw",
+            "DeepRV + MLP",
             "Inducing Points Large",
         ],
     )
