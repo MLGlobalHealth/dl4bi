@@ -469,13 +469,15 @@ def plot_aggregated_bar(
     plt.figure(figsize=(6, 4))
     ax = sns.barplot(x=agg["model_display"], y=y_shifted, ci=None, palette="tab10")
     ax.set_xlabel("")
-    ax.set_title(f"{r'$\text{Mean}_{\ell, L}$'} {display_metric(metric)}")
+    ax.set_title(
+        f"{r'$\text{Mean}$'} {display_metric(metric).replace('Wass', 'Wasserstein')}"
+    )
     plt.xticks(rotation=45, ha="right", fontsize=8)
     # Force 5 ticks
     yticks = jnp.linspace(y_shifted.min(), y_shifted.max(), 5)
     ax.set_yticks(yticks)
     ax.set_yticklabels(
-        [f"$e^{{{round(float(tick + y_min - shift), 2)}}}$" for tick in yticks]
+        [f"${jnp.exp(round(float(tick + y_min - shift), 2)):.2f}$" for tick in yticks]
     )
     save_path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
