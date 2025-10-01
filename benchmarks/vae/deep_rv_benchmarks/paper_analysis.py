@@ -59,6 +59,7 @@ DEFAULT_MAIN_TABLE_METRICS = [
     "ESS ls per second",
     "obs MSE(y, y_hat)",
     "unobs MSE(y, y_hat)",
+    "infer_time",
 ]
 
 DEFAULT_APPENDIX_TABLE_METRICS = [
@@ -74,12 +75,14 @@ DEFAULT_APPENDIX_TABLE_METRICS = [
     "ls wasserstein distance",
     "beta wasserstein distance",
     "ls",
+    "ESS ls per second",
 ]
 shortcut_names: Dict[str, str] = {
     "Baseline_GP": "GP",
-    "DeepRV + gMLP": "DRV + gMLP",
     "DeepRV + gMLP kAttn": "DRV + gMLP kAttn",
-    "DeepRV + gMLP adamw": "DRV + gMLP",
+    "DeepRV + gMLP adamw": "DeepRV - gMLP",
+    "DeepRV + gMLP": "DeepRV - gMLP",
+    "DeepRV + MLP": "DeepRV - MLP",
     "Inducing Points": "Inducing Pts small",
     "Inducing Points Large": "Inducing Pts",
 }
@@ -96,6 +99,7 @@ metric_display_names: Dict[str, str] = {
     "MSE(y, y_hat)": r"MSE($\mathbf{y}, \mathbf{\hat{y}}$)",
     "obs MSE(y, y_hat)": r"Observed MSE($\mathbf{y}, \mathbf{\hat{y}}$)",
     "unobs MSE(y, y_hat)": r"Unobserved MSE($\mathbf{y}, \mathbf{\hat{y}}$)",
+    "grid_size": "Grid",
 }
 
 hyperparam_display_names: Dict[str, str] = {
@@ -226,8 +230,6 @@ def make_best_model_table(
     rows_agg_grid = []
 
     for metric in metrics[::-1]:
-        if metric == "infer_time":
-            continue
         if metric not in work.columns:
             continue
 
@@ -324,6 +326,62 @@ def make_best_model_table(
     )
 
     return out_detailed, out_agg_ls, out_agg_grid
+
+
+def make_aggregated_model_table(
+    df: pd.DataFrame,
+    metrics: Sequence[str],
+    models_subset: Optional[Sequence[str]] = None,
+    groupby: str = "ls",  # or "grid_size", or "both"
+) -> pd.DataFrame:
+    """
+    Aggregates metrics over ls/grid_size and reports mean ± std for each model.
+    NaNs replaced with '-'.
+    Best model (lowest mean) and those within 1 std of it are bolded.
+    Adds midline between metrics, and writes metric name only in middle row.
+    """
+    work = df.copy()
+    if models_subset is not None:
+        work = work[work["model_name"].isin(models_subset)]
+    tables = []
+    for metric in metrics:
+        if metric not in work.columns:
+            continue
+        group_cols = []
+        if groupby in ("ls", "both"):
+            group_cols.append("ls")
+        if groupby in ("grid_size", "both"):
+            group_cols.append("grid_size")
+        agg = (
+            work.groupby(group_cols + ["model_name"], as_index=False)[metric]
+            .agg(mean="mean", se=lambda x: x.std(ddof=1) / (len(x) ** 0.5))
+            .reset_index()
+        )
+        rounding = 3
+        if "infer_time" in metric:
+            rounding = 0
+        if "wass" in metric.lower() or "ESS" in metric:
+            rounding = 2
+        agg["formatted"] = agg.apply(
+            lambda r: f"{jnp.round(r['mean'], rounding):.{rounding}f} ±"
+            f" {jnp.round(r['se'], 2):.2f}"
+            if not pd.isna(r["mean"])
+            else "-",
+            axis=1,
+        )
+        pivoted = agg.pivot(
+            index=group_cols, columns="model_name", values="formatted"
+        ).reset_index()
+        pivoted.rename(columns=display_name, inplace=True)
+        n_rows = len(pivoted)
+        mid_idx = n_rows // 2
+        pivoted.insert(0, "metric", [""] * n_rows)
+        pivoted.loc[mid_idx, "metric"] = display_metric(metric)
+        midline = {c: r"\midrule" for c in pivoted.columns}
+        pivoted = pd.concat([pivoted, pd.DataFrame([midline])], ignore_index=True)
+        tables.append(pivoted)
+    out = pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
+    return out
 
 
 def export_table(df: pd.DataFrame, csv_path: Path, latex_path: Optional[Path] = None):
@@ -447,9 +505,13 @@ def plot_aggregated_bar(
     save_path: Path,
     models: Optional[Sequence[str]] = None,
     base_model_name: Optional[str] = "Baseline_GP",
+    quantiles: tuple = (0.1, 0.9),
 ):
     _apply_theme()
     work = df.copy()
+    unique_models = work["model_name"].map(display_name).unique()
+    colors = sns.color_palette("tab10", len(unique_models))
+    palette = dict(zip(unique_models, colors))
     if base_model_name is not None:
         work = work[work["model_name"] != base_model_name]
     if models is not None:
@@ -457,28 +519,41 @@ def plot_aggregated_bar(
     if metric not in work.columns:
         print(f"[plot_aggregated_bar] Metric {metric} not found; skipping.")
         return
-    agg = work.groupby("model_name")[metric].mean().reset_index()
-    agg = agg[~pd.isna(agg[metric])].reset_index(drop=True)
-    agg["model_display"] = agg["model_name"].map(display_name)
-    agg = agg.sort_values(metric)
-    y_vals = jnp.log(jnp.maximum(agg[metric].values, 1e-12))
-    shift = 0.2
-    y_min = y_vals.min()
-    y_shifted = y_vals - y_min + shift  # shift slightly above lowest tick
-    y_vals = y_vals - y_min
+    # --- compute mean and quantiles ---
+    q_low, q_high = quantiles
+    agg_stats = (
+        work.groupby("model_name")[metric]
+        .agg(
+            mean="mean",
+            q_low=lambda x: x.quantile(q_low),
+            q_high=lambda x: x.quantile(q_high),
+        )
+        .reset_index()
+    )
+    agg_stats = agg_stats[~pd.isna(agg_stats["mean"])].reset_index(drop=True)
+    agg_stats["model_display"] = agg_stats["model_name"].map(display_name)
+    agg_stats = agg_stats.sort_values("mean")
+    # --- raw values for plotting ---
+    y_mean = agg_stats["mean"].values
+    y_low = agg_stats["q_low"].values
+    y_high = agg_stats["q_high"].values
+    # --- bar plot with error bars ---
     plt.figure(figsize=(6, 4))
-    ax = sns.barplot(x=agg["model_display"], y=y_shifted, ci=None, palette="tab10")
+    ax = plt.gca()
+    ax.bar(
+        x=agg_stats["model_display"],
+        height=y_mean,
+        yerr=[y_mean - y_low, y_high - y_mean],
+        capsize=4,
+        color=[palette[m] for m in agg_stats["model_display"]],
+    )
+    ax.set_yscale("log", base=2)
     ax.set_xlabel("")
     ax.set_title(
         f"{r'$\text{Mean}$'} {display_metric(metric).replace('Wass', 'Wasserstein')}"
     )
     plt.xticks(rotation=45, ha="right", fontsize=8)
-    # Force 5 ticks
-    yticks = jnp.linspace(y_shifted.min(), y_shifted.max(), 5)
-    ax.set_yticks(yticks)
-    ax.set_yticklabels(
-        [f"${jnp.exp(round(float(tick + y_min - shift), 2)):.2f}$" for tick in yticks]
-    )
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.2f}"))
     save_path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
     plt.savefig(save_path, dpi=300)

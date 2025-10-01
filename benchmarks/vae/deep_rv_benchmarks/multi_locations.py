@@ -14,11 +14,13 @@ import numpyro
 import optax
 import pandas as pd
 from jax import Array, jit, random, value_and_grad
+from jax.scipy.linalg import solve_triangular
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig
 from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
 from scipy.stats import wasserstein_distance
+from sklearn.cluster import KMeans
 from sps.kernels import matern_1_2
 from utils.plot_utils import plot_infer_trace
 
@@ -26,21 +28,20 @@ import wandb
 from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import TrainState, cosine_annealing_lr, evaluate, save_ckpt, train
-from dl4bi.vae import FixedKernelAttention, KernelBiasTransformerDeepRV, gMLPDeepRV
+from dl4bi.vae import KernelBiasTransformerDeepRV
 from dl4bi.vae.train_utils import generate_surrogate_decoder
 
 
 def main(seed=23):
     save_dir = Path("results/multi_location/")
     save_dir.mkdir(parents=True, exist_ok=True)
-    max_train_locations = 1600
-    num_infer_locations = [1024, 1600, 2048]
+    num_infer_locations = [512, 1024, 2048]
     max_s = 50.0
     rng = random.key(seed)
     kernel = matern_1_2
     rng_train, rng_test, rng_infer, rng_s, rng_obs = random.split(rng, 5)
     result, y_hats, all_samples = [], [], []
-    default_steps = 1_200_000
+    default_steps = 600_000
     s_per_loc = [
         random.uniform(random.fold_in(rng_s, i), (n, 2), maxval=max_s)
         for i, n in enumerate(num_infer_locations)
@@ -50,30 +51,16 @@ def main(seed=23):
         for i, s in enumerate(s_per_loc)
     ]
     D = 128
+    L = max(num_infer_locations)
     models = {
         "Baseline_GP": None,
-        "DeepRV + trans RFF interp kernelAttn": KernelBiasTransformerDeepRV(
-            num_blks=4,
-            dim=D,
-            s_embed=RFFEmbed(num_features=512),
-            head=MLP([D * 4, D * 2, D // 2, 1]),
-            max_locations=max(num_infer_locations),
-        ),
+        "Inducing Points Large": None,
         "DeepRV + trans RFF kernelAttn": KernelBiasTransformerDeepRV(
             num_blks=4,
             dim=D,
             s_embed=RFFEmbed(num_features=512),
-            head=MLP([D * 4, D * 2, D // 2, 1]),
-            max_locations=max(num_infer_locations),
-        ),
-        "DeepRV + gMLP RFF kAttn": gMLPDeepRV(
-            s_embed=RFFEmbed(num_features=512),
-            proj_in=MLP([D * 2, D * 2], nn.gelu),
-            proj_out=MLP([D, D], nn.gelu),
-            embed=MLP([D, D], nn.gelu),
-            num_blks=4,
-            attn=FixedKernelAttention(proj_vs=MLP([D], nn.gelu)),
-            head=MLP([D, D // 2, 1]),
+            head=MLP([D * 4, D, D // 2, 1]),
+            max_locations=L,
         ),
     }
     for model_name, nn_model in models.items():
@@ -83,29 +70,14 @@ def main(seed=23):
         max_lr, bs, train_steps = None, None, None
         if nn_model is not None:
             optimizer, max_lr, bs, train_steps = gen_train_params(
-                model_name,
-                max_train_locations,
-                default_steps,
+                model_name, default_steps
             )
             pr = {"ls": dist.Uniform(1.0, max_s)}
-            if "trans" in model_name:
-                loader = gen_dataloader(
-                    max_train_locations,
-                    pr,
-                    kernel,
-                    max_s,
-                    bs,
-                    min_train_locs=1024,
-                    max_train_locs=max_train_locations
-                    if "interp" in model_name
-                    else None,
-                )
-            else:
-                loader = gen_dataloader(max(num_infer_locations), pr, kernel, max_s, bs)
+            loader = gen_dataloader(L, pr, kernel, max_s, bs, min_train_locs=512)
             wandb.init(
                 config={
                     "model_name": model_name,
-                    "grid_size": max_train_locations,
+                    "grid_size": L,
                     "max_lr": max_lr,
                     "batch_size": bs,
                     "kernel": kernel.__name__,
@@ -134,21 +106,22 @@ def main(seed=23):
             model_s_path.mkdir(parents=True, exist_ok=True)
             obs_mask = True
             priors = {"ls": dist.Uniform(1.0, max_s), "beta": dist.Normal()}
-            infer_model, cond_names = inference_model(
-                s, priors, model_name, max(num_infer_locations)
-            )
-            # if (model_s_path / "single_res.pkl").exists():
-            #     with open(model_s_path / "hmc_samples.pkl", "rb") as out_file:
-            #         samples = pickle.load(out_file)
-            #     with open(model_s_path / "hmc_pp.pkl", "rb") as out_file:
-            #         post = pickle.load(out_file)
-            #     with open(model_s_path / "single_res.pkl", "rb") as out_file:
-            #         res = pickle.load(out_file)
-            #     y_hats.append(post["obs"])
-            #     samples = {k: it for k, it in samples.items() if k in cond_names}
-            #     all_samples.append(samples)
-            #     result.append(res)
-            #     continue
+            if "Inducing" in model_name:
+                infer_model, cond_names = inference_model_inducing_points(s, priors)
+            else:
+                infer_model, cond_names = inference_model(s, priors, model_name, L)
+            if (model_s_path / "single_res.pkl").exists():
+                with open(model_s_path / "hmc_samples.pkl", "rb") as out_file:
+                    samples = pickle.load(out_file)
+                with open(model_s_path / "hmc_pp.pkl", "rb") as out_file:
+                    post = pickle.load(out_file)
+                with open(model_s_path / "single_res.pkl", "rb") as out_file:
+                    res = pickle.load(out_file)
+                y_hats.append(post["obs"])
+                samples = {k: it for k, it in samples.items() if k in cond_names}
+                all_samples.append(samples)
+                result.append(res)
+                continue
 
             samples, mcmc, post, infer_time = hmc(
                 rng_infer,
@@ -274,38 +247,25 @@ def surrogate_model_train(
     return train_time, eval_mse, generate_surrogate_decoder(state, model)
 
 
-@partial(
-    jit, static_argnames=["max_s", "grid_size", "min_train_locs", "max_train_locs"]
-)
-def sample_uniform_s(rng, max_s, grid_size, min_train_locs, max_train_locs):
+@partial(jit, static_argnames=["max_s", "grid_size", "min_train_locs"])
+def sample_uniform_s(rng, max_s, grid_size, min_train_locs):
     rng_loc, rng_s = random.split(rng)
     s = random.uniform(rng_s, (grid_size, 2), maxval=max_s)
-    num_locs = max_train_locs
-    if min_train_locs < max_train_locs:
+    if min_train_locs < grid_size:
         num_locs = random.randint(
-            rng_loc, shape=tuple(), minval=min_train_locs, maxval=max_train_locs + 1
+            rng_loc, shape=tuple(), minval=min_train_locs, maxval=grid_size + 1
         )
     return s, num_locs
 
 
-def gen_dataloader(
-    grid_size,
-    priors,
-    kernel,
-    max_s,
-    batch_size=32,
-    min_train_locs=None,
-    max_train_locs=None,
-):
+def gen_dataloader(grid_size, priors, kernel, max_s, batch_size, min_train_locs=None):
     jitter = 5e-4 * jnp.eye(grid_size)
-    max_train_locs = grid_size if max_train_locs is None else max_train_locs
-    min_train_locs = max_train_locs if min_train_locs is None else min_train_locs
+    min_train_locs = grid_size if min_train_locs is None else min_train_locs
     s_jit = partial(
         sample_uniform_s,
         max_s=max_s,
         grid_size=grid_size,
         min_train_locs=min_train_locs,
-        max_train_locs=max_train_locs,
     )
     kernel_jit = jit(lambda s, var, ls: kernel(s, s, var, ls) + jitter)
     f_jit = jit(lambda K, z: jnp.einsum("ij,bj->bi", jnp.linalg.cholesky(K), z))
@@ -328,7 +288,7 @@ def gen_dataloader(
             yield {
                 "s": s,
                 "f": f,
-                "z": z,
+                "z": z * mask,
                 "mask": mask,
                 "conditionals": jnp.array([ls]),
                 "K": K,
@@ -391,12 +351,10 @@ def gen_y_obs(rng: Array, s: Array, gt_ls: float, kernel: Callable):
     return dist.Poisson(rate=lambda_).sample(rng_poiss)
 
 
-def gen_train_params(model_name, grid_size, default_steps, default_bs=32):
-    L = grid_size
+def gen_train_params(model_name, default_steps, default_bs=16):
     bs = default_bs
     max_lr = 2e-3
     if "trans" in model_name:
-        bs = int(min(1, 1024 / L) * default_bs)
         max_lr = 1e-4
     train_steps = default_steps * (default_bs // bs)
     optimizer = optax.chain(
@@ -411,15 +369,20 @@ def inference_model(s: Array, priors: dict, model_name: str, max_infer_locs: int
     Builds a poisson likelihood inference model for GP and surrogate models
     """
     L_inf = s.shape[0]
-    if "gMLP" in model_name and s.shape[0] < max_infer_locs:
-        s = jnp.concatenate([s, s[: max_infer_locs - s.shape[0]]], axis=0)
-    surrogate_kwargs = {"s": s}
+    if "gMLP" in model_name and max_infer_locs - L_inf > 0:
+        s = jnp.concatenate(
+            [s, jnp.zeros((max_infer_locs - L_inf, s.shape[1]))], axis=0
+        )
     L = s.shape[0]
+    mask = jnp.repeat((jnp.arange(s.shape[0]) < L_inf)[None], 1, axis=0)
+    surrogate_kwargs = {"s": s, "mask": mask}
 
     def poisson(surrogate_decoder=None, obs_mask=True, y=None):
         ls = numpyro.sample("ls", priors["ls"], sample_shape=())
         beta = numpyro.sample("beta", priors["beta"], sample_shape=())
-        z = numpyro.sample("z", dist.Normal(), sample_shape=(1, L))
+        z = numpyro.sample("z", dist.Normal(), sample_shape=(1, L_inf))
+        if L_inf < L:
+            z = jnp.concatenate([z, jnp.zeros((1, L - L_inf))], axis=1)
         K = matern_1_2(s, s, 1.0, ls) + 5e-4 * jnp.eye(L)
         if surrogate_decoder:  # NOTE: whether to use a replacment for the GP
             surrogate_kwargs["K"] = K
@@ -437,6 +400,29 @@ def inference_model(s: Array, priors: dict, model_name: str, max_infer_locs: int
             numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
 
     return poisson, ["ls", "beta"]
+
+
+def inference_model_inducing_points(s: Array, priors: dict):
+    """Builds a poisson likelihood inference model for inducing points"""
+    n_pts = int(jnp.pow(s.shape[0], 2 / 3))
+    kmeans = KMeans(n_clusters=n_pts, random_state=0)
+    u = kmeans.fit(s).cluster_centers_
+
+    def poisson_inducing(surrogate_decoder=None, obs_mask=True, y=None):
+        var = 1.0
+        ls = numpyro.sample("ls", priors["ls"], sample_shape=())
+        beta = numpyro.sample("beta", priors["beta"], sample_shape=())
+        K_su = matern_1_2(s, u, var, ls)
+        z = numpyro.sample("z", dist.Normal(), sample_shape=(1, u.shape[0]))
+        K_uu = matern_1_2(u, u, var, ls) + 5e-4 * jnp.eye(u.shape[0])
+        L_uu = jnp.linalg.cholesky(K_uu)
+        f_u_bar = solve_triangular(L_uu.T, z[0], lower=False)
+        f = numpyro.deterministic("mu", K_su @ f_u_bar)
+        lambda_ = jnp.exp(f + beta)
+        with numpyro.handlers.mask(mask=obs_mask):
+            numpyro.sample("obs", dist.Poisson(lambda_), obs=y)
+
+    return poisson_inducing, ["ls", "beta"]
 
 
 class RFFEmbed(nn.Module):
