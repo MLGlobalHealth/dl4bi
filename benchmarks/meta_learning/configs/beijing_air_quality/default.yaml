@@ -7,6 +7,7 @@ project: Beijing Air Quality
 train_num_steps: 10000
 valid_num_steps: 500
 valid_interval: 500
+plot_interval: 100000
 test_num_steps: 5000
 data:
   batch_size: 32

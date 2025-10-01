@@ -1,8 +1,4 @@
 name: full
-train_num_steps: 100000
-valid_num_steps: 5000 # exhaust valid dataloader
-valid_interval: 5000
-plot_interval: 100000
 splits:
   train_region: central_europe
   valid_region: northern_europe
