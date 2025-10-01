@@ -48,7 +48,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         [f"2d/{m}" for m in models],
         gp_main,
         overrides,
-        "NeurIPS BSA-TNP - Gaussian Processes",
+        "AISTATS BSA-TNP - Gaussian Processes",
         dry_run=dry_run,
     )
     gp_benchmark(
@@ -58,7 +58,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         [f"2d/{m}" for m in ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_shifted_10"]],
         gp_main,
         overrides + ["project_suffix=' - Shifted 10'", "evaluate_only=True"],
-        "NeurIPS BSA-TNP - Gaussian Processes",
+        "AISTATS BSA-TNP - Gaussian Processes",
         dry_run=dry_run,
     )
     gp_benchmark(
@@ -72,7 +72,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
             "evaluate_only=True",
             "valid_num_steps=1000",
         ],
-        "NeurIPS BSA-TNP - Gaussian Processes",
+        "AISTATS BSA-TNP - Gaussian Processes",
         dry_run=dry_run,
     )
 
@@ -83,7 +83,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         ["bsa_tnp", "te_tnp"],
         multiscale_2d_gp_main,
         overrides,
-        "NeurIPS BSA-TNP - Multiscale Gaussian Processes",
+        "AISTATS BSA-TNP - Multiscale Gaussian Processes",
         dry_run=dry_run,
     )
 
@@ -94,7 +94,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         models,
         sir_main,
         overrides,
-        "NeurIPS BSA-TNP - SIR",
+        "AISTATS BSA-TNP - SIR",
         dry_run=dry_run,
     )
     generic_benchmark(
@@ -108,7 +108,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
             "evaluate_only=True",
             "data=spatial_64x64_shifted_10.yaml",
         ],
-        "NeurIPS BSA-TNP - SIR",
+        "AISTATS BSA-TNP - SIR",
         dry_run=dry_run,
     )
     generic_benchmark(
@@ -123,7 +123,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
             "valid_num_steps=1000",
             "data=spatial_128x128",
         ],
-        "NeurIPS BSA-TNP - SIR",
+        "AISTATS BSA-TNP - SIR",
         dry_run=dry_run,
     )
 
@@ -139,7 +139,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         era5_models,
         era5_main,
         overrides + era5_overrides,
-        "NeurIPS BSA-TNP - ERA5 - CNW",
+        "AISTATS BSA-TNP - ERA5 - CNW",
         dry_run=dry_run,
     )
     era5_overrides = [
@@ -152,7 +152,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         era5_models,
         era5_main,
         overrides + era5_overrides,
-        "NeurIPS BSA-TNP - ERA5 - CWN",
+        "AISTATS BSA-TNP - ERA5 - CWN",
         dry_run=dry_run,
     )
 
@@ -164,7 +164,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         tabular_models,
         beijing_air_quality_main,
         overrides,
-        "NeurIPS BSA-TNP - Beijing Air Quality",
+        "AISTATS BSA-TNP - Beijing Air Quality",
         dry_run=dry_run,
     )
     generic_benchmark(
@@ -173,7 +173,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         tabular_models,
         generic_spatial_main,
         overrides,
-        "NeurIPS BSA-TNP - Generic Spatial",
+        "AISTATS BSA-TNP - Generic Spatial",
         dry_run=dry_run,
     )
     # run models on examples for comparison to MCMC
@@ -183,7 +183,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         tabular_models,
         generic_spatial_main,
         overrides + ["infer_with_model=True"],
-        "NeurIPS BSA-TNP - Generic Spatial",
+        "AISTATS BSA-TNP - Generic Spatial",
         dry_run=dry_run,
     )
     # run MCMC on examples
@@ -193,7 +193,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         ["bsa_tnp"],  # dummy model - unused
         generic_spatial_main,
         overrides + ["infer_with_mcmc=True"],
-        "NeurIPS BSA-TNP - Generic Spatial",
+        "AISTATS BSA-TNP - Generic Spatial",
         dry_run=dry_run,
     )
 
