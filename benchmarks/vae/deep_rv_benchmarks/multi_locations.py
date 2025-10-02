@@ -41,7 +41,7 @@ def main(seed=23):
     kernel = matern_1_2
     rng_train, rng_test, rng_infer, rng_s, rng_obs = random.split(rng, 5)
     result, y_hats, all_samples = [], [], []
-    default_steps = 600_000
+    default_steps = 2_000_000
     s_per_loc = [
         random.uniform(random.fold_in(rng_s, i), (n, 2), maxval=max_s)
         for i, n in enumerate(num_infer_locations)
@@ -55,7 +55,7 @@ def main(seed=23):
     models = {
         "Baseline_GP": None,
         "Inducing Points Large": None,
-        "DeepRV + trans RFF kernelAttn": KernelBiasTransformerDeepRV(
+        "DeepRV + trans kAttn": KernelBiasTransformerDeepRV(
             num_blks=4,
             dim=D,
             s_embed=RFFEmbed(num_features=512),
@@ -69,9 +69,7 @@ def main(seed=23):
         train_time, eval_mse, surrogate_decoder = None, None, None
         max_lr, bs, train_steps = None, None, None
         if nn_model is not None:
-            optimizer, max_lr, bs, train_steps = gen_train_params(
-                model_name, default_steps
-            )
+            optimizer, max_lr, bs, train_steps = gen_train_params(default_steps)
             pr = {"ls": dist.Uniform(1.0, max_s)}
             loader = gen_dataloader(L, pr, kernel, max_s, bs, min_train_locs=512)
             wandb.init(
@@ -221,8 +219,8 @@ def surrogate_model_train(
     optimizer,
     train_num_steps: int,
     results_dir: Path,
-    valid_interval: int = 100_000,
-    valid_steps: int = 5_000,
+    valid_interval: int = 400_000,
+    valid_steps: int = 10_000,
 ):
     start = datetime.now()
     state = train(
@@ -279,16 +277,13 @@ def gen_dataloader(grid_size, priors, kernel, max_s, batch_size, min_train_locs=
                 (jnp.arange(grid_size) < num_locs)[None], batch_size, axis=0
             )
             ls = priors["ls"].sample(rng_ls)
-            z = dist.Normal().sample(rng_z, sample_shape=(batch_size, grid_size))
+            z = dist.Normal().sample(rng_z, sample_shape=(batch_size, grid_size)) * mask
             K = kernel_jit(s, var, ls)
-            f = f_jit(K, z * mask)
-            mask = jnp.repeat(
-                (jnp.arange(grid_size) < num_locs)[None], batch_size, axis=0
-            )
+            f = f_jit(K, z)
             yield {
                 "s": s,
                 "f": f,
-                "z": z * mask,
+                "z": z,
                 "mask": mask,
                 "conditionals": jnp.array([ls]),
                 "K": K,
@@ -351,12 +346,10 @@ def gen_y_obs(rng: Array, s: Array, gt_ls: float, kernel: Callable):
     return dist.Poisson(rate=lambda_).sample(rng_poiss)
 
 
-def gen_train_params(model_name, default_steps, default_bs=16):
+def gen_train_params(default_steps, default_bs=8):
     bs = default_bs
-    max_lr = 2e-3
-    if "trans" in model_name:
-        max_lr = 1e-4
-    train_steps = default_steps * (default_bs // bs)
+    max_lr = 1e-4
+    train_steps = default_steps
     optimizer = optax.chain(
         optax.clip_by_global_norm(3.0),
         optax.adamw(cosine_annealing_lr(train_steps, max_lr)),
