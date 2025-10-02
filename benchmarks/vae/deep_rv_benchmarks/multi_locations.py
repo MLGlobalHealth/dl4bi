@@ -15,6 +15,7 @@ import optax
 import pandas as pd
 from jax import Array, jit, random, value_and_grad
 from jax.scipy.linalg import solve_triangular
+from jax.scipy.stats import poisson
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig
@@ -163,10 +164,16 @@ def main(seed=23):
                     distance = wasserstein_distance(
                         gp_samples[var_name], samples[var_name]
                     )
-                res[f"{var_name} wasserstein distance"] = distance
+                    res[f"{var_name} wasserstein distance"] = distance
             res["MSE(y_hat_gp, y_hat)"] = jnp.mean(
                 (y_hats[i].mean(axis=0) - post["obs"].mean(axis=0)) ** 2
             )
+            res["LPD"] = jnp.mean(
+                jnp.log(jnp.mean(poisson.pmf(y_obs, post["obs"]), axis=0) + 1e-12)
+            )
+            lower = jnp.quantile(post["obs"], 0.1, axis=0)
+            upper = jnp.quantile(post["obs"], 0.9, axis=0)
+            res["coverage_80"] = jnp.mean((y_obs >= lower) & (y_obs <= upper))
             with open(model_s_path / "single_res.pkl", "wb") as out_file:
                 pickle.dump(res, out_file)
             result.append(res)

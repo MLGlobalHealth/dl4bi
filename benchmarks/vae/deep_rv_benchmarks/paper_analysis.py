@@ -769,6 +769,16 @@ def run_pipeline(
         dirs["main_tables"] / "top2_agg_grid_per_metric.tex",
     )
     # ----------------------------
+    # Aggregated tables (mean ± std with bolded best)
+    # ----------------------------
+    agg_grid = make_aggregated_model_table(df, main_table_metrics, groupby="grid_size")
+    export_table(
+        agg_grid,
+        dirs["main_tables"] / "agg_grid_per_metric.csv",
+        dirs["main_tables"] / "agg_grid_per_metric.tex",
+    )
+
+    # ----------------------------
     # Main plots (use plot_metrics)
     # ----------------------------
     style = PlotStyle(line_or_bar)
