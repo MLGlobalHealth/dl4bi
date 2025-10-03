@@ -130,8 +130,8 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     # SPACE & TIME
     era5_models = ["tnp_d", "te_tnp", "bsa_tnp"]
     era5_overrides = [
-        "data.valid_region=northern_europe",
-        "data.test_region=western_europe",
+        "data.splits.valid_region=northern_europe",
+        "data.splits.test_region=western_europe",
     ]
     generic_benchmark(
         seeds,
@@ -143,8 +143,8 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         dry_run=dry_run,
     )
     era5_overrides = [
-        "data.valid_region=western_europe",
-        "data.test_region=northern_europe",
+        "data.splits.valid_region=western_europe",
+        "data.splits.test_region=northern_europe",
     ]
     generic_benchmark(
         seeds,
