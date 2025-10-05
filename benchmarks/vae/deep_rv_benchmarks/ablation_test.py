@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Callable, Optional, Union
 
 import arviz as az
-import flax.linen as nn
 import geopandas as gpd
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -17,16 +16,14 @@ from jax import Array, jit, random
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from scipy.stats import wasserstein_distance
-from sps.kernels import matern_1_2, matern_5_2
+from sps.kernels import matern_1_2, matern_3_2, matern_5_2, rbf
 from sps.utils import build_grid
 from utils.plot_utils import conds_to_title, plot_on_map
 
 import wandb
-from dl4bi.core.attention import MultiHeadAttention
 from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, train
-from dl4bi.core.transformer import TransformerEncoderBlock
 from dl4bi.vae import (
     FixedKernelAttention,
     KernelBiasTransformerDeepRV,
@@ -35,7 +32,6 @@ from dl4bi.vae import (
     gMLPDeepRV,
 )
 from dl4bi.vae.train_utils import (
-    cond_as_feats,
     cond_as_locs,
     deep_rv_train_step,
     generate_surrogate_decoder,
@@ -43,23 +39,21 @@ from dl4bi.vae.train_utils import (
 )
 
 
-def main(init_seed=42, num_seeds=5):
+def main(init_seed=42, num_seeds=3):
     wandb.init(mode="disabled")  # NOTE: downstream function assume active wandb
     save_dir = Path("results/ablation_test/")
     save_dir.mkdir(parents=True, exist_ok=True)
-    s = build_grid([{"start": 0.0, "stop": 100.0, "num": 32}] * 2).reshape(-1, 2)
+    s = build_grid([{"start": 0.0, "stop": 100.0, "num": 24}] * 2).reshape(-1, 2)
     L = s.shape[0]
     models = {
         "GP": None,
         "PriorCVAE": PriorCVAE(MLP(dims=[L, L]), MLP(dims=[L, L]), cond_as_locs, L),
         "DeepRV + MLP": MLPDeepRV(dims=[L, L]),
-        "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
+        "DeepRV + gMLP adamw": gMLPDeepRV(num_blks=2),
         "DeepRV + gMLP kAttn": gMLPDeepRV(num_blks=2, attn=FixedKernelAttention()),
-        "DeepRV + trans": TransformerDeepRV(max_locations=L),
         "DeepRV + trans kAttn": KernelBiasTransformerDeepRV(max_locations=L),
-        "DeepRV + trans kAttn no ID": KernelBiasTransformerDeepRV(max_locations=1),
     }
-    kernels = [matern_1_2, matern_5_2]
+    kernels = [matern_1_2, matern_5_2, matern_3_2, rbf]
     priors = {"ls": dist.Uniform(1.0, 100.0), "beta": dist.Normal()}
     # NOTE: > 5 so PriorCVAE won't break, < 50 so it would have some variability
     gen_data_priors = {
@@ -136,7 +130,7 @@ def main(init_seed=42, num_seeds=5):
                             sq_res[jnp.logical_not(obs_mask)]
                         ).mean(),
                         "num_chains": 2,
-                        "MSE(y_hat_gp, y_hat)": (gp_mean_obs - mean_obs) ** 2,
+                        "MSE(y_hat_gp, y_hat)": ((gp_mean_obs - mean_obs) ** 2).mean(),
                         "ls wasserstein distance": wasserstein_distance(
                             ls_gp, samples["ls"]
                         ),
@@ -236,7 +230,7 @@ def valid_step(rng, state, batch):
 def gen_train_params(model_name):
     train_num_steps = 200_000
     max_lr = {
-        "DeepRV + gMLP": 5e-3,
+        "DeepRV + gMLP adamw": 1e-3,
         "DeepRV + trans": 1e-4,
         "DeepRV + trans kAttn": 1e-4,
         "DeepRV + trans kAttn no ID": 1e-4,
@@ -323,47 +317,6 @@ def plot_reconstruction_comp(
         fig.savefig(save_dir / f"{kernel_n}_rec_{i}.png", dpi=125)
         plt.clf()
         plt.close(fig)
-
-
-class TransformerDeepRV(nn.Module):
-    max_locations: int
-    dim: int = 64
-    num_blks: int = 2
-    s_embed: Union[Callable, nn.Module] = lambda x: x
-    head: Union[Callable, nn.Module] = MLP([128, 1], nn.gelu)
-
-    @nn.compact
-    def __call__(
-        self,
-        z: Array,
-        conditionals: Array,
-        s: Array,
-        mask: Optional[Array] = None,
-        **kwargs,
-    ):
-        (B, L), D, C = z.shape, self.dim, conditionals.shape[0]
-        batched_s = jnp.repeat(s[None, ...], z.shape[0], axis=0)
-        s_embeded = self.s_embed(batched_s)
-        ids = jnp.repeat(jnp.arange(L, dtype=int)[None, :], B, axis=0)
-        ids_embed = nn.Embed(self.max_locations, features=(D * 2) - (C + 1))(ids)
-        x = jnp.concat([jnp.atleast_3d(z), s_embeded, ids_embed], axis=-1)
-        x = cond_as_feats(x, conditionals)
-        x = MLP([D * 4, D], nn.gelu)(x)
-        for _ in range(self.num_blks):
-            attn = MultiHeadAttention(
-                proj_qs=MLP([D * 2]),
-                proj_ks=MLP([D * 2]),
-                proj_vs=MLP([D * 2]),
-                proj_out=MLP([D]),
-            )
-            ffn = MLP([D * 4, D])
-            x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(
-                x, mask=mask, training=False, **kwargs
-            )
-        return VAEOutput(self.head(x))
-
-    def decode(self, z: Array, conditionals: Array, **kwargs):
-        return self(z, conditionals, **kwargs).f_hat
 
 
 if __name__ == "__main__":

@@ -79,12 +79,13 @@ DEFAULT_APPENDIX_TABLE_METRICS = [
 ]
 shortcut_names: Dict[str, str] = {
     "Baseline_GP": "GP",
-    "DeepRV + gMLP kAttn": "DRV + gMLP kAttn",
+    "DeepRV + gMLP kAttn": "DeepRV - gMLP kAttn",
     "DeepRV + gMLP adamw": "DeepRV - gMLP",
     "DeepRV + gMLP": "DeepRV - gMLP",
     "DeepRV + MLP": "DeepRV - MLP",
     "Inducing Points": "Inducing Pts small",
     "Inducing Points Large": "Inducing Pts",
+    "DeepRV + trans kAttn": "DeepRV - trans kAttn",
 }
 
 metric_display_names: Dict[str, str] = {
@@ -100,6 +101,8 @@ metric_display_names: Dict[str, str] = {
     "obs MSE(y, y_hat)": r"Observed MSE($\mathbf{y}, \mathbf{\hat{y}}$)",
     "unobs MSE(y, y_hat)": r"Unobserved MSE($\mathbf{y}, \mathbf{\hat{y}}$)",
     "grid_size": "Grid",
+    "train_time": "Train Time (s)",
+    "Test Norm MSE": "Test Loss",
 }
 
 hyperparam_display_names: Dict[str, str] = {
@@ -410,6 +413,191 @@ def per_lengthscale_full_table(
     return tab
 
 
+def make_ablation_latex_table(
+    df: pd.DataFrame, metric: str, rounding: int = 3
+) -> pd.DataFrame:
+    if metric == "Test Norm MSE":
+        rounding = 5
+    df = df[(df.model_name != "DeepRV + gMLP kAttn")].reset_index(drop=True)
+    if "gp" in metric or "wass" in metric or "Test" in metric:
+        df = df[(df.model_name != "GP")].reset_index(drop=True)
+
+    agg = (
+        df.groupby(["model_name", "kernel"], as_index=False)[metric]
+        .agg(["mean", "std", "count"])
+        .reset_index()
+    )
+    agg["SE"] = agg.apply(
+        lambda r: r["std"] / jnp.sqrt(float(r["count"])) if r["count"] > 0 else jnp.nan,
+        axis=1,
+    )
+
+    higher_better = "ESS" in metric
+
+    # create formatted string and bold best
+    def fmt_val(row, best_per_kernel):
+        if pd.isna(row["mean"]):
+            return "-"
+        val_str = f"{row['mean']:.{rounding}f} ± {row['SE']:.{max(rounding, 2)}f}"
+        if row["mean"] in best_per_kernel[row["kernel"]]:
+            val_str = f"\\mathbf{{{val_str}}}"
+        return val_str
+
+    # determine best per kernel
+    best_per_kernel = {}
+    for k in df["kernel"].unique():
+        subset = agg[agg["kernel"] == k]
+        if higher_better:
+            best_val = subset["mean"].max()
+        else:
+            best_val = subset["mean"].min()
+        best_per_kernel[k] = [best_val]
+
+    agg["formatted"] = agg.apply(lambda r: fmt_val(r, best_per_kernel), axis=1)
+
+    final_table = agg.pivot(
+        index="model_name", columns="kernel", values="formatted"
+    ).reset_index()
+    final_table.rename(columns={"model_name": "Model"}, inplace=True)
+    final_table["Model"] = final_table["Model"].map(display_name)
+    final_table.columns = [
+        display_metric(c) if c != "Model" else "Model" for c in final_table.columns
+    ]
+
+    return final_table
+
+
+def export_ablation_table(
+    df: pd.DataFrame, metric: str, save_dir: Path, filename: Optional[str] = None
+):
+    """
+    Aggregates ablation results and exports CSV + LaTeX using pipeline's export_table.
+    """
+    save_dir.mkdir(parents=True, exist_ok=True)
+    table = make_ablation_latex_table(df, metric)
+    fname = filename or f"ablation_{metric.replace(' ', '_')}"
+    csv_path = save_dir / f"{fname}.csv"
+    latex_path = save_dir / f"{fname}.tex"
+    export_table(table, csv_path, latex_path)
+
+
+def _make_table_from_metrics(
+    df: pd.DataFrame,
+    metrics: list[tuple[str, bool, int, str]],
+) -> pd.DataFrame:
+    """
+    Build a single LaTeX-ready table from a list of metrics.
+    Each metric tuple: (metric_name_in_df, higher_better, rounding, display_name)
+
+    - Filters:
+        * Drop "DeepRV + gMLP kAttn"
+        * Drop "GP" when metric contains "gp", "wass", or "test" (case-insensitive)
+    - Aggregation: averages across kernels/runs (groupby model_name)
+    - Formatting: mean ± SE, bold best per column.
+    """
+    table = pd.DataFrame()
+
+    for metric, higher_better, rounding in metrics:
+        sub = df.copy()
+        sub = sub[(sub.model_name != "DeepRV + gMLP kAttn")].reset_index(drop=True)
+        if (
+            ("gp" in metric.lower())
+            or ("wass" in metric.lower())
+            or ("test" in metric.lower())
+        ):
+            sub = sub[(sub.model_name != "GP")].reset_index(drop=True)
+
+        # aggregate across kernels/runs
+        agg = (
+            sub.groupby(["model_name"], as_index=False)[metric]
+            .agg(["mean", "std", "count"])
+            .reset_index()
+        )
+        agg["SE"] = agg.apply(
+            lambda r: r["std"] / jnp.sqrt(float(r["count"]))
+            if r["count"] > 0
+            else jnp.nan,
+            axis=1,
+        )
+
+        # choose best and format
+        best_val = agg["mean"].max() if higher_better else agg["mean"].min()
+        tol = 1e-12
+
+        def fmt(row):
+            if pd.isna(row["mean"]):
+                return "-"
+            s = f"{row['mean']:.{rounding}f} ± {row['SE']:.{max(rounding, 2)}f}"
+            return f"\\mathbf{{{s}}}" if abs(row["mean"] - best_val) <= tol else s
+
+        nice_name = metric_display_names.get(metric, metric)
+        col = pd.DataFrame(
+            {
+                "model_name": agg["model_name"],
+                nice_name: agg.apply(fmt, axis=1),
+            }
+        )
+        table = col if table.empty else table.merge(col, on="model_name", how="outer")
+
+    table.rename(columns={"model_name": "Model"}, inplace=True)
+    table["Model"] = table["Model"].map(display_name)
+    # If you want to map headers through display_metric, uncomment:
+    table.columns = [
+        display_metric(c) if c != "Model" else "Model" for c in table.columns
+    ]
+    return table
+
+
+def run_ablation():
+    df = pd.read_csv("results/ablation_test/res.csv")
+    for col in df.columns:
+        if "ess" in col.lower() or col.lower() == "infer_time":
+            df[col] = df[col] / df["num_chains"]
+    for col in df.columns:
+        if "ess" in col.lower():
+            df[col + " per second"] = df[col] / df["infer_time"]
+
+    save_dir = Path("outputs/ablation_tables")
+    for metric in [
+        "Test Norm MSE",
+        "infer_time",
+        "MSE(y, y_hat)",
+        "obs MSE(y, y_hat)",
+        "unobs MSE(y, y_hat)",
+        "MSE(y_hat_gp, y_hat)",
+        "ls wasserstein distance",
+        "ESS ls per second",
+    ]:
+        export_ablation_table(df, metric, save_dir)
+
+    # ---- MAIN TABLES (outside the loop) ----
+    # Table A: Performance / Fidelity
+    metrics_A = [
+        ("MSE(y_hat_gp, y_hat)", False, 3),
+        ("Test Norm MSE", False, 5),
+        ("ls wasserstein distance", False, 3),
+    ]
+    table_A = _make_table_from_metrics(df, metrics_A)
+    export_table(
+        table_A,
+        save_dir / "ablation_main_table_A.csv",
+        save_dir / "ablation_main_table_A.tex",
+    )
+
+    # Table B: Efficiency (incl. train_time)
+    metrics_B = [
+        ("ESS ls per second", True, 3),
+        ("infer_time", False, 2),
+        ("train_time", False, 1),
+    ]
+    table_B = _make_table_from_metrics(df, metrics_B)
+    export_table(
+        table_B,
+        save_dir / "ablation_main_table_B.csv",
+        save_dir / "ablation_main_table_B.tex",
+    )
+
+
 # ----------------------------
 # Plotting
 # ----------------------------
@@ -543,7 +731,7 @@ def plot_aggregated_bar(
     ax.bar(
         x=agg_stats["model_display"],
         height=y_mean,
-        yerr=[y_mean - y_low, y_high - y_mean],
+        yerr=[y_mean - y_low, jnp.maximum(y_high - y_mean, 1e-12)],
         capsize=4,
         color=[palette[m] for m in agg_stats["model_display"]],
     )
@@ -771,7 +959,9 @@ def run_pipeline(
     # ----------------------------
     # Aggregated tables (mean ± std with bolded best)
     # ----------------------------
-    agg_grid = make_aggregated_model_table(df, main_table_metrics, groupby="grid_size")
+    agg_grid = make_aggregated_model_table(
+        df, main_table_metrics + ["train_time"], groupby="grid_size"
+    )
     export_table(
         agg_grid,
         dirs["main_tables"] / "agg_grid_per_metric.csv",
@@ -861,6 +1051,7 @@ def parse_args() -> argparse.Namespace:
 
 def main():
     args = parse_args()
+    # run_ablation()
     run_pipeline(
         args.base_dir,
         args.dir_prefix,

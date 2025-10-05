@@ -400,14 +400,15 @@ def plot_models_predictive_means(
     f_hats, map_data, save_path: Path, obs_mask: Union[jax.Array, bool] = True, log=True
 ):
     std_vals = [f.std(axis=0) for f in f_hats[1:]]
+    f_hats_plot = f_hats.copy()
     if log:
-        f_hats = [jnp.log(f_mean + 1) for f_mean in f_hats]
-    observed_y = f_hats[0]
-    true_y = f_hats[0]
-    n_models = len(f_hats) - 1
+        f_hats_plot = [jnp.log(f_mean + 1) for f_mean in f_hats_plot]
+    observed_y = f_hats_plot[0]
+    true_y = f_hats_plot[0]
+    n_models = len(f_hats_plot) - 1
     if not isinstance(obs_mask, bool):
         observed_y = np.ma.masked_where(~obs_mask, observed_y)
-    mean_vals = [observed_y, true_y] + [f.mean(axis=0) for f in f_hats[1:]]
+    mean_vals = [observed_y, true_y] + [f.mean(axis=0) for f in f_hats_plot[1:]]
     vmin_mean = float(jnp.min(jnp.array([m.min() for m in mean_vals])))
     vmax_mean = float(jnp.max(jnp.array([m.max() for m in mean_vals])))
     vmin_std = float(jnp.min(jnp.array([s.min() for s in std_vals])))
@@ -430,7 +431,7 @@ def plot_models_predictive_means(
     ax[1].set_title("True y")
     ax[1].set_axis_off()
     for i in range(n_models):
-        mean_i = f_hats[i + 1].mean(axis=0)
+        mean_i = f_hats_plot[i + 1].mean(axis=0)
         std_i = std_vals[i]
         col_mean = 2 + i * 2
         col_std = 2 + i * 2 + 1
@@ -444,7 +445,10 @@ def plot_models_predictive_means(
             sm = ScalarMappable(
                 norm=Normalize(vmin=vmin_mean, vmax=vmax_mean), cmap="viridis"
             )
-            fig.colorbar(sm, ax=ax[col_mean], shrink=0.35)
+            cb = fig.colorbar(sm, ax=ax[col_mean], shrink=0.35)
+            ticks = np.linspace(vmin_mean, vmax_mean, 5)
+            cb.set_ticks(ticks)
+            cb.set_ticklabels([f"{np.exp(t) - 1:.0f}" for t in ticks])
         plot_on_map(
             ax[col_std],
             map_data,

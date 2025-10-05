@@ -11,10 +11,12 @@ import flax.linen as nn
 import geopandas as gpd
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
 import numpyro
 import optax
 import pandas as pd
 from jax import Array, jit, random, value_and_grad
+from matplotlib.lines import Line2D
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 from omegaconf import DictConfig
@@ -42,9 +44,7 @@ def main(data_type, seed=59, num_chains=2, obs_ratio=0.5):
     map_data = gpd.read_file(f"benchmarks/vae/maps/{data_type}")
     s_max = 100
     s = gen_spatial_structure(map_data, s_max=s_max)
-    models = {"DeepRV + gMLP": gMLPDeepRV(num_blks=2)}
-    if s.shape[0] < 2500:
-        models["Baseline_GP"] = None
+    models = {"DeepRV + gMLP": gMLPDeepRV(num_blks=2), "Baseline_GP": None}
     y_obs = jnp.array(map_data["data"], dtype=jnp.float32)
     population = jnp.array(map_data.population, dtype=jnp.int32)
     obs_mask = gen_random_obs_mask(rng_idxs, s, obs_ratio)
@@ -119,6 +119,7 @@ def main(data_type, seed=59, num_chains=2, obs_ratio=0.5):
         with open(model_path / "single_res.pkl", "wb") as out_file:
             pickle.dump(res, out_file)
         result.append(res)
+    scatter_plot_model_vs_model(all_samples, list(models.keys()), obs_mask, save_dir)
     plot_models_predictive_means(
         y_hats, map_data, save_dir / "obs_means.png", obs_mask, log=True
     )
@@ -148,10 +149,13 @@ def hmc(
 ):
     """Run HMC with multiple independent single-chain runs and merge results."""
     num_chains, n_samples, n_warmup = len(init_vals), 4000, 4000
+    if y_obs.shape[0] > 2500 and surrogate_decoder is None:
+        num_chains, n_samples, n_warmup = 2, 1000, 500
     all_samples, all_posts = [], []
     total_time = 0.0
 
-    for i, chain_init in enumerate(init_vals):
+    for i in range(num_chains):
+        chain_init = init_vals[i]
         print(f"Running chain {i} ...")
         rng, subrng = random.split(rng)
         init_strat = init_to_value(values=chain_init)
@@ -453,55 +457,15 @@ def joint_map_init(
     return priors, init_vals
 
 
-def analyze_chains(path, params_to_check=("ls", "beta", "var"), nc=2):
-    import numpy as np
-    from scipy.stats import ks_2samp
-
-    with open(path, "rb") as f:
-        d = pickle.load(f)
-
-    print("=" * 80)
-    print(f"Diagnostics for {path}")
-    print("=" * 80)
-
-    def split_chains(arr, num_chains=nc):
-        arr = np.array(arr)
-        if arr.ndim == 1:
-            return np.array_split(arr, num_chains)
-        elif arr.ndim == 2:
-            return np.array_split(arr, num_chains, axis=0)
-        else:
-            raise ValueError(f"Unexpected shape for array: {arr.shape}")
-
-    # Check scalar/vector params
-    for p in params_to_check:
-        if p not in d:
-            continue
-        cs = split_chains(d[p])
-        for i in range(nc):
-            print(f"\n--- {p} ---")
-            print(f"chain{i} mean={cs[i].mean():.3f}, var={cs[i].var():.3f}")
-        if nc > 1:
-            ks_stat, ks_p = ks_2samp(cs[0].ravel(), cs[1].ravel())
-            print(f"KS chain 0-1 test: stat={ks_stat:.3f}, p={ks_p:.3g}")
-
-    # Special handling for mu (spatial field)
-    if "mu" in d:
-        print("\n--- mu ---")
-        cs = split_chains(d["mu"])
-        for i in range(nc):
-            print(f"chain{i} mean of mean(mu)={cs[i].mean(axis=0).mean():.3f}")
-        if nc > 1:
-            mu_mean0 = cs[0].mean(axis=0)
-            mu_mean1 = cs[1].mean(axis=0)
-            corr = np.corrcoef(mu_mean0, mu_mean1)[0, 1]
-            print(f"mean(mu) correlation across chains 0-1 = {corr:.3f}")
-
-    print("=" * 80)
-
-
 def scatter_plot_prevalence(
-    y_obs, population, all_samples, model_names: list, obs_mask, save_dir
+    y_obs,
+    population,
+    all_samples,
+    model_names: list,
+    obs_mask,
+    save_dir,
+    max_points=100,
+    seed=78,
 ):
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -519,31 +483,55 @@ def scatter_plot_prevalence(
         "observed": obs_mask,
         "unobserved": ~obs_mask,
     }
-    markers = ["x", "o", "s", "D", "^", "v", "P"]
+    styles = {
+        "Baseline_GP": {"edgecolor": "blue", "facecolor": "none", "marker": "o"},
+        "DeepRV + gMLP": {"edgecolor": "red", "facecolor": "red", "marker": "x"},
+    }
+    rng = random.key(seed)
     for name, mask in plot_types.items():
+        rng, _ = random.split(rng)
+        idxs = random.choice(
+            rng, jnp.arange(int(sum(mask))), shape=(max_points,), replace=False
+        )
         fig, ax = plt.subplots(figsize=(5, 5), constrained_layout=True)
         for i, model_name in enumerate(model_names):
             label = model_name.replace("Baseline_", "")
-            marker = markers[i % len(markers)]
-            ax.scatter(
-                p_obs[mask],
-                p_hat_means[i][mask],
-                label=label,
-                alpha=0.5,
-                s=20,
-                marker=marker,
+            style = styles.get(
+                model_name, {"edgecolor": "gray", "facecolor": "gray", "marker": "s"}
             )
+            if style["marker"] == "x":
+                ax.scatter(
+                    p_obs[mask][idxs],
+                    p_hat_means[i][mask][idxs],
+                    label=label,
+                    alpha=0.8,
+                    s=50,
+                    color=style["edgecolor"],
+                    marker=style["marker"],
+                )
+            else:
+                ax.scatter(
+                    p_obs[mask][idxs],
+                    p_hat_means[i][mask][idxs],
+                    label=label,
+                    alpha=0.8,
+                    s=50,
+                    facecolors=style["facecolor"],
+                    edgecolors=style["edgecolor"],
+                    marker=style["marker"],
+                    linewidths=1.2,
+                )
         min_val = float(jnp.nanmin(p_obs[mask]))
         max_val = float(jnp.nanmax(p_obs[mask]))
         ax.plot([min_val, max_val], [min_val, max_val], "k--", lw=1)
-        if name == "unobserved":
+        if name == "unobserved" and "DeepRV + gMLP" in model_names:
             x = p_obs[mask]
             y = p_hat_means[model_names.index("DeepRV + gMLP")][mask]
             slope, intercept = jnp.polyfit(x, y, 1)
             ax.plot(
                 [min_val, max_val],
                 intercept + slope * jnp.array([min_val, max_val]),
-                "r-",
+                "k-",
                 lw=1,
             )
         ax.set_xlabel(r"Observed prevalence ($\frac{y}{N}$)")
@@ -559,10 +547,118 @@ def scatter_plot_prevalence(
         plt.close(fig)
 
 
+def scatter_plot_model_vs_model(
+    all_samples,
+    model_names: list,
+    obs_mask,
+    save_dir,
+    cred: float = 0.5,
+    max_points: int = 100,
+    seed: int = 0,
+):
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    name_x = model_names[0]
+    name_y = model_names[1]
+
+    def summarize_posterior(samples_dict):
+        mu = jnp.asarray(samples_dict["mu"])
+        beta = jnp.asarray(samples_dict["beta"])
+        var = jnp.asarray(samples_dict["var"])
+        logits = jnp.sqrt(var)[:, None] * mu + beta[:, None]
+        p_samples = nn.sigmoid(logits)
+        p_mean = jnp.nanmean(p_samples, axis=0)
+        alpha = (1.0 - cred) / 2.0
+        p_lo = jnp.nanquantile(p_samples, alpha, axis=0)
+        p_hi = jnp.nanquantile(p_samples, 1.0 - alpha, axis=0)
+        p_mean = jnp.clip(p_mean, 0.0, 1.0)
+        p_lo = jnp.clip(p_lo, 0.0, 1.0)
+        p_hi = jnp.clip(p_hi, 0.0, 1.0)
+        return p_mean, p_lo, p_hi
+
+    x_mean, x_lo, x_hi = summarize_posterior(all_samples[0])
+    y_mean, y_lo, y_hi = summarize_posterior(all_samples[1])
+    plot_types = {
+        "all": jnp.ones_like(x_mean, dtype=bool),
+        "observed": obs_mask,
+        "unobserved": ~obs_mask,
+    }
+    rng = np.random.default_rng(seed)
+    cred_pct = int(round(cred * 100))
+    for name, mask in plot_types.items():
+        idx = jnp.where(mask)[0]
+        if idx.size > max_points:
+            pick = rng.choice(np.array(idx), size=max_points, replace=False)
+            pick = jnp.array(pick)
+        else:
+            pick = idx
+        xm = x_mean[pick]
+        ym = y_mean[pick]
+        xlo = x_lo[pick]
+        xhi = x_hi[pick]
+        ylo = y_lo[pick]
+        yhi = y_hi[pick]
+        fig, ax = plt.subplots(figsize=(5, 5), constrained_layout=True)
+        ax.scatter(
+            xm,
+            ym,
+            s=28,
+            alpha=0.85,
+            linewidths=0.8,
+            edgecolors="black",
+            marker="o",
+            label=f"{name_x} vs {name_y}",
+        )
+        min_val = float(jnp.nanmin(jnp.concatenate([xm, ym])))
+        max_val = float(jnp.nanmax(jnp.concatenate([xm, ym])))
+        pad = 0.02 * max(1e-8, (max_val - min_val))
+        lo = max(0.0, min_val - pad)
+        hi = min(1.0, max_val + pad)
+        raw_xerr = jnp.vstack([xm - xlo, xhi - xm])
+        raw_yerr = jnp.vstack([ym - ylo, yhi - ym])
+        ax.errorbar(
+            xm,
+            ym,
+            xerr=np.array(raw_xerr),
+            fmt="none",
+            ecolor="orange",
+            elinewidth=0.8,
+            capsize=0,
+            alpha=0.6,
+            zorder=0,
+        )
+        ax.errorbar(
+            xm,
+            ym,
+            yerr=np.array(raw_yerr),
+            fmt="none",
+            ecolor="green",
+            elinewidth=0.8,
+            capsize=0,
+            alpha=0.6,
+            zorder=0,
+        )
+        ax.plot([lo, hi], [lo, hi], "k--", lw=1)
+        ax.set_xlabel(r"Predicted prevalence ($\mathbf{p}$) DeepRV")
+        ax.set_ylabel(r"Predicted prevalence ($\mathbf{p}$) GP")
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+        ax.grid(alpha=0.3)
+        handles = [
+            Line2D([0], [0], color="green", lw=1.2, label="GP, 50% BCI"),
+            Line2D([0], [0], color="orange", lw=1.2, label="DeepRV, 50% BCI"),
+        ]
+        ax.legend(handles=handles, loc="upper left", frameon=False)
+        fig.savefig(
+            save_dir / f"scatter_model_vs_model_{name}_cred{cred_pct}.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close(fig)
+
+
 if __name__ == "__main__":
     dt = "London_MSOA_education_deprivation_parsed_thrs_0"
     main(seed=81, data_type=dt, num_chains=4, obs_ratio=0.5)
-    analyze_chains(f"results/{dt}/DeepRV + gMLP/hmc_samples.pkl", nc=4)
     dt = "London_LSOA_education_deprivation_parsed_thrs_0"
     main(seed=62, data_type=dt, num_chains=4, obs_ratio=0.5)
-    analyze_chains(f"results/{dt}/DeepRV + gMLP/hmc_samples.pkl", nc=4)
