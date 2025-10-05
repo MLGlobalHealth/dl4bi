@@ -73,27 +73,12 @@ def main(seed=67, logged_priors=False, max_ls=30.0, grid_dim=100, L_train=1024):
     y_hats, all_samples, result = [], [], []
     kmeans = KMeans(n_clusters=L_train, random_state=0)
     s_train = kmeans.fit(s[obs_mask]).cluster_centers_
-    # old_res = pd.read_csv(save_dir / "res.csv")
     with open(save_dir / "s_train.pkl", "wb") as ff:
         pickle.dump(
             {"s_train": s_train, "obs_mask": obs_mask, "seed": seed, "y_obs": y_obs}, ff
         )
     for model_name, nn_model in models.items():
         model_dir = save_dir / f"{model_name}"
-        # if (model_dir / "single_res.pkl").exists():
-        #     with open(model_dir / "hmc_samples.pkl", "rb") as out_file:
-        #         samples = pickle.load(out_file)
-        #     with open(model_dir / "hmc_pp.pkl", "rb") as out_file:
-        #         post = pickle.load(out_file)
-        #     with open(model_dir / "single_res.pkl", "rb") as out_file:
-        #         res = pickle.load(out_file)
-        #     samples = {k: it for k, it in samples.items() if k in ["beta", "ls"]}
-        #     y_hats.append(post["obs"])
-        #     all_samples.append(samples)
-        #     if len(old_res[old_res.model_name == model_name]) > 0:
-        #         res = dict(old_res[old_res.model_name == model_name].iloc[0])
-        #     result.append(res)
-        #     continue
         model_dir.mkdir(parents=True, exist_ok=True)
         train_time, f_u_bar_mse, surrogate_decoder, ess = None, None, None, {}
         eval_f_mse, cosine_sim = None, None
@@ -168,31 +153,6 @@ def main(seed=67, logged_priors=False, max_ls=30.0, grid_dim=100, L_train=1024):
     )
     result = posterior_mean_inducing_dist(result, y_hats, model_names)
     pd.DataFrame(result).to_csv(save_dir / "res.csv")
-    # from inducing_drv_diagnostics import compare_grads, diff_per_loader
-
-    # diff_per_loader(models, s, s_train, matern_1_2, save_dir, max_ls)
-    # compare_grads(
-    #     models,
-    #     s,
-    #     inference_model_inducing_points,
-    #     infer_priors,
-    #     s_train,
-    #     L_train,
-    #     save_dir,
-    #     target="f",
-    #     max_ls=max_ls + 10.0,
-    # )
-    # compare_grads(
-    #     models,
-    #     s,
-    #     inference_model_inducing_points,
-    #     infer_priors,
-    #     s_train,
-    #     L_train,
-    #     save_dir,
-    #     target="f_u_bar",
-    #     max_ls=max_ls + 10.0,
-    # )
 
 
 def hmc(
