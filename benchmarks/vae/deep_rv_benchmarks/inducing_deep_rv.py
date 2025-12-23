@@ -22,12 +22,11 @@ from numpyro import distributions as dist
 from numpyro.distributions.transforms import ParameterFreeTransform
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig
-from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
 from scipy.stats import wasserstein_distance
 from sklearn.cluster import KMeans
 from sps.kernels import matern_1_2
 from sps.utils import build_grid
-from utils.plot_utils import plot_infer_trace
+from utils.plot_utils import plot_infer_trace, plot_posterior_predictive_comparisons
 
 import wandb
 from dl4bi.core.mlp import MLP

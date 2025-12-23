@@ -24,12 +24,11 @@ from numpyro.infer import MCMC, NUTS, SVI, Predictive, Trace_ELBO, init_to_media
 from numpyro.infer.autoguide import AutoMultivariateNormal
 from numpyro.optim import Adam
 from omegaconf import DictConfig
-from reproduce_paper.deep_rv_plots import plot_posterior_predictive_comparisons
 from scipy.stats import wasserstein_distance
 from sklearn.cluster import KMeans
 from sps.kernels import matern_3_2
 from sps.utils import build_grid
-from utils.plot_utils import plot_infer_trace
+from utils.plot_utils import plot_infer_trace, plot_posterior_predictive_comparisons
 
 import wandb
 from dl4bi.core.mlp import MLP

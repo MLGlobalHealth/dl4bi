@@ -20,13 +20,13 @@ from matplotlib.lines import Line2D
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 from omegaconf import DictConfig
-from reproduce_paper.deep_rv_plots import (
+from shapely.affinity import scale, translate
+from sps.kernels import matern_1_2
+from utils.plot_utils import (
+    plot_infer_trace,
     plot_models_predictive_means,
     plot_posterior_predictive_comparisons,
 )
-from shapely.affinity import scale, translate
-from sps.kernels import matern_1_2
-from utils.plot_utils import plot_infer_trace
 
 import wandb
 from dl4bi.core.model_output import VAEOutput
