@@ -15,7 +15,7 @@ Features:
 - Uses jax.numpy as jnp for reductions/rankings
 
 Run:
-    python analysis.py --base_dir results --out_dir outputs \
+    python deep_rv_paper.py --base_dir results --out_dir outputs \
         --lengthscales 10 30 50 \
         --grid_sizes 256 576 1024 2304 4096 \
         --style line \

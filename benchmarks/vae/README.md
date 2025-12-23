@@ -102,11 +102,11 @@ All experiments are runnable from the repository root. Results and processed out
     [Google Drive link](https://drive.google.com/file/d/12oPJGONKqSRLXH9h49LujIDQyFT18_tb/view?usp=drive_link)
   - Unzip the downloaded archive directly into the `maps` directory using:
     ```bash
-    unzip London_Education_Deprivation_Maps.zip -d maps/
+    unzip London_Education_Deprivation_Maps.zip -d benchmarks/vae/maps/
     ```
   - After extraction, the directory structure should be:
     ```
-    <root_directory>/
+    <root_directory>/benchmarks/vae/
     ├── maps/
     │   ├── London_LSOA_education_deprivation_parsed_thrs_0/ ...
     │   └── London_MSOA_education_deprivation_parsed_thrs_0/ ...
@@ -127,14 +127,14 @@ All experiments are runnable from the repository root. Results and processed out
   python benchmarks/vae/multi_locations.py
   ```
   - Notes:
-    - Transformer training can be long (2M steps); results in `outputs/multi_locations`.
+    - Transformer training can be long (2M steps); results in `results/multi_locations`.
 
 - **Ablation study**
   ```bash
   python benchmarks/vae/ablation_test.py
   ```
   - Notes:
-    - Aggregated ablation tables are saved at `outputs/ablation_tables`.
+    - Aggregated ablation tables are saved at `results/ablation_tables`.
 ---
 
 ## Example Usage
