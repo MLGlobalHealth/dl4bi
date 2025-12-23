@@ -782,52 +782,6 @@ def plot_mean_infer_time(
     plt.close(g.fig)
 
 
-def plot_posterior_predictive_comparisons_kde(
-    samples: list[dict],
-    model_names: list[str],
-    var_names: list[str],
-    save_prefix: Path,
-):
-    n_vars = len(var_names)
-    fig, axes = plt.subplots(1, n_vars, figsize=(n_vars * 1.7, 2.0), sharey=False)
-    if n_vars == 1:
-        axes = [axes]
-    all_handles, all_labels = None, None
-    for i, var_name in enumerate(var_names):
-        ax = axes[i]
-        min_val, max_val = np.inf, -np.inf
-        for model_name, model_dict in zip(model_names, samples):
-            model_samples = model_dict.get(str(var_name), None)
-            if model_samples is not None:
-                if var_name == "a":
-                    model_samples = model_samples[model_samples <= 2]
-                min_val = min(min_val, model_samples.min())
-                max_val = max(max_val, model_samples.max())
-                model_n = model_name.split(" +")[0]
-                sns.kdeplot(
-                    model_samples, label=model_n, linewidth=1.2, alpha=0.7, ax=ax
-                )
-        ax.set_xlabel(display_hyperparam(var_name), fontsize=9)
-        ax.set_ylabel("")
-        ax.tick_params(axis="y", left=False, labelleft=False)
-        if i == 0:
-            all_handles, all_labels = ax.get_legend_handles_labels()
-    if all_handles:
-        fig.legend(
-            all_handles,
-            all_labels,
-            loc="upper center",
-            bbox_to_anchor=(0.5, 1.05),  # closer to plots
-            ncol=len(all_labels),
-            fontsize=8,
-            frameon=False,
-        )
-    plt.tight_layout(rect=[0, 0, 1, 0.95])  # leave just enough space for legend
-    save_prefix.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(f"{save_prefix}_posterior_kde.png", dpi=600, bbox_inches="tight")
-    plt.close(fig)
-
-
 def plot_accuracy_vs_speed_quadrant(
     df: pd.DataFrame,
     save_path: Path,
