@@ -59,7 +59,7 @@ def deep_rv_train_step(
         f, conditionals = batch["f"], batch["conditionals"]
         var = conditionals[var_idx] if var_idx is not None else 1.0
         output: VAEOutput = state.apply_fn(
-            {"params": params}, **batch, rngs={"extra": rng}
+            {"params": params, **state.kwargs}, **batch, rngs={"extra": rng}
         )
         return (1 / var) * output.mse(f)
 
@@ -94,7 +94,7 @@ def inducing_deep_rv_train_step(
         K_su = batch["K_su"]
         var = conditionals[var_idx] if var_idx is not None else 1.0
         output: VAEOutput = state.apply_fn(
-            {"params": params}, **batch, rngs={"extra": rng}
+            {"params": params, **state.kwargs}, **batch, rngs={"extra": rng}
         )
         residuals = f_bar_u.squeeze() - output.f_hat.squeeze()
         f_bar_u_mse = (residuals**2).mean()
@@ -121,7 +121,7 @@ def elbo_train_step(rng: jax.Array, state: TrainState, batch: dict):
     def elbo_loss(params):
         f = batch["f"]
         output: VAEOutput = state.apply_fn(
-            {"params": params}, **batch, rngs={"extra": rng}
+            {"params": params, **state.kwargs}, **batch, rngs={"extra": rng}
         )
         kl_div = output.kl_normal_dist()
         nll = output.nll(f)
@@ -155,7 +155,7 @@ def prior_cvae_train_step(
     def prior_cvae_loss(params):
         f = batch["f"]
         output: VAEOutput = state.apply_fn(
-            {"params": params}, **batch, rngs={"extra": rng}
+            {"params": params, **state.kwargs}, **batch, rngs={"extra": rng}
         )
         kl_div = output.kl_normal_dist()
         mse = output.mse(f)
@@ -170,7 +170,7 @@ def pi_vae_train_step(rng: jax.Array, state: TrainState, batch: dict):
     def loss_fn(params):
         f = batch["f"]
         f_hat_beta, f_hat_beta_hat, z_mu, z_std = state.apply_fn(
-            {"params": params}, **batch, rngs={"extra": rng}
+            {"params": params, **state.kwargs}, **batch, rngs={"extra": rng}
         )
         loss_1 = optax.squared_error(f_hat_beta, f).mean()
         loss_2 = optax.squared_error(f_hat_beta_hat, f).mean()
