@@ -61,7 +61,7 @@ def plot_infer_map_sum(post, map_data, log=True):
     plot_on_map(ax[0], map_data, f, vmin, vmax, f"y obs{log_str}")
     plot_on_map(ax[1], map_data, f_hat_mean, vmin, vmax, f"Mean MCMC Samples{log_str}")
     plot_on_map(ax[2], map_data, f_hat_std, title="MCMC STD", cmap="plasma")
-    obs_title = f"Obsereved Locations ({len(obs_idxs)} locations)"
+    obs_title = f"Observed Locations ({len(obs_idxs)} locations)"
     mask = jnp.array([(1 if i in obs_idxs else 0) for i in range(map_data.shape[0])])
     plot_on_map(ax[3], map_data, mask, 0.0, 1.0, obs_title, cmap="coolwarm")
     for axis in ax:

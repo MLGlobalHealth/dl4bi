@@ -45,10 +45,10 @@ def main(seed=42):
     s = gen_spatial_structure(map_data)
     L = s.shape[0]
     models = {
-        "Baseline_GP": None,  # Baseline test - can remove if takes too long
+        # "Baseline_GP": None,  # Baseline test - can remove if takes too long
         "DeepRV + MLP": MLPDeepRV(dims=[L, L]),
-        "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
-        "DeepRV + Transfomer": TransformerDeepRV(num_blks=2, dim=64),
+        # "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
+        # "DeepRV + Transfomer": TransformerDeepRV(num_blks=2, dim=64),
     }
     # NOTE: change to correct data columns paternal\maternal etc
     y_obs = jnp.array(map_data.paternal, dtype=jnp.float32)
@@ -102,8 +102,28 @@ def main(seed=42):
         all_samples, {}, priors, list(models.keys()), cond_names, save_dir / "comp"
     )
     # NOTE: plots the observed means by the order of the models above
-    plot_models_predictive_means(y_hats, map_data, save_dir / "obs_means.png")
+    f_hat_means, vmin, vmax = plot_models_predictive_means(y_hats, map_data, save_dir / "obs_means.png")
+
+    result.append(
+        {
+            "vmin": vmin,
+            "vmax": vmax,
+        }
+    )
+
     pd.DataFrame(result).to_csv(save_dir / "res.csv")
+
+    # save the model predictions with the corresponding map data
+    map_data["y_preds"] = f_hat_means
+    y_preds = []
+    y_preds.append(
+        {
+            "y_preds": f_hat_means,
+        }
+    )
+
+    # save f_hat_means, vmin, vmax to a GeoDataFrame and then save it
+    pd.DataFrame(y_preds).to_csv(save_dir / "y_preds") 
 
 
 def hmc(

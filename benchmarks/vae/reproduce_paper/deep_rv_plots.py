@@ -414,6 +414,7 @@ def plot_models_predictive_means(f_hats, map_data, save_path: Path, log=True):
     fig.savefig(save_path, dpi=200)
     plt.clf()
     plt.close(fig)
+    return f_hat_means, vmin, vmax
 
 
 def plot_infer_obs_summary(f, f_hat, map_data, save_path: Path, log=True):
