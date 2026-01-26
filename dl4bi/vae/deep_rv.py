@@ -4,14 +4,8 @@ from typing import Optional, Union
 import flax.linen as nn
 import jax.numpy as jnp
 from jax import Array
-from sps.kernels import l2_dist
 
-from ..core.attention import (
-    BiasedScanAttention,
-    DeepKernelAttention,
-    Attention,
-    MultiHeadAttention,
-)
+from ..core.attention import MultiHeadAttention
 from ..core.bias import Bias
 from ..core.mlp import MLP, gMLP, gMLPBlock
 from ..core.model_output import VAEOutput
@@ -153,7 +147,6 @@ class KernelBiasTransformerDeepRV(nn.Module):
 
 class FixedKernelAttention(nn.Module):
     proj_vs: nn.Module = MLP([64], nn.gelu)
-    gate_fn: Callable = lambda x: x
 
     @nn.compact
     def __call__(self, qs, ks, vs, valid_lens: Optional[Array] = None, **kwargs):

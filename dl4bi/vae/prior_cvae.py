@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from collections.abc import Callable
 
-import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
 
