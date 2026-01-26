@@ -1,11 +1,10 @@
 from . import train_utils
 from .deep_rv import (
     DeepRV,
-    DKADeepRV,
+    FixedKernelAttention,
     MLPDeepRV,
-    ScanTransformerDeepRV,
-    TransformerDeepRV,
     gMLPDeepRV,
+    KernelBiasTransformerDeepRV,
 )
 from .pi_vae import Phi, PiVAE
 from .prior_cvae import PriorCVAE

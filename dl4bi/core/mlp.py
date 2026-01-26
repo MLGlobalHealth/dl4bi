@@ -130,14 +130,15 @@ class gMLPBlock(nn.Module):
     proj_in: nn.Module = MLP([128], nn.gelu)
     proj_out: nn.Module = MLP([64], nn.gelu)
     attn: Optional[nn.Module] = None
+    gate_fn: Callable = lambda x: x
 
     @nn.compact
-    def __call__(self, x, valid_lens: Optional[jax.Array] = None):
+    def __call__(self, x, valid_lens: Optional[jax.Array] = None, **kwargs):
         attn_res = None
         if self.attn is not None:
-            attn_res, _ = self.attn(x, x, x, valid_lens)
+            attn_res, _ = self.attn(x, x, x, valid_lens, **kwargs)
         x = self.proj_in(x)
-        x = SpatialGatingUnit()(x, attn_res)
+        x = SpatialGatingUnit(gate_fn=self.gate_fn)(x, attn_res)
         return self.proj_out(x)
 
 
@@ -170,5 +171,5 @@ class gMLP(nn.Module):
     def __call__(self, x: jax.Array, **kwargs):  # x: [B, L, D]
         x = self.embed(x)
         for _ in range(self.num_blks):
-            x += self.blk.copy()(self.norm.copy()(x))
+            x += self.blk.copy()(self.norm.copy()(x), **kwargs)
         return self.output_fn(self.head(self.norm.copy()(x)))

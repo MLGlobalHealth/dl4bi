@@ -1,8 +1,0 @@
-cls: DeepRV
-kwargs:
-  cond_stack_fn:
-    func: cond_as_feats
-  decoder:
-    cls: gMLP
-    kwargs:
-      num_blks: 2

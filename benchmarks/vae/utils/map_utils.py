@@ -1,9 +1,12 @@
+from pathlib import Path
+
 import geopandas as gpd
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 from omegaconf import DictConfig
 from scipy.spatial import distance_matrix
+from shapely import Point
 from shapely.affinity import scale, translate
 from sps.utils import build_grid
 
@@ -116,6 +119,39 @@ def generate_adjacency_matrix(gdf: gpd.GeoDataFrame, self_loops: bool = False):
     if self_loops:
         adjacency_matrix += jnp.eye(N=num_geoms, dtype=adjacency_matrix.dtype)
     return adjacency_matrix
+
+
+def aggregate_to_geo_data(
+    fine_grain_dset: pd.DataFrame,
+    geo_data: gpd.GeoDataFrame,
+    data_col: str,
+    save_path: Path,
+) -> gpd.GeoDataFrame:
+    """
+    Aggregate fine-grain spatial data to a higher-level spatial data.
+
+    Parameters:
+    - fine_grain_dset: DataFrame with columns 'x', 'y', and pollution data column.
+    - geo_data: GeoDataFrame of MSOA shapes (must be in EPSG:27700).
+    - data_col: Name of the column in fine_grain_dset to aggregate.
+    - save_path: Path to save the resulting GeoPackage or Shapefile.
+
+    Returns:
+    - Updated GeoDataFrame with new aggregated data column from finer resultion data.
+    """
+    points_gdf = gpd.GeoDataFrame(
+        fine_grain_dset,
+        geometry=[Point(xy) for xy in zip(fine_grain_dset["x"], fine_grain_dset["y"])],
+        crs="EPSG:27700",
+    )
+    if geo_data.crs != "EPSG:27700":
+        geo_data = geo_data.to_crs("EPSG:27700")
+    joined = gpd.sjoin(points_gdf, geo_data, how="inner", predicate="within")
+    agg_df = joined.groupby("MSOA21CD")[data_col].mean().reset_index()
+    agg_df.rename(columns={data_col: f"{data_col}_msoa_avg"}, inplace=True)
+    result_gdf = geo_data.merge(agg_df, on="MSOA21CD", how="left")
+    result_gdf.to_file(save_path)
+    return result_gdf
 
 
 def normalize_locations_names(s):
