@@ -39,6 +39,7 @@ For NVIDIA GPUs (e.g., RTX 5000 Ada, CUDA 12.8):
 ```bash
 pip install jax[cuda12]==0.6.2
 pip install -e .
+pip install geopandas seaborn
 ```
 
 #### • CPU Installation
@@ -46,6 +47,7 @@ For CPU-only machines:
 ```bash
 pip install jax==0.6.2 jaxlib==0.6.2
 pip install -e .
+pip install geopandas seaborn
 ```
 
 ### 3. Verify Installation
@@ -75,7 +77,10 @@ All experiments are runnable from the repository root. Results and processed out
   python benchmarks/vae/benchmark_matern_1_2.py
   ```
   - Notes:
-    - Ground truth data and INLA outputs are precomputed at `results/INLA_raw_batch_results` by the `benchmarks/vae/inla.r` script. The script can be used to re-generate them by running `benchmarks/vae/inla.r` (requires R packages listed in that file).
+    - Ground truth data and INLA outputs are expected under `results/INLA_raw_batch_results`. Due to instability in regenerating the exact ground truth observations and masking (despite seed control), we **recommend downloading the precomputed ground truth data** from the following link: [Drive link](https://drive.google.com/file/d/1OXKwBUC1FYttw_NHK-jFK_zO4u421myB/view) and placing the extracted contents directly into `results/INLA_raw_batch_results`.
+    - Once the precomputed data are in place, you may either: run `benchmarks/vae/inla.r`, which will **reuse the existing ground truth observation and will generate INLA outputs** in this directory, or run the Python benchmarking script directly, which will also **detect and use the precomputed results and INLA outputs**.
+    - The R script `benchmarks/vae/inla.r` can optionally regenerate the ground truth data by setting the internal `generate` flag to `TRUE` and rerunning the script.  
+  This enables full end-to-end regeneration for benchmarking purposes, but **may result isn discrepancies in the generated ground truth** relative to the precomputed version used in the paper.
     - Long runtime (machine-dependent; expect days on some setups).
     - Results saved to `results/Benchmark_Matern_1_2_ls_<lengthscale>` for lengthscales 10, 30, 50.
     - Interruption-safe: intermediate results are reloaded automatically.
@@ -141,7 +146,7 @@ All experiments are runnable from the repository root. Results and processed out
 
 A small example usage script:
 ```bash
-python deep_rv_usage_example.py
+python benchmarks/vae/deep_rv_example.py
 ```
 
 ---
