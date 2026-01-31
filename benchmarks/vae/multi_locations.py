@@ -25,11 +25,15 @@ from sps.kernels import matern_1_2
 from utils.plot_utils import plot_infer_trace, plot_posterior_predictive_comparisons
 
 import wandb
+from dl4bi.core.attention import MultiHeadAttention
+from dl4bi.core.bias import Bias
+from dl4bi.core.embed import FixedSinusoidalEmbedding
 from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import TrainState, cosine_annealing_lr, evaluate, save_ckpt, train
+from dl4bi.core.transformer import TransformerEncoderBlock
 from dl4bi.vae import KernelBiasTransformerDeepRV
-from dl4bi.vae.train_utils import generate_surrogate_decoder
+from dl4bi.vae.train_utils import cond_as_feats, generate_surrogate_decoder
 
 
 def main(seed=23):
@@ -61,6 +65,18 @@ def main(seed=23):
             s_embed=RFFEmbed(num_features=512),
             head=MLP([D * 4, D, D // 2, 1]),
             max_locations=L,
+        ),
+        "DeepRV + trans kAttn no id": KernelBiasTransformerDeepRVNoID(
+            num_blks=4,
+            dim=D,
+            s_embed=RFFEmbed(num_features=512),
+            head=MLP([D * 4, D, D // 2, 1]),
+        ),
+        "DeepRV + trans kAttn sinu no id": KernelBiasTransformerDeepRVNoID(
+            num_blks=4,
+            dim=D,
+            s_embed=FixedSinusoidalEmbedding(embed_dim=512),
+            head=MLP([D * 4, D, D // 2, 1]),
         ),
     }
     for model_name, nn_model in models.items():
@@ -468,6 +484,48 @@ def load_surr_model_results(model, optimizer, model_path: Path):
         train_res = pickle.load(ff)
     eval_mse, train_time = train_res["eval_mse"], train_res["train_time"]
     return train_time, eval_mse, surrogate_decoder
+
+
+class KernelBiasTransformerDeepRVNoID(nn.Module):
+    """Transfomer DeepRV variant used to justify the ID Embeddings (ablation)"""
+
+    dim: int = 64
+    num_blks: int = 2
+    s_embed: Union[Callable, nn.Module] = lambda x: x
+    head: Union[Callable, nn.Module] = MLP([128, 1], nn.gelu)
+
+    @nn.compact
+    def __call__(
+        self,
+        z: Array,
+        conditionals: Array,
+        s: Array,
+        K: Array,
+        mask: Optional[Array] = None,
+        **kwargs,
+    ):
+        (B, L), D, C = z.shape, self.dim, conditionals.shape[0]
+        batched_s = jnp.repeat(s[None, ...], z.shape[0], axis=0)
+        s_embeded = self.s_embed(batched_s)
+        x = jnp.concat([jnp.atleast_3d(z), s_embeded], axis=-1)
+        x = cond_as_feats(x, conditionals)
+        x = MLP([D * 4, D], nn.gelu)(x)
+        for _ in range(self.num_blks):
+            kwargs = {"bias": Bias.build_scalar_bias()(jnp.repeat(K[None], B, axis=0))}
+            attn = MultiHeadAttention(
+                proj_qs=MLP([D * 2]),
+                proj_ks=MLP([D * 2]),
+                proj_vs=MLP([D * 2]),
+                proj_out=MLP([D]),
+            )
+            ffn = MLP([D * 4, D])
+            x, _ = TransformerEncoderBlock(attn=attn, ffn=ffn)(
+                x, mask=mask, training=False, **kwargs
+            )
+        return VAEOutput(self.head(x))
+
+    def decode(self, z: Array, conditionals: Array, **kwargs):
+        return self(z, conditionals, **kwargs).f_hat
 
 
 if __name__ == "__main__":
