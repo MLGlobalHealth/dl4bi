@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from collections.abc import Callable
 
-import jax.numpy as jnp
 from flax import linen as nn
 from jax import Array, random
 
@@ -49,7 +48,7 @@ class PriorCVAE(nn.Module):
         latents = self.encoder(self.cond_stack_fn(f, conditionals), **kwargs).squeeze()
         z_mu = nn.Dense(self.z_dim)(latents)
         z_log_var = nn.Dense(self.z_dim)(latents)
-        z_std = jnp.exp(z_log_var / 2)
+        z_std = nn.softplus(z_log_var / 2)
         eps = random.normal(self.make_rng("extra"), z_std.shape)
         z = z_mu + z_std * eps
         f_hat = self.decoder(self.cond_stack_fn(z, conditionals), **kwargs)

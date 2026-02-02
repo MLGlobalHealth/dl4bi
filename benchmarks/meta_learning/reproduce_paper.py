@@ -30,7 +30,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
             "wandb=False",
             "train_num_steps=100",
             "valid_num_steps=50",
-            "plot_interval=50",
+            "++plot_interval=50",
         ]
     gp_kernels_2d = ["rbf"]
     models = [

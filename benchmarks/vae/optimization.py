@@ -11,22 +11,14 @@ import optax
 import pandas as pd
 from jax import Array, jit, random
 from numpyro import distributions as dist
-from sps.kernels import matern_3_2
+from sps.kernels import matern_1_2, matern_3_2, rbf
 from sps.utils import build_grid
 
 import wandb
-from dl4bi.core.mlp import MLP
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, evaluate, train
-from dl4bi.vae import (
-    DKADeepRV,
-    MLPDeepRV,
-    PriorCVAE,
-    ScanTransformerDeepRV,
-    gMLPDeepRV,
-)
+from dl4bi.vae import gMLPDeepRV
 from dl4bi.vae.train_utils import (
-    cond_as_locs,
     deep_rv_train_step,
     prior_cvae_train_step,
 )
@@ -36,10 +28,10 @@ def main(seed=15):
     save_dir = Path("results/optimization_test/")
     save_dir.mkdir(parents=True, exist_ok=True)
     grids = [
-        build_grid([{"start": 0.0, "stop": 100.0, "num": n}])
-        for n in [256, 512, 1024, 2048, 4096]
+        build_grid([{"start": 0.0, "stop": 100.0, "num": n}] * 2).reshape(-1, 2)
+        for n in [16, 32, 64]
     ]
-    priors = {"ls": dist.Uniform(0.0, 100.0)}
+    priors = {"ls": dist.Uniform(1.0, 100.0)}
     result = []
     rng = random.key(seed)
     for s in grids:
@@ -47,57 +39,59 @@ def main(seed=15):
         L = s.shape[0]
         (save_dir / f"grid_{L}").mkdir(parents=True, exist_ok=True)
         models = {
-            "PriorCVAE": PriorCVAE(MLP(dims=[L, L]), MLP(dims=[L, L]), cond_as_locs, L),
-            "DeepRV + MLP": MLPDeepRV(dims=[L, L]),
-            "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
-            "DeepRV + gMLP Large": gMLPDeepRV(num_blks=4),
-            "DeepRV + ScanTransfomer": ScanTransformerDeepRV(num_blks=2, dim=64),
-            "DeepRV + ScanTransfomer Large": ScanTransformerDeepRV(num_blks=4, dim=64),
-            "DeepRV + DKA": DKADeepRV(num_blks=2, dim=64),
+            f"DeepRV + gMLP AdamW clip={clip_k} decay={decay} lr={lr}": gMLPDeepRV(
+                num_blks=2
+            )
+            for clip_k in ["0.5", "1.0", "3.0"]
+            for decay in [1e-3, 1e-2]
+            for lr in ([1e-3] if L <= 48**2 else [2e-3])
         }
-        default_steps = 100_000 if L <= 1024 else 200_000
+        default_steps = 200_000 if L <= 1024 else 300_000
         rng_train, rng_test = random.split(rng, 2)
-        for model_name, nn_model in models.items():
-            optimizer, max_lr, bs, train_steps = gen_train_params(
-                model_name, s, default_steps
-            )
-            loader = gen_gp_dataloader(s, priors, matern_3_2, batch_size=bs)
-            wandb.init(
-                config={
-                    "model_name": model_name,
-                    "grid_size": L,
-                    "max_lr": max_lr,
-                    "batch_size": bs,
-                },
-                mode="online",
-                name=f"{model_name}",
-                project="deep_rv_optimizations",
-                reinit=True,
-            )
-            train_time, eval_mse, _ = surrogate_model_train(
-                rng_train,
-                rng_test,
-                loader,
-                nn_model,
-                optimizer,
-                train_steps,
-            )
-            result.append(
-                {
-                    "model_name": model_name,
-                    "train_time": train_time,
-                    "Test Norm MSE": eval_mse,
-                    "max_lr": max_lr,
-                    "grid_size": L,
-                    "batch_size": bs,
-                }
-            )
-            wandb.log(
-                {
-                    "train_time": train_time,
-                    "Test Norm MSE": eval_mse,
-                }
-            )
+        for kernel in [rbf, matern_3_2, matern_1_2]:
+            for model_name, nn_model in models.items():
+                optimizer, max_lr, bs, train_steps = gen_train_params(
+                    model_name, s, default_steps
+                )
+                loader = gen_gp_dataloader(s, priors, kernel, batch_size=bs)
+                wandb.init(
+                    config={
+                        "model_name": model_name,
+                        "grid_size": L,
+                        "max_lr": max_lr,
+                        "batch_size": bs,
+                        "kernel": kernel.__name__,
+                    },
+                    mode="online",
+                    name=f"{model_name}",
+                    project="deep_rv_optimizations",
+                    reinit=True,
+                )
+                train_time, eval_mse, _ = surrogate_model_train(
+                    rng_train,
+                    rng_test,
+                    loader,
+                    nn_model,
+                    optimizer,
+                    train_steps,
+                )
+                result.append(
+                    {
+                        "model_name": model_name,
+                        "train_time": train_time,
+                        "Test Norm MSE": eval_mse,
+                        "max_lr": max_lr,
+                        "grid_size": L,
+                        "batch_size": bs,
+                        "kernel": kernel.__name__,
+                    }
+                )
+                wandb.log(
+                    {
+                        "train_time": train_time,
+                        "Test Norm MSE": eval_mse,
+                    }
+                )
         pd.DataFrame(result).to_csv((save_dir / f"grid_{L}") / "res.csv")
 
 
@@ -163,25 +157,25 @@ def valid_step(rng, state, batch):
 
 def gen_train_params(model_name, s, default_steps, default_bs=32):
     L = s.shape[0]
-    max_lr = {
-        "PriorCVAE": 1e-3,
-        "DeepRV + MLP": 5e-3,
-        "DeepRV + gMLP": 5e-3,
-        "DeepRV + gMLP Large": 5e-3,
-        "DeepRV + ScanTransfomer": 1e-4,
-        "DeepRV + ScanTransfomer Large": 1e-4,
-        "DeepRV + DKA": 1e-3,
-    }[model_name]
-    bs = int(min(1, 512 / L) * default_bs)
+    max_lr = float(model_name.split("lr=")[-1])
+    bs = default_bs if L <= 48**2 else default_bs // 2
     train_steps = default_steps * (default_bs // bs)
-    optimizer = optax.yogi(cosine_annealing_lr(train_steps, max_lr))
-    if model_name in [
-        "DeepRV + ScanTransfomer",
-        "DeepRV + ScanTransfomer Large",
-        "DeepRV + DKA",
-    ]:
-        optimizer = optax.adamw(max_lr)
-    optimizer = optax.chain(optax.clip_by_global_norm(3.0), optimizer)
+    clip_vals = {
+        "0.5": optax.clip_by_global_norm(0.5),
+        "1.0": optax.clip_by_global_norm(1.0),
+        "3.0": optax.clip_by_global_norm(3.0),
+    }
+    optimizer = {
+        f"DeepRV + gMLP AdamW clip={clip_k} decay={decay} lr={lr}": optax.chain(
+            clip_vals[clip_k],
+            optax.adamw(
+                learning_rate=cosine_annealing_lr(train_steps, lr), weight_decay=decay
+            ),
+        )
+        for clip_k in ["0.5", "1.0", "3.0"]
+        for decay in [1e-3, 1e-2]
+        for lr in ([1e-3] if L <= 48**2 else [2e-3])
+    }[model_name]
     return optimizer, max_lr, bs, train_steps
 
 
