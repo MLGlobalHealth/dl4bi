@@ -63,13 +63,12 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         dry_run=dry_run,
     )
     # ablation requested by reviewer
-    ablation_overrides = [
+    for num_basis_override in [
         "model.blk.attn.attn.bias.s.num_basis=1",
         "model.blk.attn.attn.bias.s.num_basis=3",
         "model.blk.attn.attn.bias.s.num_basis=5",
         "model.blk.attn.attn.bias.s.num_basis=10",
-    ]
-    for num_basis_override in ablation_overrides:
+    ]:
         gp_benchmark(
             seeds,
             "2d",
@@ -77,7 +76,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
             ["2d/bsa_tnp"],
             gp_main,
             overrides + [num_basis_override],
-            "AISTATS BSA-TNP - Gaussian Processes (Ablation)",
+            "AISTATS BSA-TNP - Gaussian Processes Ablation",
             dry_run=dry_run,
         )
     gp_benchmark(
@@ -126,6 +125,22 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "AISTATS BSA-TNP - SIR",
         dry_run=dry_run,
     )
+    # ablation requested by reviewer
+    for num_basis_override in [
+        "model.blk.attn.attn.bias.s.num_basis=1",
+        "model.blk.attn.attn.bias.s.num_basis=3",
+        "model.blk.attn.attn.bias.s.num_basis=5",
+        "model.blk.attn.attn.bias.s.num_basis=10",
+    ]:
+        generic_benchmark(
+            seeds,
+            "configs/sir",
+            ["bsa_tnp"],
+            sir_main,
+            overrides + [num_basis_override],
+            "AISTATS BSA-TNP - SIR Ablation",
+            dry_run=dry_run,
+        )
     generic_benchmark(
         seeds,
         "configs/sir",
@@ -171,6 +186,22 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "AISTATS BSA-TNP - ERA5 - CNW",
         dry_run=dry_run,
     )
+    # ablation reqeusted by reviewer
+    for num_basis_override in [
+        "model.blk.attn.attn.bias.s.num_basis=1",
+        "model.blk.attn.attn.bias.s.num_basis=3",
+        "model.blk.attn.attn.bias.s.num_basis=5",
+        "model.blk.attn.attn.bias.s.num_basis=10",
+    ]:
+        generic_benchmark(
+            seeds,
+            "configs/era5",
+            ["bsa_tnp"],
+            era5_main,
+            overrides + era5_overrides + [num_basis_override],
+            "AISTATS BSA-TNP - ERA5 - CNW",
+            dry_run=dry_run,
+        )
     era5_overrides = [
         "data.splits.valid_region=western_europe",
         "data.splits.test_region=northern_europe",
