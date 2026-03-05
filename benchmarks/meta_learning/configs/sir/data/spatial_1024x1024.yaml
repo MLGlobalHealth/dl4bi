@@ -8,8 +8,8 @@ s:
     stop: 32
     num: 1024
 num_ctx:
-  min: 31744 # ~3%
-  max: 131072 # 12.5%
+  min: 100000 # ~10%, 100k for paper claim
+  max: 100000
 num_test: 1048576 # 100%
 num_steps: 200
 batch_size: 1

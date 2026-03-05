@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import time
 from functools import partial
 from pathlib import Path
 
@@ -53,6 +54,9 @@ def main(cfg: DictConfig):
         # NOTE: pass override_cfg=cfg in case attributes have been updated,
         # e.g. ConvCNP needs updated bounds for its latent grid
         state, _ = load_ckpt(path.with_suffix(".ckpt"), cfg)
+        # warmup and compile
+        _ = evaluate(rng_test, state, model.valid_step, dataloader, num_steps=1)
+        start = time.perf_counter()
         metrics = evaluate(
             rng_test,
             state,
@@ -60,6 +64,13 @@ def main(cfg: DictConfig):
             dataloader,
             cfg.valid_num_steps,
         )
+        # wait for all computations to complete
+        metrics = jax.tree_util.tree_map(
+            lambda x: x.block_until_ready() if hasattr(x, "block_until_ready") else x,
+            metrics,
+        )
+        elapsed = time.perf_counter() - start
+        metrics["seconds per batch"] = elapsed / cfg.valid_num_steps
         wandb.log({f"Test {m}": v for m, v in metrics.items()})
         return
     clbk = partial(

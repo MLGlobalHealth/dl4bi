@@ -51,6 +51,34 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "AISTATS BSA-TNP - Gaussian Processes",
         dry_run=dry_run,
     )
+    # as requested by reviewer
+    gp_benchmark(
+        seeds,
+        "2d",
+        gp_kernels_2d,
+        [f"2d/{m}" for m in ["te_tnp_128", "te_tnp_vanilla"]],
+        gp_main,
+        overrides,
+        "AISTATS BSA-TNP - Gaussian Processes",
+        dry_run=dry_run,
+    )
+    # ablation requested by reviewer
+    for num_basis_override in [
+        "model.blk.attn.attn.bias.s.num_basis=1",
+        "model.blk.attn.attn.bias.s.num_basis=3",
+        "model.blk.attn.attn.bias.s.num_basis=5",
+        "model.blk.attn.attn.bias.s.num_basis=10",
+    ]:
+        gp_benchmark(
+            seeds,
+            "2d",
+            gp_kernels_2d,
+            ["2d/bsa_tnp"],
+            gp_main,
+            overrides + [num_basis_override],
+            "AISTATS BSA-TNP - Gaussian Processes Ablation",
+            dry_run=dry_run,
+        )
     gp_benchmark(
         seeds,
         "2d_shifted_10",
@@ -97,6 +125,22 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "AISTATS BSA-TNP - SIR",
         dry_run=dry_run,
     )
+    # ablation requested by reviewer
+    for num_basis_override in [
+        "model.blk.attn.attn.bias.s.num_basis=1",
+        "model.blk.attn.attn.bias.s.num_basis=3",
+        "model.blk.attn.attn.bias.s.num_basis=5",
+        "model.blk.attn.attn.bias.s.num_basis=10",
+    ]:
+        generic_benchmark(
+            seeds,
+            "configs/sir",
+            ["bsa_tnp"],
+            sir_main,
+            overrides + [num_basis_override],
+            "AISTATS BSA-TNP - SIR Ablation",
+            dry_run=dry_run,
+        )
     generic_benchmark(
         seeds,
         "configs/sir",
@@ -142,6 +186,34 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "AISTATS BSA-TNP - ERA5 - CNW",
         dry_run=dry_run,
     )
+    # ablation reqeusted by reviewer
+    for num_basis_overrides in [
+        [
+            "model.blk.attn.attn.bias.s.num_basis=1",
+            "model.blk.attn.attn.bias.t.num_basis=1",
+        ],
+        [
+            "model.blk.attn.attn.bias.s.num_basis=3",
+            "model.blk.attn.attn.bias.t.num_basis=3",
+        ],
+        [
+            "model.blk.attn.attn.bias.s.num_basis=5",
+            "model.blk.attn.attn.bias.t.num_basis=5",
+        ],
+        [
+            "model.blk.attn.attn.bias.s.num_basis=10",
+            "model.blk.attn.attn.bias.t.num_basis=10",
+        ],
+    ]:
+        generic_benchmark(
+            seeds,
+            "configs/era5",
+            ["bsa_tnp"],
+            era5_main,
+            overrides + era5_overrides + num_basis_overrides,
+            "AISTATS BSA-TNP - ERA5 - CNW Ablation",
+            dry_run=dry_run,
+        )
     era5_overrides = [
         "data.splits.valid_region=western_europe",
         "data.splits.test_region=northern_europe",
@@ -165,6 +237,17 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         beijing_air_quality_main,
         overrides,
         "AISTATS BSA-TNP - Beijing Air Quality",
+        dry_run=dry_run,
+    )
+    # ablation requested by reviewer
+    beijing_ablation_models = ["bsa_tnp", "bsa_tnp_only_embed", "bsa_tnp_only_bias"]
+    generic_benchmark(
+        seeds,
+        "configs/beijing_air_quality",
+        beijing_ablation_models,
+        beijing_air_quality_main,
+        overrides,
+        "AISTATS BSA-TNP - Beijing Air Quality Ablation",
         dry_run=dry_run,
     )
     generic_benchmark(
@@ -211,7 +294,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         rot_models,
         gp_main,
         overrides,
-        "Neurips BSA-TNP - Gaussian Processes - Rotated",
+        "AISTATS BSA-TNP - Gaussian Processes - Rotated",
         dry_run=dry_run,
     )
     for rot in rots:
@@ -227,7 +310,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
                 "evaluate_only=True",
                 f"data.rotate=[{rot}]",
             ],
-            "Neurips BSA-TNP - Gaussian Processes - Rotated",
+            "AISTATS BSA-TNP - Gaussian Processes - Rotated",
             dry_run=dry_run,
         )
 

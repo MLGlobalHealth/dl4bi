@@ -2,10 +2,8 @@ _target_: dl4bi.meta_learning.TETNP
 encoder:
   _target_: dl4bi.transformer.TEEncoder
   num_blks: 5
-  embed_dim: 128
   blk:
     _target_: dl4bi.transformer.TEBlock
-    num_heads: 8
     attn:
       _target_: dl4bi.attention.TEMultiHeadAttention
       num_heads: 8
