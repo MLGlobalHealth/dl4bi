@@ -1,5 +1,13 @@
 # Deep Learning for Bayesian Inference (dl4bi)
 
+This repository contains code for two papers accepted to **AISTATS 2026**:
+
+- **DeepRV** — [arxiv.org/abs/2503.21473](https://arxiv.org/abs/2503.21473)
+  Reproduction code: [benchmarks/vae/](benchmarks/vae/)
+
+- **BSA-TNP** — [arxiv.org/abs/2506.09163](https://arxiv.org/abs/2506.09163)
+  Reproduction code: [benchmarks/meta_learning/](benchmarks/meta_learning/)
+
 ## Install
 1. Install [jax](https://jax.readthedocs.io/en/latest/installation.html)
 2. Install [numpyro](https://num.pyro.ai/en/stable/getting_started.html#installation)

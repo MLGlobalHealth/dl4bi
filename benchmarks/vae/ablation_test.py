@@ -109,12 +109,33 @@ def main(init_seed=42, num_seeds=3):
                 samples, mcmc, post, infer_time = hmc(
                     rng_infer, infer_model, y_obs, obs_mask, surrogate_decoder
                 )
+                n = len(samples["ls"]) // 2
                 if nn_model is None:
                     gp_mean_obs = post["obs"].mean(axis=0)
+                    gp_c1_mean_obs = post["obs"][:n].mean(axis=0)
+                    gp_c2_mean_obs = post["obs"][n:].mean(axis=0)
                     beta_gp, ls_gp = samples["beta"], samples["ls"]
+                    ls_gp_c1, ls_gp_c2 = ls_gp[:n], ls_gp[n:]
+                    beta_gp_c1, beta_gp_c2 = beta_gp[:n], beta_gp[n:]
                 ess = az.ess(mcmc, method="mean")
                 mean_obs = post["obs"].mean(axis=0)
+                model_c1_mean_obs = post["obs"][:n].mean(axis=0)
+                model_c2_mean_obs = post["obs"][n:].mean(axis=0)
+                ls_model_c1, ls_model_c2 = samples["ls"][:n], samples["ls"][n:]
+                beta_model_c1, beta_model_c2 = samples["beta"][:n], samples["beta"][n:]
                 sq_res = (y_obs - mean_obs) ** 2
+                mse_cross = 0.5 * (
+                    ((gp_c1_mean_obs - model_c2_mean_obs) ** 2).mean()
+                    + ((gp_c2_mean_obs - model_c1_mean_obs) ** 2).mean()
+                )
+                ls_wass_cross = 0.5 * (
+                    wasserstein_distance(ls_gp_c1, ls_model_c2)
+                    + wasserstein_distance(ls_gp_c2, ls_model_c1)
+                )
+                beta_wass_cross = 0.5 * (
+                    wasserstein_distance(beta_gp_c1, beta_model_c2)
+                    + wasserstein_distance(beta_gp_c2, beta_model_c1)
+                )
                 result.append(
                     {
                         "model_name": model_name,
@@ -131,12 +152,15 @@ def main(init_seed=42, num_seeds=3):
                         ).mean(),
                         "num_chains": 2,
                         "MSE(y_hat_gp, y_hat)": ((gp_mean_obs - mean_obs) ** 2).mean(),
+                        "MSE(y_hat_gp, y_hat) cross chain": mse_cross,
                         "ls wasserstein distance": wasserstein_distance(
                             ls_gp, samples["ls"]
                         ),
+                        "ls wasserstein distance cross chain": ls_wass_cross,
                         "beta wasserstein distance": wasserstein_distance(
                             beta_gp, samples["beta"]
                         ),
+                        "beta wasserstein distance cross chain": beta_wass_cross,
                         "ESS ls": ess["ls"].mean().item(),
                         "ESS beta": ess["beta"].mean().item(),
                     }
