@@ -24,6 +24,7 @@ from dl4bi.core.train import (
     Callback,
     TrainState,
     evaluate,
+    load_ckpt,
     save_ckpt,
     train,
 )
@@ -60,6 +61,18 @@ def main(cfg: DictConfig):
     )
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
+    if cfg.evaluate_only:
+        path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
+        state, _ = load_ckpt(path.with_suffix(".ckpt"), cfg)
+        metrics = evaluate(
+            rng_test,
+            state,
+            model.valid_step,
+            test_dataloader,
+            cfg.data.test_num_steps,
+        )
+        wandb.log({f"Test {m}": v for m, v in metrics.items()})
+        return
     clbk = Callback(plot, cfg.data.plot_interval)
     state = train(
         rng_train,
@@ -81,7 +94,7 @@ def main(cfg: DictConfig):
         state,
         model.valid_step,
         test_dataloader,
-        cfg.data.valid_num_steps,
+        cfg.data.test_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")

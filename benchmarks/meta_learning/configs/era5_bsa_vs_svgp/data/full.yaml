@@ -1,6 +1,6 @@
 name: full
 train_num_steps: 100000
-valid_num_steps: 5000 # exhaust valid dataloader
+valid_num_steps: 5000
 test_num_steps: ${.valid_num_steps}
 valid_interval: 5000
 plot_interval: 100000
@@ -10,9 +10,9 @@ splits:
   test_region: western_europe
 dataloader:
   batch_size: 8
-  num_ctx_min_per_t: 45  # ~5% of 900 = 30 * 30
-  num_ctx_max_per_t: 225  # ~25% of 900 = 30 * 30
-  num_test: 900  # 900 = 30 * 30 = predicted frame
+  num_ctx_min_per_t: 45
+  num_ctx_max_per_t: 225
+  num_test: 900
   H_deg: 7.5
   W_deg: 7.5
   T_hrs: 30

@@ -46,12 +46,13 @@ def train(
     valid_dataloader: Optional[Callable] = None,
     valid_monitor_metric: str = "NLL",
     early_stop_patience: Optional[int] = None,
-    callbacks: list[Callback] = [],
+    callbacks: Optional[list[Callback]] = None,
     callback_dataloader: Optional[Callable] = None,
     log_loss_interval: int = 100,
     return_state: str = "last",  # best, last, both
     state: Optional[TrainState] = None,
 ):
+    callbacks = callbacks or []
     rng_data, rng_params, rng_extra, rng_train, rng_valid = random.split(rng, 5)
     batches = train_dataloader(rng_data)
     batch = next(batches)

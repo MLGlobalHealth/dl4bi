@@ -1,6 +1,7 @@
 name: reduced
 train_num_steps: 25000 # 100000 / 4 because batch size is 8x larger
 valid_num_steps: 5000 # exhaust valid dataloader
+test_num_steps: ${.valid_num_steps}
 valid_interval: 5000
 plot_interval: 25000
 splits:

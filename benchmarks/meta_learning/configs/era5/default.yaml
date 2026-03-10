@@ -5,6 +5,7 @@ defaults:
 seed: 42
 wandb: True
 project: ERA5
+evaluate_only: False
 optimizer:
   _target_: optax.chain
   _args_:

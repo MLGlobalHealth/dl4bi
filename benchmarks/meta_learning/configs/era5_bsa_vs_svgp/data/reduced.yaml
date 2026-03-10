@@ -1,0 +1,31 @@
+name: reduced
+train_num_steps: 25000
+valid_num_steps: 5000
+test_num_steps: ${.valid_num_steps}
+valid_interval: 5000
+plot_interval: 25000
+splits:
+  train_region: central_europe
+  valid_region: northern_europe
+  test_region: western_europe
+train_dataloader:
+  batch_size: 32
+  num_ctx_min_per_t: 10
+  num_ctx_max_per_t: 50
+  num_test: 196
+  H_deg: 3.5
+  W_deg: 3.5
+  T_hrs: 30
+  T_hrs_delta: 6
+  num_batches_per_subset: 8
+valid_dataloader:
+  batch_size: 8
+  num_ctx_min_per_t: 45
+  num_ctx_max_per_t: 225
+  num_test: 900
+  H_deg: 7.5
+  W_deg: 7.5
+  T_hrs: 30
+  T_hrs_delta: 6
+  num_batches_per_subset: 32
+test_dataloader: ${.valid_dataloader}
