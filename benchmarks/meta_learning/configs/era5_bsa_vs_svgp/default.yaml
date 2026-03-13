@@ -37,7 +37,17 @@ svgp:
   init_noise: 0.1
   init_amplitude: 1.0
   init_lengthscale: 1.0
-  learn_inducing_locations: False
+  learn_inducing_locations: True
+svgp_sweep:
+  enabled: True
+  seed: 0
+  num_batches: 4
+  metric: NLL
+  grid:
+    num_inducing: [64, 128, 256]
+    num_steps: [500, 750]
+    learning_rate: [1.0e-3, 5.0e-3]
+    init_lengthscale: [0.5, 1.0, 2.0]
 optimizer:
   _target_: optax.chain
   _args_:

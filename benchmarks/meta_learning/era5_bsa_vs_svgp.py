@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import json
-from datetime import datetime
 from functools import partial
+from itertools import product
 from pathlib import Path
+from time import perf_counter
 
 import hydra
 import jax
@@ -42,6 +43,7 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     splits = resolve_data_splits(cfg)
     ds_train, ds_valid, ds_test, revert = load_data(**splits)
+    svgp_cfg = maybe_sweep_svgp(cfg, ds_valid)
     test_dataloader = partial(dataloader, ds=ds_test, **cfg.benchmark.dataloader)
     records = []
     seed_iter = tqdm(
@@ -52,12 +54,12 @@ def main(cfg: DictConfig):
     )
     for seed in seed_iter:
         state, ckpt_path = load_or_train_bsa(seed, cfg, ds_train, ds_valid, revert)
-        seed_records = benchmark_seed(seed, state, test_dataloader, cfg)
+        seed_records = benchmark_seed(seed, state, test_dataloader, cfg, svgp_cfg)
         records.extend(seed_records)
         wandb.log({f"checkpoint/{seed}": str(ckpt_path)})
         for metric, value in summarize_records(seed_records).items():
             wandb.log({f"seed/{seed}/{metric}": value})
-    save_results(records, cfg, run_name)
+    save_results(records, cfg, run_name, svgp_cfg)
 
 
 def load_or_train_bsa(
@@ -164,6 +166,7 @@ def benchmark_seed(
     state,
     test_dataloader,
     cfg: DictConfig,
+    svgp_cfg: DictConfig,
 ):
     rng = random.key(seed)
     batches = test_dataloader(rng)
@@ -195,6 +198,7 @@ def benchmark_seed(
             batch_idx,
             rng_svgp,
             cfg,
+            svgp_cfg,
         )
         records.extend(task_records)
     return records
@@ -208,6 +212,7 @@ def benchmark_batch(
     batch_idx: int,
     rng: jax.Array,
     cfg: DictConfig,
+    svgp_cfg: DictConfig,
 ):
     batch_size = batch.f_test.shape[0]
     rngs = random.split(rng, batch_size)
@@ -230,7 +235,9 @@ def benchmark_batch(
                 **bsa_metrics,
             }
         )
-        svgp_mu, svgp_std, loss = fit_svgp_predict(rngs[task_idx], task, cfg.svgp)
+        svgp_mu, svgp_std, loss, fit_stats = fit_svgp_predict(
+            rngs[task_idx], task, svgp_cfg
+        )
         svgp_metrics = compute_metrics(
             target,
             np.asarray(svgp_mu),
@@ -244,6 +251,7 @@ def benchmark_batch(
                 "task": task_idx,
                 "method": "SVGP",
                 "ELBO": float(loss),
+                **fit_stats,
                 **svgp_metrics,
             }
         )
@@ -280,6 +288,7 @@ def fit_svgp_predict(rng: jax.Array, task: dict, cfg: DictConfig):
     rng_z, rng_svi = random.split(rng)
     z_init = initialize_inducing_inputs(rng_z, x_ctx, cfg.num_inducing)
     svi = SVI(svgp_model, svgp_guide, Adam(cfg.learning_rate), Trace_ELBO())
+    fit_start = perf_counter()
     svi_state = svi.init(
         rng_svi,
         x_ctx,
@@ -304,9 +313,25 @@ def fit_svgp_predict(rng: jax.Array, task: dict, cfg: DictConfig):
             cfg.learn_inducing_locations,
             cfg.jitter,
         )
+    fit_time_s = perf_counter() - fit_start
     params = svi.get_params(svi_state)
+    predict_start = perf_counter()
     mu, std = svgp_predictive(x_test, params, z_init, cfg.jitter)
-    return mu, std, loss
+    predict_time_s = perf_counter() - predict_start
+    return (
+        mu,
+        std,
+        loss,
+        {
+            "fit_time_s": fit_time_s,
+            "predict_time_s": predict_time_s,
+            "total_time_s": fit_time_s + predict_time_s,
+            "num_ctx": int(x_ctx.shape[0]),
+            "num_test": int(x_test.shape[0]),
+            "num_inducing": int(z_init.shape[0]),
+            "num_steps": int(cfg.num_steps),
+        },
+    )
 
 
 def initialize_inducing_inputs(rng: jax.Array, x: jax.Array, num_inducing: int):
@@ -454,7 +479,22 @@ def summarize_records(records: list[dict]):
     df = pd.DataFrame(records)
     metric_cols = [
         c
-        for c in ["NLL", "RMSE", "MAE", "Coverage", "CRPS", "IS", "ELBO"]
+        for c in [
+            "NLL",
+            "RMSE",
+            "MAE",
+            "Coverage",
+            "CRPS",
+            "IS",
+            "ELBO",
+            "fit_time_s",
+            "predict_time_s",
+            "total_time_s",
+            "num_ctx",
+            "num_test",
+            "num_inducing",
+            "num_steps",
+        ]
         if c in df.columns
     ]
     summary = (
@@ -471,7 +511,7 @@ def summarize_records(records: list[dict]):
     }
 
 
-def save_results(records: list[dict], cfg: DictConfig, run_name: str):
+def save_results(records: list[dict], cfg: DictConfig, run_name: str, svgp_cfg: DictConfig):
     df = pd.DataFrame(records)
     per_seed = (
         df.groupby(["seed", "method"])
@@ -481,7 +521,22 @@ def save_results(records: list[dict], cfg: DictConfig, run_name: str):
     )
     metrics = [
         c
-        for c in ["NLL", "RMSE", "MAE", "Coverage", "CRPS", "IS", "ELBO"]
+        for c in [
+            "NLL",
+            "RMSE",
+            "MAE",
+            "Coverage",
+            "CRPS",
+            "IS",
+            "ELBO",
+            "fit_time_s",
+            "predict_time_s",
+            "total_time_s",
+            "num_ctx",
+            "num_test",
+            "num_inducing",
+            "num_steps",
+        ]
         if c in per_seed.columns
     ]
     summary = {}
@@ -504,6 +559,8 @@ def save_results(records: list[dict], cfg: DictConfig, run_name: str):
         json.dump(summary, fp, indent=2, sort_keys=True)
     with open(out_dir / "config.json", "w") as fp:
         json.dump(OmegaConf.to_container(cfg, resolve=True), fp, indent=2, sort_keys=True)
+    with open(out_dir / "svgp_config.json", "w") as fp:
+        json.dump(OmegaConf.to_container(svgp_cfg, resolve=True), fp, indent=2, sort_keys=True)
     wandb.log({"summary_path": str(out_dir / "summary.json")})
     flat_summary = flatten_summary(summary)
     if flat_summary:
@@ -517,6 +574,96 @@ def flatten_summary(summary: dict):
             for stat, value in stats.items():
                 flat[f"summary/{method}/{metric}/{stat}"] = value
     return flat
+
+
+def maybe_sweep_svgp(cfg: DictConfig, ds_valid):
+    sweep_cfg = cfg.get("svgp_sweep")
+    if not sweep_cfg or not sweep_cfg.get("enabled", False):
+        return OmegaConf.create(OmegaConf.to_container(cfg.svgp, resolve=True))
+    candidates = enumerate_svgp_candidates(cfg.svgp, sweep_cfg.grid)
+    if len(candidates) == 1:
+        return candidates[0]
+    valid_dataloader = partial(dataloader, ds=ds_valid, **cfg.benchmark.dataloader)
+    best_cfg = None
+    best_score = float("inf")
+    rows = []
+    rng = random.key(sweep_cfg.seed)
+    batches = valid_dataloader(rng)
+    eval_batches = [next(batches) for _ in range(sweep_cfg.num_batches)]
+    for candidate in tqdm(
+        candidates,
+        desc="SVGP sweep",
+        dynamic_ncols=True,
+        disable=not cfg.progress.seeds,
+    ):
+        metrics = evaluate_svgp_candidate(eval_batches, candidate, sweep_cfg.metric, rng)
+        row = {**OmegaConf.to_container(candidate, resolve=True), **metrics}
+        rows.append(row)
+        score = metrics[sweep_cfg.metric]
+        if score < best_score:
+            best_score = score
+            best_cfg = candidate
+    sweep_df = pd.DataFrame(rows).sort_values(sweep_cfg.metric)
+    wandb.log(
+        {
+            f"svgp_sweep/best/{k}": v
+            for k, v in OmegaConf.to_container(best_cfg, resolve=True).items()
+        }
+    )
+    wandb.log({f"svgp_sweep/best/{sweep_cfg.metric}": best_score})
+    if not sweep_df.empty:
+        table = wandb.Table(dataframe=sweep_df)
+        wandb.log({"svgp_sweep/results": table})
+    return best_cfg
+
+
+def enumerate_svgp_candidates(base_cfg: DictConfig, grid_cfg: DictConfig):
+    base = OmegaConf.to_container(base_cfg, resolve=True)
+    grid = OmegaConf.to_container(grid_cfg, resolve=True)
+    keys = sorted(grid)
+    values = [grid[k] for k in keys]
+    candidates = []
+    for combo in product(*values):
+        candidate = dict(base)
+        candidate.update(dict(zip(keys, combo, strict=True)))
+        candidates.append(OmegaConf.create(candidate))
+    return candidates
+
+
+def evaluate_svgp_candidate(
+    eval_batches: list,
+    candidate: DictConfig,
+    metric: str,
+    rng: jax.Array,
+):
+    records = []
+    for batch in eval_batches:
+        batch_size = batch.f_test.shape[0]
+        rngs = random.split(rng, batch_size + 1)
+        rng = rngs[-1]
+        for task_idx in range(batch_size):
+            task = extract_task(batch, task_idx)
+            target = np.asarray(task["y_test"])
+            mu, std, loss, fit_stats = fit_svgp_predict(rngs[task_idx], task, candidate)
+            records.append(
+                {
+                    "NLL": compute_metrics(
+                        target,
+                        np.asarray(mu),
+                        np.asarray(std),
+                        0.95,
+                    )["NLL"],
+                    "ELBO": float(loss),
+                    **fit_stats,
+                }
+            )
+    df = pd.DataFrame(records)
+    return {
+        metric: float(df[metric].mean()),
+        "ELBO": float(df["ELBO"].mean()),
+        "fit_time_s": float(df["fit_time_s"].mean()),
+        "total_time_s": float(df["total_time_s"].mean()),
+    }
 
 
 if __name__ == "__main__":
