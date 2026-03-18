@@ -7,7 +7,7 @@ project: ERA5 BSA-TNP vs SVGP
 results_dir: results
 wandb: True
 benchmark_setting: CNW
-seeds: [0, 1, 2, 3, 4]
+seeds: [46, 61, 69, 79, 91]
 progress:
   seeds: True
   batches: True

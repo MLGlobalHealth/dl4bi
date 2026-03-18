@@ -264,7 +264,9 @@ def extract_task(batch, idx: int):
     x_ctx = None if batch.x_ctx is None else batch.x_ctx[idx][mask_ctx]
     x_test = None if batch.x_test is None else batch.x_test[idx][mask_test]
     return {
-        "x_ctx": stack_features(x_ctx, batch.s_ctx[idx][mask_ctx], batch.t_ctx[idx][mask_ctx]),
+        "x_ctx": stack_features(
+            x_ctx, batch.s_ctx[idx][mask_ctx], batch.t_ctx[idx][mask_ctx]
+        ),
         "y_ctx": batch.f_ctx[idx][mask_ctx, 0],
         "x_test": stack_features(
             x_test,
@@ -287,6 +289,7 @@ def fit_svgp_predict(rng: jax.Array, task: dict, cfg: DictConfig):
     x_test = jnp.asarray(task["x_test"])
     rng_z, rng_svi = random.split(rng)
     z_init = initialize_inducing_inputs(rng_z, x_ctx, cfg.num_inducing)
+    kernel_init = resolve_weather_kernel_init(cfg)
     svi = SVI(svgp_model, svgp_guide, Adam(cfg.learning_rate), Trace_ELBO())
     fit_start = perf_counter()
     svi_state = svi.init(
@@ -294,9 +297,8 @@ def fit_svgp_predict(rng: jax.Array, task: dict, cfg: DictConfig):
         x_ctx,
         y_ctx,
         z_init,
-        cfg.init_amplitude,
+        kernel_init,
         cfg.init_noise,
-        cfg.init_lengthscale,
         cfg.learn_inducing_locations,
         cfg.jitter,
     )
@@ -307,9 +309,8 @@ def fit_svgp_predict(rng: jax.Array, task: dict, cfg: DictConfig):
             x_ctx,
             y_ctx,
             z_init,
-            cfg.init_amplitude,
+            kernel_init,
             cfg.init_noise,
-            cfg.init_lengthscale,
             cfg.learn_inducing_locations,
             cfg.jitter,
         )
@@ -341,20 +342,43 @@ def initialize_inducing_inputs(rng: jax.Array, x: jax.Array, num_inducing: int):
     return x[idx]
 
 
+def resolve_weather_kernel_init(cfg: DictConfig):
+    base_amp = float(cfg.get("init_amplitude", 1.0))
+    base_ls = float(cfg.get("init_lengthscale", 1.0))
+    spatial_ls = cfg.get("init_spatial_lengthscale")
+    if spatial_ls is None:
+        spatial_ls = [base_ls, base_ls]
+    elif np.isscalar(spatial_ls):
+        spatial_ls = [float(spatial_ls), float(spatial_ls)]
+    return {
+        "amp_spatiotemporal": jnp.array(
+            cfg.get("init_amplitude_spatiotemporal", 0.5 * base_amp)
+        ),
+        "amp_diurnal": jnp.array(cfg.get("init_amplitude_diurnal", 0.5 * base_amp)),
+        "ls_elevation": jnp.array(cfg.get("init_elevation_lengthscale", base_ls)),
+        "ls_space": jnp.asarray(spatial_ls),
+        "ls_time": jnp.array(cfg.get("init_temporal_lengthscale", base_ls)),
+        "ls_hour_of_day": jnp.array(cfg.get("init_hour_of_day_lengthscale", base_ls)),
+    }
+
+
 def svgp_model(
     x: jax.Array,
     y: jax.Array,
     z_init: jax.Array,
-    init_amplitude: float,
+    kernel_init: dict,
     init_noise: float,
-    init_lengthscale: float,
     learn_inducing_locations: bool,
     jitter: float,
 ):
-    dim = x.shape[-1]
-    amplitude = numpyro.param(
-        "amplitude",
-        jnp.array(init_amplitude),
+    amp_spatiotemporal = numpyro.param(
+        "amp_spatiotemporal",
+        kernel_init["amp_spatiotemporal"],
+        constraint=constraints.positive,
+    )
+    amp_diurnal = numpyro.param(
+        "amp_diurnal",
+        kernel_init["amp_diurnal"],
         constraint=constraints.positive,
     )
     noise = numpyro.param(
@@ -362,17 +386,37 @@ def svgp_model(
         jnp.array(init_noise),
         constraint=constraints.positive,
     )
-    lengthscale = numpyro.param(
-        "lengthscale",
-        jnp.full((dim,), init_lengthscale),
+    ls_elevation = numpyro.param(
+        "ls_elevation",
+        kernel_init["ls_elevation"],
         constraint=constraints.positive,
     )
-    z = (
-        numpyro.param("inducing_inputs", z_init)
-        if learn_inducing_locations
-        else z_init
+    ls_space = numpyro.param(
+        "ls_space",
+        kernel_init["ls_space"],
+        constraint=constraints.positive,
     )
-    k_zz = rbf_kernel(z, z, amplitude, lengthscale)
+    ls_time = numpyro.param(
+        "ls_time",
+        kernel_init["ls_time"],
+        constraint=constraints.positive,
+    )
+    ls_hour_of_day = numpyro.param(
+        "ls_hour_of_day",
+        kernel_init["ls_hour_of_day"],
+        constraint=constraints.positive,
+    )
+    z = numpyro.param("inducing_inputs", z_init) if learn_inducing_locations else z_init
+    k_zz = weather_kernel(
+        z,
+        z,
+        amp_spatiotemporal,
+        amp_diurnal,
+        ls_elevation,
+        ls_space,
+        ls_time,
+        ls_hour_of_day,
+    )
     k_zz = k_zz + jitter * jnp.eye(z.shape[0], dtype=x.dtype)
     chol = jnp.linalg.cholesky(k_zz)
     u = numpyro.sample(
@@ -383,10 +427,20 @@ def svgp_model(
         ),
     )
     alpha = jsp_linalg.cho_solve((chol, True), u)
-    k_xz = rbf_kernel(x, z, amplitude, lengthscale)
+    k_xz = weather_kernel(
+        x,
+        z,
+        amp_spatiotemporal,
+        amp_diurnal,
+        ls_elevation,
+        ls_space,
+        ls_time,
+        ls_hour_of_day,
+    )
     proj = jsp_linalg.solve_triangular(chol, k_xz.T, lower=True)
     mean = k_xz @ alpha
-    var = amplitude - jnp.sum(proj**2, axis=0) + noise**2
+    prior_diag = weather_kernel_diag(x, amp_spatiotemporal, amp_diurnal)
+    var = prior_diag - jnp.sum(proj**2, axis=0) + noise**2
     numpyro.sample(
         "obs",
         dist.Normal(mean, jnp.sqrt(jnp.clip(var, a_min=jitter))),
@@ -398,13 +452,19 @@ def svgp_guide(
     x: jax.Array,
     y: jax.Array,
     z_init: jax.Array,
-    init_amplitude: float,
+    kernel_init: dict,
     init_noise: float,
-    init_lengthscale: float,
     learn_inducing_locations: bool,
     jitter: float,
 ):
-    del x, y, init_amplitude, init_noise, init_lengthscale, learn_inducing_locations, jitter
+    del (
+        x,
+        y,
+        kernel_init,
+        init_noise,
+        learn_inducing_locations,
+        jitter,
+    )
     m = z_init.shape[0]
     loc = numpyro.param("u_loc", jnp.zeros(m))
     scale_tril = numpyro.param(
@@ -421,20 +481,43 @@ def svgp_predictive(
     z_init: jax.Array,
     jitter: float,
 ):
-    amplitude = params["amplitude"]
+    amp_spatiotemporal = params["amp_spatiotemporal"]
+    amp_diurnal = params["amp_diurnal"]
     noise = params["noise"]
-    lengthscale = params["lengthscale"]
+    ls_elevation = params["ls_elevation"]
+    ls_space = params["ls_space"]
+    ls_time = params["ls_time"]
+    ls_hour_of_day = params["ls_hour_of_day"]
     z = params.get("inducing_inputs", z_init)
     u_loc = params["u_loc"]
     u_scale_tril = params["u_scale_tril"]
-    k_zz = rbf_kernel(z, z, amplitude, lengthscale)
+    k_zz = weather_kernel(
+        z,
+        z,
+        amp_spatiotemporal,
+        amp_diurnal,
+        ls_elevation,
+        ls_space,
+        ls_time,
+        ls_hour_of_day,
+    )
     k_zz = k_zz + jitter * jnp.eye(z.shape[0], dtype=x_test.dtype)
     chol = jnp.linalg.cholesky(k_zz)
-    k_tz = rbf_kernel(x_test, z, amplitude, lengthscale)
+    k_tz = weather_kernel(
+        x_test,
+        z,
+        amp_spatiotemporal,
+        amp_diurnal,
+        ls_elevation,
+        ls_space,
+        ls_time,
+        ls_hour_of_day,
+    )
     alpha = jsp_linalg.cho_solve((chol, True), u_loc)
     proj = jsp_linalg.solve_triangular(chol, k_tz.T, lower=True)
     mean = k_tz @ alpha
-    prior_diag = amplitude - jnp.sum(proj**2, axis=0)
+    prior_diag = weather_kernel_diag(x_test, amp_spatiotemporal, amp_diurnal)
+    prior_diag = prior_diag - jnp.sum(proj**2, axis=0)
     precision_proj = jsp_linalg.cho_solve((chol, True), k_tz.T).T
     s = u_scale_tril @ u_scale_tril.T
     var_q = jnp.sum((precision_proj @ s) * precision_proj, axis=1)
@@ -443,16 +526,65 @@ def svgp_predictive(
     return mean, std
 
 
-def rbf_kernel(
+def weather_kernel_diag(
+    x: jax.Array,
+    amp_spatiotemporal: jax.Array,
+    amp_diurnal: jax.Array,
+):
+    return jnp.full((x.shape[0],), amp_spatiotemporal + amp_diurnal, dtype=x.dtype)
+
+
+def weather_kernel(
     x_a: jax.Array,
     x_b: jax.Array,
-    amplitude: jax.Array,
-    lengthscale: jax.Array,
+    amp_spatiotemporal: jax.Array,
+    amp_diurnal: jax.Array,
+    ls_elevation: jax.Array,
+    ls_space: jax.Array,
+    ls_time: jax.Array,
+    ls_hour_of_day: jax.Array,
 ):
+    elev_a, hod_a, space_a, time_a = split_weather_features(x_a)
+    elev_b, hod_b, space_b, time_b = split_weather_features(x_b)
+    k_elev = exp_quad_kernel(elev_a, elev_b, jnp.atleast_1d(ls_elevation))
+    k_space = matern32_kernel(space_a, space_b, ls_space)
+    k_time = matern32_kernel(time_a, time_b, jnp.atleast_1d(ls_time))
+    k_hod = periodic_kernel(hod_a, hod_b, ls_hour_of_day, period=1.0)
+    return amp_spatiotemporal * k_space * k_time * k_elev + amp_diurnal * k_space * k_hod * k_elev
+
+
+def split_weather_features(x: jax.Array):
+    if x.shape[-1] != 5:
+        raise ValueError(
+            f"Expected ERA5 SVGP inputs with 5 features [elev, hod, lat, lon, time], got {x.shape[-1]}."
+        )
+    return x[:, :1], x[:, 1:2], x[:, 2:4], x[:, 4:5]
+
+
+def sq_dist_ard(x_a: jax.Array, x_b: jax.Array, lengthscale: jax.Array):
     x_a = x_a / lengthscale
     x_b = x_b / lengthscale
-    sq_dist = jnp.sum((x_a[:, None, :] - x_b[None, :, :]) ** 2, axis=-1)
-    return amplitude * jnp.exp(-0.5 * sq_dist)
+    return jnp.sum((x_a[:, None, :] - x_b[None, :, :]) ** 2, axis=-1)
+
+
+def exp_quad_kernel(x_a: jax.Array, x_b: jax.Array, lengthscale: jax.Array):
+    sq_dist = sq_dist_ard(x_a, x_b, lengthscale)
+    return jnp.exp(-0.5 * sq_dist)
+
+
+def matern32_kernel(x_a: jax.Array, x_b: jax.Array, lengthscale: jax.Array):
+    sq_dist = sq_dist_ard(x_a, x_b, lengthscale)
+    r = jnp.sqrt(jnp.clip(sq_dist, a_min=1.0e-12))
+    scaled_r = jnp.sqrt(3.0) * r
+    return (1.0 + scaled_r) * jnp.exp(-scaled_r)
+
+
+def periodic_kernel(
+    x_a: jax.Array, x_b: jax.Array, lengthscale: jax.Array, period: float
+):
+    d = jnp.pi * (x_a[:, None, 0] - x_b[None, :, 0]) / period
+    ls = jnp.squeeze(lengthscale)
+    return jnp.exp(-2.0 * jnp.sin(d) ** 2 / (ls**2))
 
 
 def compute_metrics(
@@ -511,7 +643,9 @@ def summarize_records(records: list[dict]):
     }
 
 
-def save_results(records: list[dict], cfg: DictConfig, run_name: str, svgp_cfg: DictConfig):
+def save_results(
+    records: list[dict], cfg: DictConfig, run_name: str, svgp_cfg: DictConfig
+):
     df = pd.DataFrame(records)
     per_seed = (
         df.groupby(["seed", "method"])
@@ -558,9 +692,13 @@ def save_results(records: list[dict], cfg: DictConfig, run_name: str, svgp_cfg: 
     with open(out_dir / "summary.json", "w") as fp:
         json.dump(summary, fp, indent=2, sort_keys=True)
     with open(out_dir / "config.json", "w") as fp:
-        json.dump(OmegaConf.to_container(cfg, resolve=True), fp, indent=2, sort_keys=True)
+        json.dump(
+            OmegaConf.to_container(cfg, resolve=True), fp, indent=2, sort_keys=True
+        )
     with open(out_dir / "svgp_config.json", "w") as fp:
-        json.dump(OmegaConf.to_container(svgp_cfg, resolve=True), fp, indent=2, sort_keys=True)
+        json.dump(
+            OmegaConf.to_container(svgp_cfg, resolve=True), fp, indent=2, sort_keys=True
+        )
     wandb.log({"summary_path": str(out_dir / "summary.json")})
     flat_summary = flatten_summary(summary)
     if flat_summary:
@@ -596,7 +734,9 @@ def maybe_sweep_svgp(cfg: DictConfig, ds_valid):
         dynamic_ncols=True,
         disable=not cfg.progress.seeds,
     ):
-        metrics = evaluate_svgp_candidate(eval_batches, candidate, sweep_cfg.metric, rng)
+        metrics = evaluate_svgp_candidate(
+            eval_batches, candidate, sweep_cfg.metric, rng
+        )
         row = {**OmegaConf.to_container(candidate, resolve=True), **metrics}
         rows.append(row)
         score = metrics[sweep_cfg.metric]
