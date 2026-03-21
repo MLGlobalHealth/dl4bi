@@ -258,7 +258,22 @@ def benchmark_batch(
     return records
 
 
+# SVGP baseline.
+#
+# Unlike the BSA-TNP model, the GP baseline is fit independently for every task
+# encountered during benchmarking. Each batch element is converted into a dense
+# regression problem, an SVGP is optimized on that task's context set, and the
+# learned variational posterior is then evaluated on the held-out test set.
 def extract_task(batch, idx: int):
+    """Convert one batch element into a single-task regression dataset.
+
+    The SVGP baseline expects dense design matrices rather than masked
+    meta-learning tensors. We therefore:
+
+    1. apply the context/test masks for one batch element, and
+    2. concatenate the covariates into the feature order expected by the ERA5
+       kernel: [elevation, hour_of_day, latitude, longitude, time].
+    """
     mask_ctx = np.asarray(batch.mask_ctx[idx], dtype=bool)
     mask_test = np.asarray(batch.mask_test[idx], dtype=bool)
     x_ctx = None if batch.x_ctx is None else batch.x_ctx[idx][mask_ctx]
@@ -279,11 +294,19 @@ def extract_task(batch, idx: int):
 
 
 def stack_features(*arrays):
+    """Concatenate non-null feature blocks along the last dimension."""
     parts = [jnp.asarray(a) for a in arrays if a is not None]
     return jnp.concatenate(parts, axis=-1)
 
 
 def fit_svgp_predict(rng: jax.Array, task: dict, cfg: DictConfig):
+    """Fit one sparse variational GP to a single ERA5 task and predict.
+
+    This baseline is deliberately non-amortized: for every task we solve a new
+    variational inference problem from scratch using only the context set
+    `(x_ctx, y_ctx)`. The optimized variational posterior is then used to
+    produce marginal Gaussian predictions over `x_test`.
+    """
     x_ctx = jnp.asarray(task["x_ctx"])
     y_ctx = jnp.asarray(task["y_ctx"])
     x_test = jnp.asarray(task["x_test"])
@@ -336,6 +359,7 @@ def fit_svgp_predict(rng: jax.Array, task: dict, cfg: DictConfig):
 
 
 def initialize_inducing_inputs(rng: jax.Array, x: jax.Array, num_inducing: int):
+    """Initialize inducing inputs by subsampling context locations."""
     n = x.shape[0]
     m = min(num_inducing, n)
     idx = random.choice(rng, n, (m,), replace=False)
@@ -343,6 +367,7 @@ def initialize_inducing_inputs(rng: jax.Array, x: jax.Array, num_inducing: int):
 
 
 def resolve_weather_kernel_init(cfg: DictConfig):
+    """Build the initial kernel hyperparameters for the ERA5 SVGP."""
     base_amp = float(cfg.get("init_amplitude", 1.0))
     base_ls = float(cfg.get("init_lengthscale", 1.0))
     spatial_ls = cfg.get("init_spatial_lengthscale")
@@ -371,6 +396,23 @@ def svgp_model(
     learn_inducing_locations: bool,
     jitter: float,
 ):
+    """Sparse GP likelihood parameterized by inducing variables.
+
+    Let `u = f(z)` denote the latent function evaluated at inducing inputs `z`.
+    Given kernel matrix `K_zz` and cross-covariance `K_xz`, this model uses the
+    standard sparse GP conditional
+
+        E[f(x) | u] = K_xz K_zz^{-1} u
+        Var[f(x) | u] = diag(K_xx - K_xz K_zz^{-1} K_zx)
+
+    and adds i.i.d. Gaussian observation noise `sigma^2`:
+
+        y | u ~ N(E[f(x) | u], Var[f(x) | u] + sigma^2 I).
+
+    In this implementation only the diagonal conditional variance is needed,
+    because we score pointwise predictive marginals rather than full joint
+    covariances.
+    """
     amp_spatiotemporal = numpyro.param(
         "amp_spatiotemporal",
         kernel_init["amp_spatiotemporal"],
@@ -419,6 +461,7 @@ def svgp_model(
     )
     k_zz = k_zz + jitter * jnp.eye(z.shape[0], dtype=x.dtype)
     chol = jnp.linalg.cholesky(k_zz)
+    # Prior over inducing function values: u ~ N(0, K_zz).
     u = numpyro.sample(
         "u",
         dist.MultivariateNormal(
@@ -440,6 +483,7 @@ def svgp_model(
     proj = jsp_linalg.solve_triangular(chol, k_xz.T, lower=True)
     mean = k_xz @ alpha
     prior_diag = weather_kernel_diag(x, amp_spatiotemporal, amp_diurnal)
+    # diag(K_xx - K_xz K_zz^{-1} K_zx) + sigma^2
     var = prior_diag - jnp.sum(proj**2, axis=0) + noise**2
     numpyro.sample(
         "obs",
@@ -457,6 +501,16 @@ def svgp_guide(
     learn_inducing_locations: bool,
     jitter: float,
 ):
+    """Full-covariance variational posterior over inducing values.
+
+    The guide uses
+
+        q(u) = N(m, S)
+
+    with free mean `m` and Cholesky factor of `S`. SVI optimizes these
+    variational parameters together with the kernel hyperparameters in
+    `svgp_model` by maximizing the ELBO.
+    """
     del (
         x,
         y,
@@ -481,6 +535,19 @@ def svgp_predictive(
     z_init: jax.Array,
     jitter: float,
 ):
+    """Compute marginal predictive mean and std under `q(u)`.
+
+    After fitting we have `q(u) = N(m, S)`. Integrating out `u` yields
+
+        mean = K_tz K_zz^{-1} m
+        var = diag(K_tt - K_tz K_zz^{-1} K_zt)
+            + diag(K_tz K_zz^{-1} S K_zz^{-1} K_zt)
+            + sigma^2
+
+    where the first variance term is the sparse-GP conditional uncertainty, the
+    second is uncertainty from the variational posterior over `u`, and the last
+    term is observation noise.
+    """
     amp_spatiotemporal = params["amp_spatiotemporal"]
     amp_diurnal = params["amp_diurnal"]
     noise = params["noise"]
@@ -516,8 +583,10 @@ def svgp_predictive(
     alpha = jsp_linalg.cho_solve((chol, True), u_loc)
     proj = jsp_linalg.solve_triangular(chol, k_tz.T, lower=True)
     mean = k_tz @ alpha
+    # diag(K_tt - K_tz K_zz^{-1} K_zt)
     prior_diag = weather_kernel_diag(x_test, amp_spatiotemporal, amp_diurnal)
     prior_diag = prior_diag - jnp.sum(proj**2, axis=0)
+    # diag(K_tz K_zz^{-1} S K_zz^{-1} K_zt), where S = u_scale_tril u_scale_tril^T.
     precision_proj = jsp_linalg.cho_solve((chol, True), k_tz.T).T
     s = u_scale_tril @ u_scale_tril.T
     var_q = jnp.sum((precision_proj @ s) * precision_proj, axis=1)
@@ -531,6 +600,11 @@ def weather_kernel_diag(
     amp_spatiotemporal: jax.Array,
     amp_diurnal: jax.Array,
 ):
+    """Diagonal of the ERA5 kernel.
+
+    All component kernels are normalized so that `k(x, x) = 1`, hence the prior
+    variance at any input is simply the sum of the two amplitudes.
+    """
     return jnp.full((x.shape[0],), amp_spatiotemporal + amp_diurnal, dtype=x.dtype)
 
 
@@ -544,16 +618,32 @@ def weather_kernel(
     ls_time: jax.Array,
     ls_hour_of_day: jax.Array,
 ):
+    """Composite kernel for the ERA5 SVGP baseline.
+
+    Inputs are ordered as `[elevation, hour_of_day, latitude, longitude, time]`.
+    The kernel is a sum of two separable terms:
+
+        k(x, x')
+          = a_st * k_space * k_time * k_elev
+          + a_d  * k_space * k_hod  * k_elev
+
+    The first term models smooth spatiotemporal variation, while the second
+    captures diurnal periodicity that can vary across space and elevation.
+    """
     elev_a, hod_a, space_a, time_a = split_weather_features(x_a)
     elev_b, hod_b, space_b, time_b = split_weather_features(x_b)
     k_elev = exp_quad_kernel(elev_a, elev_b, jnp.atleast_1d(ls_elevation))
     k_space = matern32_kernel(space_a, space_b, ls_space)
     k_time = matern32_kernel(time_a, time_b, jnp.atleast_1d(ls_time))
     k_hod = periodic_kernel(hod_a, hod_b, ls_hour_of_day, period=1.0)
-    return amp_spatiotemporal * k_space * k_time * k_elev + amp_diurnal * k_space * k_hod * k_elev
+    return (
+        amp_spatiotemporal * k_space * k_time * k_elev
+        + amp_diurnal * k_space * k_hod * k_elev
+    )
 
 
 def split_weather_features(x: jax.Array):
+    """Split ERA5 SVGP inputs into semantic feature groups."""
     if x.shape[-1] != 5:
         raise ValueError(
             f"Expected ERA5 SVGP inputs with 5 features [elev, hod, lat, lon, time], got {x.shape[-1]}."
@@ -562,17 +652,20 @@ def split_weather_features(x: jax.Array):
 
 
 def sq_dist_ard(x_a: jax.Array, x_b: jax.Array, lengthscale: jax.Array):
+    """Squared distance after ARD lengthscale normalization."""
     x_a = x_a / lengthscale
     x_b = x_b / lengthscale
     return jnp.sum((x_a[:, None, :] - x_b[None, :, :]) ** 2, axis=-1)
 
 
 def exp_quad_kernel(x_a: jax.Array, x_b: jax.Array, lengthscale: jax.Array):
+    """Exponentiated quadratic / RBF kernel with ARD lengthscales."""
     sq_dist = sq_dist_ard(x_a, x_b, lengthscale)
     return jnp.exp(-0.5 * sq_dist)
 
 
 def matern32_kernel(x_a: jax.Array, x_b: jax.Array, lengthscale: jax.Array):
+    """Matérn-3/2 kernel with ARD lengthscales."""
     sq_dist = sq_dist_ard(x_a, x_b, lengthscale)
     r = jnp.sqrt(jnp.clip(sq_dist, a_min=1.0e-12))
     scaled_r = jnp.sqrt(3.0) * r
@@ -582,6 +675,7 @@ def matern32_kernel(x_a: jax.Array, x_b: jax.Array, lengthscale: jax.Array):
 def periodic_kernel(
     x_a: jax.Array, x_b: jax.Array, lengthscale: jax.Array, period: float
 ):
+    """Exponentiated-sine-squared periodic kernel."""
     d = jnp.pi * (x_a[:, None, 0] - x_b[None, :, 0]) / period
     ls = jnp.squeeze(lengthscale)
     return jnp.exp(-2.0 * jnp.sin(d) ** 2 / (ls**2))
@@ -715,6 +809,7 @@ def flatten_summary(summary: dict):
 
 
 def maybe_sweep_svgp(cfg: DictConfig, ds_valid):
+    """Tune SVGP hyperparameters on a fixed set of validation tasks."""
     sweep_cfg = cfg.get("svgp_sweep")
     if not sweep_cfg or not sweep_cfg.get("enabled", False):
         return OmegaConf.create(OmegaConf.to_container(cfg.svgp, resolve=True))
@@ -776,6 +871,7 @@ def evaluate_svgp_candidate(
     metric: str,
     rng: jax.Array,
 ):
+    """Score one SVGP hyperparameter candidate on pre-sampled tasks."""
     records = []
     for batch in eval_batches:
         batch_size = batch.f_test.shape[0]

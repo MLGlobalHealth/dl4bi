@@ -28,7 +28,7 @@ benchmark:
     W_deg: ${data.test_dataloader.W_deg}
     T_hrs: ${data.test_dataloader.T_hrs}
     T_hrs_delta: ${data.test_dataloader.T_hrs_delta}
-    num_batches_per_subset: ${data.test_dataloader.num_batches_per_subset}
+    num_batches_per_subset: 1
 svgp:
   num_inducing: 128
   num_steps: 750
