@@ -325,10 +325,10 @@ def fit_svgp_predict(rng: jax.Array, task: dict, cfg: DictConfig):
         cfg.learn_inducing_locations,
         cfg.jitter,
     )
-    loss = float("nan")
-    for _ in range(cfg.num_steps):
-        svi_state, loss = svi.update(
-            svi_state,
+
+    def update(state, _):
+        return svi.update(
+            state,
             x_ctx,
             y_ctx,
             z_init,
@@ -337,6 +337,10 @@ def fit_svgp_predict(rng: jax.Array, task: dict, cfg: DictConfig):
             cfg.learn_inducing_locations,
             cfg.jitter,
         )
+
+    svi_state, losses = jax.lax.scan(update, svi_state, None, length=cfg.num_steps)
+    loss = float(losses[-1]) if len(losses) > 0 else float("nan")
+
     fit_time_s = perf_counter() - fit_start
     params = svi.get_params(svi_state)
     predict_start = perf_counter()
