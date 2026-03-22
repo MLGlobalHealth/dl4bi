@@ -72,7 +72,7 @@ def gp_mle_sgd(
     theta = jnp.array([initial_var, initial_ls, initial_eps])
     state = optimizer.init(theta)
     nll = loss_delta = param_delta = jnp.float32("inf")
-    while loss_delta > loss_tol or param_delta > param_delta:
+    while loss_delta > loss_tol or param_delta > param_tol:
         nll_prev = nll
         nll, grad = jax.value_and_grad(nll_fn)(theta)
         updates, state = optimizer.update(grad, state, theta)
