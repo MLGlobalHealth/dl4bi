@@ -229,54 +229,20 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     )
 
     # HIGH DIMENSIONAL FIXED EFFECTS
-    tabular_models = ["bsa_tnp", "te_tnp", "tnp_d"]
+    beijing_models = [
+        "te_tnp",
+        "tnp_d",
+        "bsa_tnp",
+        "bsa_tnp_only_embed",
+        "bsa_tnp_only_bias",
+    ]
     generic_benchmark(
         seeds,
         "configs/beijing_air_quality",
-        tabular_models,
+        beijing_models,
         beijing_air_quality_main,
         overrides,
         "AISTATS BSA-TNP - Beijing Air Quality",
-        dry_run=dry_run,
-    )
-    # ablation requested by reviewer
-    beijing_ablation_models = ["bsa_tnp", "bsa_tnp_only_embed", "bsa_tnp_only_bias"]
-    generic_benchmark(
-        seeds,
-        "configs/beijing_air_quality",
-        beijing_ablation_models,
-        beijing_air_quality_main,
-        overrides,
-        "AISTATS BSA-TNP - Beijing Air Quality Ablation",
-        dry_run=dry_run,
-    )
-    generic_benchmark(
-        seeds,
-        "configs/generic_spatial",
-        tabular_models,
-        generic_spatial_main,
-        overrides,
-        "AISTATS BSA-TNP - Generic Spatial",
-        dry_run=dry_run,
-    )
-    # run models on examples for comparison to MCMC
-    generic_benchmark(
-        seeds,
-        "configs/generic_spatial",
-        tabular_models,
-        generic_spatial_main,
-        overrides + ["infer_with_model=True"],
-        "AISTATS BSA-TNP - Generic Spatial",
-        dry_run=dry_run,
-    )
-    # run MCMC on examples
-    generic_benchmark(
-        seeds,
-        "configs/generic_spatial",
-        ["bsa_tnp"],  # dummy model - unused
-        generic_spatial_main,
-        overrides + ["infer_with_mcmc=True"],
-        "AISTATS BSA-TNP - Generic Spatial",
         dry_run=dry_run,
     )
 
