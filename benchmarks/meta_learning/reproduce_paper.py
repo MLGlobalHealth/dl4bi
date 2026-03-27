@@ -108,12 +108,7 @@ def gp_translation_invariance_benchmarks(
         gp_kernels_2d,
         [f"2d/{m}" for m in ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_scaled_2x"]],
         gp_main,
-        overrides
-        + [
-            "project_suffix=' - Scaled 2x'",
-            "evaluate_only=True",
-            "valid_num_steps=1000",
-        ],
+        overrides + ["project_suffix=' - Scaled 2x'", "evaluate_only=True"],
         "AISTATS BSA-TNP - Gaussian Processes",
         dry_run=dry_run,
     )
