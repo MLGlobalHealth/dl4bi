@@ -164,37 +164,50 @@ def load_data(
     humidity_ls: float,
     obs_noise: float,
 ):
-    x, s, t, f = generate_panel(
-        rng,
-        total_steps=total_steps,
+    rng_static, rng_train, rng_valid, rng_test = random.split(rng, 4)
+    num_test_steps = int(total_steps * pct_test)
+    num_valid_steps = int(total_steps * pct_valid)
+    num_train_steps = total_steps - num_valid_steps - num_test_steps
+    s, site_effect = generate_static(
+        rng_static,
         num_locations=num_locations,
         fixed_effect_scale=fixed_effect_scale,
+    )
+    train = generate_panel(
+        rng_train,
+        total_steps=num_train_steps,
+        num_locations=num_locations,
         plume_scale=plume_scale,
         plume_ls=plume_ls,
         weather_ls=weather_ls,
         humidity_ls=humidity_ls,
         obs_noise=obs_noise,
+        s=s,
+        site_effect=site_effect,
     )
-    num_test_steps = int(total_steps * pct_test)
-    num_valid_steps = int(total_steps * pct_valid)
-    num_train_steps = total_steps - num_valid_steps - num_test_steps
-    train = (
-        x[:num_train_steps],
-        s,
-        t[:num_train_steps],
-        f[:num_train_steps],
+    valid = generate_panel(
+        rng_valid,
+        total_steps=num_valid_steps,
+        num_locations=num_locations,
+        plume_scale=plume_scale,
+        plume_ls=plume_ls,
+        weather_ls=weather_ls,
+        humidity_ls=humidity_ls,
+        obs_noise=obs_noise,
+        s=s,
+        site_effect=site_effect,
     )
-    valid = (
-        x[num_train_steps : num_train_steps + num_valid_steps],
-        s,
-        t[num_train_steps : num_train_steps + num_valid_steps],
-        f[num_train_steps : num_train_steps + num_valid_steps],
-    )
-    test = (
-        x[-num_test_steps:],
-        s,
-        t[-num_test_steps:],
-        f[-num_test_steps:],
+    test = generate_panel(
+        rng_test,
+        total_steps=num_test_steps,
+        num_locations=num_locations,
+        plume_scale=plume_scale,
+        plume_ls=plume_ls,
+        weather_ls=weather_ls,
+        humidity_ls=humidity_ls,
+        obs_noise=obs_noise,
+        s=s,
+        site_effect=site_effect,
     )
     x_mu = train[0].mean(axis=(0, 1), keepdims=True)
     x_std = train[0].std(axis=(0, 1), keepdims=True) + 1e-6
@@ -213,20 +226,30 @@ def load_data(
     return standardize(train), standardize(valid), standardize(test)
 
 
+def generate_static(
+    rng: jax.Array,
+    num_locations: int,
+    fixed_effect_scale: float,
+):
+    rng_locs, rng_site = random.split(rng)
+    s = random.uniform(rng_locs, (num_locations, 2), minval=0.05, maxval=0.95)
+    site_effect = fixed_effect_scale * random.normal(rng_site, (num_locations,))
+    return s.astype(jnp.float32), site_effect.astype(jnp.float32)
+
+
 def generate_panel(
     rng: jax.Array,
     total_steps: int,
     num_locations: int,
-    fixed_effect_scale: float,
     plume_scale: float,
     plume_ls: float,
     weather_ls: float,
     humidity_ls: float,
     obs_noise: float,
+    s: jax.Array,
+    site_effect: jax.Array,
 ):
-    rng_locs, rng_site, rng_dyn, rng_noise = random.split(rng, 4)
-    s = random.uniform(rng_locs, (num_locations, 2), minval=0.05, maxval=0.95)
-    site_effect = fixed_effect_scale * random.normal(rng_site, (num_locations,))
+    rng_dyn, rng_noise = random.split(rng)
     (
         source_center,
         weather_center,
