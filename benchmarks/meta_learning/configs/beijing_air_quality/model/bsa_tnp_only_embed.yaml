@@ -1,4 +1,5 @@
 _target_: dl4bi.meta_learning.BSATNP
+name: BSA-TNP - embed
 num_blks: 6
 num_reps: 1
 embed_all:
