@@ -1,49 +1,70 @@
-[tool.poetry]
+[project]
 name = "dl4bi"
 version = "0.1.0"
 description = "Deep Learning for Bayesian Inference (DL4BI)"
-authors = ["Daniel Jenson <daniel.a.jenson@gmail.com>"]
 readme = "README.md"
+requires-python = ">=3.11,<4.0"
+dependencies = [
+  "arviz>=0.20,<1",
+  "cdsapi>=0.7,<1",
+  "dask>=2025.4,<2026",
+  "datasets>=3.5,<4",
+  "einops>=0.8,<1",
+  "flax>=0.12,<0.13",
+  "hydra-core>=1.3,<2",
+  "imageio>=2.37,<3",
+  "jraph==0.0.6.dev0",
+  "matplotlib>=3.10,<4",
+  "numpy>=2.2,<3",
+  "numpyro>=0.14,<1",
+  "optax>=0.2,<0.3",
+  "orbax>=0.1,<1",
+  "orbax-checkpoint>=0.11,<1",
+  "pandas>=2.3,<3",
+  "pillow>=11.1,<12",
+  "pygifsicle>=1.1,<2",
+  "scikit-learn>=1.7,<2",
+  "scipy>=1.15,<2",
+  "scoringrules>=0.7,<1",
+  "tiktoken>=0.8,<1",
+  "tqdm>=4.67,<5",
+  "ucimlrepo>=0.0.7,<1",
+  "wandb>=0.22,<1",
+  "xarray>=2025.9,<2026",
+  "sps",
+]
 
-[tool.poetry.dependencies]
-arviz = "^0.20.0"
-cdsapi = "^0.7.5"
-dask = "^2025.4.0"
-datasets = "^3.5.0"
-einops = "^0.8.0"
-flax = "^0.12.0"
-hydra-core = "^1.3.2"
-imageio = "^2.37.0"
-jraph = "0.0.6.dev0"
-matplotlib = "^3.10.6"
-numpy = "^2.2.6"
-optax = "^0.2.6"
-orbax = "^0.1.9"
-orbax-checkpoint = "^0.11.19"
-pandas = "^2.3.3"
-pillow = "^11.1.0"
-pygifsicle = "^1.1.0"
-python = "^3.11"
-scikit-learn = "^1.7.2"
-scipy = "^1.15.2"
-scoringrules = "^0.7.1"
-sps = {git = "ssh://git@github.com/MLGlobalHealth/sps.git"}
-tiktoken = "^0.8.0"
-tqdm = "^4.67.1"
-ucimlrepo = "^0.0.7"
-wandb = "^0.22.1"
-xarray = "^2025.9.1"
+[project.optional-dependencies]
+jax-cpu = [
+  "jax>=0.8.1,<0.9",
+]
+jax-cuda-12 = [
+  "jax[cuda12]>=0.8.1,<0.9",
+]
+jax-cuda-13 = [
+  "jax[cuda13]>=0.8.1,<0.9",
+]
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^7.4.4"
+[dependency-groups]
+dev = [
+  "pytest>=7.4,<8",
+]
 
-[[tool.poetry.source]]
-name = "PyPI"
-priority = "primary"
+[tool.uv.sources]
+sps = { git = "https://github.com/MLGlobalHealth/sps.git" }
+
+[tool.uv]
+conflicts = [
+  [
+    { extra = "jax-cpu" },
+    { extra = "jax-cuda-12" },
+    { extra = "jax-cuda-13" },
+  ],
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.ruff.lint]
 extend-select = ["I"]
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"

@@ -1,4 +1,5 @@
 _target_: dl4bi.meta_learning.TETNP
+name: TE-TNP
 encoder:
   _target_: dl4bi.transformer.TEISTEncoder
   num_blks: 5
