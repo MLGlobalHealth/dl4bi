@@ -69,21 +69,21 @@ def main(cfg: DictConfig):
             state,
             model.valid_step,
             test_dataloader,
-            cfg.data.test_num_steps,
+            cfg.test_num_steps,
         )
         wandb.log({f"Test {m}": v for m, v in metrics.items()})
         return
-    clbk = Callback(plot, cfg.data.plot_interval)
+    clbk = Callback(plot, cfg.plot_interval)
     state = train(
         rng_train,
         model,
         optimizer,
         model.train_step,
-        cfg.data.train_num_steps,
+        cfg.train_num_steps,
         train_dataloader,
         model.valid_step,
-        cfg.data.valid_interval,
-        cfg.data.valid_num_steps,
+        cfg.valid_interval,
+        cfg.valid_num_steps,
         valid_dataloader,
         callbacks=[clbk],
         callback_dataloader=callback_dataloader,
@@ -94,7 +94,7 @@ def main(cfg: DictConfig):
         state,
         model.valid_step,
         test_dataloader,
-        cfg.data.test_num_steps,
+        cfg.test_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
