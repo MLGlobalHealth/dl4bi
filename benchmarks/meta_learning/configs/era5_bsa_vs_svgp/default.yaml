@@ -8,6 +8,11 @@ results_dir: results
 wandb: True
 benchmark_setting: CNW
 seeds: [46, 61, 69, 79, 91]
+train_num_steps: 100000
+valid_num_steps: 5000
+test_num_steps: ${.valid_num_steps}
+valid_interval: 5000
+plot_interval: 100000
 progress:
   seeds: True
   batches: True

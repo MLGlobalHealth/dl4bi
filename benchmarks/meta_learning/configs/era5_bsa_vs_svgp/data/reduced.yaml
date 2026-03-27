@@ -1,9 +1,4 @@
 name: reduced
-train_num_steps: 25000
-valid_num_steps: 5000
-test_num_steps: ${.valid_num_steps}
-valid_interval: 5000
-plot_interval: 25000
 splits:
   train_region: central_europe
   valid_region: northern_europe

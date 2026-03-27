@@ -18,6 +18,7 @@ from hydra import compose, initialize
 from jax import random
 from multiscale_2d_gp import main as multiscale_2d_gp_main
 from sir import main as sir_main
+from synthetic_air_quality import main as synthetic_air_quality_main
 
 
 def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
@@ -29,6 +30,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
             "wandb=False",
             "train_num_steps=100",
             "valid_num_steps=50",
+            "++test_num_steps=50",
             "++plot_interval=50",
         ]
     gp_translation_invariance_benchmarks(seeds, overrides, dry_run)
@@ -37,6 +39,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     sir_benchmarks(seeds, overrides, dry_run)
     era5_benchmarks(seeds, overrides, dry_run)
     beijing_benchmarks(seeds, overrides, dry_run)
+    synthetic_air_quality_benchmarks(seeds, overrides, dry_run)
 
 
 def gp_translation_invariance_benchmarks(
@@ -319,6 +322,29 @@ def beijing_benchmarks(
         beijing_air_quality_main,
         overrides,
         "AISTATS BSA-TNP - Beijing Air Quality",
+        dry_run=dry_run,
+    )
+
+
+def synthetic_air_quality_benchmarks(
+    seeds: jax.Array,
+    overrides: list[str],
+    dry_run: bool,
+):
+    synthetic_air_quality_models = [
+        "te_tnp",
+        "tnp_d",
+        "bsa_tnp",
+        "bsa_tnp_only_embed",
+        "bsa_tnp_only_bias",
+    ]
+    generic_benchmark(
+        seeds,
+        "configs/synthetic_air_quality",
+        synthetic_air_quality_models,
+        synthetic_air_quality_main,
+        overrides,
+        "AISTATS BSA-TNP - Synthetic Air Quality",
         dry_run=dry_run,
     )
 
