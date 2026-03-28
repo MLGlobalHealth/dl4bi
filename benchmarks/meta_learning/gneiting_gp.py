@@ -92,6 +92,9 @@ def build_dataloader(data: DictConfig):
                 b=data.b,
                 nu_min=data.nu_min,
                 nu_max=data.nu_max,
+                spatial_mean_scale=data.spatial_mean_scale,
+                temporal_mean_scale=data.temporal_mean_scale,
+                interaction_mean_scale=data.interaction_mean_scale,
                 jitter=data.jitter,
                 obs_noise=data.obs_noise,
             )
@@ -134,6 +137,9 @@ def sample_gneiting_field(
     b: float,
     nu_min: float,
     nu_max: float,
+    spatial_mean_scale: float,
+    temporal_mean_scale: float,
+    interaction_mean_scale: float,
     jitter: float,
     obs_noise: float,
 ):
@@ -152,7 +158,14 @@ def sample_gneiting_field(
     K = gneiting_covariance_matrix(s, t, s, t, var, ls, a, alpha, b, nu)
     K += jitter * jnp.eye(K.shape[0], dtype=jnp.float32)
     z = random.normal(rng_z, (K.shape[0],), dtype=jnp.float32)
-    f = jnp.linalg.cholesky(K).astype(jnp.float32) @ z
+    mean = deterministic_mean(
+        s,
+        t,
+        spatial_mean_scale,
+        temporal_mean_scale,
+        interaction_mean_scale,
+    )
+    f = mean + jnp.linalg.cholesky(K).astype(jnp.float32) @ z
     if obs_noise > 0.0:
         f += obs_noise * random.normal(rng_eps, f.shape, dtype=jnp.float32)
     return f.reshape(t.shape[0], *spatial_shape, 1)
@@ -175,6 +188,32 @@ def sample_hyperparams(
     alpha = random.uniform(rng_alpha, (), minval=alpha_min, maxval=alpha_max)
     nu = random.uniform(rng_nu, (), minval=nu_min, maxval=nu_max)
     return ls, a, alpha, nu
+
+
+def deterministic_mean(
+    s: jax.Array,
+    t: jax.Array,
+    spatial_mean_scale: float,
+    temporal_mean_scale: float,
+    interaction_mean_scale: float,
+):
+    sx, sy = s[:, 0], s[:, 1]
+    spatial = (
+        0.8 * jnp.sin(1.5 * jnp.pi * sx)
+        + 0.5 * jnp.cos(1.0 * jnp.pi * sy)
+        + 0.7 * jnp.exp(-((sx - 0.35) ** 2 + (sy + 0.2) ** 2) / (2 * 0.22**2))
+        - 0.6 * jnp.exp(-((sx + 0.45) ** 2 + (sy - 0.3) ** 2) / (2 * 0.18**2))
+    )
+    temporal = jnp.sin(2 * jnp.pi * t + 0.35) + 0.35 * jnp.cos(4 * jnp.pi * t - 0.15)
+    interaction = (
+        jnp.sin(jnp.pi * sx)[None, :] * jnp.cos(2 * jnp.pi * t[:, None] + 0.2)
+        + 0.5 * jnp.cos(jnp.pi * sy)[None, :] * jnp.sin(2 * jnp.pi * t[:, None] - 0.4)
+    )
+    return (
+        spatial_mean_scale * spatial[None, :]
+        + temporal_mean_scale * temporal[:, None]
+        + interaction_mean_scale * interaction
+    ).reshape(-1)
 
 
 @jit

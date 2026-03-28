@@ -29,5 +29,8 @@ alpha_max: 0.9
 b: 1.0
 nu_min: 2.0
 nu_max: 4.0
+spatial_mean_scale: 0.45
+temporal_mean_scale: 0.3
+interaction_mean_scale: 0.2
 jitter: 5.0e-4
 obs_noise: 0.05
