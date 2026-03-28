@@ -13,12 +13,12 @@ from collections.abc import Callable
 import jax
 from beijing_air_quality import main as beijing_air_quality_main
 from era5 import main as era5_main
+from gneiting_gp import main as gneiting_gp_main
 from gp import main as gp_main
 from hydra import compose, initialize
 from jax import random
 from multiscale_2d_gp import main as multiscale_2d_gp_main
 from sir import main as sir_main
-from synthetic_air_quality import main as synthetic_air_quality_main
 
 
 def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
@@ -33,13 +33,13 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
             "++test_num_steps=50",
             "++plot_interval=50",
         ]
-    gp_translation_invariance_benchmarks(seeds, overrides, dry_run)
-    gp_multi_scale_benchmarks(seeds, overrides, dry_run)
-    gp_rotational_invariance_benchmarks(seeds, overrides, dry_run)
-    sir_benchmarks(seeds, overrides, dry_run)
-    era5_benchmarks(seeds, overrides, dry_run)
-    beijing_benchmarks(seeds, overrides, dry_run)
-    synthetic_air_quality_benchmarks(seeds, overrides, dry_run)
+    # gp_translation_invariance_benchmarks(seeds, overrides, dry_run)
+    # gp_multi_scale_benchmarks(seeds, overrides, dry_run)
+    # gp_rotational_invariance_benchmarks(seeds, overrides, dry_run)
+    # sir_benchmarks(seeds, overrides, dry_run)
+    # era5_benchmarks(seeds, overrides, dry_run)
+    # beijing_benchmarks(seeds, overrides, dry_run)
+    gneiting_gp_benchmarks(seeds, overrides, dry_run)
 
 
 def gp_translation_invariance_benchmarks(
@@ -321,25 +321,25 @@ def beijing_benchmarks(
     )
 
 
-def synthetic_air_quality_benchmarks(
+def gneiting_gp_benchmarks(
     seeds: jax.Array,
     overrides: list[str],
     dry_run: bool,
 ):
-    synthetic_air_quality_models = [
-        "te_tnp",
-        "tnp_d",
+    gneiting_gp_models = [
+        # "te_tnp",
+        # "tnp_d",
         "bsa_tnp",
         "bsa_tnp_only_embed",
         "bsa_tnp_only_bias",
     ]
     generic_benchmark(
         seeds,
-        "configs/synthetic_air_quality",
-        synthetic_air_quality_models,
-        synthetic_air_quality_main,
+        "configs/gneiting_gp",
+        gneiting_gp_models,
+        gneiting_gp_main,
         overrides,
-        "AISTATS BSA-TNP - Synthetic Air Quality",
+        "AISTATS BSA-TNP - Gneiting GP",
         dry_run=dry_run,
     )
 

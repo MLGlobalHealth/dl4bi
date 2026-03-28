@@ -1,0 +1,33 @@
+name: 8x8
+s:
+  - start: -1.0
+    stop: 1.0
+    num: 8
+  - start: -1.0
+    stop: 1.0
+    num: 8
+t:
+  start: 0.0
+  stop: 1.0
+num_steps: 12
+num_t: 5
+random_t: False
+num_ctx_per_t:
+  min: 12
+  max: 20
+independent_t_masks: False
+num_test: 32
+forecast: True
+batch_size: 16
+var: 1.0
+ls_min: 0.25
+ls_max: 0.65
+a_min: 0.1
+a_max: 1.0
+alpha_min: 0.3
+alpha_max: 0.9
+b: 1.0
+nu_min: 2.0
+nu_max: 4.0
+jitter: 5.0e-4
+obs_noise: 0.05

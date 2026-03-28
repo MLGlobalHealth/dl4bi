@@ -75,7 +75,7 @@ encoder:
       dims: [128, 128]
 decoder:
   _target_: dl4bi.mlp.MLP
-  dims: [128, 128, 4]
+  dims: [128, 128, 2]
 embed_f:
   _target_: dl4bi.mlp.MLP
   dims: [128, 128]
