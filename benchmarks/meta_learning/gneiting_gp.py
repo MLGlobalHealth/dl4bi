@@ -70,18 +70,28 @@ def build_dataloader(data: DictConfig):
         raise ValueError("num_t must be <= num_steps.")
     s_grid = build_grid(data.s)
     spatial_shape = s_grid.shape[:-1]
-    s_flat = s_grid.reshape(-1, s_grid.shape[-1])
-    s = jnp.repeat(s_grid[None, ...], data.num_steps, axis=0)
+    num_locations = s_grid.reshape(-1, s_grid.shape[-1]).shape[0]
     t = jnp.linspace(data.t.start, data.t.stop, data.num_steps, dtype=jnp.float32)
 
     def dataloader(rng: jax.Array):
         while True:
-            rng_f, rng_b, rng = random.split(rng, 3)
+            rng_s, rng_f, rng_b, rng = random.split(rng, 4)
+            if data.irregular_layout:
+                s_flat = sample_jittered_grid(
+                    rng_s,
+                    data.s,
+                    jitter_frac=data.spatial_jitter_frac,
+                )
+                spatial_shape_i = (num_locations,)
+            else:
+                s_flat = s_grid.reshape(-1, s_grid.shape[-1])
+                spatial_shape_i = spatial_shape
+            s = jnp.repeat(s_flat[None, ...], data.num_steps, axis=0)
             f = sample_gneiting_field(
                 rng_f,
                 s_flat,
                 t,
-                spatial_shape,
+                spatial_shape_i,
                 var=data.var,
                 ls_min=data.ls_min,
                 ls_max=data.ls_max,
@@ -120,6 +130,27 @@ def build_grid(axes: list[dict]):
         for axis in axes
     ]
     return jnp.stack(jnp.meshgrid(*coords, indexing="ij"), axis=-1)
+
+
+def sample_jittered_grid(
+    rng: jax.Array,
+    axes: list[dict],
+    jitter_frac: float,
+):
+    base = build_grid(axes)
+    noise = random.uniform(rng, base.shape, minval=-1.0, maxval=1.0)
+    steps = []
+    for axis in axes:
+        num = axis["num"]
+        if num <= 1:
+            steps.append(0.0)
+        else:
+            steps.append((axis["stop"] - axis["start"]) / (num - 1))
+    step = jnp.asarray(steps, dtype=jnp.float32)
+    lo = jnp.asarray([axis["start"] for axis in axes], dtype=jnp.float32)
+    hi = jnp.asarray([axis["stop"] for axis in axes], dtype=jnp.float32)
+    jitter = noise * (jitter_frac * step)
+    return jnp.clip(base + jitter, lo, hi).reshape(-1, len(axes))
 
 
 def sample_gneiting_field(
@@ -183,11 +214,21 @@ def sample_hyperparams(
     nu_max: float,
 ):
     rng_ls, rng_a, rng_alpha, rng_nu = random.split(rng, 4)
-    ls = random.uniform(rng_ls, (), minval=ls_min, maxval=ls_max)
-    a = random.uniform(rng_a, (), minval=a_min, maxval=a_max)
-    alpha = random.uniform(rng_alpha, (), minval=alpha_min, maxval=alpha_max)
-    nu = random.uniform(rng_nu, (), minval=nu_min, maxval=nu_max)
+    ls = sample_interval(rng_ls, ls_min, ls_max)
+    a = sample_interval(rng_a, a_min, a_max)
+    alpha = sample_interval(rng_alpha, alpha_min, alpha_max)
+    nu = sample_interval(rng_nu, nu_min, nu_max)
     return ls, a, alpha, nu
+
+
+def sample_interval(rng: jax.Array, low: float, high: float):
+    low = jnp.asarray(low, dtype=jnp.float32)
+    high = jnp.asarray(high, dtype=jnp.float32)
+    return jnp.where(
+        jnp.isclose(low, high),
+        low,
+        random.uniform(rng, (), minval=low, maxval=high),
+    )
 
 
 def deterministic_mean(

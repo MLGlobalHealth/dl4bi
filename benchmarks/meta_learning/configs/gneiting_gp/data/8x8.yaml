@@ -12,25 +12,27 @@ t:
 num_steps: 12
 num_t: 5
 random_t: False
+irregular_layout: True
+spatial_jitter_frac: 0.35
 num_ctx_per_t:
-  min: 12
-  max: 20
+  min: 8
+  max: 12
 independent_t_masks: False
 num_test: 32
 forecast: True
 batch_size: 16
 var: 1.0
-ls_min: 0.25
-ls_max: 0.65
-a_min: 0.1
-a_max: 1.0
-alpha_min: 0.3
-alpha_max: 0.9
-b: 1.0
-nu_min: 2.0
-nu_max: 4.0
-spatial_mean_scale: 0.45
-temporal_mean_scale: 0.3
-interaction_mean_scale: 0.2
+ls_min: 0.52
+ls_max: 0.52
+a_min: 0.30
+a_max: 0.30
+alpha_min: 0.55
+alpha_max: 0.55
+b: 0.30
+nu_min: 2.6
+nu_max: 2.6
+spatial_mean_scale: 0.30
+temporal_mean_scale: 0.18
+interaction_mean_scale: 0.10
 jitter: 5.0e-4
 obs_noise: 0.05
