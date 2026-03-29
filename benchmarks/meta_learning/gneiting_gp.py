@@ -19,25 +19,6 @@ from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalBatch
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
-# Shared geography/climatology to make absolute coordinates informative across tasks.
-SHARED_TERRAIN_PARAMS = {
-    "centers": jnp.array(
-        [[-0.72, -0.18], [-0.08, 0.58], [0.56, -0.48]],
-        dtype=jnp.float32,
-    ),
-    "widths": jnp.array(
-        [[0.30, 0.42], [0.26, 0.24], [0.38, 0.50]],
-        dtype=jnp.float32,
-    ),
-    "amps": jnp.array([1.30, -1.05, 0.85], dtype=jnp.float32),
-    "phase": jnp.asarray(0.35 * jnp.pi, dtype=jnp.float32),
-}
-SHARED_HARMONIC_PHASE = jnp.asarray(-0.45 * jnp.pi, dtype=jnp.float32)
-SHARED_MOVING_CENTER0 = jnp.array([-0.55, -0.25], dtype=jnp.float32)
-SHARED_MOVING_VELOCITY = jnp.array([1.05, 0.55], dtype=jnp.float32)
-SHARED_MOVING_WIDTH = jnp.array([0.24, 0.18], dtype=jnp.float32)
-
-
 @hydra.main("configs/gneiting_gp", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
@@ -108,32 +89,27 @@ def build_dataloader(data: DictConfig, for_plot: bool = False):
         for_plot and data.get("plot_regular_grid", True)
     )
     s_dims = (num_locations,) if use_irregular_layout else spatial_shape
-    step = jnp.asarray(
-        [
-            0.0 if axis["num"] <= 1 else (axis["stop"] - axis["start"]) / (axis["num"] - 1)
-            for axis in data.s
-        ],
-        dtype=jnp.float32,
-    )
     lo = jnp.asarray([axis["start"] for axis in data.s], dtype=jnp.float32)
     hi = jnp.asarray([axis["stop"] for axis in data.s], dtype=jnp.float32)
     base_flat = s_grid.reshape(-1, s_grid.shape[-1])
 
+    # Keep a custom batching path here because we sample GP values directly on the
+    # queried points rather than drawing a dense episode and slicing afterward.
     @jit
     def sample_batch(rng: jax.Array):
-        rng_s, rng_t, rng_perm, rng_len, rng_mode, rng_episode = random.split(rng, 6)
+        rng_s, rng_t, rng_perm, rng_len, rng_episode = random.split(rng, 5)
         if use_irregular_layout:
-            s_flat = sample_jittered_grid_batch(
+            s_flat = sample_uniform_points_batch(
                 rng_s,
-                s_grid,
-                step,
                 lo,
                 hi,
-                data.spatial_jitter_frac,
+                num_locations,
                 batch_size,
             )
         else:
-            s_flat = jnp.broadcast_to(base_flat[None, ...], (batch_size, *base_flat.shape))
+            s_flat = jnp.broadcast_to(
+                base_flat[None, ...], (batch_size, *base_flat.shape)
+            )
         ts = select_time_indices_batch(
             rng_t,
             data.num_steps,
@@ -142,11 +118,10 @@ def build_dataloader(data: DictConfig, for_plot: bool = False):
             batch_size,
         )
         t_window = t[ts]
-        independent_t_masks = sample_independent_t_masks_batch(
-            rng_mode,
-            batch_size,
+        independent_t_masks = jnp.full(
+            (batch_size,),
             data.independent_t_masks,
-            data.get("independent_t_masks_prob"),
+            dtype=bool,
         )
         permute_idxs = sample_permute_idxs_batch(
             rng_perm,
@@ -191,7 +166,9 @@ def build_dataloader(data: DictConfig, for_plot: bool = False):
         s_query = jnp.concatenate([s_ctx, s_test], axis=1)
         t_query = jnp.concatenate([t_ctx[..., 0], t_test[..., 0]], axis=1)
         mask_query = jnp.concatenate([mask_ctx, mask_test], axis=1)
-        f_query = sample_observations_batched(rng_episode, s_query, t_query, mask_query, data)
+        f_query = sample_observations_batched(
+            rng_episode, s_query, t_query, mask_query, data
+        )
         f_ctx = f_query[:, : num_ctx_steps * num_ctx_max, None]
         f_test = f_query[:, num_ctx_steps * num_ctx_max :, None]
         return SpatiotemporalBatch(
@@ -226,24 +203,18 @@ def build_grid(axes: list[dict]):
     return jnp.stack(jnp.meshgrid(*coords, indexing="ij"), axis=-1)
 
 
-def sample_jittered_grid_batch(
+def sample_uniform_points_batch(
     rng: jax.Array,
-    base_grid: jax.Array,
-    step: jax.Array,
     lo: jax.Array,
     hi: jax.Array,
-    jitter_frac: float,
+    num_locations: int,
     batch_size: int,
 ):
-    noise = random.uniform(
+    return random.uniform(
         rng,
-        (batch_size, *base_grid.shape),
-        minval=-1.0,
-        maxval=1.0,
-    )
-    jitter = noise * (jitter_frac * step)
-    return jnp.clip(base_grid[None, ...] + jitter, lo, hi).reshape(
-        batch_size, -1, base_grid.shape[-1]
+        (batch_size, num_locations, lo.shape[0]),
+        minval=lo,
+        maxval=hi,
     )
 
 
@@ -263,26 +234,13 @@ def select_time_indices_batch(
     if random_t:
         rngs = random.split(rng, batch_size)
         return vmap(
-            lambda rng_i: jnp.sort(random.choice(rng_i, num_steps, (num_t,), replace=False))
+            lambda rng_i: jnp.sort(
+                random.choice(rng_i, num_steps, (num_t,), replace=False)
+            )
         )(rngs)
     last_t = random.randint(rng, (batch_size, 1), num_t, num_steps)
     delta = jnp.arange(num_t - 1, -1, -1, dtype=jnp.int32)
     return last_t - delta
-
-
-def sample_independent_t_masks_batch(
-    rng: jax.Array,
-    batch_size: int,
-    independent_t_masks: bool,
-    independent_t_masks_prob: float | None,
-):
-    if independent_t_masks_prob is None:
-        return jnp.full((batch_size,), independent_t_masks, dtype=bool)
-    return random.bernoulli(
-        rng,
-        jnp.asarray(independent_t_masks_prob, dtype=jnp.float32),
-        (batch_size,),
-    )
 
 
 def sample_permute_idxs_batch(
@@ -341,7 +299,11 @@ def sample_observations_batched(
     means = vmap(lambda rng_i: sample_mean_hyperparams(rng_i, data))(
         random.split(rng_m, batch_size)
     )
-    m = vmap(representative_mean_points)(s, t, means)
+    m = vmap(lambda s_i, t_i, mean_i: mean_function_points(s_i, t_i, mean_i, data))(
+        s,
+        t,
+        means,
+    )
     K = gneiting_covariance_points_batched(
         s,
         t,
@@ -368,59 +330,57 @@ def sample_observations_batched(
     return jnp.where(mask, f, 0.0)
 
 
-def cfg_value(data: DictConfig, primary: str, fallback: str | None = None):
-    if primary in data:
-        return data[primary]
-    if fallback is not None and fallback in data:
-        return data[fallback]
-    raise KeyError(f"Expected one of {primary!r} or {fallback!r} in config.")
-
-
 def sample_kernel_hyperparams(rng: jax.Array, data: DictConfig):
     rng_var, rng_ls, rng_a, rng_alpha, rng_b, rng_nu, rng_gamma, rng_noise = (
         random.split(rng, 8)
     )
     value_scale = jnp.asarray(data.get("value_scale", 1.0), dtype=jnp.float32)
-    var = sample_log_interval(
-        rng_var,
-        cfg_value(data, "var_min", "var"),
-        cfg_value(data, "var_max", "var"),
-    ) * value_scale**2
+    var = (
+        sample_log_interval(
+            rng_var,
+            data.var_min,
+            data.var_max,
+        )
+        * value_scale**2
+    )
     ls_space = sample_log_interval(
         rng_ls,
-        cfg_value(data, "ls_space_min", "ls_min"),
-        cfg_value(data, "ls_space_max", "ls_max"),
+        data.ls_space_min,
+        data.ls_space_max,
     )
     a = sample_log_interval(
         rng_a,
-        cfg_value(data, "a_min"),
-        cfg_value(data, "a_max"),
+        data.a_min,
+        data.a_max,
     )
     alpha = sample_interval(
         rng_alpha,
-        cfg_value(data, "alpha_min"),
-        cfg_value(data, "alpha_max"),
+        data.alpha_min,
+        data.alpha_max,
     )
     b = sample_interval(
         rng_b,
-        cfg_value(data, "b_min", "b"),
-        cfg_value(data, "b_max", "b"),
+        data.b_min,
+        data.b_max,
     )
     nu = sample_interval(
         rng_nu,
-        cfg_value(data, "nu_min"),
-        cfg_value(data, "nu_max"),
+        data.nu_min,
+        data.nu_max,
     )
     gamma = sample_interval(
         rng_gamma,
         data.get("gamma_min", 1.0),
         data.get("gamma_max", 1.0),
     )
-    obs_noise = sample_log_interval(
-        rng_noise,
-        cfg_value(data, "obs_noise_min", "obs_noise"),
-        cfg_value(data, "obs_noise_max", "obs_noise"),
-    ) * value_scale
+    obs_noise = (
+        sample_log_interval(
+            rng_noise,
+            data.obs_noise_min,
+            data.obs_noise_max,
+        )
+        * value_scale
+    )
     return {
         "var": jnp.asarray(var, dtype=jnp.float32),
         "ls_space": jnp.asarray(ls_space, dtype=jnp.float32),
@@ -446,20 +406,41 @@ def sample_mean_hyperparams(rng: jax.Array, data: DictConfig):
     ) = random.split(rng, 7)
     mean_offset = jnp.asarray(data.get("mean_offset", 0.0), dtype=jnp.float32)
     value_scale = jnp.asarray(data.get("value_scale", 1.0), dtype=jnp.float32)
+    mean = data.mean
     return {
         "offset": mean_offset,
         "scale": value_scale,
-        "bias": sample_interval(rng_bias, -0.15, 0.15),
-        "terrain_weight": sample_interval(rng_terrain_weight, -0.75, 0.75),
+        "bias": sample_interval(rng_bias, mean.bias_min, mean.bias_max),
+        "terrain_weight": sample_interval(
+            rng_terrain_weight,
+            mean.terrain_weight_min,
+            mean.terrain_weight_max,
+        ),
         "clock_weights": sample_interval(
             rng_clock,
-            jnp.array([-0.55, -0.55], dtype=jnp.float32),
-            jnp.array([0.55, 0.55], dtype=jnp.float32),
+            mean.clock_weights_min,
+            mean.clock_weights_max,
         ),
-        "harmonic_weight": sample_interval(rng_harm_weight, -0.25, 0.25),
-        "interaction_weight": sample_interval(rng_inter, -0.35, 0.35),
-        "trend_weight": sample_interval(rng_trend, -0.1, 0.1),
-        "moving_amp": sample_interval(rng_move_amp, -0.55, 0.55),
+        "harmonic_weight": sample_interval(
+            rng_harm_weight,
+            mean.harmonic_weight_min,
+            mean.harmonic_weight_max,
+        ),
+        "interaction_weight": sample_interval(
+            rng_inter,
+            mean.interaction_weight_min,
+            mean.interaction_weight_max,
+        ),
+        "trend_weight": sample_interval(
+            rng_trend,
+            mean.trend_weight_min,
+            mean.trend_weight_max,
+        ),
+        "moving_amp": sample_interval(
+            rng_move_amp,
+            mean.moving_amp_min,
+            mean.moving_amp_max,
+        ),
     }
 
 
@@ -480,15 +461,22 @@ def sample_log_interval(rng: jax.Array, low, high):
     )
 
 
-def terrain_from_params(s: jax.Array, params: dict):
-    centers = params["centers"]
-    widths = params["widths"]
-    amps = params["amps"]
+def terrain_from_config(s: jax.Array, shared: DictConfig):
+    terrain_cfg = shared.terrain
+    centers = jnp.asarray(terrain_cfg.centers, dtype=jnp.float32)
+    widths = jnp.asarray(terrain_cfg.widths, dtype=jnp.float32)
+    amps = jnp.asarray(terrain_cfg.amps, dtype=jnp.float32)
     diff = (s[:, None, :] - centers[None, :, :]) / widths[None, :, :]
     terrain = jnp.sum(amps[None, :] * jnp.exp(-0.5 * jnp.sum(diff**2, axis=-1)), axis=1)
-    phase = params["phase"]
-    terrain += 0.35 * jnp.sin(jnp.pi * s[:, 0] + phase) * jnp.cos(
-        0.8 * jnp.pi * s[:, 1] - 0.5 * phase
+    phase = jnp.asarray(terrain_cfg.phase_pi, dtype=jnp.float32) * jnp.pi
+    ripple_amp = jnp.asarray(terrain_cfg.ripple_amp, dtype=jnp.float32)
+    ripple_x_freq_pi = jnp.asarray(terrain_cfg.ripple_x_freq_pi, dtype=jnp.float32)
+    ripple_y_freq_pi = jnp.asarray(terrain_cfg.ripple_y_freq_pi, dtype=jnp.float32)
+    ripple_phase_mix = jnp.asarray(terrain_cfg.ripple_phase_mix, dtype=jnp.float32)
+    terrain += (
+        ripple_amp
+        * jnp.sin(ripple_x_freq_pi * jnp.pi * s[:, 0] + phase)
+        * jnp.cos(ripple_y_freq_pi * jnp.pi * s[:, 1] + ripple_phase_mix * phase)
     )
     return standardize_feature(terrain)
 
@@ -497,30 +485,35 @@ def standardize_feature(x: jax.Array, eps: float = 1e-6):
     return (x - x.mean()) / (x.std() + eps)
 
 
-def representative_mean_points(
+def mean_function_points(
     s: jax.Array,
     t: jax.Array,
     params: dict,
+    data: DictConfig,
 ):
-    terrain = terrain_from_params(s, SHARED_TERRAIN_PARAMS)
+    """Evaluate the deterministic mean function at pointwise spatiotemporal inputs."""
+    shared = data.shared
+    terrain = terrain_from_config(s, shared)
     clock_sin = jnp.sin(2 * jnp.pi * t)
     clock_cos = jnp.cos(2 * jnp.pi * t)
-    moving_center = SHARED_MOVING_CENTER0[None, :] + (t[:, None] - 0.5) * SHARED_MOVING_VELOCITY[None, :]
-    diff = (s - moving_center) / SHARED_MOVING_WIDTH[None, :]
+    moving_center0 = jnp.asarray(shared.moving.center0, dtype=jnp.float32)
+    moving_velocity = jnp.asarray(shared.moving.velocity, dtype=jnp.float32)
+    moving_width = jnp.asarray(shared.moving.width, dtype=jnp.float32)
+    moving_center = (
+        moving_center0[None, :] + (t[:, None] - 0.5) * moving_velocity[None, :]
+    )
+    diff = (s - moving_center) / moving_width[None, :]
     moving = params["moving_amp"] * jnp.exp(-0.5 * jnp.sum(diff**2, axis=-1))
-    return (
-        params["offset"]
-        + params["scale"]
-        * (
-            params["bias"]
-            + params["terrain_weight"] * terrain
-            + params["clock_weights"][0] * clock_sin
-            + params["clock_weights"][1] * clock_cos
-            + params["harmonic_weight"] * jnp.sin(4 * jnp.pi * t + SHARED_HARMONIC_PHASE)
-            + params["interaction_weight"] * terrain * clock_sin
-            + params["trend_weight"] * (t - 0.5)
-            + moving
-        )
+    harmonic_phase = jnp.asarray(shared.harmonic_phase_pi, dtype=jnp.float32) * jnp.pi
+    return params["offset"] + params["scale"] * (
+        params["bias"]
+        + params["terrain_weight"] * terrain
+        + params["clock_weights"][0] * clock_sin
+        + params["clock_weights"][1] * clock_cos
+        + params["harmonic_weight"] * jnp.sin(4 * jnp.pi * t + harmonic_phase)
+        + params["interaction_weight"] * terrain * clock_sin
+        + params["trend_weight"] * (t - 0.5)
+        + moving
     )
 
 
@@ -544,8 +537,10 @@ def gneiting_covariance_points_batched(
     )
     u = jnp.abs(t1[:, :, None] - t2[:, None, :])
     g = 1.0 + a[:, None, None] * u ** (2 * alpha[:, None, None])
-    return var[:, None, None] / (g**nu[:, None, None]) * jnp.exp(
-        -((scaled_sq / (g**b[:, None, None])) ** gamma[:, None, None])
+    return (
+        var[:, None, None]
+        / (g ** nu[:, None, None])
+        * jnp.exp(-((scaled_sq / (g ** b[:, None, None])) ** gamma[:, None, None]))
     )
 
 

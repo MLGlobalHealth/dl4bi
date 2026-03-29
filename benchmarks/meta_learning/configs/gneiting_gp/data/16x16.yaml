@@ -14,7 +14,6 @@ num_t: 5
 random_t: False
 irregular_layout: True
 plot_regular_grid: True
-spatial_jitter_frac: 0.35
 num_ctx_per_t:
   min: 8
   max: 16
@@ -41,3 +40,39 @@ gamma_max: 1.00
 jitter: 5.0e-4
 obs_noise_min: 0.01
 obs_noise_max: 0.06
+mean:
+  bias_min: -0.15
+  bias_max: 0.15
+  terrain_weight_min: -0.75
+  terrain_weight_max: 0.75
+  clock_weights_min: [-0.55, -0.55]
+  clock_weights_max: [0.55, 0.55]
+  harmonic_weight_min: -0.25
+  harmonic_weight_max: 0.25
+  interaction_weight_min: -0.35
+  interaction_weight_max: 0.35
+  trend_weight_min: -0.10
+  trend_weight_max: 0.10
+  moving_amp_min: -0.55
+  moving_amp_max: 0.55
+shared:
+  terrain:
+    centers:
+      - [-0.72, -0.18]
+      - [-0.08, 0.58]
+      - [0.56, -0.48]
+    widths:
+      - [0.30, 0.42]
+      - [0.26, 0.24]
+      - [0.38, 0.50]
+    amps: [1.30, -1.05, 0.85]
+    phase_pi: 0.35
+    ripple_amp: 0.35
+    ripple_x_freq_pi: 1.0
+    ripple_y_freq_pi: 0.8
+    ripple_phase_mix: -0.5
+  harmonic_phase_pi: -0.45
+  moving:
+    center0: [-0.55, -0.25]
+    velocity: [1.05, 0.55]
+    width: [0.24, 0.18]

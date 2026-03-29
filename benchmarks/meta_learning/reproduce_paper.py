@@ -326,12 +326,13 @@ def gneiting_gp_benchmarks(
     overrides: list[str],
     dry_run: bool,
 ):
+    seeds = seeds[:1]
     gneiting_gp_models = [
-        # "te_tnp",
-        # "tnp_d",
+        "tnp_d",
         "bsa_tnp",
         "bsa_tnp_only_embed",
         "bsa_tnp_only_bias",
+        "te_tnp",
     ]
     generic_benchmark(
         seeds,
