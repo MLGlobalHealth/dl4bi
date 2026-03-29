@@ -506,17 +506,17 @@ def sample_mean_hyperparams(rng: jax.Array):
         rng_move_amp,
     ) = random.split(rng, 7)
     return {
-        "bias": sample_interval(rng_bias, -0.2, 0.2),
-        "terrain_weight": sample_interval(rng_terrain_weight, -0.95, 0.95),
+        "bias": sample_interval(rng_bias, -0.15, 0.15),
+        "terrain_weight": sample_interval(rng_terrain_weight, -0.75, 0.75),
         "clock_weights": sample_interval(
             rng_clock,
-            jnp.array([-0.8, -0.8], dtype=jnp.float32),
-            jnp.array([0.8, 0.8], dtype=jnp.float32),
+            jnp.array([-0.55, -0.55], dtype=jnp.float32),
+            jnp.array([0.55, 0.55], dtype=jnp.float32),
         ),
-        "harmonic_weight": sample_interval(rng_harm_weight, -0.45, 0.45),
-        "interaction_weight": sample_interval(rng_inter, -0.6, 0.6),
-        "trend_weight": sample_interval(rng_trend, -0.15, 0.15),
-        "moving_amp": sample_interval(rng_move_amp, -0.9, 0.9),
+        "harmonic_weight": sample_interval(rng_harm_weight, -0.25, 0.25),
+        "interaction_weight": sample_interval(rng_inter, -0.35, 0.35),
+        "trend_weight": sample_interval(rng_trend, -0.1, 0.1),
+        "moving_amp": sample_interval(rng_move_amp, -0.55, 0.55),
     }
 
 
