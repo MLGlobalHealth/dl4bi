@@ -339,7 +339,7 @@ def gneiting_gp_benchmarks(
         gneiting_gp_models,
         gneiting_gp_main,
         overrides,
-        "AISTATS BSA-TNP - Gneiting GP 2",
+        "AISTATS BSA-TNP - Gneiting GP",
         dry_run=dry_run,
     )
 
