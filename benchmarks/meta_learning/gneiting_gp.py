@@ -19,6 +19,25 @@ from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalBatch
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
+# Shared geography/climatology to make absolute coordinates informative across tasks.
+SHARED_TERRAIN_PARAMS = {
+    "centers": jnp.array(
+        [[-0.72, -0.18], [-0.08, 0.58], [0.56, -0.48]],
+        dtype=jnp.float32,
+    ),
+    "widths": jnp.array(
+        [[0.30, 0.42], [0.26, 0.24], [0.38, 0.50]],
+        dtype=jnp.float32,
+    ),
+    "amps": jnp.array([1.30, -1.05, 0.85], dtype=jnp.float32),
+    "phase": jnp.asarray(0.35 * jnp.pi, dtype=jnp.float32),
+}
+SHARED_HARMONIC_PHASE = jnp.asarray(-0.45 * jnp.pi, dtype=jnp.float32)
+SHARED_MOVING_CENTER0 = jnp.array([-0.55, -0.25], dtype=jnp.float32)
+SHARED_MOVING_VELOCITY = jnp.array([1.05, 0.55], dtype=jnp.float32)
+SHARED_MOVING_WIDTH = jnp.array([0.24, 0.18], dtype=jnp.float32)
+
+
 @hydra.main("configs/gneiting_gp", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
@@ -482,44 +501,22 @@ def sample_mean_hyperparams(rng: jax.Array):
         rng_terrain_weight,
         rng_clock,
         rng_harm_weight,
-        rng_harm_phase,
         rng_inter,
         rng_trend,
         rng_move_amp,
-        rng_move_center,
-        rng_move_vel,
-        rng_move_width,
-        rng_terrain_shape,
-    ) = random.split(rng, 12)
+    ) = random.split(rng, 7)
     return {
-        "bias": sample_interval(rng_bias, -0.3, 0.3),
-        "terrain_weight": sample_interval(rng_terrain_weight, -0.7, 0.7),
+        "bias": sample_interval(rng_bias, -0.2, 0.2),
+        "terrain_weight": sample_interval(rng_terrain_weight, -0.95, 0.95),
         "clock_weights": sample_interval(
             rng_clock,
-            jnp.array([-0.65, -0.65], dtype=jnp.float32),
-            jnp.array([0.65, 0.65], dtype=jnp.float32),
+            jnp.array([-0.8, -0.8], dtype=jnp.float32),
+            jnp.array([0.8, 0.8], dtype=jnp.float32),
         ),
-        "harmonic_weight": sample_interval(rng_harm_weight, -0.25, 0.25),
-        "harmonic_phase": sample_interval(rng_harm_phase, -jnp.pi, jnp.pi),
-        "interaction_weight": sample_interval(rng_inter, -0.4, 0.4),
-        "trend_weight": sample_interval(rng_trend, -0.3, 0.3),
-        "moving_amp": sample_interval(rng_move_amp, -0.65, 0.65),
-        "moving_center0": sample_interval(
-            rng_move_center,
-            jnp.array([-0.65, -0.65], dtype=jnp.float32),
-            jnp.array([0.65, 0.65], dtype=jnp.float32),
-        ),
-        "moving_velocity": sample_interval(
-            rng_move_vel,
-            jnp.array([-0.6, -0.6], dtype=jnp.float32),
-            jnp.array([0.6, 0.6], dtype=jnp.float32),
-        ),
-        "moving_width": sample_log_interval(
-            rng_move_width,
-            jnp.array([0.18, 0.18], dtype=jnp.float32),
-            jnp.array([0.45, 0.45], dtype=jnp.float32),
-        ),
-        "terrain": sample_terrain_params(rng_terrain_shape),
+        "harmonic_weight": sample_interval(rng_harm_weight, -0.45, 0.45),
+        "interaction_weight": sample_interval(rng_inter, -0.6, 0.6),
+        "trend_weight": sample_interval(rng_trend, -0.15, 0.15),
+        "moving_amp": sample_interval(rng_move_amp, -0.9, 0.9),
     }
 
 
@@ -588,20 +585,18 @@ def representative_mean_points(
     t: jax.Array,
     params: dict,
 ):
-    terrain = terrain_from_params(s, params["terrain"])
+    terrain = terrain_from_params(s, SHARED_TERRAIN_PARAMS)
     clock_sin = jnp.sin(2 * jnp.pi * t)
     clock_cos = jnp.cos(2 * jnp.pi * t)
-    moving_center = params["moving_center0"][None, :] + (t[:, None] - 0.5) * params[
-        "moving_velocity"
-    ][None, :]
-    diff = (s - moving_center) / params["moving_width"][None, :]
+    moving_center = SHARED_MOVING_CENTER0[None, :] + (t[:, None] - 0.5) * SHARED_MOVING_VELOCITY[None, :]
+    diff = (s - moving_center) / SHARED_MOVING_WIDTH[None, :]
     moving = params["moving_amp"] * jnp.exp(-0.5 * jnp.sum(diff**2, axis=-1))
     return (
         params["bias"]
         + params["terrain_weight"] * terrain
         + params["clock_weights"][0] * clock_sin
         + params["clock_weights"][1] * clock_cos
-        + params["harmonic_weight"] * jnp.sin(4 * jnp.pi * t + params["harmonic_phase"])
+        + params["harmonic_weight"] * jnp.sin(4 * jnp.pi * t + SHARED_HARMONIC_PHASE)
         + params["interaction_weight"] * terrain * clock_sin
         + params["trend_weight"] * (t - 0.5)
         + moving
