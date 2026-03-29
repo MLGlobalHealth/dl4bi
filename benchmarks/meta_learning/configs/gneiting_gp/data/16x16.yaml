@@ -1,0 +1,41 @@
+name: 16x16
+s:
+  - start: -1.0
+    stop: 1.0
+    num: 16
+  - start: -1.0
+    stop: 1.0
+    num: 16
+t:
+  start: 0.0
+  stop: 1.0
+num_steps: 12
+num_t: 5
+random_t: False
+irregular_layout: True
+plot_regular_grid: True
+spatial_jitter_frac: 0.35
+num_ctx_per_t:
+  min: 8
+  max: 24
+independent_t_masks: True
+num_test: 256
+forecast: True
+batch_size: 4
+var_min: 0.85
+var_max: 1.75
+ls_space_min: [0.10, 0.10]
+ls_space_max: [0.32, 0.32]
+a_min: 0.25
+a_max: 2.50
+alpha_min: 0.35
+alpha_max: 1.00
+b_min: 0.00
+b_max: 0.75
+nu_min: 1.10
+nu_max: 4.00
+gamma_min: 0.55
+gamma_max: 1.00
+jitter: 5.0e-4
+obs_noise_min: 0.01
+obs_noise_max: 0.06

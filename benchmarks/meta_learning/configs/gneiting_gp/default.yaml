@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - data: 8x8
+  - data: 16x16
   - model: bsa_tnp
 seed: 42
 wandb: True
