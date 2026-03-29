@@ -1,11 +1,11 @@
-name: 8x8
+name: 32x32
 s:
   - start: -1.0
     stop: 1.0
-    num: 8
+    num: 32
   - start: -1.0
     stop: 1.0
-    num: 8
+    num: 32
 t:
   start: 0.0
   stop: 1.0
@@ -16,13 +16,13 @@ irregular_layout: True
 plot_regular_grid: True
 spatial_jitter_frac: 0.35
 num_ctx_per_t:
-  min: 4
-  max: 16
+  min: 64
+  max: 256
 independent_t_masks: False
 independent_t_masks_prob: 0.5
-num_test: 64
+num_test: 1024
 forecast: True
-batch_size: 16
+batch_size: 2
 var_min: 0.35
 var_max: 1.20
 ls_space_min: [0.18, 0.18]
