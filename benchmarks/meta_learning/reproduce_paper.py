@@ -33,12 +33,12 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
             "++test_num_steps=50",
             "++plot_interval=50",
         ]
-    # gp_translation_invariance_benchmarks(seeds, overrides, dry_run)
-    # gp_multi_scale_benchmarks(seeds, overrides, dry_run)
-    # gp_rotational_invariance_benchmarks(seeds, overrides, dry_run)
-    # sir_benchmarks(seeds, overrides, dry_run)
-    # era5_benchmarks(seeds, overrides, dry_run)
-    # beijing_benchmarks(seeds, overrides, dry_run)
+    gp_translation_invariance_benchmarks(seeds, overrides, dry_run)
+    gp_multi_scale_benchmarks(seeds, overrides, dry_run)
+    gp_rotational_invariance_benchmarks(seeds, overrides, dry_run)
+    sir_benchmarks(seeds, overrides, dry_run)
+    era5_benchmarks(seeds, overrides, dry_run)
+    beijing_benchmarks(seeds, overrides, dry_run)
     gneiting_gp_benchmarks(seeds, overrides, dry_run)
 
 
@@ -326,12 +326,11 @@ def gneiting_gp_benchmarks(
     overrides: list[str],
     dry_run: bool,
 ):
-    seeds = seeds[:1]
     gneiting_gp_models = [
-        "tnp_d",
         "bsa_tnp",
         "bsa_tnp_only_embed",
         "bsa_tnp_only_bias",
+        "tnp_d",
         "te_tnp",
     ]
     generic_benchmark(

@@ -9,7 +9,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import wandb
 from hydra.utils import instantiate
-from jax import jit, random, vmap
+from jax import jit, random
 from matplotlib.colors import Normalize
 from omegaconf import DictConfig, OmegaConf
 
@@ -93,95 +93,76 @@ def build_dataloader(data: DictConfig, for_plot: bool = False):
     hi = jnp.asarray([axis["stop"] for axis in data.s], dtype=jnp.float32)
     base_flat = s_grid.reshape(-1, s_grid.shape[-1])
 
-    # Keep a custom batching path here because we sample GP values directly on the
-    # queried points rather than drawing a dense episode and slicing afterward.
+    repeat_batch = lambda v: jnp.repeat(v[None, ...], batch_size, axis=0)
+
+    # Keep a custom batching path here because we sample GP values directly on
+    # the queried points. Each yielded batch shares one sampled task and contains
+    # multiple independent draws from that task, matching the cheaper policy used
+    # in gp.py without reverting to dense episode sampling.
     @jit
     def sample_batch(rng: jax.Array):
         rng_s, rng_t, rng_perm, rng_len, rng_episode = random.split(rng, 5)
         if use_irregular_layout:
-            s_flat = sample_uniform_points_batch(
-                rng_s,
-                lo,
-                hi,
-                num_locations,
-                batch_size,
-            )
+            s_flat = sample_uniform_points(rng_s, lo, hi, num_locations)
         else:
-            s_flat = jnp.broadcast_to(
-                base_flat[None, ...], (batch_size, *base_flat.shape)
-            )
-        ts = select_time_indices_batch(
-            rng_t,
-            data.num_steps,
-            data.num_t,
-            data.random_t,
-            batch_size,
-        )
+            s_flat = base_flat
+        ts = select_time_indices(rng_t, data.num_steps, data.num_t, data.random_t)
         t_window = t[ts]
-        independent_t_masks = jnp.full(
-            (batch_size,),
-            data.independent_t_masks,
-            dtype=bool,
-        )
-        permute_idxs = sample_permute_idxs_batch(
+        permute_idxs = sample_permute_idxs(
             rng_perm,
-            batch_size,
             data.num_t,
             num_locations,
-            independent_t_masks,
+            data.independent_t_masks,
         )
-        inv_permute_idx = jnp.argsort(permute_idxs, axis=2)
-        valid_lens_ctx = sample_valid_lens_batch(
+        inv_permute_idx = jnp.argsort(permute_idxs, axis=1)
+        valid_lens_ctx = sample_valid_lens(
             rng_len,
-            batch_size,
             num_ctx_steps,
             data.num_ctx_per_t.min,
             num_ctx_max,
-            independent_t_masks,
+            data.independent_t_masks,
         )
         ctx_s, ctx_t, ctx_mask = [], [], []
         for ctx_i, pos in enumerate(ctx_positions):
-            idx = permute_idxs[:, pos, :num_ctx_max]
-            s_ctx_i = take_locations(s_flat, idx)
-            t_ctx_i = jnp.broadcast_to(
-                t_window[:, pos, None, None],
-                (batch_size, num_ctx_max, 1),
-            )
-            mask_ctx_i = (
-                jnp.arange(num_ctx_max)[None, :] < valid_lens_ctx[:, ctx_i, None]
-            )
+            idx = permute_idxs[pos, :num_ctx_max]
+            s_ctx_i = s_flat[idx]
+            t_ctx_i = jnp.full((num_ctx_max, 1), t_window[pos], dtype=jnp.float32)
+            mask_ctx_i = jnp.arange(num_ctx_max) < valid_lens_ctx[ctx_i]
             ctx_s += [s_ctx_i]
             ctx_t += [t_ctx_i]
             ctx_mask += [mask_ctx_i]
-        s_ctx = jnp.concatenate(ctx_s, axis=1)
-        t_ctx = jnp.concatenate(ctx_t, axis=1)
-        mask_ctx = jnp.concatenate(ctx_mask, axis=1)
-        test_idx = permute_idxs[:, test_i, :num_test]
-        s_test = take_locations(s_flat, test_idx)
-        t_test = jnp.broadcast_to(
-            t_window[:, test_i, None, None],
-            (batch_size, num_test, 1),
+        s_ctx = jnp.concatenate(ctx_s, axis=0)
+        t_ctx = jnp.concatenate(ctx_t, axis=0)
+        mask_ctx = jnp.concatenate(ctx_mask, axis=0)
+        test_idx = permute_idxs[test_i, :num_test]
+        s_test = s_flat[test_idx]
+        t_test = jnp.full((num_test, 1), t_window[test_i], dtype=jnp.float32)
+        mask_test = jnp.ones((num_test,), dtype=bool)
+        s_query = jnp.concatenate([s_ctx, s_test], axis=0)
+        t_query = jnp.concatenate([t_ctx[:, 0], t_test[:, 0]], axis=0)
+        mask_query = jnp.concatenate([mask_ctx, mask_test], axis=0)
+        f_query = sample_observations_shared_task(
+            rng_episode,
+            s_query,
+            t_query,
+            mask_query,
+            data,
+            batch_size,
         )
-        mask_test = jnp.ones((batch_size, num_test), dtype=bool)
-        s_query = jnp.concatenate([s_ctx, s_test], axis=1)
-        t_query = jnp.concatenate([t_ctx[..., 0], t_test[..., 0]], axis=1)
-        mask_query = jnp.concatenate([mask_ctx, mask_test], axis=1)
-        f_query = sample_observations_batched(
-            rng_episode, s_query, t_query, mask_query, data
-        )
-        f_ctx = f_query[:, : num_ctx_steps * num_ctx_max, None]
-        f_test = f_query[:, num_ctx_steps * num_ctx_max :, None]
+        num_ctx = num_ctx_steps * num_ctx_max
+        f_ctx = f_query[:, :num_ctx, None]
+        f_test = f_query[:, num_ctx:, None]
         return SpatiotemporalBatch(
             x_ctx=None,
-            s_ctx=s_ctx,
-            t_ctx=t_ctx,
+            s_ctx=repeat_batch(s_ctx),
+            t_ctx=repeat_batch(t_ctx),
             f_ctx=f_ctx,
-            mask_ctx=mask_ctx,
+            mask_ctx=repeat_batch(mask_ctx),
             x_test=None,
-            s_test=s_test,
-            t_test=t_test,
+            s_test=repeat_batch(s_test),
+            t_test=repeat_batch(t_test),
             f_test=f_test,
-            mask_test=mask_test,
+            mask_test=repeat_batch(mask_test),
             inv_permute_idx=inv_permute_idx,
             s_dims=s_dims,
             forecast=data.forecast,
@@ -203,131 +184,99 @@ def build_grid(axes: list[dict]):
     return jnp.stack(jnp.meshgrid(*coords, indexing="ij"), axis=-1)
 
 
-def sample_uniform_points_batch(
+def sample_uniform_points(
     rng: jax.Array,
     lo: jax.Array,
     hi: jax.Array,
     num_locations: int,
-    batch_size: int,
 ):
     return random.uniform(
         rng,
-        (batch_size, num_locations, lo.shape[0]),
+        (num_locations, lo.shape[0]),
         minval=lo,
         maxval=hi,
     )
 
 
-def take_locations(s: jax.Array, idx: jax.Array):
-    return vmap(lambda s_i, idx_i: s_i[idx_i])(s, idx)
-
-
-def select_time_indices_batch(
+def select_time_indices(
     rng: jax.Array,
     num_steps: int,
     num_t: int,
     random_t: bool,
-    batch_size: int,
 ):
     if num_t == num_steps:
-        return jnp.broadcast_to(jnp.arange(num_t, dtype=jnp.int32), (batch_size, num_t))
+        return jnp.arange(num_t, dtype=jnp.int32)
     if random_t:
-        rngs = random.split(rng, batch_size)
-        return vmap(
-            lambda rng_i: jnp.sort(
-                random.choice(rng_i, num_steps, (num_t,), replace=False)
-            )
-        )(rngs)
-    last_t = random.randint(rng, (batch_size, 1), num_t, num_steps)
+        return jnp.sort(random.choice(rng, num_steps, (num_t,), replace=False))
+    last_t = random.randint(rng, (), num_t, num_steps)
     delta = jnp.arange(num_t - 1, -1, -1, dtype=jnp.int32)
     return last_t - delta
 
 
-def sample_permute_idxs_batch(
+def sample_permute_idxs(
     rng: jax.Array,
-    batch_size: int,
     num_t: int,
     num_locations: int,
-    independent_t_masks: jax.Array,
+    independent_t_masks: bool,
 ):
-    rng_shared, rng_indep = random.split(rng)
-    shared = vmap(lambda rng_i: random.permutation(rng_i, num_locations))(
-        random.split(rng_shared, batch_size)
-    )
-    indep = vmap(
-        lambda rng_i: vmap(lambda rng_j: random.permutation(rng_j, num_locations))(
-            random.split(rng_i, num_t)
+    if independent_t_masks:
+        return jnp.stack(
+            [random.permutation(rng_i, num_locations) for rng_i in random.split(rng, num_t)]
         )
-    )(random.split(rng_indep, batch_size))
-    shared = jnp.repeat(shared[:, None, :], num_t, axis=1)
-    return jnp.where(independent_t_masks[:, None, None], indep, shared)
+    permute_idx = random.permutation(rng, num_locations)
+    return jnp.repeat(permute_idx[None, :], num_t, axis=0)
 
 
-def sample_valid_lens_batch(
+def sample_valid_lens(
     rng: jax.Array,
-    batch_size: int,
     num_ctx_steps: int,
     num_ctx_min: int,
     num_ctx_max: int,
-    independent_t_masks: jax.Array,
+    independent_t_masks: bool,
 ):
     if num_ctx_max <= num_ctx_min:
-        return jnp.full((batch_size, num_ctx_steps), num_ctx_min, dtype=jnp.int32)
-    rng_shared, rng_indep = random.split(rng)
-    shared = random.randint(rng_shared, (batch_size, 1), num_ctx_min, num_ctx_max)
-    indep = random.randint(
-        rng_indep,
-        (batch_size, num_ctx_steps),
-        num_ctx_min,
-        num_ctx_max,
-    )
-    return jnp.where(independent_t_masks[:, None], indep, shared)
+        return jnp.full((num_ctx_steps,), num_ctx_min, dtype=jnp.int32)
+    if independent_t_masks:
+        return random.randint(rng, (num_ctx_steps,), num_ctx_min, num_ctx_max)
+    valid_len = random.randint(rng, (), num_ctx_min, num_ctx_max)
+    return jnp.full((num_ctx_steps,), valid_len, dtype=jnp.int32)
 
 
-def sample_observations_batched(
+def sample_observations_shared_task(
     rng: jax.Array,
     s: jax.Array,
     t: jax.Array,
     mask: jax.Array,
     data: DictConfig,
+    batch_size: int,
 ):
-    batch_size, num_points, _ = s.shape
     rng_k, rng_m, rng_z, rng_eps = random.split(rng, 4)
-    kernels = vmap(lambda rng_i: sample_kernel_hyperparams(rng_i, data))(
-        random.split(rng_k, batch_size)
-    )
-    means = vmap(lambda rng_i: sample_mean_hyperparams(rng_i, data))(
-        random.split(rng_m, batch_size)
-    )
-    m = vmap(lambda s_i, t_i, mean_i: mean_function_points(s_i, t_i, mean_i, data))(
-        s,
-        t,
-        means,
-    )
-    K = gneiting_covariance_points_batched(
+    num_points = s.shape[0]
+    kernel = sample_kernel_hyperparams(rng_k, data)
+    mean = sample_mean_hyperparams(rng_m, data)
+    m = mean_function_points(s, t, mean, data)
+    K = gneiting_covariance_points(
         s,
         t,
         s,
         t,
-        kernels["var"],
-        kernels["ls_space"],
-        kernels["a"],
-        kernels["alpha"],
-        kernels["b"],
-        kernels["nu"],
-        kernels["gamma"],
+        kernel["var"],
+        kernel["ls_space"],
+        kernel["a"],
+        kernel["alpha"],
+        kernel["b"],
+        kernel["nu"],
+        kernel["gamma"],
     )
-    valid = mask[:, :, None] & mask[:, None, :]
-    eye = jnp.eye(num_points, dtype=jnp.float32)[None, ...]
+    valid = mask[:, None] & mask[None, :]
+    eye = jnp.eye(num_points, dtype=jnp.float32)
     K = jnp.where(valid, K, 0.0)
-    K += eye * (
-        kernels["jitter"][:, None, None] + (~mask)[:, None, :].astype(jnp.float32)
-    )
+    K += eye * (kernel["jitter"] + (~mask).astype(jnp.float32))
+    chol = jnp.linalg.cholesky(K)
     z = random.normal(rng_z, (batch_size, num_points), dtype=jnp.float32)
-    f = jnp.where(mask, m, 0.0) + jnp.einsum("bij,bj->bi", jnp.linalg.cholesky(K), z)
-    obs_noise = kernels["obs_noise"][:, None]
-    f += obs_noise * random.normal(rng_eps, f.shape, dtype=jnp.float32) * mask
-    return jnp.where(mask, f, 0.0)
+    f = jnp.where(mask[None, :], m[None, :], 0.0) + z @ chol.T
+    f += kernel["obs_noise"] * random.normal(rng_eps, f.shape, dtype=jnp.float32) * mask
+    return jnp.where(mask[None, :], f, 0.0)
 
 
 def sample_kernel_hyperparams(rng: jax.Array, data: DictConfig):
@@ -518,7 +467,7 @@ def mean_function_points(
 
 
 @jit
-def gneiting_covariance_points_batched(
+def gneiting_covariance_points(
     s1: jax.Array,
     t1: jax.Array,
     s2: jax.Array,
@@ -532,16 +481,12 @@ def gneiting_covariance_points_batched(
     gamma: jax.Array,
 ):
     scaled_sq = jnp.sum(
-        ((s1[:, :, None, :] - s2[:, None, :, :]) / ls_space[:, None, None, :]) ** 2,
+        ((s1[:, None, :] - s2[None, :, :]) / ls_space[None, None, :]) ** 2,
         axis=-1,
     )
-    u = jnp.abs(t1[:, :, None] - t2[:, None, :])
-    g = 1.0 + a[:, None, None] * u ** (2 * alpha[:, None, None])
-    return (
-        var[:, None, None]
-        / (g ** nu[:, None, None])
-        * jnp.exp(-((scaled_sq / (g ** b[:, None, None])) ** gamma[:, None, None]))
-    )
+    u = jnp.abs(t1[:, None] - t2[None, :])
+    g = 1.0 + a * u ** (2 * alpha)
+    return var / (g**nu) * jnp.exp(-((scaled_sq / (g**b)) ** gamma))
 
 
 def plot(
@@ -564,10 +509,6 @@ def plot(
     if isinstance(output, tuple):
         output, _ = output
     f_pred, f_std = output.mu, output.std
-    if batch.inv_permute_idx.ndim == 3:
-        batch = select_plot_sample(batch, 0)
-        f_pred = f_pred[:1]
-        f_std = f_std[:1]
     f_min = min(batch.f_ctx.min(), batch.f_test.min(), f_pred.min())
     f_max = max(batch.f_ctx.max(), batch.f_test.max(), f_pred.max())
     norm = Normalize(f_min, f_max)
@@ -586,25 +527,6 @@ def plot(
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     wandb.log({f"Step {step}": wandb.Image(path)})
-
-
-def select_plot_sample(batch: SpatiotemporalBatch, idx: int):
-    select = lambda v: None if v is None else v[idx : idx + 1]
-    return SpatiotemporalBatch(
-        x_ctx=select(batch.x_ctx),
-        s_ctx=select(batch.s_ctx),
-        t_ctx=select(batch.t_ctx),
-        f_ctx=select(batch.f_ctx),
-        mask_ctx=select(batch.mask_ctx),
-        x_test=select(batch.x_test),
-        s_test=select(batch.s_test),
-        t_test=select(batch.t_test),
-        f_test=select(batch.f_test),
-        mask_test=select(batch.mask_test),
-        inv_permute_idx=batch.inv_permute_idx[idx],
-        s_dims=batch.s_dims,
-        forecast=batch.forecast,
-    )
 
 
 if __name__ == "__main__":
