@@ -226,27 +226,6 @@ def build_grid(axes: list[dict]):
     return jnp.stack(jnp.meshgrid(*coords, indexing="ij"), axis=-1)
 
 
-def sample_jittered_grid(
-    rng: jax.Array,
-    axes: list[dict],
-    jitter_frac: float,
-):
-    base = build_grid(axes)
-    noise = random.uniform(rng, base.shape, minval=-1.0, maxval=1.0)
-    steps = []
-    for axis in axes:
-        num = axis["num"]
-        if num <= 1:
-            steps.append(0.0)
-        else:
-            steps.append((axis["stop"] - axis["start"]) / (num - 1))
-    step = jnp.asarray(steps, dtype=jnp.float32)
-    lo = jnp.asarray([axis["start"] for axis in axes], dtype=jnp.float32)
-    hi = jnp.asarray([axis["stop"] for axis in axes], dtype=jnp.float32)
-    jitter = noise * (jitter_frac * step)
-    return jnp.clip(base + jitter, lo, hi).reshape(-1, len(axes))
-
-
 def sample_jittered_grid_batch(
     rng: jax.Array,
     base_grid: jax.Array,
@@ -347,49 +326,6 @@ def sample_valid_lens_batch(
     return jnp.where(independent_t_masks[:, None], indep, shared)
 
 
-def sample_episode(
-    rng: jax.Array,
-    s: jax.Array,
-    t: jax.Array,
-    spatial_shape: tuple[int, ...],
-    data: DictConfig,
-):
-    s_rep, t_rep = flatten_spacetime_inputs(s, t)
-    f = sample_observations(rng, s_rep, t_rep, data)
-    return f.reshape(t.shape[0], *spatial_shape, 1)
-
-
-def sample_observations(
-    rng: jax.Array,
-    s: jax.Array,
-    t: jax.Array,
-    data: DictConfig,
-):
-    rng_k, rng_m, rng_z, rng_eps = random.split(rng, 4)
-    kernel = sample_kernel_hyperparams(rng_k, data)
-    mean = sample_mean_hyperparams(rng_m)
-    m = representative_mean_points(s, t, mean)
-    K = gneiting_covariance_points(
-        s,
-        t,
-        s,
-        t,
-        kernel["var"],
-        kernel["ls_space"],
-        kernel["a"],
-        kernel["alpha"],
-        kernel["b"],
-        kernel["nu"],
-        kernel["gamma"],
-    )
-    K += kernel["jitter"] * jnp.eye(K.shape[0], dtype=jnp.float32)
-    z = random.normal(rng_z, (K.shape[0],), dtype=jnp.float32)
-    f = m + jnp.linalg.cholesky(K).astype(jnp.float32) @ z
-    if float(kernel["obs_noise"]) > 0.0:
-        f += kernel["obs_noise"] * random.normal(rng_eps, f.shape, dtype=jnp.float32)
-    return f
-
-
 def sample_observations_batched(
     rng: jax.Array,
     s: jax.Array,
@@ -402,7 +338,9 @@ def sample_observations_batched(
     kernels = vmap(lambda rng_i: sample_kernel_hyperparams(rng_i, data))(
         random.split(rng_k, batch_size)
     )
-    means = vmap(sample_mean_hyperparams)(random.split(rng_m, batch_size))
+    means = vmap(lambda rng_i: sample_mean_hyperparams(rng_i, data))(
+        random.split(rng_m, batch_size)
+    )
     m = vmap(representative_mean_points)(s, t, means)
     K = gneiting_covariance_points_batched(
         s,
@@ -442,11 +380,12 @@ def sample_kernel_hyperparams(rng: jax.Array, data: DictConfig):
     rng_var, rng_ls, rng_a, rng_alpha, rng_b, rng_nu, rng_gamma, rng_noise = (
         random.split(rng, 8)
     )
+    value_scale = jnp.asarray(data.get("value_scale", 1.0), dtype=jnp.float32)
     var = sample_log_interval(
         rng_var,
         cfg_value(data, "var_min", "var"),
         cfg_value(data, "var_max", "var"),
-    )
+    ) * value_scale**2
     ls_space = sample_log_interval(
         rng_ls,
         cfg_value(data, "ls_space_min", "ls_min"),
@@ -481,7 +420,7 @@ def sample_kernel_hyperparams(rng: jax.Array, data: DictConfig):
         rng_noise,
         cfg_value(data, "obs_noise_min", "obs_noise"),
         cfg_value(data, "obs_noise_max", "obs_noise"),
-    )
+    ) * value_scale
     return {
         "var": jnp.asarray(var, dtype=jnp.float32),
         "ls_space": jnp.asarray(ls_space, dtype=jnp.float32),
@@ -495,7 +434,7 @@ def sample_kernel_hyperparams(rng: jax.Array, data: DictConfig):
     }
 
 
-def sample_mean_hyperparams(rng: jax.Array):
+def sample_mean_hyperparams(rng: jax.Array, data: DictConfig):
     (
         rng_bias,
         rng_terrain_weight,
@@ -505,7 +444,11 @@ def sample_mean_hyperparams(rng: jax.Array):
         rng_trend,
         rng_move_amp,
     ) = random.split(rng, 7)
+    mean_offset = jnp.asarray(data.get("mean_offset", 0.0), dtype=jnp.float32)
+    value_scale = jnp.asarray(data.get("value_scale", 1.0), dtype=jnp.float32)
     return {
+        "offset": mean_offset,
+        "scale": value_scale,
         "bias": sample_interval(rng_bias, -0.15, 0.15),
         "terrain_weight": sample_interval(rng_terrain_weight, -0.75, 0.75),
         "clock_weights": sample_interval(
@@ -537,25 +480,6 @@ def sample_log_interval(rng: jax.Array, low, high):
     )
 
 
-def sample_terrain_params(rng: jax.Array):
-    rng_centers, rng_widths, rng_amps, rng_phase = random.split(rng, 4)
-    num_bumps, dims = 3, 2
-    return {
-        "centers": sample_interval(
-            rng_centers,
-            -0.85 * jnp.ones((num_bumps, dims), dtype=jnp.float32),
-            0.85 * jnp.ones((num_bumps, dims), dtype=jnp.float32),
-        ),
-        "widths": sample_log_interval(
-            rng_widths,
-            0.18 * jnp.ones((num_bumps, dims), dtype=jnp.float32),
-            0.6 * jnp.ones((num_bumps, dims), dtype=jnp.float32),
-        ),
-        "amps": random.normal(rng_amps, (num_bumps,), dtype=jnp.float32),
-        "phase": sample_interval(rng_phase, -jnp.pi, jnp.pi),
-    }
-
-
 def terrain_from_params(s: jax.Array, params: dict):
     centers = params["centers"]
     widths = params["widths"]
@@ -567,13 +491,6 @@ def terrain_from_params(s: jax.Array, params: dict):
         0.8 * jnp.pi * s[:, 1] - 0.5 * phase
     )
     return standardize_feature(terrain)
-
-
-def flatten_spacetime_inputs(s: jax.Array, t: jax.Array):
-    T, L = t.shape[0], s.shape[0]
-    s_rep = jnp.broadcast_to(s[None, :, :], (T, L, s.shape[-1])).reshape(-1, s.shape[-1])
-    t_rep = jnp.broadcast_to(t[:, None], (T, L)).reshape(-1)
-    return s_rep, t_rep
 
 
 def standardize_feature(x: jax.Array, eps: float = 1e-6):
@@ -592,67 +509,19 @@ def representative_mean_points(
     diff = (s - moving_center) / SHARED_MOVING_WIDTH[None, :]
     moving = params["moving_amp"] * jnp.exp(-0.5 * jnp.sum(diff**2, axis=-1))
     return (
-        params["bias"]
-        + params["terrain_weight"] * terrain
-        + params["clock_weights"][0] * clock_sin
-        + params["clock_weights"][1] * clock_cos
-        + params["harmonic_weight"] * jnp.sin(4 * jnp.pi * t + SHARED_HARMONIC_PHASE)
-        + params["interaction_weight"] * terrain * clock_sin
-        + params["trend_weight"] * (t - 0.5)
-        + moving
+        params["offset"]
+        + params["scale"]
+        * (
+            params["bias"]
+            + params["terrain_weight"] * terrain
+            + params["clock_weights"][0] * clock_sin
+            + params["clock_weights"][1] * clock_cos
+            + params["harmonic_weight"] * jnp.sin(4 * jnp.pi * t + SHARED_HARMONIC_PHASE)
+            + params["interaction_weight"] * terrain * clock_sin
+            + params["trend_weight"] * (t - 0.5)
+            + moving
+        )
     )
-
-
-@jit
-def gneiting_covariance_matrix(
-    s1: jax.Array,
-    t1: jax.Array,
-    s2: jax.Array,
-    t2: jax.Array,
-    var: jax.Array,
-    ls_space: jax.Array,
-    a: jax.Array,
-    alpha: jax.Array,
-    b: jax.Array,
-    nu: jax.Array,
-    gamma: jax.Array,
-):
-    """Gneiting (2002) non-separable space-time covariance on R^d x R."""
-    L1, T1 = s1.shape[0], t1.shape[0]
-    L2, T2 = s2.shape[0], t2.shape[0]
-    scaled_sq = jnp.sum(
-        ((s1[:, None, :] - s2[None, :, :]) / ls_space[None, None, :]) ** 2,
-        axis=-1,
-    )
-    u = jnp.abs(t1[:, None] - t2[None, :])
-    scaled_sq = scaled_sq[None, None, :, :]
-    u = u[:, :, None, None]
-    g = 1.0 + a * u ** (2 * alpha)
-    K = var / (g**nu) * jnp.exp(-((scaled_sq / (g**b)) ** gamma))
-    return K.transpose(0, 2, 1, 3).reshape(T1 * L1, T2 * L2)
-
-
-@jit
-def gneiting_covariance_points(
-    s1: jax.Array,
-    t1: jax.Array,
-    s2: jax.Array,
-    t2: jax.Array,
-    var: jax.Array,
-    ls_space: jax.Array,
-    a: jax.Array,
-    alpha: jax.Array,
-    b: jax.Array,
-    nu: jax.Array,
-    gamma: jax.Array,
-):
-    scaled_sq = jnp.sum(
-        ((s1[:, None, :] - s2[None, :, :]) / ls_space[None, None, :]) ** 2,
-        axis=-1,
-    )
-    u = jnp.abs(t1[:, None] - t2[None, :])
-    g = 1.0 + a * u ** (2 * alpha)
-    return var / (g**nu) * jnp.exp(-((scaled_sq / (g**b)) ** gamma))
 
 
 @jit

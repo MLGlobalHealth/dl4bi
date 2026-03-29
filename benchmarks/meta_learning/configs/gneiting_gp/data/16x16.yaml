@@ -22,6 +22,8 @@ independent_t_masks: True
 num_test: 256
 forecast: True
 batch_size: 4
+mean_offset: 6.0
+value_scale: 0.9
 var_min: 0.85
 var_max: 1.75
 ls_space_min: [0.05, 0.05]
