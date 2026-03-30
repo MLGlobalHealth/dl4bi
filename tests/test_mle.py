@@ -1,10 +1,10 @@
 import jax.numpy as jnp
 import pytest
 from jax import random
-from sps.gp import GP
-from sps.kernels import rbf
-from sps.priors import Prior
-from sps.utils import build_grid
+from dl4bi_sps.gp import GP
+from dl4bi_sps.kernels import rbf
+from dl4bi_sps.priors import Prior
+from dl4bi_sps.utils import build_grid
 
 from dl4bi.core.mle import gp_mle_bfgs, gp_mle_sgd
 

@@ -1,10 +1,12 @@
 # Deep Learning for Bayesian Inference (dl4bi)
 
 ## Install
-1. Install [jax](https://jax.readthedocs.io/en/latest/installation.html)
-2. Install the `dl4bi` package from git with `uv`:
+Install with the appropriate command. If JAX isn't installed already, we recommend using one of the `dl4bi[<jax-version>]` installs.
 ```bash
-uv pip install -U --force-reinstall git+ssh://git@github.com/MLGlobalHealth/dl4bi.git
+pip install dl4bi # dl4bi
+pip install dl4bi[cpu] # dl4bi + jax for CPU
+pip install dl4bi[cuda12] # dl4bi + jax for CUDA-12
+pip install dl4bi[cuda13] # dl4bi + jax for CUDA-13
 ```
 
 ## View Documentation (Locally)
@@ -13,7 +15,7 @@ git clone git@github.com:MLGlobalHealth/dl4bi.git
 cd dl4bi
 uv run --with pdoc pdoc --docformat google --math dl4bi
 ```
-Example scripts can be found [here](https://github.com/MLGlobalHealth/dl4bi/tree/main/benchmarks).
+Example benchmarks can be found [here](https://github.com/MLGlobalHealth/dl4bi/tree/main/benchmarks).
 
 ## Development Setup
 - Install `uv`: `curl -LsSf https://astral.sh/uv/install.sh | sh`
@@ -24,15 +26,13 @@ Example scripts can be found [here](https://github.com/MLGlobalHealth/dl4bi/tree
     - CUDA 12 JAX: `uv sync --extra cuda12`
     - CUDA 13 JAX: `uv sync --extra cuda13`
 - `uv sync` creates `.venv`, installs the project in editable mode, includes the default `dev` dependency group, and picks a Python interpreter compatible with the project's `requires-python`
-- Run project commands through `uv`, e.g. `uv run pytest`
+- Before making changes, install the shared development hooks: `uv run pre-commit install --install-hooks`
+- Verify the hook setup once per clone with: `uv run pre-commit run --all-files`
+- Keep the hooks installed for local development; commits on `main` run `pytest -q tests` through the shared `pre-commit` setup
+- Run project commands through `uv`, e.g. `uv run pytest` or `uv run python gp.py`
 - If you want to activate the virtualenv directly, use `source .venv/bin/activate`
 
 ## Build and Publish to PyPI
-- PyPI receives a single distribution, `dl4bi`; the CUDA variants are published as extras on that distribution, not as separate wheels
-- With the current metadata, the published extra install targets are `dl4bi[cpu]`, `dl4bi[cuda12]`, and `dl4bi[cuda13]`
-- Extras are always opt-in; Python packaging does not have a "default extra", so `dl4bi` is only the CPU/default install if CPU JAX is included in the base `[project.dependencies]`
-- With the current metadata, plain `dl4bi` does not install JAX; users must either install JAX separately or select one of the JAX extras
-
 1. Bump the package version:
 ```bash
 uv version --bump patch --frozen

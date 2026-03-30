@@ -5,7 +5,7 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 from jax import jit
-from sps.kernels import great_circle_dist, l2_dist
+from dl4bi_sps.kernels import great_circle_dist, l2_dist
 
 
 @partial(jit, static_argnames=("causal",))

@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 from flax import linen as nn
 from jax import random
-from sps.kernels import l2_dist_sq
+from dl4bi_sps.kernels import l2_dist_sq
 
 
 class PiVAE(nn.Module):

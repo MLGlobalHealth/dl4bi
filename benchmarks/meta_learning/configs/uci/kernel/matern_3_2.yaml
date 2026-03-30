@@ -1,5 +1,5 @@
 cls: GP
-kwargs: 
+kwargs:
   kernel:
     func: matern_3_2
   var:

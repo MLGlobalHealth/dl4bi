@@ -1,6 +1,9 @@
+import os
+
 import jax
 import jax.numpy as jnp
 import optax
+import pytest
 from jax import jit, random
 
 from dl4bi.core.attention import (
@@ -28,6 +31,11 @@ from dl4bi.meta_learning import (
     ConvCNP,
 )
 from dl4bi.meta_learning.data.spatial import SpatialData
+
+requires_perf_env = pytest.mark.skipif(
+    os.environ.get("DL4BI_RUN_PERF_TESTS") != "1",
+    reason="performance and scale tests are opt-in; set DL4BI_RUN_PERF_TESTS=1",
+)
 
 
 def test_models():
@@ -77,6 +85,7 @@ def test_models():
         assert output.std.shape == (B, L, 1)
 
 
+@requires_perf_env
 def test_tnp_kr_fast_scale():
     B, D_f, L_init, L_ctx, L_test = 1, 1, 3, 500000, 50000
     rng = random.key(42)

@@ -1,8 +1,8 @@
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from jax import random
-from sps.kernels import rbf
-from sps.utils import build_grid
+from dl4bi_sps.kernels import rbf
+from dl4bi_sps.utils import build_grid
 
 from dl4bi.embed import FixedSinusoidalEmbedding, RBFRandomFourierFeatures
 

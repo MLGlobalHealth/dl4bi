@@ -1,10 +1,12 @@
 from time import time
+import os
 
 import jax
 import jax.numpy as jnp
+import pytest
 from jax import random
 from jraph import GraphsTuple
-from sps.utils import build_grid
+from dl4bi_sps.utils import build_grid
 
 from dl4bi.core.attention import (
     AdaptiveMultiHeadSelfAttention,
@@ -20,6 +22,15 @@ from dl4bi.core.bias import Bias
 from dl4bi.core.hyper import HyperLoRA, HyperLoRAqkv
 from dl4bi.core.utils import mask_from_valid_lens
 
+requires_gpu = pytest.mark.skipif(
+    not any(device.platform == "gpu" for device in jax.devices()),
+    reason="cuDNN attention requires a GPU-backed JAX runtime",
+)
+requires_perf_env = pytest.mark.skipif(
+    os.environ.get("DL4BI_RUN_PERF_TESTS") != "1",
+    reason="performance and scale tests are opt-in; set DL4BI_RUN_PERF_TESTS=1",
+)
+
 
 def test_attention_impl():
     B, H, L, D = 4, 4, 32, 16
@@ -34,6 +45,7 @@ def test_attention_impl():
     assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
 
 
+@requires_gpu
 def test_cudnn_attention_impl():
     B, H, L, D = 4, 4, 32, 16
     key = random.key(42)
@@ -180,6 +192,8 @@ def test_biased_scan_attention_impl():
         assert ctx_scan.shape == (B, H, L, D), "Scan: incorrect context output shape!"
 
 
+@requires_perf_env
+@requires_gpu
 def test_cudnn_attention_speed():
     B, L, H, D, N = 4, 4096, 4, 16, 10
     rng = random.key(42)
@@ -220,6 +234,7 @@ def test_cudnn_attention_speed():
     )
 
 
+@requires_perf_env
 def test_fast_softmax_attention_speed():
     B, H, L, D, N = 1, 4, 1024, 16, 5
     key = random.key(42)
@@ -251,6 +266,7 @@ def test_fast_softmax_attention_speed():
     assert jnp.isclose(t_fast_diff, t_true_diff, atol=1e-4), "Fast isn't faster!"
 
 
+@requires_perf_env
 def test_scan_attention_speed():
     B, L, H, D, N, C = 5, 1024, 4, 16, 5, 1024
     key = random.key(42)
@@ -284,6 +300,7 @@ def test_scan_attention_speed():
     assert t_scan_diff < factor * t_true_diff, f"Scan is more than {factor}x slower!"
 
 
+@requires_perf_env
 def test_biased_scan_attention_speed():
     B, H, L, D, S, N = 5, 4, 1024, 16, 2, 5
     key = random.key(42)
@@ -344,6 +361,8 @@ def test_biased_scan_attention_speed():
         )
 
 
+@requires_perf_env
+@requires_gpu
 def test_cudnn_attention_scale():
     # L_ctx, L_test = 105569, 44431  # Case Study for Large Spatial Data, Heaton et al
     B, L_ctx, L_test, H, D = 1, 110000, 50000, 4, 16
@@ -365,6 +384,7 @@ def test_cudnn_attention_scale():
     assert jnp.isfinite(ctx_cudnn).all(), "Non-finite values produced!"
 
 
+@requires_perf_env
 def test_fast_softmax_attention_scale():
     # L_ctx, L_test = 105569, 44431  # Case Study for Large Spatial Data, Heaton et al
     B, L_ctx, L_test, L_init, H, D = 1, 110000, 50000, 3, 4, 16
@@ -387,6 +407,7 @@ def test_fast_softmax_attention_scale():
     assert jnp.isfinite(ctx_fast).all(), "Non-finite values produced!"
 
 
+@requires_perf_env
 def test_scan_attention_scale():
     # L_ctx, L_test = 105569, 44431  # Case Study for Large Spatial Data, Heaton et al
     B, L_ctx, L_test, H, D = 1, 110000, 50000, 4, 16
@@ -408,6 +429,7 @@ def test_scan_attention_scale():
     assert jnp.isfinite(ctx_scan).all(), "Non-finite values produced!"
 
 
+@requires_perf_env
 def test_biased_scan_attention_scale():
     # L_ctx, L_test = 105569, 44431  # Case Study for Large Spatial Data, Heaton et al
     B, H, L_ctx, L_test, D, S = 1, 4, 110000, 50000, 16, 2

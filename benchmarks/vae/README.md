@@ -1,6 +1,6 @@
 # DeepRV
 
-DeepRV is a decoder-only surrogate neural model designed to emulate Gaussian process priors and accelerate Bayesian inference for spatial and spatiotemporal data.  
+DeepRV is a decoder-only surrogate neural model designed to emulate Gaussian process priors and accelerate Bayesian inference for spatial and spatiotemporal data.
 
 ## Environment Setup
 
@@ -79,12 +79,12 @@ All experiments are runnable from the repository root. Results and processed out
   - Notes:
     - Ground truth data and INLA outputs are expected under `results/INLA_raw_batch_results`. Due to instability in regenerating the exact ground truth observations and masking (despite seed control), we **recommend downloading the precomputed ground truth data** from the following link: [Drive link](https://drive.google.com/file/d/1OXKwBUC1FYttw_NHK-jFK_zO4u421myB/view) and placing the extracted contents directly into `results/INLA_raw_batch_results`.
     - Once the precomputed data are in place, you may either: run `benchmarks/vae/inla.r`, which will **reuse the existing ground truth observation and will generate INLA outputs** in this directory, or run the Python benchmarking script directly, which will also **detect and use the precomputed results and INLA outputs**.
-    - The R script `benchmarks/vae/inla.r` can optionally regenerate the ground truth data by setting the internal `generate` flag to `TRUE` and rerunning the script.  
+    - The R script `benchmarks/vae/inla.r` can optionally regenerate the ground truth data by setting the internal `generate` flag to `TRUE` and rerunning the script.
   This enables full end-to-end regeneration for benchmarking purposes, but **may result isn discrepancies in the generated ground truth** relative to the precomputed version used in the paper.
     - Long runtime (machine-dependent; expect days on some setups).
     - Results saved to `results/Benchmark_Matern_1_2_ls_<lengthscale>` for lengthscales 10, 30, 50.
     - Interruption-safe: intermediate results are reloaded automatically.
-    - For a more computationally intensive INLA configuration, you can uncomment the lines related to mesh spacing (line 60) in `benchmarks/vae/inla.r`.  
+    - For a more computationally intensive INLA configuration, you can uncomment the lines related to mesh spacing (line 60) in `benchmarks/vae/inla.r`.
    This increases mesh resolution and computation time but did not yield significant improvements in our results. It remains available for full reproducibility.
 
 - **Benchmarking — Matérn-3/2**
@@ -103,7 +103,7 @@ All experiments are runnable from the repository root. Results and processed out
     - Results saved under `results/spatiotemporal`.
 
 - **Real-world LSOA / MSOA (London)**
-  - Before running, you **must** download the required shapefiles from:  
+  - Before running, you **must** download the required shapefiles from:
     [Google Drive link](https://drive.google.com/file/d/12oPJGONKqSRLXH9h49LujIDQyFT18_tb/view?usp=drive_link)
   - Unzip the downloaded archive directly into the `maps` directory using:
     ```bash
@@ -156,11 +156,11 @@ python benchmarks/vae/deep_rv_example.py
 ```
 dl4bi/                   # Core model and training modules (Belongs to the parent repo DL4BI)
 benchmarks/vae/          # Scripts for DeepRV's paper experiments and utilities
-benchmarks/vae/utils/    # Experiment utilities and plotting functions  
+benchmarks/vae/utils/    # Experiment utilities and plotting functions
 benchmarks/vae/maps/     # Shapefiles for London LSOA/MSOA analysis (download link in the reproduce paper section)
 results/                 # Where results per experiment are kept
 outputs/                 # Where processed plots and tables are saved (will be generated automatically)
 README.md                # DL4BI parent repo's README
 benchmarks/vae/README.md # DeepRV paper reproduction README
-pyproject.toml           # Dependency and installation configuration  
+pyproject.toml           # Dependency and installation configuration
 ```

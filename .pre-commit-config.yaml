@@ -1,0 +1,20 @@
+minimum_pre_commit_version: "4.0.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: pytest-on-main
+        name: Run unit tests on main
+        entry: ./scripts/pre-commit-run-tests-on-main.sh
+        language: system
+        pass_filenames: false
+        always_run: true

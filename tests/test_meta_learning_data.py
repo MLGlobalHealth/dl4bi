@@ -3,8 +3,8 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from flax.core.frozen_dict import FrozenDict
 from jax import jit, random
-from sps.sir import LatticeSIR
-from sps.utils import build_grid
+from dl4bi_sps.sir import LatticeSIR
+from dl4bi_sps.utils import build_grid
 
 from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData

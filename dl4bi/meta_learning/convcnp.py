@@ -6,7 +6,7 @@ from typing import Callable, List, Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from sps.utils import build_grid
+from dl4bi_sps.utils import build_grid
 
 from ..core.conv import ConvCNPNet, ConvDeepSet
 from ..core.mlp import MLP
