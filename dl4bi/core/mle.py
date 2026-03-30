@@ -1,6 +1,4 @@
-"""
-Based on reference implementation here: https://krasserm.github.io/2018/03/19/gaussian-processes/
-"""
+"""Gaussian process maximum-likelihood estimation helpers."""
 
 from collections.abc import Callable
 
@@ -21,6 +19,7 @@ def gp_mle_bfgs(
     initial_ls: float = 1.0,
     initial_eps: float = 0.05,
 ):
+    """Estimate GP hyperparameters with BFGS."""
     def nll_fn(theta):
         var, ls, eps = theta
         return gp_nll(s, f, kernel, var, ls, eps)
@@ -41,6 +40,7 @@ def gp_nll(
     ls: float,
     noise: float,
 ):
+    """Compute the negative log-likelihood of a Gaussian process."""
     N, D = s.size // s.shape[-1], s.shape[-1]
     s = s.reshape(-1, D)
     f = f.reshape(-1)
@@ -64,6 +64,7 @@ def gp_mle_sgd(
     optimizer: optax.GradientTransformation = optax.yogi(learning_rate=1e-3),
     verbose: bool = False,
 ):
+    """Estimate GP hyperparameters with gradient-based optimization."""
     @jax.jit
     def nll_fn(theta):
         var, ls, eps = theta

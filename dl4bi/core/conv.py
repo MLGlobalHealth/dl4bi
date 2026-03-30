@@ -1,3 +1,5 @@
+"""Convolutional building blocks and ConvCNP layers."""
+
 from collections.abc import Callable
 from functools import partial
 from typing import Optional
@@ -42,6 +44,7 @@ class ConvDeepSet(nn.Module):
         mask_ctx: Optional[jax.Array] = None,
         **kwargs,
     ):
+        """Aggregate context values onto test locations with an RBF deep set."""
         d_in = f_ctx.shape[-1] + self.use_density
         log_ls = self.param("log_lengthscale", nn.initializers.constant(-1), (d_in,))
         f_test = _deep_set(
@@ -64,6 +67,7 @@ def _deep_set(
     use_density: bool,
     log_ls: jax.Array,
 ):
+    """Project context observations onto test locations with RBF weights."""
     B, L_ctx, _ = f_ctx.shape
     d_sq = vmap(l2_dist_sq)(s_test, s_ctx)[..., None]  # [B, L_test, L_ctx, 1]
     ls = 1e-6 + jnp.exp(log_ls)[None, None, None, :]  # [1, 1, 1, d_in]
@@ -100,6 +104,7 @@ class SimpleConv(nn.Module):
 
     @nn.compact
     def __call__(self, x: jax.Array):
+        """Apply the fixed-width convolutional stack."""
         d_x = x.shape[-1]
         Conv = Partial(nn.Conv, kernel_size=5, strides=1, dtype=self.dtype)
         for n in [16, 32, 16, d_x]:
@@ -125,6 +130,7 @@ class UNet(nn.Module):
 
     @nn.compact
     def __call__(self, x):
+        """Apply the U-Net encoder-decoder with skip connections."""
         d_x = x.shape[-1]
         Conv = Partial(
             nn.Conv,
@@ -177,6 +183,7 @@ class ResNetBlock(nn.Module):
         x: jax.Array,  # [B, ...spatial dims..., C]
         training: bool = False,
     ):
+        """Apply a pre-activation residual convolutional block."""
         r = x  # residual
         d = len(self.strides)  # num spatial dims
         Bn = Partial(
@@ -229,6 +236,7 @@ class ConvCNPBlock(nn.Module):
         x: jax.Array,  # [B, ...spatial dims..., C]
         training: bool = False,
     ):
+        """Apply a depthwise-separable residual block used in ConvCNP."""
         r = x
         n = x.shape[-1]
         d = len(self.kernel)  # num spatial dims
@@ -289,6 +297,7 @@ class ConvCNPNet(nn.Module):
         x: jax.Array,  # [B, ...spatial dims..., C]
         training: bool = False,
     ):
+        """Run the ConvCNP residual CNN over the input grid."""
         for _ in range(self.num_blks):
             x = ConvCNPBlock(
                 self.r_dim,
@@ -327,6 +336,7 @@ class ResNeXtBlock(nn.Module):
         x: jax.Array,  # [B, ...spatial dims..., C]
         training: bool = False,
     ):
+        """Apply a grouped-convolution ResNeXt residual block."""
         r = x  # residual
         d = len(self.kernel)  # num spatial dims
         Bn = Partial(
@@ -384,6 +394,7 @@ class ConvBlock(nn.Module):
         x: jax.Array,  # [B, ...spatial dims..., C]
         training: bool = False,
     ):
+        """Apply a single convolution, normalization, and activation step."""
         y = nn.BatchNorm(not training, dtype=self.dtype)(x)
         y = self.act_fn(y)
         y = nn.Conv(self.num_features, self.kernel, dtype=self.dtype)(y)
@@ -416,6 +427,7 @@ class DenseBlock(nn.Module):
         x: jax.Array,  # [B, ...spatial dims..., C]
         training: bool = False,
     ):
+        """Apply repeated dense connectivity through convolution blocks."""
         blk = ConvBlock(self.num_features, self.kernel, self.act_fn, self.dtype)
         for _ in range(self.num_blks):
             x = blk.copy()(x, training)
@@ -444,6 +456,7 @@ class TransitionBlock(nn.Module):
         x: jax.Array,  # [B, ...spatial dims..., C]
         training: bool = False,
     ):
+        """Downsample features between dense blocks."""
         d = x.ndim - 2  # num spatial dims
         x = nn.BatchNorm(not training, dtype=self.dtype)(x)
         x = self.act_fn(x)

@@ -1,3 +1,5 @@
+"""Conditional Attentive Neural Process model."""
+
 from typing import Callable, Optional
 
 import flax.linen as nn
@@ -73,6 +75,7 @@ class CANP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Predict test outputs for a Conditional Attentive Neural Process."""
         r_ctx = self.encode_deterministic(s_ctx, f_ctx, mask_ctx, training)
         return self.decode(r_ctx, s_ctx, s_test, mask_ctx, training)
 
@@ -83,6 +86,7 @@ class CANP(nn.Module):
         mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
     ):
+        """Encode the deterministic context path."""
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_det(s_f_ctx, training)
         r_ctx, _ = self.self_attn_det(
@@ -102,6 +106,7 @@ class CANP(nn.Module):
         mask_ctx: Optional[jax.Array],  # [B, L_ctx]
         training: bool = False,
     ):
+        """Decode context representations at target locations."""
         r, _ = self.cross_attn(
             self.embed_s(s_test),
             self.embed_s(s_ctx),

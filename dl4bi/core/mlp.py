@@ -1,3 +1,5 @@
+"""MLP-based building blocks, mixer layers, and gMLP modules."""
+
 from collections.abc import Callable
 from typing import Optional, Sequence
 
@@ -10,6 +12,8 @@ from jax.nn import initializers as init
 
 
 class MLP(nn.Module):
+    """A configurable multilayer perceptron."""
+
     dims: Sequence[int]
     act_fn: Callable = nn.relu
     p_dropout: float = 0.0
@@ -19,6 +23,7 @@ class MLP(nn.Module):
 
     @nn.compact
     def __call__(self, x, training: bool = False, **kwargs):
+        """Apply the MLP to ``x``."""
         for dim in self.dims[:-1]:
             x = nn.Dense(dim, dtype=self.dtype, kernel_init=self.kernel_init)(x)
             x = self.act_fn(x)
@@ -31,11 +36,14 @@ class MLP(nn.Module):
 
 
 class MLPMixerBlock(nn.Module):
+    """Apply token-mixing and channel-mixing MLP residual blocks."""
+
     token_dims: list[int]
     channel_dims: list[int]
 
     @nn.compact
     def __call__(self, x):
+        """Apply one token-mixing block followed by one channel-mixing block."""
         y = nn.LayerNorm()(x)
         y = jnp.swapaxes(x, 1, 2)
         y = MLP(self.token_dims, nn.gelu, name="token_mixing")(x)
@@ -46,6 +54,8 @@ class MLPMixerBlock(nn.Module):
 
 
 class MLPMixer(nn.Module):
+    """An MLP-Mixer image classifier."""
+
     num_cls: int
     num_blks: int
     token_dims: list[int]
@@ -55,6 +65,7 @@ class MLPMixer(nn.Module):
 
     @nn.compact
     def __call__(self, x, **kwargs):
+        """Run an MLP-Mixer classifier forward pass."""
         s = self.patch_size
         x = nn.Conv(self.conv_dim, (s, s), strides=(s, s))(x)
         x = rearrange(x, "B H W C -> B (H W) C")
@@ -85,6 +96,7 @@ class SpatialGatingUnit(nn.Module):
 
     @nn.compact
     def __call__(self, x, attn_res: Optional[jax.Array] = None):
+        """Gate half of the channels using learned spatial mixing weights."""
         L, H = x.shape[1], self.num_heads
         bias = self.param("bias", init.constant(1.0), (1, H, L, 1))
         weights = self.param("weights", init.lecun_uniform(), (H, L, L))
@@ -98,6 +110,7 @@ class SpatialGatingUnit(nn.Module):
 
 @jit
 def _spatial_gate(z_2: jax.Array, weights: jax.Array, bias: jax.Array):
+    """Apply the spatial gating projection used by :class:`SpatialGatingUnit`."""
     H = bias.shape[1]
     z_2 = rearrange(z_2, "B L (H D) -> B H L D", H=H)  # subgate per head
     z_2 = jnp.einsum("H Q L, B H L D -> B H Q D", weights, z_2) + bias  # WZ + b
@@ -134,6 +147,7 @@ class gMLPBlock(nn.Module):
 
     @nn.compact
     def __call__(self, x, valid_lens: Optional[jax.Array] = None, **kwargs):
+        """Apply a gMLP block with optional attention residuals."""
         attn_res = None
         if self.attn is not None:
             attn_res, _ = self.attn(x, x, x, valid_lens, **kwargs)
@@ -169,6 +183,7 @@ class gMLP(nn.Module):
 
     @nn.compact
     def __call__(self, x: jax.Array, **kwargs):  # x: [B, L, D]
+        """Run the stacked gMLP network and return the configured output type."""
         x = self.embed(x)
         for _ in range(self.num_blks):
             x += self.blk.copy()(self.norm.copy()(x), **kwargs)

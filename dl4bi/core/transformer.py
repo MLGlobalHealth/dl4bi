@@ -1,3 +1,5 @@
+"""Transformer encoder, decoder, and set-transformer blocks."""
+
 from typing import Callable, Optional
 
 import flax.linen as nn
@@ -41,6 +43,7 @@ class TransformerEncoderBlock(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Apply one transformer encoder block."""
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         if self.pre_norm:
             x_1 = self.norm(x)
@@ -81,6 +84,7 @@ class TransformerEncoder(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Apply the stacked transformer encoder."""
         for _ in range(self.num_blks):
             x, *_ = self.blk.copy()(x, mask, training, **kwargs)
         if self.blk.pre_norm:
@@ -125,6 +129,7 @@ class TransformerDecoderBlock(nn.Module):
         qq_kwargs={},
         qk_kwargs={},
     ):
+        """Apply one transformer decoder block."""
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         x_dec_1, x_enc_1 = self.norm(x_dec), self.norm(x_enc)
         x_dec_2, self_attn = self.attn(
@@ -179,6 +184,7 @@ class TransformerDecoder(nn.Module):
         training=False,
         **kwargs,
     ):
+        """Apply the stacked transformer decoder."""
         for _ in range(self.num_blks):
             x_dec, _, _ = self.blk.copy()(
                 x_dec,
@@ -215,6 +221,7 @@ class TEBlock(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Apply a translation-equivariant attention block."""
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         if self.pre_norm:
             qs_1, ks_1 = self.norm(qs), self.norm(ks)
@@ -250,6 +257,7 @@ class TEEncoder(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Apply stacked translation-equivariant encoder blocks."""
         for _ in range(self.num_blks):
             qs, qs_s, _ = self.blk.copy()(qs, ks, qs_s, ks_s, mask, training, **kwargs)
         return qs
@@ -276,6 +284,7 @@ class TEISTEncoder(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Encode translation-equivariant features through pseudo tokens."""
         (B, _L, D_s), Z, E = qs_s.shape, self.num_latents, self.embed_dim
         batchify = jit(lambda v: jnp.repeat(v, B, axis=0))
         ps = self.param("pseudo_tokens", init.normal(stddev=1.0), (1, Z, E))
@@ -331,6 +340,7 @@ class KRBlock(nn.Module):
         kk_kwargs: dict = {},
         **kwargs,
     ):
+        """Perform one kernel-regression-style attention block."""
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
         qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, mask, training, **qk_kwargs)
@@ -365,6 +375,7 @@ class AttentivePooler(nn.Module):
         mask: Optional[jax.Array] = None,
         training: bool = False,
     ):
+        """Pool a set into a fixed number of learned seed tokens."""
         B, L, D = x.shape
         seeds = self.param("seeds", init.truncated_normal(), (1, self.num_seeds, D))
         seeds = jnp.repeat(seeds, B, axis=0)
@@ -393,4 +404,5 @@ class SetTransformerBlock(nn.Module):
         mask: Optional[jax.Array] = None,
         training: bool = False,
     ):
+        """Mix a set with self-attention and then pool the result."""
         return self.pool(self.mix(x, mask, training), mask, training)

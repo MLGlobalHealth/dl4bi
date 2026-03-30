@@ -1,3 +1,5 @@
+"""Data containers and multiprocessing dataloader helpers."""
+
 import multiprocessing as mp
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields, replace
@@ -11,7 +13,10 @@ from jax import random
 
 @dataclass(frozen=True)
 class ElementSelectorMixin(Mapping):
+    """Provide helpers for selecting a single element from batched mappings."""
+
     def element(self, i: int):
+        """Extract the ``i``-th element from each array-valued field."""
         d = {}
         for k, v in self.items():
             d[k] = v
@@ -22,11 +27,14 @@ class ElementSelectorMixin(Mapping):
 
 @dataclass(frozen=True)
 class Data(Mapping):
+    """Immutable mapping-style container for dataset-level arrays."""
+
     def update(self, **kwargs):
         """Returns a new batch with updated attributes."""
         return replace(self, **kwargs)
 
     def eq_shapes(self, other):
+        """Return ``True`` when matching fields have compatible shapes."""
         for f in fields(self):
             lhs = getattr(self, f.name)
             rhs = getattr(other, f.name)
@@ -68,11 +76,14 @@ class Data(Mapping):
 
 @dataclass(frozen=True)
 class Batch(Mapping):
+    """Immutable mapping-style container for batched model inputs."""
+
     def update(self, **kwargs):
         """Returns a new batch with updated attributes."""
         return replace(self, **kwargs)
 
     def eq_shapes(self, other):
+        """Return ``True`` when matching fields have compatible shapes."""
         for f in fields(self):
             lhs = getattr(self, f.name)
             rhs = getattr(other, f.name)
@@ -124,6 +135,7 @@ def dataloader_worker(
     input_queue: mp.Queue,
     output_queue: mp.Queue,
 ):
+    """Run a dataloader in a worker process and stream batches to a queue."""
     batches = dataloader(rng)
     while True:
         try:
@@ -146,6 +158,7 @@ def multiprocess_dataloader(
     num_workers: int = 4,
     queue_size: int = 32,
 ):
+    """Prefetch batches from a dataloader using multiple worker processes."""
     output_queue = ctx.Queue(maxsize=queue_size)
     input_queues = [ctx.Queue() for _ in range(num_workers)]
     workers = []
@@ -180,6 +193,7 @@ def multiprocess_wrapper(
     num_workers: int = 4,
     queue_size: int = 32,
 ):
+    """Partially apply multiprocessing settings to a dataloader factory."""
     return partial(
         multiprocess_dataloader,
         dataloader=dataloader,

@@ -1,3 +1,5 @@
+"""Spatiotemporal meta-learning data containers and batching."""
+
 from dataclasses import dataclass
 from functools import partial
 from typing import Callable, Optional
@@ -21,9 +23,10 @@ from .utils import (
 
 @dataclass(frozen=True, eq=False)
 class SpatiotemporalData(MetaLearningData):
-    """
-    .. warning::
-        This class assumes that time, `t`, is ordered and ascending.
+    """Container for spatiotemporal meta-learning tasks.
+
+    Warning:
+        This class assumes that ``t`` is ordered in ascending time.
     """
 
     x: Optional[jax.Array]  # [T, [S]+, D_x] or [T, D_x] or [D_x] None
@@ -110,6 +113,7 @@ def _batch(
     forecast: bool,
     batch_size: int,
 ):
+    """Sample a spatiotemporal context/test split from dense task tensors."""
     B, T, T_b = batch_size, t.shape[0], num_t
     rng_t, rng_p, rng_b, rng_v = random.split(rng, 4)
     s_dims = s.shape[1:-1]
@@ -186,6 +190,7 @@ def _select_ts(
     T: int,
     T_b: int,
 ):
+    """Choose context and test time indices for each batch element."""
     if random_t:
         rng_ts = random.split(rng_t, B)
         ts = vmap(lambda rng: random.choice(rng, T, (T_b,), replace=False))(rng_ts)
@@ -210,6 +215,7 @@ def _build_masks(
     B: int,
     T_b: int,
 ):
+    """Sample spatial observation masks for context and test timesteps."""
     Nc_min, Nc_max = num_ctx_min_per_t, num_ctx_max_per_t
     if independent_t_masks:
         valid_lens_ctx_per_t = random.randint(rng, (T_b - 1,), Nc_min, Nc_max)
@@ -229,6 +235,7 @@ def _permute_Ls(
     v_test: jax.Array,
     independent_t_masks: bool = True,
 ):
+    """Permute spatial locations consistently across context and test tensors."""
     B, T_b_minus_1, L_s, _ = v_ctx.shape
     T_b = T_b_minus_1 + 1
     v = jnp.concat([v_ctx, v_test], axis=1)  # [B, T_b, L_s, D]
@@ -245,6 +252,7 @@ def _permute_Ls(
 
 
 def _inv_permute_Ls(v_ctx: jax.Array, v_test: jax.Array, inv_permute_idx: jax.Array):
+    """Undo the spatial permutations applied by :func:`_permute_Ls`."""
     B = v_ctx.shape[0]
     v = jnp.concat([v_ctx, v_test], axis=1)
     vs = []
@@ -264,6 +272,8 @@ jax.tree_util.register_pytree_node(
 
 @dataclass(frozen=True, eq=False)
 class SpatiotemporalBatch(MetaLearningBatch):
+    """A batched spatiotemporal meta-learning task split."""
+
     x_ctx: Optional[jax.Array]  # [B, L_ctx, D_x] or None
     s_ctx: jax.Array  # [B, L_ctx, D_s]
     t_ctx: jax.Array  # [B, L_ctx, 1]
@@ -326,6 +336,7 @@ class SpatiotemporalBatch(MetaLearningBatch):
         norm_std=None,
         remap_colors: Callable = lambda x: x,
     ):
+        """Plot spatiotemporal context frames, predictions, and uncertainty."""
         (T_b, L), (B, _, D_f) = self.inv_permute_idx.shape, f_pred.shape
         # fill in masked values with nan
         f_ctx = jnp.where(self.mask_ctx[..., None], self.f_ctx, jnp.nan)

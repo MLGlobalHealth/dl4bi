@@ -1,3 +1,5 @@
+"""Hypernetwork-conditioned LoRA projection layers."""
+
 from typing import Callable
 
 import flax.linen.initializers as init
@@ -7,12 +9,15 @@ from flax import linen as nn
 
 
 class HyperLoRAqkv(nn.Module):
+    """Produce query, key, and value projections with conditional LoRA updates."""
+
     rank: int = 16
     dtype: jnp.dtype = jnp.float32
     kernel_init: Callable = init.orthogonal()
 
     @nn.compact
     def __call__(self, x: jax.Array, z: jax.Array):
+        """Project ``x`` into QKV tensors conditioned on latent code ``z``."""
         (B, L, D), D_z, R = x.shape, z.shape[-1], self.rank
         # shared base projection
         qkv = nn.Dense(3 * D, dtype=self.dtype, kernel_init=self.kernel_init)(x)
@@ -52,6 +57,7 @@ class HyperLoRA(nn.Module):
 
     @nn.compact
     def __call__(self, x: jax.Array, z: jax.Array):
+        """Apply a dense projection plus a conditional low-rank update."""
         (B, L, D_in), D_out, D_z, R = x.shape, self.out_dim, z.shape[-1], self.rank
         V = self.param("V", init.lecun_normal(), (R, D_in), self.dtype)
         U = self.param("U", init.zeros, (D_out, R), self.dtype)

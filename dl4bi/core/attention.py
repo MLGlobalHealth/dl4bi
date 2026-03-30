@@ -1,3 +1,5 @@
+"""Attention layers and kernel feature map helpers."""
+
 import warnings
 from collections.abc import Callable
 from functools import partial
@@ -99,18 +101,22 @@ def build_stable_positive_softmax_phi(proj: jax.Array):
 
 
 def build_exp_phi(proj: jax.Array):
+    """Build a generalized kernel feature map with an exponential nonlinearity."""
     return build_generalized_kernel_phi(proj, jnp.exp)
 
 
 def build_elu_phi(proj: jax.Array):
+    """Build a generalized kernel feature map with an ELU nonlinearity."""
     return build_generalized_kernel_phi(proj, nn.elu)
 
 
 def build_gelu_phi(proj: jax.Array):
+    """Build a generalized kernel feature map with a GELU nonlinearity."""
     return build_generalized_kernel_phi(proj, nn.gelu)
 
 
 def build_relu_phi(proj: jax.Array):
+    """Build a generalized kernel feature map with a ReLU nonlinearity."""
     return build_generalized_kernel_phi(proj, nn.relu)
 
 
@@ -235,6 +241,17 @@ def fast_attend(
     vs: jax.Array,
     eps: float = 1e-6,
 ):
+    """Compute FAVOR-style attention from transformed queries and keys.
+
+    Args:
+        qs_prime: Kernelized queries.
+        ks_prime: Kernelized keys.
+        vs: Values paired with ``ks_prime``.
+        eps: Minimum normalization constant for numerical stability.
+
+    Returns:
+        The attention context tensor.
+    """
     c = jnp.concatenate([vs, jnp.ones((*vs.shape[:-1], 1))], axis=-1)
     buf_1 = ks_prime.mT @ c
     buf_2 = qs_prime @ buf_1
@@ -349,6 +366,7 @@ def scan_ks(
     mask: Optional[jax.Array] = None,
     ks_chunk_size: int = 1024,
 ):
+    """Accumulate attention outputs for a chunk of queries over all keys."""
     (Q_c, B, H, D), K = qs_chunk.shape, ks.shape[0]
     D_v = vs.shape[-1]
     K_c = min(K, ks_chunk_size)
@@ -510,6 +528,7 @@ def biased_scan_attention(
     qs_chunk_size: int = 1024,
     ks_chunk_size: int = 1024,
 ):
+    """Run chunked attention with additive query-key bias functions."""
     B, H, Q, D = qs.shape
     Q_c = min(Q, qs_chunk_size)
 
@@ -590,6 +609,7 @@ def biased_scan_ks(
     bias_kwargs: dict = {},
     ks_chunk_size: int = 1024,
 ):
+    """Accumulate a biased attention update for a chunk of queries."""
     (Q_c, B, H, D), K = qs_chunk.shape, ks.shape[0]
     K_c = min(K, ks_chunk_size)
     D_v = vs.shape[-1]
@@ -954,6 +974,7 @@ class TEMultiHeadAttention(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Apply translation-equivariant multi-head attention."""
         H = self.num_heads
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
@@ -1062,6 +1083,7 @@ def _graph_conv(
     num_segments: int,
     bucket_size: Optional[int],
 ):
+    """Aggregate attention-weighted messages on a graph."""
     from_mh = lambda n: rearrange(n, "N H D -> N (H D)")
     messages = from_mh(attn[..., None] * nodes[senders])
     return jax.ops.segment_sum(

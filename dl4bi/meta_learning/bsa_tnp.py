@@ -1,3 +1,5 @@
+"""Biased scan-attention Transformer Neural Process model."""
+
 from collections.abc import Callable
 from typing import Optional
 

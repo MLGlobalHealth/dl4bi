@@ -1,3 +1,5 @@
+"""Training loops, evaluation helpers, and checkpoint utilities."""
+
 import shutil
 from collections import defaultdict
 from dataclasses import dataclass
@@ -22,6 +24,8 @@ from tqdm import tqdm
 
 @flax.struct.dataclass
 class TrainState(train_state.TrainState):
+    """Training state extended with non-parameter model variables."""
+
     # kwargs stores any extra information associated with training,
     # i.e. batch norm stats or fixed (random) projections
     kwargs: FrozenDict = FrozenDict({})
@@ -29,6 +33,8 @@ class TrainState(train_state.TrainState):
 
 @dataclass
 class Callback:
+    """Periodic callback invoked during training."""
+
     fn: Callable  # (step, rng_step, state, batch, extra) -> None
     interval: int  # apply every interval of train_num_steps
 
@@ -52,6 +58,31 @@ def train(
     return_state: str = "last",  # best, last, both
     state: Optional[TrainState] = None,
 ):
+    """Train a Flax model with optional validation and callbacks.
+
+    Args:
+        rng: Root PRNG key.
+        model: Model to initialize and train.
+        optimizer: Optax optimizer.
+        train_step: Step function returning ``(state, loss)``.
+        train_num_steps: Number of training steps to run.
+        train_dataloader: Callable that yields training batches.
+        valid_step: Optional validation step function.
+        valid_interval: Validation cadence in training steps.
+        valid_num_steps: Number of validation batches to consume.
+        valid_dataloader: Callable that yields validation batches.
+        valid_monitor_metric: Metric name used for early stopping.
+        early_stop_patience: Number of validation rounds without improvement.
+        callbacks: Periodic callbacks to execute during training.
+        callback_dataloader: Optional dataloader for callback batches.
+        log_loss_interval: Training-loss logging cadence.
+        return_state: Which checkpointed state to return: ``"best"``, ``"last"``,
+            or ``"both"``.
+        state: Optional existing state to resume from.
+
+    Returns:
+        The requested trained state, or both best and last states.
+    """
     callbacks = callbacks or []
     rng_data, rng_params, rng_extra, rng_train, rng_valid = random.split(rng, 5)
     batches = train_dataloader(rng_data)
@@ -125,6 +156,7 @@ def train(
 
 
 def estimate_flops(rng, state, train_step, batch):
+    """Estimate inference and training FLOPs for a single batch."""
     infer_cost = jit(infer).lower(rng, state, batch).compile().cost_analysis()
     train_cost = jit(train_step).lower(rng, state, batch).compile().cost_analysis()
     return infer_cost["flops"], train_cost["flops"]
@@ -132,6 +164,7 @@ def estimate_flops(rng, state, train_step, batch):
 
 @jit
 def infer(rng, state, batch):
+    """Run model inference with the stored parameters and variables."""
     return state.apply_fn(
         {"params": state.params, **state.kwargs},
         **batch,
@@ -147,6 +180,7 @@ def evaluate(
     dataloader: Callable,
     num_steps: Optional[int],
 ):
+    """Aggregate validation metrics over a dataloader."""
     rng_data, rng = random.split(rng)
     num_steps = num_steps or float("inf")
     pbar = tqdm(
@@ -201,4 +235,5 @@ def cosine_annealing_lr(
     lr_max: float = 1e-3,
     lr_min: float = 1e-4,
 ):
+    """Build a cosine-decay learning-rate schedule."""
     return optax.cosine_decay_schedule(lr_max, num_steps, lr_min)

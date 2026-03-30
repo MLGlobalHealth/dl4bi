@@ -1,3 +1,5 @@
+"""Preprocessing helpers for whitening and conditioning checks."""
+
 from typing import Optional
 
 import jax

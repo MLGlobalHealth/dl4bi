@@ -1,3 +1,5 @@
+"""Vision Transformer building blocks."""
+
 from typing import Callable
 
 import flax.linen as nn
@@ -12,6 +14,8 @@ from .transformer import TransformerEncoderBlock
 # TODO(danj): mnist benchmark
 # TODO(danj): try SSL with DINOv2
 class ViT(nn.Module):
+    """A compact Vision Transformer classifier."""
+
     num_blks: int = 6
     patch: nn.Module = nn.Conv(
         features=128,
@@ -25,6 +29,7 @@ class ViT(nn.Module):
 
     @nn.compact
     def __call__(self, x: jax.Array, training: bool = False, **kwargs):
+        """Embed image patches, apply transformer blocks, and classify."""
         x = self.patch(x)
         B, H, W, C = x.shape
         x = x.reshape(B, H * W, C)

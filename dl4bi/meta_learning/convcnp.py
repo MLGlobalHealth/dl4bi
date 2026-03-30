@@ -1,3 +1,5 @@
+"""Convolutional Conditional Neural Process model."""
+
 from dataclasses import field
 from typing import Callable, List, Optional
 
@@ -57,6 +59,7 @@ class ConvCNP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Predict test outputs with the ConvCNP architecture."""
         B = s_ctx.shape[0]
         s_dim = len(self.s_lower)
         s_grid = build_grid(

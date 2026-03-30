@@ -1,3 +1,5 @@
+"""Diagonal Transformer Neural Process model."""
+
 from typing import Callable, Optional
 
 import flax.linen as nn

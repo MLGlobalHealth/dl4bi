@@ -1,3 +1,5 @@
+"""Attention bias parameterizations and helper builders."""
+
 from dataclasses import field
 from functools import partial
 from typing import Callable, Optional
@@ -12,6 +14,7 @@ from .sim import great_circle_dist, l2_dist
 
 
 def init_scalar_bias_params(mod: nn.Module, name: str, num_heads: int):
+    """Initialize scalar bias parameters for each attention head."""
     a = mod.param(f"{name}_a", init.constant(-1), (num_heads,))
     return {"a": a}
 
@@ -43,6 +46,7 @@ def scanned_scalar_bias(
     a: jax.Array,  # [H, F]
     func: Callable = l2_dist,
 ):
+    """Compute scalar attention bias from metadata in scan-compatible form."""
     d = vmap(func)(qs_meta, ks_meta)  # [B, Q, K]
     mask = jnp.isfinite(d)
     return scalar_bias(d, mask, a)
@@ -54,6 +58,7 @@ def init_rbf_network_bias_params(
     num_heads: int,
     num_basis: int,
 ):
+    """Initialize RBF-network bias parameters for each attention head."""
     a = mod.param(f"{name}_a", init.constant(1), (num_heads, num_basis))
     b = mod.param(f"{name}_b", init.constant(1), (num_heads, num_basis))
     return {"a": a, "b": b}
@@ -92,6 +97,7 @@ def scanned_rbf_network_bias(
     b: jax.Array,  # [H, F]
     func: Callable = l2_dist,
 ):
+    """Compute an RBF-network attention bias from query and key metadata."""
     d = vmap(func)(qs_meta, ks_meta)  # [B, Q, K]
     mask = jnp.isfinite(d)
     return rbf_network_bias(d, mask, a, b)
@@ -135,12 +141,14 @@ def scanned_exponential_network_bias(
     b: jax.Array,  # [H, F]
     func: Callable = l2_dist,
 ):
+    """Compute an exponential attention bias from query and key metadata."""
     d = vmap(func)(qs_meta, ks_meta)
     mask = jnp.isfinite(d)
     return exponential_network_bias(d, mask, a, b)
 
 
 def init_tisa_bias_params(mod: nn.Module, name: str, num_heads: int, num_basis: int):
+    """Initialize Translation-Invariant Self-Attention bias parameters."""
     a = mod.param(f"{name}_a", init.constant(1), (num_heads, num_basis))
     b = mod.param(f"{name}_b", init.constant(1), (num_heads, num_basis))
     c = mod.param(f"{name}_c", init.constant(0), (num_heads, num_basis))
@@ -183,6 +191,7 @@ def scanned_tisa_bias(
     c: jax.Array,  # [H, F]
     func: Callable = l2_dist,
 ):
+    """Compute a TISA attention bias from query and key metadata."""
     d = vmap(func)(qs_meta, ks_meta)  # [B, Q, K]
     mask = jnp.isfinite(d)
     return tisa_bias(d, mask, a, b, c)
@@ -209,6 +218,7 @@ class Bias(nn.Module):
         d: jax.Array,  # [B, Q, K] or [E]
         mask: Optional[jax.Array] = None,  # [B, Q, K] or [E]
     ):
+        """Evaluate the configured bias function on pairwise distances."""
         params = self.init_params(self, "bias", **self.init_kwargs)
         if mask is None:
             mask = jnp.ones((1,) * d.ndim, dtype=bool)  # broadcast True
@@ -216,6 +226,7 @@ class Bias(nn.Module):
 
     @classmethod
     def build_scalar_bias(cls, num_heads: int = 4):
+        """Build a scalar distance bias module."""
         return Bias(
             init_scalar_bias_params,
             {"num_heads": num_heads},
@@ -225,6 +236,7 @@ class Bias(nn.Module):
 
     @classmethod
     def build_rbf_network_bias(cls, num_heads: int = 4, num_basis: int = 5):
+        """Build an RBF-network distance bias module."""
         return Bias(
             init_rbf_network_bias_params,
             {"num_heads": num_heads, "num_basis": num_basis},
@@ -234,6 +246,7 @@ class Bias(nn.Module):
 
     @classmethod
     def build_tisa_bias(cls, num_heads: int = 4, num_basis: int = 5):
+        """Build a Translation-Invariant Self-Attention bias module."""
         return Bias(
             init_tisa_bias_params,
             {"num_heads": num_heads, "num_basis": num_basis},
@@ -245,6 +258,7 @@ class Bias(nn.Module):
     # as your `sim` function
     @classmethod
     def build_geodesic_network_bias(cls, num_heads: int = 4, num_basis: int = 5):
+        """Build an exponential bias module over great-circle distances."""
         return Bias(
             init_rbf_network_bias_params,
             {"num_heads": num_heads, "num_basis": num_basis},
@@ -256,6 +270,7 @@ class Bias(nn.Module):
 
     @classmethod
     def build_geodesic_rbf_network_bias(cls, num_heads: int = 4, num_basis: int = 5):
+        """Build an RBF bias module over great-circle distances."""
         # NOTE this is not a valid kernel on a sphere
         return Bias(
             init_rbf_network_bias_params,

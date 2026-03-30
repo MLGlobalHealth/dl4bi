@@ -1,3 +1,5 @@
+"""Training and validation steps for meta-learning models."""
+
 import jax
 from jax import jit, random
 
@@ -12,6 +14,7 @@ def likelihood_train_step(
     batch: MetaLearningBatch,
     **kwargs,
 ):
+    """Run one likelihood-based training step for a meta-learning model."""
     rng_dropout, rng_extra = random.split(rng)
 
     def loss_fn(params):
@@ -35,6 +38,7 @@ def likelihood_valid_step(
     batch: MetaLearningBatch,
     **kwargs,
 ):
+    """Evaluate predictive metrics on a validation batch."""
     output = state.apply_fn(
         {"params": state.params, **state.kwargs},
         **batch,
@@ -54,6 +58,7 @@ def elbo_train_step(
     batch: MetaLearningBatch,
     **kwargs,
 ):
+    """Run one ELBO training step for latent neural process models."""
     rng_dropout, rng_extra = random.split(rng)
 
     def loss_fn(params):

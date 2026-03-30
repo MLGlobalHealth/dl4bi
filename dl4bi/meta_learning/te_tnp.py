@@ -1,3 +1,5 @@
+"""Translation-equivariant Transformer Neural Process model."""
+
 from typing import Callable, Optional
 
 import flax.linen as nn
@@ -41,6 +43,7 @@ class TETNP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Predict test outputs with the translation-equivariant TNP."""
         test_shape = first_shape([x_test, s_test, t_test])
         (B, L_ctx, _D_f), L_test = f_ctx.shape, test_shape[1]
         obs_ind, unobs_ind = jnp.ones((B, L_ctx, 1)), jnp.zeros((B, L_test, 1))

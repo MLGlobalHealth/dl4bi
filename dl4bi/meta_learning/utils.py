@@ -1,3 +1,5 @@
+"""Utilities for meta-learning experiments and visualization."""
+
 import re
 from datetime import datetime
 from functools import partial
@@ -19,6 +21,7 @@ from .data.spatial import SpatialBatch
 
 
 def first_shape(arrays: Sequence[Union[jax.Array, None]]) -> tuple:
+    """Return the first non-``None`` shape from ``arrays``."""
     for array in arrays:
         if array is not None:
             return array.shape
@@ -26,6 +29,7 @@ def first_shape(arrays: Sequence[Union[jax.Array, None]]) -> tuple:
 
 
 def cfg_to_run_name(cfg: DictConfig):
+    """Derive a readable run name from a Hydra config."""
     model_cfg = cfg.get("model")
     model_name = model_cfg.get("name") if model_cfg is not None else None
     if model_name:
@@ -52,6 +56,7 @@ def load_ckpts(
 
 
 def regression_to_rgb(f: jax.Array):
+    """Map regression outputs from ``[-1, 1]`` into RGB space."""
     return jnp.clip(f / 2 + 0.5, 0, 1)  # [-1, 1] => [0, 1]
 
 
@@ -83,6 +88,7 @@ def wandb_2d_img_callback(
 
 
 def x_to_none(x: jax.Array):
+    """Ignore ``x`` and return ``None``."""
     return None
 
 
@@ -92,6 +98,7 @@ def save_batches_for_tabpfn(
     num_steps: int,
     path: Path,
 ):
+    """Serialize a fixed number of dataloader batches in TabPFN format."""
     rng_data, rng = random.split(rng)
     print("Saving batches for TabPFN")
     pbar = tqdm(

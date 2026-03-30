@@ -1,3 +1,5 @@
+"""Utility helpers for masking, padding, and array conversion."""
+
 from functools import partial
 
 import jax
@@ -14,16 +16,19 @@ def mask_from_valid_lens(max_len: int, valid_lens: jax.Array):
 
 
 def exists(*args):
+    """Return ``True`` when every argument is not ``None``."""
     return all([x is not None for x in args])
 
 
 @jit
 def safe_stack(*arrays):
+    """Concatenate the non-``None`` arrays along the last axis."""
     return jnp.concat([x for x in arrays if x is not None], axis=-1)
 
 
 @jit
 def to_none(x: jax.Array):
+    """Return ``None`` inside JIT-compatible control flow."""
     return None
 
 
@@ -94,6 +99,7 @@ def pad_concat(x: jax.Array, y: jax.Array):
 
 
 def nan_pad(v: jax.Array, axis: int, L: int):
+    """Pad ``v`` with ``NaN`` values along ``axis`` up to length ``L``."""
     pad = [(0, 0)] * v.ndim
     L_v = v.shape[axis]
     pad[axis] = (0, L - L_v)

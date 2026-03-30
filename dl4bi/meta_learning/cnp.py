@@ -1,3 +1,5 @@
+"""Conditional Neural Process model."""
+
 from typing import Callable, Optional
 
 import flax.linen as nn
@@ -47,6 +49,7 @@ class CNP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Predict test outputs for a Conditional Neural Process."""
         r = self.encode_deterministic(s_ctx, f_ctx, mask_ctx, training)
         return self.decode(r, s_test, training)  # [B, n_z, L_test, d_f]
 
@@ -57,6 +60,7 @@ class CNP(nn.Module):
         mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
     ):
+        """Pool context observations into a deterministic representation."""
         (B, L, _) = s_ctx.shape
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_det(s_f_ctx, training)
@@ -70,6 +74,7 @@ class CNP(nn.Module):
         s_test: jax.Array,  # [B, L_test, D_s]
         training: bool = False,
     ):
+        """Decode deterministic context features at test locations."""
         L_test = s_test.shape[1]
         r_ctx = jnp.repeat(r_ctx[:, None, :], L_test, axis=1)  # [B, L_test, d_ffn]
         q = jnp.concatenate([r_ctx, s_test], -1)  # [B, L_test, d_ffn + D_s]

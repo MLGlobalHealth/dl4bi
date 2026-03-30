@@ -35,13 +35,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-jax-cpu = [
+cpu = [
   "jax>=0.8.1,<0.9",
 ]
-jax-cuda-12 = [
+cuda12 = [
   "jax[cuda12]>=0.8.1,<0.9",
 ]
-jax-cuda-13 = [
+cuda13 = [
   "jax[cuda13]>=0.8.1,<0.9",
 ]
 
@@ -56,9 +56,9 @@ sps = { git = "https://github.com/MLGlobalHealth/sps.git" }
 [tool.uv]
 conflicts = [
   [
-    { extra = "jax-cpu" },
-    { extra = "jax-cuda-12" },
-    { extra = "jax-cuda-13" },
+    { extra = "cpu" },
+    { extra = "cuda12" },
+    { extra = "cuda13" },
   ],
 ]
 

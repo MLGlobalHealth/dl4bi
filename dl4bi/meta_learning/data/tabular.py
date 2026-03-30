@@ -1,3 +1,5 @@
+"""Tabular meta-learning data containers and batching."""
+
 from dataclasses import dataclass
 from functools import partial
 from typing import Optional
@@ -45,6 +47,7 @@ class TabularData(MetaLearningData):
         forecast: bool = False,  # requires a 't' feature group
         t_sorted: bool = False,  # requires a 't' feature group
     ):
+        """Sample a batch of tabular context and test points."""
         return _batch(
             rng,
             self.feature_groups,
@@ -80,6 +83,7 @@ def _batch(
     forecast: bool,
     t_sorted: bool,
 ):
+    """Sample a tabular context/test split from grouped feature tensors."""
     rng_p, rng_b = random.split(rng)
     prepare_L_in_BLD = permute_L_in_BLD
     if forecast:
@@ -117,6 +121,8 @@ jax.tree_util.register_pytree_node(
 
 @dataclass(frozen=True, eq=False)
 class TabularBatch(MetaLearningBatch):
+    """A batched tabular meta-learning task split."""
+
     ctx: FrozenDict[str, jax.Array]
     mask_ctx: Optional[jax.Array]
     test: FrozenDict[str, jax.Array]
@@ -158,6 +164,7 @@ class TabularBatch(MetaLearningBatch):
         }
 
     def feature_groups(self):
+        """Return the names of feature groups present in the batch."""
         return [k.replace("_ctx", "") for k in self if k.endswith("_ctx")]
 
     def sample_for_inference(

@@ -1,3 +1,5 @@
+"""Sparse Graph Neural Process models and graph builders."""
+
 from functools import partial
 from typing import Callable, Optional
 
@@ -105,6 +107,7 @@ class SGNP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Predict test outputs by message passing on a sparse task graph."""
         test_shape = first_shape([x_test, s_test, t_test])
         f_test = jnp.zeros((*test_shape[:-1], f_ctx.shape[-1]))
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
@@ -163,6 +166,7 @@ class SGNP(nn.Module):
         t_test: Optional[jax.Array] = None,
         **kwargs,
     ):
+        """Construct or reconstruct the sparse graph used by the model."""
         return build_graph(
             x_ctx,
             s_ctx,
@@ -212,6 +216,7 @@ def build_graph(
     scale_s_sim: float = 1.0,
     scale_t_sim: float = 1.0,
 ):
+    """Construct a sparse graph connecting context and test nodes by KNN."""
     ctx, test = [x_ctx, s_ctx, t_ctx], [x_test, s_test, t_test]
     r_ctx = [_safe_mask(v, mask_ctx) for v in ctx]
     args = [k, x_sim, s_sim, t_sim, causal_t, scale_x_sim, scale_s_sim, scale_t_sim]
@@ -248,6 +253,7 @@ def build_graph(
 
 
 def _safe_mask(a: Optional[jax.Array], mask: Optional[jax.Array]):
+    """Mask invalid rows with ``inf`` while preserving ``None`` inputs."""
     if a is None:
         return None
     if mask is None:
@@ -288,6 +294,7 @@ def approx_knn(
     num_q_parallel: int = 1024,
     recall_target: float = 0.95,
 ):
+    """Approximate K-nearest neighbors using scaled feature similarities."""
     def process_batch(i):
         d_x = d_s = d_t = 0
         if exists(q_x, x_sim):
@@ -314,6 +321,7 @@ def approx_knn(
 
 
 def _idx_or_none(a, idx: jax.Array):
+    """Index ``a`` when it is an array, otherwise propagate ``None``."""
     if isinstance(a, jax.Array):
         return a[idx]
     return None

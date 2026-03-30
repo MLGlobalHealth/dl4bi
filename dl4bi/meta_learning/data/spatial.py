@@ -1,3 +1,5 @@
+"""Spatial meta-learning data containers and batching."""
+
 from dataclasses import dataclass
 from functools import partial
 from typing import Callable, Optional
@@ -22,6 +24,8 @@ from .utils import (
 
 @dataclass(frozen=True, eq=False)
 class SpatialData(MetaLearningData):
+    """Container for spatial meta-learning tasks."""
+
     x: Optional[jax.Array]  # [B, [S]+, D_x] or [B, D_x] or None
     s: jax.Array  # [B, [S]+, D_s]
     f: jax.Array  # [B, [S]+, D_f]
@@ -36,6 +40,7 @@ class SpatialData(MetaLearningData):
         obs_noise: Optional[float] = None,
         batch_size: Optional[int] = None,  # resamples B dim
     ):
+        """Sample a batch of spatial context and test points."""
         return _batch(
             rng,
             self.x,
@@ -73,6 +78,7 @@ def _batch(
     obs_noise: Optional[float] = None,
     batch_size: Optional[int] = None,
 ):
+    """Sample a spatial context/test split from dense task tensors."""
     rng_i, rng_p, rng_b, rng_eps = random.split(rng, 4)
     has_x = x is not None
     full_x = has_x and x.shape[:-1] == s.shape[:-1]
@@ -117,6 +123,8 @@ jax.tree_util.register_pytree_node(
 
 @dataclass(frozen=True, eq=False)
 class SpatialBatch(MetaLearningBatch):
+    """A batched spatial meta-learning task split."""
+
     x_ctx: Optional[jax.Array]  # [B, L_ctx, D_x] or None
     s_ctx: jax.Array  # [B, L_ctx, D_s]
     f_ctx: jax.Array  # [B, L_ctx, D_f]
@@ -173,6 +181,7 @@ class SpatialBatch(MetaLearningBatch):
         num_plots: Optional[int] = None,
         **kwargs,
     ):
+        """Plot one-dimensional context, targets, predictions, and intervals."""
         B = self.f_test.shape[0]
         N = min(num_plots or B, B)
         order = jnp.argsort(self.s_test, axis=1)
@@ -221,6 +230,7 @@ class SpatialBatch(MetaLearningBatch):
         num_plots: Optional[int] = None,
         **kwargs,
     ):
+        """Plot two-dimensional context, predictions, uncertainty, and targets."""
         B = self.f_test.shape[0]
         inv_p = self.inv_permute_idx
         L = inv_p.shape[0] if inv_p.ndim == 1 else inv_p.shape[1]

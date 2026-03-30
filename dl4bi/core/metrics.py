@@ -1,3 +1,5 @@
+"""Metrics and probabilistic scoring utilities."""
+
 from collections import defaultdict
 from functools import partial
 
@@ -55,6 +57,17 @@ def mvn_logpdf(
 
 
 def mean_kl_div_diag_mvn(f_mu_p, f_std_p, f_mu_q, f_std_q):
+    """Compute the mean KL divergence between diagonal Gaussians.
+
+    Args:
+        f_mu_p: Mean of the reference Gaussian.
+        f_std_p: Standard deviation of the reference Gaussian.
+        f_mu_q: Mean of the comparison Gaussian.
+        f_std_q: Standard deviation of the comparison Gaussian.
+
+    Returns:
+        The mean forward KL divergence ``KL(p || q)``.
+    """
     f_var_p, f_var_q = f_std_p**2, f_std_q**2
     return 0.5 * jnp.mean(
         f_var_p / f_var_q

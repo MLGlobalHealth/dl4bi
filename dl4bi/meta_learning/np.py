@@ -1,3 +1,5 @@
+"""Neural Process model."""
+
 from typing import Callable, Optional
 
 import flax.linen as nn
@@ -51,6 +53,7 @@ class NP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Predict test outputs and latent statistics for an NP task."""
         r = self.encode_deterministic(s_ctx, f_ctx, mask_ctx, training)
         z_mu_ctx, z_std_ctx = self.encode_latent(s_ctx, f_ctx, mask_ctx, training)
         rng_z, z_shape = self.make_rng("extra"), (self.n_z, *z_mu_ctx.shape)
@@ -66,6 +69,7 @@ class NP(nn.Module):
         mask_ctx: Optional[jax.Array],  # [B, K]
         training: bool = False,
     ):
+        """Pool context observations into a deterministic representation."""
         (B, L, _) = s_ctx.shape
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_det(s_f_ctx, training)
@@ -80,6 +84,7 @@ class NP(nn.Module):
         mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
     ):
+        """Encode the latent context path into Gaussian parameters."""
         (B, L, _) = s_ctx.shape
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_lat(s_f_ctx, training)
@@ -99,6 +104,7 @@ class NP(nn.Module):
         s_test: jax.Array,  # [B, L_test, D_s]
         training: bool = False,
     ):
+        """Decode deterministic and latent representations at test locations."""
         L_test = s_test.shape[1]
         r_ctx = jnp.repeat(r_ctx[:, None, :], self.n_z, axis=1)  # [B, n_z, d_ffn]
         r_ctx_z = jnp.concatenate([r_ctx, z], -1)  # [B, n_z, d_ffn + d_z]

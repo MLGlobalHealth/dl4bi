@@ -1,3 +1,5 @@
+"""Attentive Neural Process model."""
+
 from typing import Callable, Optional
 
 import flax.linen as nn
@@ -91,6 +93,7 @@ class ANP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        """Predict test outputs and latent statistics for an ANP task."""
         r = self.encode_deterministic(s_ctx, f_ctx, mask_ctx, training)
         z_mu_ctx, z_std_ctx = self.encode_latent(s_ctx, f_ctx, mask_ctx, training)
         rng_z, z_shape = self.make_rng("extra"), (self.n_z, *z_mu_ctx.shape)
@@ -106,6 +109,7 @@ class ANP(nn.Module):
         mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
     ):
+        """Encode the deterministic context path."""
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_det(s_f_ctx, training)
         r_ctx, _ = self.self_attn_det(
@@ -124,6 +128,7 @@ class ANP(nn.Module):
         mask_ctx: Optional[jax.Array] = None,  # [B, K]
         training: bool = False,
     ):
+        """Encode the latent context path into Gaussian parameters."""
         (B, L, _) = s_ctx.shape
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
         s_f_ctx_embed = self.enc_lat(s_f_ctx, training)
@@ -152,6 +157,7 @@ class ANP(nn.Module):
         mask_ctx: Optional[jax.Array],  # [B, K]
         training: bool = False,
     ):
+        """Decode deterministic and latent representations at test locations."""
         L_test = s_test.shape[1]
         r, _ = self.cross_attn(
             self.embed_s(s_test),  # qs

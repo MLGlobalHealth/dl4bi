@@ -1,3 +1,5 @@
+"""Similarity and distance helpers."""
+
 from functools import partial
 
 import jax
@@ -12,6 +14,16 @@ def delta_time(
     r: jax.Array,  # [R, 1]
     causal: bool = True,
 ):
+    """Compute pairwise time differences between reference and query points.
+
+    Args:
+        q: Query timestamps of shape ``[Q, 1]``.
+        r: Reference timestamps of shape ``[R, 1]``.
+        causal: Whether to mask future reference times with ``inf``.
+
+    Returns:
+        Pairwise time deltas with shape ``[Q, R]``.
+    """
     d = r.T - q
     if causal:
         return jnp.where(d <= 0, d, jnp.inf)
