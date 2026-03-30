@@ -111,7 +111,7 @@ class BSATNP(nn.Module):
             self.embed_t(t_test),
             self.embed_f(f_test),
         )
-        norm = nn.LayerNorm()
+        norm = self.norm.copy()
         qvs, kvs = map(lambda x: norm(self.embed_all(x)), (test, ctx))
         qk_kwargs = dict(
             qs_x=x_test,

@@ -1,0 +1,65 @@
+defaults:
+  - _self_
+  - data: full
+  - model: bsa_tnp
+name: bsa_tnp_vs_svgp
+project: ERA5 BSA-TNP vs SVGP
+results_dir: results
+wandb: True
+benchmark_setting: CNW
+seeds: [46, 61, 69, 79, 91]
+train_num_steps: 100000
+valid_num_steps: 5000
+test_num_steps: ${.valid_num_steps}
+valid_interval: 5000
+plot_interval: 100000
+progress:
+  seeds: True
+  batches: True
+bsa:
+  project: ERA5
+  project_name: null
+  run_name: null
+  train_if_missing: False
+benchmark:
+  num_eval_batches: 32
+  hdi_prob: 0.95
+  dataloader:
+    batch_size: 1
+    num_ctx_min_per_t: ${data.test_dataloader.num_ctx_min_per_t}
+    num_ctx_max_per_t: ${data.test_dataloader.num_ctx_max_per_t}
+    num_test: ${data.test_dataloader.num_test}
+    H_deg: ${data.test_dataloader.H_deg}
+    W_deg: ${data.test_dataloader.W_deg}
+    T_hrs: ${data.test_dataloader.T_hrs}
+    T_hrs_delta: ${data.test_dataloader.T_hrs_delta}
+    num_batches_per_subset: 1
+svgp:
+  num_inducing: 128
+  num_steps: 750
+  learning_rate: 5.0e-3
+  jitter: 1.0e-5
+  init_noise: 0.1
+  init_amplitude: 1.0
+  init_lengthscale: 1.0
+  learn_inducing_locations: True
+svgp_sweep:
+  enabled: True
+  seed: 0
+  num_batches: 4
+  metric: NLL
+  grid:
+    num_inducing: [64, 128, 256]
+    num_steps: [500, 750]
+    learning_rate: [1.0e-3, 5.0e-3]
+    init_lengthscale: [0.5, 1.0, 2.0]
+optimizer:
+  _target_: optax.chain
+  _args_:
+    - _target_: optax.clip_by_global_norm
+      max_norm: 0.5
+    - _target_: optax.adamw
+      learning_rate: 5.0e-4
+      b1: 0.9
+      b2: 0.999
+      weight_decay: 1.0e-4

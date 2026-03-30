@@ -1,8 +1,4 @@
 name: reduced
-train_num_steps: 25000 # 100000 / 4 because batch size is 8x larger
-valid_num_steps: 5000 # exhaust valid dataloader
-valid_interval: 5000
-plot_interval: 25000
 splits:
   train_region: central_europe
   valid_region: northern_europe

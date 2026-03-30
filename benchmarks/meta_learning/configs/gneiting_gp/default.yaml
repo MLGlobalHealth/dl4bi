@@ -1,0 +1,26 @@
+defaults:
+  - _self_
+  - data: 16x16
+  - model: bsa_tnp
+seed: 42
+wandb: True
+project: Gneiting GP
+train_num_steps: 50000
+valid_num_steps: 500
+test_num_steps: ${valid_num_steps}
+valid_interval: 5000
+plot_interval: 5000
+optimizer:
+  _target_: optax.chain
+  _args_:
+    - _target_: optax.clip_by_global_norm
+      max_norm: 0.5
+    - _target_: optax.adamw
+      learning_rate:
+        _target_: optax.cosine_decay_schedule
+        init_value: 1.0e-3
+        decay_steps: ${train_num_steps}
+        alpha: 1.0e-5
+      b1: 0.9
+      b2: 0.999
+      weight_decay: 1.0e-4

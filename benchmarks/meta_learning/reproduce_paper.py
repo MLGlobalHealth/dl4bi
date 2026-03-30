@@ -13,7 +13,7 @@ from collections.abc import Callable
 import jax
 from beijing_air_quality import main as beijing_air_quality_main
 from era5 import main as era5_main
-from generic_spatial import main as generic_spatial_main
+from gneiting_gp import main as gneiting_gp_main
 from gp import main as gp_main
 from hydra import compose, initialize
 from jax import random
@@ -30,8 +30,23 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
             "wandb=False",
             "train_num_steps=100",
             "valid_num_steps=50",
+            "++test_num_steps=50",
             "++plot_interval=50",
         ]
+    gp_translation_invariance_benchmarks(seeds, overrides, dry_run)
+    gp_multi_scale_benchmarks(seeds, overrides, dry_run)
+    gp_rotational_invariance_benchmarks(seeds, overrides, dry_run)
+    sir_benchmarks(seeds, overrides, dry_run)
+    era5_benchmarks(seeds, overrides, dry_run)
+    beijing_benchmarks(seeds, overrides, dry_run)
+    gneiting_gp_benchmarks(seeds, overrides, dry_run)
+
+
+def gp_translation_invariance_benchmarks(
+    seeds: jax.Array,
+    overrides: list[str],
+    dry_run: bool,
+):
     gp_kernels_2d = ["rbf"]
     models = [
         "bsa_tnp",
@@ -39,8 +54,6 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "te_tnp",
         "convcnp",
     ]
-
-    # TRANSLATION INVARIANCE
     gp_benchmark(
         seeds,
         "2d",
@@ -95,16 +108,17 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         gp_kernels_2d,
         [f"2d/{m}" for m in ["bsa_tnp", "tnp_d", "te_tnp", "convcnp_scaled_2x"]],
         gp_main,
-        [
-            "project_suffix=' - Scaled 2x'",
-            "evaluate_only=True",
-            "valid_num_steps=1000",
-        ],
+        overrides + ["project_suffix=' - Scaled 2x'", "evaluate_only=True"],
         "AISTATS BSA-TNP - Gaussian Processes",
         dry_run=dry_run,
     )
 
-    # MULTIRESOLUTION
+
+def gp_multi_scale_benchmarks(
+    seeds: jax.Array,
+    overrides: list[str],
+    dry_run: bool,
+):
     generic_benchmark(
         seeds,
         "configs/multiscale_2d_gp",
@@ -115,7 +129,57 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         dry_run=dry_run,
     )
 
-    # EPIDEMIOLOGY
+
+def gp_rotational_invariance_benchmarks(
+    seeds: jax.Array,
+    overrides: list[str],
+    dry_run: bool,
+):
+    rot_models = ["2d/bsa_tnp", "2d/geo_bsa_tnp", "2d/sa_tnp"]
+    rot_kernels = ["geo"]
+    rots = [  # north, east, tilt
+        "60, 30, 0",
+        "60, 30, 20",
+    ]
+    gp_benchmark(
+        seeds,
+        "so3",
+        rot_kernels,
+        rot_models,
+        gp_main,
+        overrides,
+        "AISTATS BSA-TNP - Gaussian Processes - Rotated",
+        dry_run=dry_run,
+    )
+    for rot in rots:
+        gp_benchmark(
+            seeds,
+            "so3",
+            rot_kernels,
+            rot_models,
+            gp_main,
+            overrides
+            + [
+                f"project_suffix=' - {rot}'",
+                "evaluate_only=True",
+                f"data.rotate=[{rot}]",
+            ],
+            "AISTATS BSA-TNP - Gaussian Processes - Rotated",
+            dry_run=dry_run,
+        )
+
+
+def sir_benchmarks(
+    seeds: jax.Array,
+    overrides: list[str],
+    dry_run: bool,
+):
+    models = [
+        "bsa_tnp",
+        "tnp_d",
+        "te_tnp",
+        "convcnp",
+    ]
     generic_benchmark(
         seeds,
         "configs/sir",
@@ -150,7 +214,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         + [
             "project_suffix=' - Shifted 10'",
             "evaluate_only=True",
-            "data=spatial_64x64_shifted_10.yaml",
+            "data=spatial_64x64_shifted_10",
         ],
         "AISTATS BSA-TNP - SIR",
         dry_run=dry_run,
@@ -171,7 +235,12 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         dry_run=dry_run,
     )
 
-    # SPACE & TIME
+
+def era5_benchmarks(
+    seeds: jax.Array,
+    overrides: list[str],
+    dry_run: bool,
+):
     era5_models = ["tnp_d", "te_tnp", "bsa_tnp"]
     era5_overrides = [
         "data.splits.valid_region=northern_europe",
@@ -228,91 +297,51 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         dry_run=dry_run,
     )
 
-    # HIGH DIMENSIONAL FIXED EFFECTS
-    tabular_models = ["bsa_tnp", "te_tnp", "tnp_d"]
+
+def beijing_benchmarks(
+    seeds: jax.Array,
+    overrides: list[str],
+    dry_run: bool,
+):
+    beijing_models = [
+        "te_tnp",
+        "tnp_d",
+        "bsa_tnp",
+        "bsa_tnp_only_embed",
+        "bsa_tnp_only_bias",
+    ]
     generic_benchmark(
         seeds,
         "configs/beijing_air_quality",
-        tabular_models,
+        beijing_models,
         beijing_air_quality_main,
         overrides,
         "AISTATS BSA-TNP - Beijing Air Quality",
         dry_run=dry_run,
     )
-    # ablation requested by reviewer
-    beijing_ablation_models = ["bsa_tnp", "bsa_tnp_only_embed", "bsa_tnp_only_bias"]
-    generic_benchmark(
-        seeds,
-        "configs/beijing_air_quality",
-        beijing_ablation_models,
-        beijing_air_quality_main,
-        overrides,
-        "AISTATS BSA-TNP - Beijing Air Quality Ablation",
-        dry_run=dry_run,
-    )
-    generic_benchmark(
-        seeds,
-        "configs/generic_spatial",
-        tabular_models,
-        generic_spatial_main,
-        overrides,
-        "AISTATS BSA-TNP - Generic Spatial",
-        dry_run=dry_run,
-    )
-    # run models on examples for comparison to MCMC
-    generic_benchmark(
-        seeds,
-        "configs/generic_spatial",
-        tabular_models,
-        generic_spatial_main,
-        overrides + ["infer_with_model=True"],
-        "AISTATS BSA-TNP - Generic Spatial",
-        dry_run=dry_run,
-    )
-    # run MCMC on examples
-    generic_benchmark(
-        seeds,
-        "configs/generic_spatial",
-        ["bsa_tnp"],  # dummy model - unused
-        generic_spatial_main,
-        overrides + ["infer_with_mcmc=True"],
-        "AISTATS BSA-TNP - Generic Spatial",
-        dry_run=dry_run,
-    )
 
-    # ROTATIONAL INVARIANCE
-    rot_models = ["2d/bsa_tnp", "2d/geo_bsa_tnp", "2d/sa_tnp"]
-    rot_kernels = ["geo"]
-    rots = [  # north, east, tilt
-        "60, 30, 0",
-        "60, 30, 20",
+
+def gneiting_gp_benchmarks(
+    seeds: jax.Array,
+    overrides: list[str],
+    dry_run: bool,
+):
+    gneiting_gp_models = [
+        "bsa_tnp",
+        "bsa_tnp_only_embed",
+        "bsa_tnp_only_bias",
+        "tnp_d",
+        "te_tnp",
     ]
-    gp_benchmark(
+    generic_benchmark(
         seeds,
-        "so3",
-        rot_kernels,
-        rot_models,
-        gp_main,
+        "configs/gneiting_gp",
+        gneiting_gp_models,
+        gneiting_gp_main,
         overrides,
-        "AISTATS BSA-TNP - Gaussian Processes - Rotated",
+        "AISTATS BSA-TNP - Gneiting GP",
         dry_run=dry_run,
     )
-    for rot in rots:
-        gp_benchmark(
-            seeds,
-            "so3",
-            rot_kernels,
-            rot_models,
-            gp_main,
-            overrides
-            + [
-                f"project_suffix=' - {rot}'",
-                "evaluate_only=True",
-                f"data.rotate=[{rot}]",
-            ],
-            "AISTATS BSA-TNP - Gaussian Processes - Rotated",
-            dry_run=dry_run,
-        )
 
 
 def gp_benchmark(
