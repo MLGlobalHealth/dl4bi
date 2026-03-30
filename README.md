@@ -36,6 +36,9 @@ Example benchmarks can be found [here](https://github.com/MLGlobalHealth/dl4bi/t
 1. Bump the package version:
 ```bash
 uv version --bump patch --frozen
+git tag -a <version> -m "<message>"
+git commit [--no-verify] -am "<version> <message>"
+git push origin main --follow-tags
 ```
 
 2. Build the source distribution and wheel:
