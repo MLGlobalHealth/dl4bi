@@ -8,7 +8,7 @@ from omegaconf import DictConfig
 from scipy.spatial import distance_matrix
 from shapely import Point
 from shapely.affinity import scale, translate
-from sps.utils import build_grid
+from dl4bi_sps.utils import build_grid
 
 
 def gen_locations(data: DictConfig):

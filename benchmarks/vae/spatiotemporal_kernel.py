@@ -26,7 +26,7 @@ from numpyro.optim import Adam
 from omegaconf import DictConfig
 from scipy.stats import wasserstein_distance
 from sklearn.cluster import KMeans
-from sps.utils import build_grid
+from dl4bi_sps.utils import build_grid
 from utils.plot_utils import plot_infer_trace, plot_posterior_predictive_comparisons
 
 import wandb

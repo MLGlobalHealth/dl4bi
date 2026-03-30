@@ -10,7 +10,7 @@ ball_radius: 4
 num_frames: 128
 frame_size: 32
 velocity_prior:
-  _target_: sps.priors.Prior
+  _target_: dl4bi_sps.priors.Prior
   dist: uniform
   kwargs:
     minval: 2.0

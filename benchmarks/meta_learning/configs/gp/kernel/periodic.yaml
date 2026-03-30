@@ -1,20 +1,20 @@
-_target_: sps.gp.GP
+_target_: dl4bi_sps.gp.GP
 kernel:
-  _target_: sps.kernels.periodic
+  _target_: dl4bi_sps.kernels.periodic
   _partial_: true
 var:
-  _target_: sps.priors.Prior
+  _target_: dl4bi_sps.priors.Prior
   dist: fixed
   kwargs:
     value: 1.0
 ls:
-  _target_: sps.priors.Prior
+  _target_: dl4bi_sps.priors.Prior
   dist: beta
   kwargs:
     a: 3.0
     b: 7.0
 period:
-  _target_: sps.priors.Prior
+  _target_: dl4bi_sps.priors.Prior
   dist: uniform
   kwargs:
     minval: 0.5 # 8 cycles on [-2, 2]

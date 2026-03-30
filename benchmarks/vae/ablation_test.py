@@ -16,8 +16,8 @@ from jax import Array, jit, random
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from scipy.stats import wasserstein_distance
-from sps.kernels import matern_1_2, matern_3_2, matern_5_2, rbf
-from sps.utils import build_grid
+from dl4bi_sps.kernels import matern_1_2, matern_3_2, matern_5_2, rbf
+from dl4bi_sps.utils import build_grid
 from utils.plot_utils import conds_to_title, plot_on_map
 
 import wandb

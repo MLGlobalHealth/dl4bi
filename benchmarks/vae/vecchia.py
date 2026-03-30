@@ -9,7 +9,7 @@ import optax
 import pandas as pd
 from jax import Array, jit, random, vmap
 from jax.lax import scan, top_k
-from sps.kernels import l2_dist, matern_1_2, matern_3_2, matern_5_2, rbf
+from dl4bi_sps.kernels import l2_dist, matern_1_2, matern_3_2, matern_5_2, rbf
 
 import wandb
 from dl4bi.core.model_output import VAEOutput

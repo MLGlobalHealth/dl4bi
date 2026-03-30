@@ -15,7 +15,7 @@ from hydra.utils import instantiate
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
-from sps.utils import build_grid
+from dl4bi_sps.utils import build_grid
 from tqdm import tqdm
 
 from dl4bi.core.train import (

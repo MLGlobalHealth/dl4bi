@@ -14,7 +14,7 @@ from hydra.utils import instantiate
 from jax import random
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
-from sps.utils import random_subgrid
+from dl4bi_sps.utils import random_subgrid
 
 from dl4bi.core.train import (
     Callback,

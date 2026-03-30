@@ -12,7 +12,7 @@ import wandb
 from hydra.utils import instantiate
 from jax import random
 from omegaconf import DictConfig, OmegaConf
-from sps.utils import build_grid
+from dl4bi_sps.utils import build_grid
 
 from dl4bi.core.train import (
     Callback,

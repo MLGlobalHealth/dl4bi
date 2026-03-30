@@ -21,7 +21,7 @@ from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 from omegaconf import DictConfig
 from shapely.affinity import scale, translate
-from sps.kernels import matern_1_2
+from dl4bi_sps.kernels import matern_1_2
 from utils.plot_utils import (
     plot_infer_trace,
     plot_models_predictive_means,

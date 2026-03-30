@@ -21,9 +21,9 @@ from jax.experimental import enable_x64
 from numpyro.infer import MCMC, NUTS
 from omegaconf import DictConfig, OmegaConf
 from scipy.stats import norm
-from sps.gp import GP
-from sps.kernels import rbf
-from sps.priors import Prior
+from dl4bi_sps.gp import GP
+from dl4bi_sps.kernels import rbf
+from dl4bi_sps.priors import Prior
 
 from dl4bi.core.train import (
     TrainState,

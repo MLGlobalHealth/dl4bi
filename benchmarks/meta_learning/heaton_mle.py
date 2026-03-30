@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import pandas as pd
 from jax import random
 from omegaconf import DictConfig
-from sps.kernels import matern_1_2
+from dl4bi_sps.kernels import matern_1_2
 
 from dl4bi.core import gp_mle_sgd
 

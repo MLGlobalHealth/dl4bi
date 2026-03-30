@@ -13,8 +13,8 @@ import optax
 from jax import Array, jit, random
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
-from sps.kernels import matern_1_2
-from sps.utils import build_grid
+from dl4bi_sps.kernels import matern_1_2
+from dl4bi_sps.utils import build_grid
 from utils.plot_utils import plot_infer_trace
 
 import wandb

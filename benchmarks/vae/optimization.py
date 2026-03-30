@@ -11,8 +11,8 @@ import optax
 import pandas as pd
 from jax import Array, jit, random
 from numpyro import distributions as dist
-from sps.kernels import matern_1_2, matern_3_2, rbf
-from sps.utils import build_grid
+from dl4bi_sps.kernels import matern_1_2, matern_3_2, rbf
+from dl4bi_sps.utils import build_grid
 
 import wandb
 from dl4bi.core.model_output import VAEOutput
