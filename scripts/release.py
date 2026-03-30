@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +20,32 @@ TEST_PYPI_PUBLISH_URL = "https://test.pypi.org/legacy/"
 TEST_PYPI_CHECK_URL = "https://test.pypi.org/simple/"
 SMOKE_TEST_MAX_ATTEMPTS = 12
 SMOKE_TEST_RETRY_DELAY_SECONDS = 15
-SMOKE_TARGET_CHOICES = ("base", "cpu", "cuda12", "cuda13")
+SMOKE_TARGET_CHOICES = ("base", "cpu", "cuda12", "cuda13", "benchmarks-cpu")
+BENCHMARK_SMOKE_MODULES = (
+    "arviz",
+    "cdsapi",
+    "datasets",
+    "geopandas",
+    "numpyro",
+    "pandas",
+    "PIL",
+    "rapidfuzz",
+    "requests",
+    "seaborn",
+    "shapely",
+    "tensorflow",
+    "tensorflow_datasets",
+    "tiktoken",
+    "ucimlrepo",
+    "xarray",
+)
+
+
+@dataclass(frozen=True)
+class SmokeTarget:
+    name: str
+    requirement: str
+    check_code: str
 
 
 class ReleaseError(RuntimeError):
@@ -52,7 +78,8 @@ def parse_args() -> argparse.Namespace:
         choices=SMOKE_TARGET_CHOICES,
         help=(
             "Limit smoke-only checks to one or more targets. "
-            "Defaults to all targets: base, cpu, cuda12, cuda13."
+            "Defaults to all targets: "
+            "base, cpu, cuda12, cuda13, benchmarks-cpu."
         ),
     )
     return parser.parse_args()
@@ -185,22 +212,53 @@ def build_release() -> tuple[str, str]:
 
 def build_smoke_targets(
     version: str, selected_targets: list[str] | None = None
-) -> tuple[str, ...]:
+) -> tuple[SmokeTarget, ...]:
+    benchmark_check = (
+        "import importlib.util\n"
+        f"import {IMPORT_NAME}\n"
+        f"modules = {BENCHMARK_SMOKE_MODULES!r}\n"
+        "missing = [name for name in modules if importlib.util.find_spec(name) is None]\n"
+        "if missing:\n"
+        "    raise SystemExit(f'missing benchmark modules: {missing}')\n"
+    )
     target_map = {
-        "base": f"{PACKAGE_NAME}=={version}",
-        "cpu": f"{PACKAGE_NAME}[cpu]=={version}",
-        "cuda12": f"{PACKAGE_NAME}[cuda12]=={version}",
-        "cuda13": f"{PACKAGE_NAME}[cuda13]=={version}",
+        "base": SmokeTarget(
+            "base",
+            f"{PACKAGE_NAME}=={version}",
+            f"import {IMPORT_NAME}",
+        ),
+        "cpu": SmokeTarget(
+            "cpu",
+            f"{PACKAGE_NAME}[cpu]=={version}",
+            f"import {IMPORT_NAME}",
+        ),
+        "cuda12": SmokeTarget(
+            "cuda12",
+            f"{PACKAGE_NAME}[cuda12]=={version}",
+            f"import {IMPORT_NAME}",
+        ),
+        "cuda13": SmokeTarget(
+            "cuda13",
+            f"{PACKAGE_NAME}[cuda13]=={version}",
+            f"import {IMPORT_NAME}",
+        ),
+        "benchmarks-cpu": SmokeTarget(
+            "benchmarks-cpu",
+            f"{PACKAGE_NAME}[benchmarks,cpu]=={version}",
+            benchmark_check,
+        ),
     }
     target_names = selected_targets or list(SMOKE_TARGET_CHOICES)
     return tuple(target_map[name] for name in target_names)
 
 
-def is_retryable_smoke_failure(output: str, version: str) -> bool:
+def is_retryable_smoke_failure(output: str, target: SmokeTarget, version: str) -> bool:
     normalized_output = output.lower()
     package_version = f"{PACKAGE_NAME}=={version}".lower()
+    target_requirement = target.requirement.lower()
     return (
         f"there is no version of {package_version}" in normalized_output
+        or f"there is no version of {target_requirement}" in normalized_output
         or "request failed after 3 retries" in normalized_output
         or "temporary failure in name resolution" in normalized_output
         or f"failed to fetch: `https://pypi.org/simple/{PACKAGE_NAME}/`"
@@ -208,7 +266,7 @@ def is_retryable_smoke_failure(output: str, version: str) -> bool:
     )
 
 
-def smoke_test_target(target: str, version: str) -> None:
+def smoke_test_target(target: SmokeTarget, version: str) -> None:
     with tempfile.TemporaryDirectory(prefix=f"{PACKAGE_NAME}-smoke-") as workdir:
         cmd = [
             "uv",
@@ -217,7 +275,7 @@ def smoke_test_target(target: str, version: str) -> None:
             "--refresh-package",
             PACKAGE_NAME,
             "--with",
-            target,
+            target.requirement,
             "--no-project",
             "--directory",
             workdir,
@@ -225,7 +283,7 @@ def smoke_test_target(target: str, version: str) -> None:
             "python",
             "-I",
             "-c",
-            f"import {IMPORT_NAME}",
+            target.check_code,
         ]
         for attempt in range(1, SMOKE_TEST_MAX_ATTEMPTS + 1):
             completed = command_failed(cmd)
@@ -233,15 +291,18 @@ def smoke_test_target(target: str, version: str) -> None:
                 return
 
             output = completed.stdout.strip()
-            if not is_retryable_smoke_failure(output, version):
+            if not is_retryable_smoke_failure(output, target, version):
                 raise ReleaseError(
-                    f"smoke test failed for {target}:\n{output or '<no output>'}"
+                    f"smoke test failed for {target.name} ({target.requirement}):\n"
+                    f"{output or '<no output>'}"
                 )
             if attempt == SMOKE_TEST_MAX_ATTEMPTS:
                 raise ReleaseError(
                     "published package was still unavailable after waiting "
                     f"{SMOKE_TEST_MAX_ATTEMPTS * SMOKE_TEST_RETRY_DELAY_SECONDS}s "
-                    f"for PyPI propagation ({target}):\n{output or '<no output>'}"
+                    "for PyPI propagation "
+                    f"({target.name}: {target.requirement}):\n"
+                    f"{output or '<no output>'}"
                 )
             print(
                 "smoke test target is not visible on PyPI yet; "

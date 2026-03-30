@@ -7,7 +7,12 @@ pip install dl4bi # dl4bi
 pip install dl4bi[cpu] # dl4bi + jax for CPU
 pip install dl4bi[cuda12] # dl4bi + jax for CUDA-12
 pip install dl4bi[cuda13] # dl4bi + jax for CUDA-13
+pip install dl4bi[benchmarks,cpu] # benchmark deps + jax for CPU
+pip install dl4bi[benchmarks,cuda12] # benchmark deps + jax for CUDA-12
+pip install dl4bi[benchmarks,cuda13] # benchmark deps + jax for CUDA-13
 ```
+
+The `benchmarks` extra installs the additional packages used by the benchmark scripts, especially under `benchmarks/meta_learning` and `benchmarks/vae`.
 
 ## View Documentation (Locally)
 ```bash
@@ -51,6 +56,9 @@ Benchmarks are available for BSA-TNP [here](https://github.com/MLGlobalHealth/dl
     - CPU JAX: `uv sync --extra cpu`
     - CUDA 12 JAX: `uv sync --extra cuda12`
     - CUDA 13 JAX: `uv sync --extra cuda13`
+    - Benchmark deps + CPU JAX: `uv sync --extra benchmarks --extra cpu`
+    - Benchmark deps + CUDA 12 JAX: `uv sync --extra benchmarks --extra cuda12`
+    - Benchmark deps + CUDA 13 JAX: `uv sync --extra benchmarks --extra cuda13`
 - `uv sync` creates `.venv`, installs the project in editable mode, includes the default `dev` dependency group, and picks a Python interpreter compatible with the project's `requires-python`
 - Before making changes, install the shared development hooks: `uv run pre-commit install --install-hooks`
 - Verify the hook setup once per clone with: `uv run pre-commit run --all-files`

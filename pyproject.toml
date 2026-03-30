@@ -5,36 +5,41 @@ description = "Deep Learning for Bayesian Inference (DL4BI)"
 readme = "README.md"
 requires-python = ">=3.11,<4.0"
 dependencies = [
-  "arviz>=0.20,<1",
-  "cdsapi>=0.7,<1",
-  "dask>=2025.4,<2026",
-  "datasets>=3.5,<4",
   "dl4bi-sps>=0.1.2,<1",
   "einops>=0.8,<1",
   "flax>=0.12,<0.13",
   "hydra-core>=1.3,<2",
-  "imageio>=2.37,<3",
   "jraph==0.0.6.dev0",
   "matplotlib>=3.10,<4",
   "numpy>=2.2,<3",
-  "numpyro>=0.14,<1",
   "optax>=0.2,<0.3",
-  "orbax>=0.1,<1",
   "orbax-checkpoint>=0.11,<1",
-  "pandas>=2.3,<3",
-  "pillow>=11.1,<12",
-  "pygifsicle>=1.1,<2",
   "scikit-learn>=1.7,<2",
   "scipy>=1.15,<2",
   "scoringrules>=0.7,<1",
-  "tiktoken>=0.8,<1",
   "tqdm>=4.67,<5",
-  "ucimlrepo>=0.0.7,<1",
   "wandb>=0.22,<1",
-  "xarray>=2025.9,<2026",
 ]
 
 [project.optional-dependencies]
+benchmarks = [
+  "arviz>=0.20,<1",
+  "cdsapi>=0.7,<1",
+  "datasets>=3.5,<4",
+  "geopandas>=1.1.3,<2.0.0",
+  "numpyro>=0.14,<1",
+  "pandas>=2.3,<3",
+  "pillow>=11.1,<12",
+  "rapidfuzz>=3.14.3,<4.0.0",
+  "requests>=2.33.0,<3.0.0",
+  "seaborn>=0.13.2,<0.14.0",
+  "shapely>=2.1.2,<3.0.0",
+  "tensorflow>=2.21.0,<3.0.0",
+  "tensorflow-datasets>=4.9.9,<5.0.0",
+  "tiktoken>=0.8,<1",
+  "ucimlrepo>=0.0.7,<1",
+  "xarray>=2025.9,<2026",
+]
 cpu = [
   "jax>=0.8.1,<0.9",
 ]
@@ -52,6 +57,7 @@ dev = [
 ]
 
 [tool.uv]
+add-bounds = "major"
 conflicts = [
   [
     { extra = "cpu" },
