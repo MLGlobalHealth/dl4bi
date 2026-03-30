@@ -15,7 +15,33 @@ git clone git@github.com:MLGlobalHealth/dl4bi.git
 cd dl4bi
 uv run --with pdoc pdoc --docformat google --math dl4bi
 ```
-Example benchmarks can be found [here](https://github.com/MLGlobalHealth/dl4bi/tree/main/benchmarks).
+
+## Cite
+If you're using this package or some of its code, please cite the relevant paper(s):
+```bibtex
+@inproceedings{jenson2026scalable,
+  title = {Scalable Spatiotemporal Inference with Biased Scan Attention Transformer Neural Processes},
+  author = {Jenson, Daniel and Navott, Jhonathan and Grynfelder, Piotr and Zhang, Mengyan and Sharma, Makkunda and Semenova, Elizaveta and Flaxman, Seth},
+  booktitle = {Proceedings of the 29th International Conference on Artificial Intelligence and Statistics},
+  series = {Proceedings of Machine Learning Research},
+  volume = {300},
+  address = {Tangier, Morocco},
+  year = {2026},
+  publisher = {PMLR}
+}
+
+@inproceedings{navott2026deeprv,
+  title = {{DeepRV}: Accelerating Spatiotemporal Inference with Pre-trained Neural Priors},
+  author = {Navott, Jhonathan and Jenson, Daniel and Flaxman, Seth and Semenova, Elizaveta},
+  booktitle = {Proceedings of the 29th International Conference on Artificial Intelligence and Statistics},
+  series = {Proceedings of Machine Learning Research},
+  volume = {300},
+  address = {Tangier, Morocco},
+  year = {2026},
+  publisher = {PMLR}
+}
+```
+Benchmarks are available for BSA-TNP [here](https://github.com/MLGlobalHealth/dl4bi/tree/main/benchmarks/meta_learning) and for DeepRV [here](https://github.com/MLGlobalHealth/dl4bi/tree/main/benchmarks/vae).
 
 ## Development Setup
 - Install `uv`: `curl -LsSf https://astral.sh/uv/install.sh | sh`
@@ -33,35 +59,17 @@ Example benchmarks can be found [here](https://github.com/MLGlobalHealth/dl4bi/t
 - If you want to activate the virtualenv directly, use `source .venv/bin/activate`
 
 ## Build and Publish to PyPI
-1. Bump the package version:
-```bash
-uv version --bump patch --frozen
-git tag -a <version> -m "<message>"
-git commit [--no-verify] -am "<version> <message>"
-git push origin main --follow-tags
+Create a local `.env` file with the publish tokens:
+```env
+TEST_PYPI_TOKEN=pypi-...
+PYPI_TOKEN=pypi-...
 ```
 
-2. Build the source distribution and wheel:
+Run the release helper from a clean `main` checkout:
 ```bash
-uv build --no-sources
+uv run python scripts/release.py .env "AISTATS 2026"
 ```
 
-3. Publish to TestPyPI first:
-```bash
-UV_PUBLISH_TOKEN=$TEST_PYPI_TOKEN uv publish \
-  --publish-url https://test.pypi.org/legacy/ \
-  --check-url https://test.pypi.org/simple/
-```
-
-4. After validating the release, publish the same artifacts to PyPI:
-```bash
-UV_PUBLISH_TOKEN=$PYPI_TOKEN uv publish
-```
-
-5. Smoke-test the published install targets in fresh environments:
-```bash
-uv run --isolated --with "dl4bi==<version>" --no-project -- python -c "import dl4bi"
-uv run --isolated --with "dl4bi[cpu]==<version>" --no-project -- python -c "import dl4bi"
-uv run --isolated --with "dl4bi[cuda12]==<version>" --no-project -- python -c "import dl4bi"
-uv run --isolated --with "dl4bi[cuda13]==<version>" --no-project -- python -c "import dl4bi"
-```
+The helper bumps the patch version, commits and tags `v<version> <message>`,
+rebuilds `dist/`, publishes to TestPyPI and PyPI, pushes `main` and the tag,
+and smoke-tests the published install targets.
