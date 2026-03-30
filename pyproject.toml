@@ -1,6 +1,6 @@
 [project]
 name = "dl4bi"
-version = "0.1.1"
+version = "0.1.2"
 description = "Deep Learning for Bayesian Inference (DL4BI)"
 readme = "README.md"
 requires-python = ">=3.11,<4.0"
