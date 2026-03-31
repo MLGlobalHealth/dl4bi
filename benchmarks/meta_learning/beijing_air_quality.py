@@ -71,9 +71,9 @@ def main(cfg: DictConfig):
 def build_dataloaders(
     rng: jax.Array,
     batch_size: int = 32,
-    num_ctx_min: int = 624,  # 48 hours * 12 locations + 12 buffer
+    num_ctx_min: int = 624,  # (48 history hours + 4 gap-padding hours) * 12 locations
     num_ctx_max: int = 624,
-    num_test: int = 84,  # 6 hours * 12 locations + 12 buffer
+    num_test: int = 84,  # (6 forecast hours + 1 gap-padding hour) * 12 locations
     pct_train: float = 0.8,
     pct_valid: float = 0.1,
     pct_test: float = 0.1,
