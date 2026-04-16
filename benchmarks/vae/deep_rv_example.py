@@ -1,3 +1,4 @@
+import argparse
 import sys
 
 sys.path.append("benchmarks/vae")
@@ -20,16 +21,24 @@ from utils.plot_utils import plot_infer_trace
 import wandb
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, train
-from dl4bi.vae import gMLPDeepRV
-from dl4bi.vae.train_utils import deep_rv_train_step, generate_surrogate_decoder
+from dl4bi.vae import RecursiveGMLPDeepRV, gMLPDeepRV
+from dl4bi.vae.train_utils import (
+    deep_rv_train_step,
+    generate_surrogate_decoder,
+    recursive_deep_rv_train_step,
+    recursive_deep_rv_valid_step,
+)
 
 
-def main(seed=57, gt_ls=20):
+def main(seed=57, gt_ls=20, model_name="gmlp", num_cycles=5):
     # NOTE: generate seeds and directories.
     rng = random.key(seed)
     rng_train, rng_infer, rng_idxs, rng_obs, rng = random.split(rng, 5)
     wandb.init(mode="disabled")
-    save_dir = Path("results/DeepRV_example/")
+    nn_model, train_step, valid_step_fn, model_label, decode_fn = build_model_config(
+        model_name, num_cycles
+    )
+    save_dir = Path(f"results/DeepRV_example/{model_label.replace(' ', '_')}/")
     save_dir.mkdir(parents=True, exist_ok=True)
     # NOTE: generates the spatial grid to train and infer on
     s = build_grid([{"start": 0.0, "stop": 100.0, "num": 16}] * 2).reshape(-1, 2)
@@ -40,9 +49,7 @@ def main(seed=57, gt_ls=20):
     y_obs = gen_y_obs(rng_obs, s, gt_ls)
     # NOTE: Mask detailing which locations are observable
     obs_mask = gen_spatial_obs_mask(rng_idxs, (sqrt_N, sqrt_N), obs_ratio=0.7)
-    infer_model = inference_model(s, priors)
-    # NOTE: surrogate training
-    nn_model = gMLPDeepRV(num_blks=2)
+    infer_model = inference_model(s, priors, decode_fn)
     optimizer = optax.adamw(cosine_annealing_lr(100_000, 1e-3), weight_decay=1e-2)
     optimizer = optax.chain(optax.clip_by_global_norm(3.0), optimizer)
     loader = gen_train_dataloader(s, priors)
@@ -50,10 +57,10 @@ def main(seed=57, gt_ls=20):
         rng_train,
         nn_model,
         optimizer,
-        deep_rv_train_step,
+        train_step,
         100_000,
         loader,
-        valid_step,
+        valid_step_fn,
         25_000,
         5_000,
         loader,
@@ -71,7 +78,7 @@ def main(seed=57, gt_ls=20):
         samples_drv, mcmc_drv, None, cond_names, save_dir / "infer_trace_drv.png"
     )
     plot_models_predictive_means(
-        sqrt_N, y_obs, [y_hat_drv], obs_mask, ["DeepRV"], save_dir / "obs_means.png"
+        sqrt_N, y_obs, [y_hat_drv], obs_mask, [model_label], save_dir / "obs_means.png"
     )
 
 
@@ -111,7 +118,7 @@ def gen_train_dataloader(s: Array, priors: dict, batch_size=32):
     return dataloader
 
 
-def inference_model(s: Array, priors: dict):
+def inference_model(s: Array, priors: dict, decode_fn: Callable):
     """
     Builds a poisson likelihood inference model for GP and surrogate models
     """
@@ -129,13 +136,36 @@ def inference_model(s: Array, priors: dict):
         else:  # NOTE: whether to use a replacment for the GP
             mu = numpyro.deterministic(
                 "mu",
-                surrogate_decoder(z, jnp.array([ls]), **surrogate_kwargs).squeeze(),
+                decode_fn(
+                    surrogate_decoder(z, jnp.array([ls]), **surrogate_kwargs)
+                ).squeeze(),
             )
         lambda_ = jnp.exp(beta + mu)
         with numpyro.handlers.mask(mask=obs_mask):
             numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
 
     return poisson
+
+
+def build_model_config(model_name: str, num_cycles: int):
+    model_name = model_name.lower()
+    if model_name == "gmlp":
+        return (
+            gMLPDeepRV(num_blks=2),
+            deep_rv_train_step,
+            valid_step,
+            "DeepRV",
+            lambda x: x,
+        )
+    if model_name == "recursive-gmlp":
+        return (
+            RecursiveGMLPDeepRV(num_cycles=num_cycles),
+            recursive_deep_rv_train_step,
+            recursive_deep_rv_valid_step,
+            f"Recursive DeepRV ({num_cycles} cycles)",
+            lambda x: x[-1],
+        )
+    raise ValueError(f"Unknown model_name={model_name!r}")
 
 
 @jit
@@ -248,4 +278,14 @@ def plot_models_predictive_means(
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=57)
+    parser.add_argument("--gt-ls", type=float, default=20.0)
+    parser.add_argument(
+        "--model",
+        choices=["gmlp", "recursive-gmlp"],
+        default="gmlp",
+    )
+    parser.add_argument("--num-cycles", type=int, default=5)
+    args = parser.parse_args()
+    main(args.seed, args.gt_ls, args.model, args.num_cycles)

@@ -67,6 +67,31 @@ def deep_rv_train_step(
     return state.apply_gradients(grads=grads), loss
 
 
+@partial(jax.jit, static_argnames=["var_idx"])
+def recursive_deep_rv_train_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: dict,
+    var_idx: Optional[int] = None,
+):
+    """DeepRV training step with deep supervision over every recursive cycle."""
+
+    def recursive_deep_rv_loss(params):
+        f, conditionals = batch["f"], batch["conditionals"]
+        var = conditionals[var_idx] if var_idx is not None else 1.0
+        output: VAEOutput = state.apply_fn(
+            {"params": params, **state.kwargs},
+            **batch,
+            rngs={"extra": rng},
+        )
+        preds = output.f_hat
+        targets = jnp.broadcast_to(f, preds.shape)
+        return (1 / var) * optax.squared_error(preds, targets).mean()
+
+    loss, grads = value_and_grad(recursive_deep_rv_loss)(state.params)
+    return state.apply_gradients(grads=grads), loss
+
+
 @partial(jax.jit, static_argnames=["var_idx", "f_u_bar_w"])
 def inducing_deep_rv_train_step(
     rng: jax.Array,
@@ -106,6 +131,36 @@ def inducing_deep_rv_train_step(
 
     loss, grads = value_and_grad(deep_rv_loss)(state.params)
     return state.apply_gradients(grads=grads), loss
+
+
+@partial(jax.jit, static_argnames=["var_idx"])
+def recursive_deep_rv_valid_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: dict,
+    var_idx: Optional[int] = None,
+):
+    """Validation step for recursive DeepRV models.
+
+    This expects stacked predictions and emits per-cycle metrics.
+    """
+
+    f, conditionals = batch["f"], batch["conditionals"]
+    var = conditionals[var_idx] if var_idx is not None else 1.0
+    output: VAEOutput = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        **batch,
+        rngs={"extra": rng},
+    )
+    preds = output.f_hat
+    targets = jnp.broadcast_to(f, preds.shape)
+    cycle_mses = optax.squared_error(preds, targets).mean(axis=(1, 2))
+    metrics = {"norm MSE": cycle_mses[-1] / var}
+    for i in range(preds.shape[0]):
+        metrics[f"MSE iter{i + 1}"] = cycle_mses[i]
+    for i in range(1, preds.shape[0]):
+        metrics[f"Delta iter{i + 1}-iter{i}"] = cycle_mses[i] - cycle_mses[i - 1]
+    return metrics
 
 
 @jit
