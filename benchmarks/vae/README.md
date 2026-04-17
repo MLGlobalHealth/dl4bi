@@ -91,9 +91,10 @@ All experiments are runnable from the repository root. Results and processed out
 
 ## Example Usage
 
-A small example usage script:
+Small example usage scripts:
 ```bash
 uv run python benchmarks/vae/deep_rv_example.py
+uv run python benchmarks/vae/recursive_deep_rv_example.py
 ```
 
 ---

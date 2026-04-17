@@ -90,6 +90,57 @@ class gMLPDeepRV(nn.Module):
         return self(z, conditionals, s, **kwargs).f_hat
 
 
+class RecursiveGMLPDeepRV(nn.Module):
+    """DeepRV variant that iteratively refines a shared gMLP state."""
+
+    num_cycles: int = 3
+    s_embed: Union[Callable, nn.Module] = lambda s: s
+    proj_in: nn.Module = MLP([128, 128], nn.gelu)
+    proj_out: nn.Module = MLP([64, 64], nn.gelu)
+    attn: Optional[nn.Module] = None
+    gate_fn: Union[Callable, nn.Module] = lambda x: x
+    embed: nn.Module = MLP([64, 64], nn.gelu)
+    head: nn.Module = MLP([128, 1], nn.gelu)
+
+    @nn.compact
+    def __call__(
+        self,
+        z: Array,
+        conditionals: Array,
+        s: Array,
+        num_cycles: Optional[int] = None,
+        **kwargs,
+    ):
+        s_embeded = self.s_embed(s)
+        batched_s = jnp.repeat(s_embeded[None, ...], z.shape[0], axis=0)
+        x = jnp.concat([jnp.atleast_3d(z), batched_s], axis=-1)
+        x = cond_as_feats(x, conditionals)
+        x = self.embed(x)
+        block = gMLPBlock(
+            self.proj_in,
+            self.proj_out,
+            attn=self.attn,
+            gate_fn=self.gate_fn,
+        )
+        norm = nn.LayerNorm()
+        cycles = self.num_cycles if num_cycles is None else num_cycles
+        preds = []
+        for _ in range(cycles):
+            x = x + block(norm(x), **kwargs)
+            preds.append(self.head(norm(x)).squeeze(-1))
+        return VAEOutput(jnp.stack(preds, axis=0))
+
+    def decode(
+        self,
+        z: Array,
+        conditionals: Array,
+        s: Array,
+        num_cycles: Optional[int] = None,
+        **kwargs,
+    ):
+        return self(z, conditionals, s, num_cycles=num_cycles, **kwargs).f_hat
+
+
 class MLPDeepRV(nn.Module):
     dims: list[int]
 
