@@ -21,23 +21,38 @@ from utils.plot_utils import plot_infer_trace
 import wandb
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, train
-from dl4bi.vae import RecursiveGMLPDeepRV, gMLPDeepRV
+from dl4bi.vae import gMLPDeepRV
 from dl4bi.vae.train_utils import (
     deep_rv_train_step,
     generate_surrogate_decoder,
-    recursive_deep_rv_train_step,
-    recursive_deep_rv_valid_step,
 )
 
 
-def main(seed=57, gt_ls=20, model_name="gmlp", num_cycles=5):
+def main(seed=57, gt_ls=20):
+    run_example(
+        seed=seed,
+        gt_ls=gt_ls,
+        nn_model=gMLPDeepRV(num_blks=2),
+        train_step=deep_rv_train_step,
+        valid_step_fn=valid_step,
+        model_label="DeepRV",
+        decode_fn=lambda x: x,
+    )
+
+
+def run_example(
+    seed: int,
+    gt_ls: float,
+    nn_model,
+    train_step: Callable,
+    valid_step_fn: Callable,
+    model_label: str,
+    decode_fn: Callable,
+):
     # NOTE: generate seeds and directories.
     rng = random.key(seed)
     rng_train, rng_infer, rng_idxs, rng_obs, rng = random.split(rng, 5)
     wandb.init(mode="disabled")
-    nn_model, train_step, valid_step_fn, model_label, decode_fn = build_model_config(
-        model_name, num_cycles
-    )
     save_dir = Path(f"results/DeepRV_example/{model_label.replace(' ', '_')}/")
     save_dir.mkdir(parents=True, exist_ok=True)
     # NOTE: generates the spatial grid to train and infer on
@@ -145,27 +160,6 @@ def inference_model(s: Array, priors: dict, decode_fn: Callable):
             numpyro.sample("obs", dist.Poisson(rate=lambda_), obs=y)
 
     return poisson
-
-
-def build_model_config(model_name: str, num_cycles: int):
-    model_name = model_name.lower()
-    if model_name == "gmlp":
-        return (
-            gMLPDeepRV(num_blks=2),
-            deep_rv_train_step,
-            valid_step,
-            "DeepRV",
-            lambda x: x,
-        )
-    if model_name == "recursive-gmlp":
-        return (
-            RecursiveGMLPDeepRV(num_cycles=num_cycles),
-            recursive_deep_rv_train_step,
-            recursive_deep_rv_valid_step,
-            f"Recursive DeepRV ({num_cycles} cycles)",
-            lambda x: x[-1],
-        )
-    raise ValueError(f"Unknown model_name={model_name!r}")
 
 
 @jit
@@ -281,11 +275,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=57)
     parser.add_argument("--gt-ls", type=float, default=20.0)
-    parser.add_argument(
-        "--model",
-        choices=["gmlp", "recursive-gmlp"],
-        default="gmlp",
-    )
-    parser.add_argument("--num-cycles", type=int, default=5)
     args = parser.parse_args()
-    main(args.seed, args.gt_ls, args.model, args.num_cycles)
+    main(args.seed, args.gt_ls)
