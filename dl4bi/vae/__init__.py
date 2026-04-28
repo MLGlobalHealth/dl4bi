@@ -6,6 +6,7 @@ from .deep_rv import (
     gMLPDeepRV,
     KernelBiasTransformerDeepRV,
 )
+from .flow_matching import FlowMatchingDeepRV, FlowMatchingVectorField
 from .pi_vae import Phi, PiVAE
 from .prior_cvae import PriorCVAE
 from .sp_vae import SPVAE

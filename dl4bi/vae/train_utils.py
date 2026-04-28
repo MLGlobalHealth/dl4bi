@@ -185,6 +185,88 @@ def pi_vae_train_step(rng: jax.Array, state: TrainState, batch: dict):
     return state.apply_gradients(grads=grads), loss
 
 
+@partial(jax.jit, static_argnames=["var_idx"])
+def flow_matching_train_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: dict,
+    var_idx: Optional[int] = None,
+):
+    """Conditional flow matching (CFM) train step.
+
+    Minimises ||v_θ(x_t, t, c) - (f - z)||² where x_t = (1-t)*z + t*f
+    and t ~ U(0,1) per sample (straight-path / OT-CFM objective).
+
+    Args:
+        rng: PRNG key.
+        state: Current training state.
+        batch: Dict with keys "f", "z", "conditionals", and optional extras
+               ("s", "K", ...) forwarded to the vector field network.
+        var_idx: Index into conditionals for variance normalisation.
+
+    Returns:
+        Updated TrainState and scalar loss.
+    """
+
+    def _loss(params):
+        f = batch["f"]
+        z0 = batch["z"]
+        conditionals = batch["conditionals"]
+        B = z0.shape[0]
+
+        rng_t, rng_apply = jax.random.split(rng)
+        t = jax.random.uniform(rng_t, (B,))
+        t_bc = t[:, None]
+        x_t = (1.0 - t_bc) * z0 + t_bc * f
+        v_target = f - z0
+
+        extra = {k: v for k, v in batch.items() if k not in ("f", "z", "conditionals")}
+        output: VAEOutput = state.apply_fn(
+            {"params": params, **state.kwargs},
+            x_t,
+            conditionals,
+            t,
+            **extra,
+            rngs={"extra": rng_apply},
+        )
+        scale = conditionals[var_idx] if var_idx is not None else 1.0
+        return (1.0 / scale) * jnp.mean((output.f_hat.squeeze() - v_target) ** 2)
+
+    loss, grads = value_and_grad(_loss)(state.params)
+    return state.apply_gradients(grads=grads), loss
+
+
+@jit
+def flow_matching_valid_step(rng: jax.Array, state: TrainState, batch: dict):
+    """Validation step for flow matching: measures decoded sample MSE.
+
+    Runs the full ODE decode and compares against the true GP sample.
+    This is the metric to monitor — vector field MSE (the training loss)
+    and sample MSE are not the same thing.
+
+    Args:
+        rng: PRNG key.
+        state: Current training state.
+        batch: Same format as flow_matching_train_step.
+
+    Returns:
+        Dict with "norm MSE".
+    """
+    z0 = batch["z"]
+    f = batch["f"]
+    extra = {k: v for k, v in batch.items() if k not in ("f", "z", "conditionals")}
+    f_hat = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        z0,
+        batch["conditionals"],
+        **extra,
+        rngs={"extra": rng},
+        method="decode",
+    )
+    mse = jnp.mean((f_hat.reshape(f.shape) - f) ** 2)
+    return {"norm MSE": mse}
+
+
 @jit
 def cond_as_feats(x: jax.Array, cond: jax.Array):
     B, L = x.shape[:2]
