@@ -103,7 +103,9 @@ class FlowMatchingDeepRV(nn.Module):
     n_steps: int = 1
 
     @nn.compact
-    def __call__(self, z: Array, conditionals: Array, t: Array, **kwargs) -> VAEOutput:
+    def __call__(
+        self, z: Array, conditionals: Array, t: Optional[Array] = None, **kwargs
+    ) -> VAEOutput:
         r"""Predict the vector field at the interpolated sample ``z = x_t``.
 
         During training ``z`` is the pre-computed interpolation
@@ -111,15 +113,25 @@ class FlowMatchingDeepRV(nn.Module):
         :func:`~dl4bi.vae.train_utils.flow_matching_train_step` constructs
         ``x_t`` before invoking this method.
 
+        ``t`` defaults to zeros so that ``model.init(rngs, **batch)`` from
+        :func:`dl4bi.core.train.train` succeeds: the canonical training batch
+        contains ``f, z, conditionals, s`` but no ``t`` (sampled inside the
+        train step), and Flax forwards every batch key as a kwarg to
+        ``__call__``.  The placeholder is only used during init/tabulate;
+        :func:`~dl4bi.vae.train_utils.flow_matching_train_step` always passes
+        a real ``t`` via ``state.apply_fn``.
+
         Args:
             z: Interpolated sample ``[B, L]`` (= ``x_t`` during training).
             conditionals: Kernel hyperparameters ``[C]``.
-            t: Per-sample time ``[B]``.
+            t: Per-sample time ``[B]``.  ``None`` → zeros placeholder for init.
             **kwargs: Forwarded to the vector field (e.g. ``s=coords``).
 
         Returns:
             ``VAEOutput`` with ``f_hat`` = predicted vector field.
         """
+        if t is None:
+            t = jnp.zeros((z.shape[0],))
         return self.vf(z, conditionals, t, **kwargs)
 
     def decode(self, z: Array, conditionals: Array, **kwargs) -> Array:
