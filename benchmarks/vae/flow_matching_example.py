@@ -24,6 +24,7 @@ import optax
 import pandas as pd
 from jax import Array, jit, random
 from numpyro import distributions as dist
+from numpyro.diagnostics import summary as numpyro_summary
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from dl4bi_sps.kernels import matern_1_2
 from dl4bi_sps.utils import build_grid
@@ -286,6 +287,9 @@ def main(seed: int = 57, gt_ls: float = 20.0):
         all_mcmc.append(mcmc)
 
         sq_res = (y_obs - y_hat.mean(axis=0)) ** 2
+        ls_stats = numpyro_summary(
+            mcmc.get_samples(group_by_chain=True), prob=0.9
+        )["ls"]
         results.append({
             "model": model_name,
             "train_time_s": round(train_time, 1),
@@ -293,7 +297,12 @@ def main(seed: int = 57, gt_ls: float = 20.0):
             "MSE(y, y_hat)": float(sq_res.mean()),
             "obs MSE": float(sq_res[obs_mask].mean()),
             "unobs MSE": float(sq_res[~obs_mask].mean()),
-            "inferred ls mean": float(samples["ls"].mean()),
+            "inferred ls mean": float(ls_stats["mean"]),
+            "inferred ls std": float(ls_stats["std"]),
+            "inferred ls 5%": float(ls_stats["5.0%"]),
+            "inferred ls 95%": float(ls_stats["95.0%"]),
+            "inferred ls n_eff": float(ls_stats["n_eff"]),
+            "inferred ls r_hat": float(ls_stats["r_hat"]),
         })
 
         plot_infer_trace(
