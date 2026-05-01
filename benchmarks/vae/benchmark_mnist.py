@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"   # suppress TF CUDA warnings
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+
 """benchmark_mnist.py
 
 Tests the hypothesis that FM-DeepRV outperforms DeepRV on complex image
@@ -40,6 +44,8 @@ import numpy as np
 import numpyro
 import optax
 import pandas as pd
+import tensorflow as tf
+tf.config.set_visible_devices([], "GPU")   # TF is CPU-only; JAX owns the GPU
 import tensorflow_datasets as tfds
 from jax import Array, jit, random
 from numpyro import distributions as dist
@@ -220,7 +226,7 @@ def surrogate_model_train(
     )
     train_time = (datetime.now() - t0).total_seconds()
     eval_mse = evaluate(rng_test, state, valid_step, loader, VALID_STEPS)["norm MSE"]
-    save_ckpt(state, DictConfig({}), results_dir / "model.ckpt")
+    save_ckpt(state, DictConfig({}), (results_dir / "model.ckpt").resolve())
     surrogate_decoder = generate_surrogate_decoder(state, model)
     return train_time, eval_mse, surrogate_decoder, infer_flops, train_flops, parameters
 
