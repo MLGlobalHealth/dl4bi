@@ -41,10 +41,12 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
-from dl4bi.vae import FixedKernelAttention, MLPDeepRV, PriorCVAE, gMLPDeepRV
+from dl4bi.vae import FixedKernelAttention, FlowMatchingDeepRV, FlowMatchingVectorField, MLPDeepRV, PriorCVAE, gMLPDeepRV
 from dl4bi.vae.train_utils import (
     cond_as_locs,
     deep_rv_train_step,
+    flow_matching_train_step,
+    flow_matching_valid_step,
     generate_surrogate_decoder,
     prior_cvae_train_step,
 )
@@ -65,6 +67,8 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
         "DeepRV + gMLP": gMLPDeepRV(num_blks=2),
         "DeepRV + gMLP kAttn": gMLPDeepRV(num_blks=2, attn=FixedKernelAttention()),
         "DeepRV + gMLP adamw": gMLPDeepRV(num_blks=2),
+        "FM-DeepRV (1 step)": FlowMatchingDeepRV(vf=FlowMatchingVectorField(num_blks=2), n_steps=1),
+        "FM-DeepRV (3 steps)": FlowMatchingDeepRV(vf=FlowMatchingVectorField(num_blks=2), n_steps=3),
         "PriorCVAE": PriorCVAE,
         "DeepRV + MLP": MLPDeepRV,
         "Inducing Points": None,
@@ -119,7 +123,7 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
             infer_gflops, train_gflops, parameters = None, None, None
             max_lr, bs, num_train_steps = None, None, None
             if nn_model is not None:
-                optimizer, max_lr, bs, num_train_steps, train_step = gen_train_params(
+                optimizer, max_lr, bs, num_train_steps, train_step, valid_step_fn = gen_train_params(
                     model_name, L
                 )
                 wandb.init(
@@ -154,6 +158,7 @@ def main(seed=42, logged_priors=True, gt_ls=10, grids=[16, 24, 32, 48, 64]):
                     model_path,
                     optimizer,
                     num_train_steps,
+                    valid_step_fn=valid_step_fn,
                 )
                 wandb.log({"train_time": train_time, "Test Norm MSE": eval_mse})
             if model_name != "ADVI":
@@ -288,7 +293,9 @@ def surrogate_model_train(
     train_num_steps: int = 100_000,
     valid_interval: int = 25_000,
     valid_steps: int = 5_000,
+    valid_step_fn: Optional[Callable] = None,
 ):
+    _valid_step = valid_step_fn if valid_step_fn is not None else valid_step
     flop_batch = loader(rng_train).__next__()
     # NOTE: doesn't effect actual training
     rngs = {"params": rng_train, "extra": rng_test}
@@ -310,7 +317,7 @@ def surrogate_model_train(
         train_step,
         train_num_steps,
         loader,
-        valid_step,
+        _valid_step,
         valid_interval,
         valid_steps,
         loader,
@@ -318,7 +325,7 @@ def surrogate_model_train(
         valid_monitor_metric="norm MSE",
     )
     train_time = (datetime.now() - start).total_seconds()
-    eval_mse = evaluate(rng_test, state, valid_step, loader, valid_steps)["norm MSE"]
+    eval_mse = evaluate(rng_test, state, _valid_step, loader, valid_steps)["norm MSE"]
     save_ckpt(state, DictConfig({}), results_dir / "model.ckpt")
     with open(results_dir / "train_time.pkl", "wb") as out_file:
         pickle.dump({"train_time": train_time, "eval_mse": eval_mse}, out_file)
@@ -626,6 +633,7 @@ def posterior_mean_gp_dist(result: list[dict], y_hats: list, model_names: list[s
 
 def gen_train_params(model_name, L, default_bs=32):
     default_steps = 300_000 if L >= 2048 else 200_000
+    is_fm = model_name.startswith("FM-DeepRV")
     max_lr = {
         "Inducing DeepRV + gMLP kAttn": 1e-3,
         "DeepRV + gMLP": 5e-3 if L <= 32**2 else 1e-2,
@@ -633,22 +641,23 @@ def gen_train_params(model_name, L, default_bs=32):
         "DeepRV + MLP": 1.0e-3 if L <= 32**2 else 5e-3,
         "DeepRV + gMLP kAttn": 1.0e-3 if L <= 32**2 else 2e-3,
         "DeepRV + gMLP adamw": 1.0e-3 if L <= 32**2 else 2e-3,
-    }[model_name]
+    }.get(model_name, 1.0e-3 if L <= 32**2 else 2e-3)
     bs = default_bs if L < 64**2 else default_bs // 2
     if model_name == "Inducing DeepRV + gMLP kAttn":
         bs = default_bs
     train_step = {"PriorCVAE": prior_cvae_train_step}.get(
-        model_name, deep_rv_train_step
+        model_name, flow_matching_train_step if is_fm else deep_rv_train_step
     )
+    _valid_step_fn = flow_matching_valid_step if is_fm else None
     train_num_steps = default_steps * (default_bs // bs)
     if model_name == "Inducing DeepRV + gMLP kAttn":
         train_num_steps *= 2
     lr_schedule = cosine_annealing_lr(train_num_steps, max_lr)
     optimizer, clip = optax.yogi(lr_schedule), 3.0
-    if "kAttn" in model_name or "adamw" in model_name:
+    if "kAttn" in model_name or "adamw" in model_name or is_fm:
         optimizer, clip = optax.adamw(lr_schedule, weight_decay=1e-2), 3.0
     optimizer = optax.chain(optax.clip_by_global_norm(clip), optimizer)
-    return optimizer, max_lr, bs, train_num_steps, train_step
+    return optimizer, max_lr, bs, train_num_steps, train_step, _valid_step_fn
 
 
 def plot_model_scalability_metrics(

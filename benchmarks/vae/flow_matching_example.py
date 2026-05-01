@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """flow_matching_example.py
 
-Compares FlowMatchingDeepRV with n_steps=1 and n_steps=3 on a 16×16
-spatial grid with a Matérn-1/2 GP prior and Poisson likelihood.
+Compares DeepRV (gMLP) against FM-DeepRV with n_steps in {1, 3, 5, 10} on a
+16×16 spatial grid with a Matérn-1/2 GP prior and Poisson likelihood.
+
+FM-DeepRV is trained once; the same weights are reused for all n_steps
+variants (n_steps only changes the decode-time ODE integration).
 
 Run from the repo root:
     uv run python benchmarks/vae/flow_matching_example.py
@@ -33,8 +36,9 @@ from utils.plot_utils import plot_infer_trace
 import wandb
 from dl4bi.core.model_output import VAEOutput
 from dl4bi.core.train import cosine_annealing_lr, train
-from dl4bi.vae import FlowMatchingDeepRV, FlowMatchingVectorField
+from dl4bi.vae import FlowMatchingDeepRV, FlowMatchingVectorField, gMLPDeepRV
 from dl4bi.vae.train_utils import (
+    deep_rv_train_step,
     flow_matching_train_step,
     flow_matching_valid_step,
     generate_surrogate_decoder,
@@ -54,20 +58,20 @@ HMC_WARMUP = 1_000
 HMC_SAMPLES = 1_000
 HMC_CHAINS = 2
 GRID_N = 16
+FM_N_STEPS = [1, 3, 5, 10]
 
 
 # ---------------------------------------------------------------------------
-# Models under comparison
+# Valid step for gMLPDeepRV (FM uses flow_matching_valid_step)
 # ---------------------------------------------------------------------------
 
-MODELS = {
-    "FM-DeepRV (1 step)": FlowMatchingDeepRV(
-        vf=FlowMatchingVectorField(num_blks=2), n_steps=1
-    ),
-    "FM-DeepRV (3 steps)": FlowMatchingDeepRV(
-        vf=FlowMatchingVectorField(num_blks=2), n_steps=3
-    ),
-}
+@jit
+def deep_rv_valid_step(rng, state, batch):
+    output: VAEOutput = state.apply_fn(
+        {"params": state.params, **state.kwargs}, **batch, rngs={"extra": rng}
+    )
+    metrics = output.metrics(batch["f"], 1.0)
+    return {"norm MSE": metrics["MSE"]}
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +162,14 @@ def build_inference_model(s: Array, priors: dict) -> Callable:
 # Training
 # ---------------------------------------------------------------------------
 
-def train_model(rng: Array, model_name: str, model, loader):
+def train_model(
+    rng: Array,
+    model_name: str,
+    model,
+    loader: Callable,
+    train_step_fn: Callable,
+    valid_step_fn: Callable,
+):
     optimizer = optax.chain(
         optax.clip_by_global_norm(3.0),
         optax.adamw(cosine_annealing_lr(TRAIN_STEPS, MAX_LR), weight_decay=1e-2),
@@ -168,10 +179,10 @@ def train_model(rng: Array, model_name: str, model, loader):
         rng,
         model,
         optimizer,
-        flow_matching_train_step,
+        train_step_fn,
         TRAIN_STEPS,
         loader,
-        flow_matching_valid_step,
+        valid_step_fn,
         VALID_INTERVAL,
         VALID_STEPS,
         loader,
@@ -206,6 +217,29 @@ def run_hmc(
     samples = mcmc.get_samples()
     post = Predictive(infer_model, samples)(k2, surrogate_decoder=surrogate_decoder)
     return samples, mcmc, post["obs"], infer_time
+
+
+# ---------------------------------------------------------------------------
+# Results helpers
+# ---------------------------------------------------------------------------
+
+def collect_result(model_name, train_time, infer_time, y_obs, y_hat, obs_mask, mcmc):
+    sq_res = (y_obs - y_hat.mean(axis=0)) ** 2
+    ls_stats = numpyro_summary(mcmc.get_samples(group_by_chain=True), prob=0.9)["ls"]
+    return {
+        "model": model_name,
+        "train_time_s": round(train_time, 1),
+        "infer_time_s": round(infer_time, 1),
+        "MSE(y, y_hat)": float(sq_res.mean()),
+        "obs MSE": float(sq_res[obs_mask].mean()),
+        "unobs MSE": float(sq_res[~obs_mask].mean()),
+        "ls mean": float(ls_stats["mean"]),
+        "ls std": float(ls_stats["std"]),
+        "ls 5%": float(ls_stats["5.0%"]),
+        "ls 95%": float(ls_stats["95.0%"]),
+        "n_eff": float(ls_stats["n_eff"]),
+        "r_hat": float(ls_stats["r_hat"]),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -269,55 +303,70 @@ def main(seed: int = 57, gt_ls: float = 20.0):
     infer_model = build_inference_model(s, priors)
     loader = gen_train_dataloader(s, priors)
 
-    results, y_hats, all_samples, all_mcmc = [], [], [], []
+    results, y_hats, all_names = [], [], []
 
-    for model_name, nn_model in MODELS.items():
-        print(f"\n=== {model_name} ===")
-        rng_train, rng_m = random.split(rng_train)
+    # ------------------------------------------------------------------
+    # DeepRV baseline
+    # ------------------------------------------------------------------
+    print("\n=== DeepRV (gMLP) ===")
+    rng_train, rng_m = random.split(rng_train)
+    rng_infer, rng_i = random.split(rng_infer)
+
+    drv_model = gMLPDeepRV(num_blks=2)
+    state_drv, train_time_drv = train_model(
+        rng_m, "DeepRV", drv_model, loader, deep_rv_train_step, deep_rv_valid_step
+    )
+    decoder_drv = generate_surrogate_decoder(state_drv, drv_model)
+    samples, mcmc, y_hat, infer_time = run_hmc(rng_i, infer_model, y_obs, obs_mask, decoder_drv)
+
+    y_hats.append(y_hat)
+    all_names.append("DeepRV")
+    results.append(collect_result("DeepRV", train_time_drv, infer_time, y_obs, y_hat, obs_mask, mcmc))
+    plot_infer_trace(samples, mcmc, None, list(priors.keys()), save_dir / "trace_DeepRV.png")
+
+    # ------------------------------------------------------------------
+    # FM-DeepRV: train once, evaluate with multiple n_steps
+    # ------------------------------------------------------------------
+    print("\n=== FM-DeepRV (training) ===")
+    rng_train, rng_m = random.split(rng_train)
+
+    fm_vf = FlowMatchingVectorField(num_blks=2)
+    fm_base = FlowMatchingDeepRV(vf=fm_vf, n_steps=1)
+    state_fm, train_time_fm = train_model(
+        rng_m, "FM-DeepRV", fm_base, loader, flow_matching_train_step, flow_matching_valid_step
+    )
+
+    for k in FM_N_STEPS:
+        model_name = f"FM-DeepRV ({k} step{'s' if k > 1 else ''})"
+        print(f"\n=== {model_name} (HMC only) ===")
         rng_infer, rng_i = random.split(rng_infer)
 
-        state, train_time = train_model(rng_m, model_name, nn_model, loader)
-        surrogate_decoder = generate_surrogate_decoder(state, nn_model)
+        fm_k = FlowMatchingDeepRV(vf=fm_vf, n_steps=k)
+        decoder_fm = generate_surrogate_decoder(state_fm, fm_k)
         samples, mcmc, y_hat, infer_time = run_hmc(
-            rng_i, infer_model, y_obs, obs_mask, surrogate_decoder
+            rng_i, infer_model, y_obs, obs_mask, decoder_fm
         )
 
         y_hats.append(y_hat)
-        all_samples.append(samples)
-        all_mcmc.append(mcmc)
-
-        sq_res = (y_obs - y_hat.mean(axis=0)) ** 2
-        ls_stats = numpyro_summary(
-            mcmc.get_samples(group_by_chain=True), prob=0.9
-        )["ls"]
-        results.append({
-            "model": model_name,
-            "train_time_s": round(train_time, 1),
-            "infer_time_s": round(infer_time, 1),
-            "MSE(y, y_hat)": float(sq_res.mean()),
-            "obs MSE": float(sq_res[obs_mask].mean()),
-            "unobs MSE": float(sq_res[~obs_mask].mean()),
-            "inferred ls mean": float(ls_stats["mean"]),
-            "inferred ls std": float(ls_stats["std"]),
-            "inferred ls 5%": float(ls_stats["5.0%"]),
-            "inferred ls 95%": float(ls_stats["95.0%"]),
-            "inferred ls n_eff": float(ls_stats["n_eff"]),
-            "inferred ls r_hat": float(ls_stats["r_hat"]),
-        })
-
+        all_names.append(model_name)
+        results.append(
+            collect_result(model_name, train_time_fm, infer_time, y_obs, y_hat, obs_mask, mcmc)
+        )
         plot_infer_trace(
             samples, mcmc, None,
             list(priors.keys()),
-            save_dir / f"trace_{model_name.replace(' ', '_')}.png",
+            save_dir / f"trace_{model_name.replace(' ', '_').replace('(', '').replace(')', '')}.png",
         )
 
+    # ------------------------------------------------------------------
+    # Save
+    # ------------------------------------------------------------------
     df = pd.DataFrame(results)
     df.to_csv(save_dir / "results.csv", index=False)
     print("\n" + df.to_string(index=False))
 
     plot_predictive_means(
-        GRID_N, y_obs, y_hats, obs_mask,
-        list(MODELS.keys()),
+        GRID_N, y_obs, y_hats, obs_mask, all_names,
         save_dir / "predictive_means.png",
     )
 
