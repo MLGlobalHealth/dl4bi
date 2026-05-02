@@ -69,7 +69,9 @@ def load_fm_state(ckpt_path: Path, s) -> TrainState:
     )
     ckptr = PyTreeCheckpointer()
     ckpt = ckptr.restore(
-        ckpt_path.absolute(), item={"state": state_template, "config": {}}
+        ckpt_path.absolute(),
+        item={"state": state_template, "config": {}},
+        partial_restore=True,
     )
     return ckpt["state"]
 
