@@ -47,33 +47,18 @@ from dl4bi.vae.train_utils import generate_surrogate_decoder
 FM_K_EXTRA = [5, 10]
 
 
-def load_fm_state(ckpt_path: Path, s) -> TrainState:
-    """Restore FM vector field weights into a fresh TrainState."""
+def load_fm_state(ckpt_path: Path) -> TrainState:
+    """Restore FM vector field weights from a raw checkpoint restore."""
     fm_vf = FlowMatchingVectorField(num_blks=2)
     fm_base = FlowMatchingDeepRV(vf=fm_vf, n_steps=1)
-    L = s.shape[0]
-    dummy_batch = {
-        "s": s,
-        "z": jnp.ones((1, L)),
-        "conditionals": jnp.array([10.0]),
-        "f": jnp.ones((1, L)),
-    }
-    rngs = {"params": random.key(0), "extra": random.key(1)}
-    init_vars = fm_base.init(rngs, **dummy_batch)
-    init_params = init_vars.pop("params")
-    state_template = TrainState.create(
+    ckptr = PyTreeCheckpointer()
+    raw = ckptr.restore(ckpt_path.absolute())
+    return TrainState.create(
         apply_fn=fm_base.apply,
-        params=init_params,
-        kwargs=init_vars,
+        params=raw["state"]["params"],
+        kwargs=raw["state"]["kwargs"],
         tx=optax.adam(1e-3),
     )
-    ckptr = PyTreeCheckpointer()
-    ckpt = ckptr.restore(
-        ckpt_path.absolute(),
-        item={"state": state_template, "config": {}},
-        partial_restore=True,
-    )
-    return ckpt["state"]
 
 
 def replay_grid_data(seed: int, gt_ls: int, target_grid_n: int):
@@ -104,7 +89,7 @@ def main(seed: int = 42, gt_ls: int = 10):
 
         infer_model = build_inference_model(s, priors)
         ckpt_path = grid_dir / "FM-DeepRV_1_step" / "model.ckpt"
-        loaded_state = load_fm_state(ckpt_path, s)
+        loaded_state = load_fm_state(ckpt_path)
 
         for k in FM_K_EXTRA:
             model_name = f"FM-DeepRV ({k} steps)"
