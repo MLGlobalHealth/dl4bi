@@ -19,12 +19,24 @@ Run from the repo root:
 """
 
 import os
-# Must be set before TF is imported
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
-
 import sys
 sys.path.append("benchmarks/vae")
+
+# Initialise JAX (and its CUDA context) before TF is imported.
+# TF loads its own bundled CUDA libs at import time; if it runs first it
+# corrupts the CUDA state JAX sees, causing cuBLAS to return INTERNAL_ERROR
+# instead of its version number, and JAX falls back to CPU.
+import jax
+import jax.numpy as jnp
+from jax import Array, jit, random
+jax.devices()  # force CUDA initialisation now
+
+# TF env vars must still be set before the TF import.
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+import tensorflow as tf
+tf.config.set_visible_devices([], "GPU")   # TF is CPU-only; JAX owns the GPU
+import tensorflow_datasets as tfds
 
 import pickle
 from datetime import datetime
@@ -33,17 +45,11 @@ from typing import Callable, Optional
 
 import arviz as az
 import flax.linen as nn
-import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro
 import optax
 import pandas as pd
-import tensorflow as tf
-tf.config.set_visible_devices([], "GPU")   # TF is CPU-only; JAX owns the GPU
-import tensorflow_datasets as tfds
-import jax
-from jax import Array, jit, random
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig
