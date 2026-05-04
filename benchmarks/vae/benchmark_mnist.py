@@ -228,16 +228,27 @@ def surrogate_model_train(
     return train_time, eval_mse, state, infer_flops, train_flops, parameters
 
 
-def reload_state(ckpt_dir: Path, model: nn.Module, optimizer) -> TrainState:
+def reload_state(ckpt_dir: Path, model: nn.Module, s: Array, optimizer) -> TrainState:
     """Restore weights from a saved checkpoint into a fresh TrainState."""
-    ckptr = PyTreeCheckpointer()
-    raw = ckptr.restore(ckpt_dir.absolute())
-    return TrainState.create(
+    L = s.shape[0]
+    dummy_batch = {
+        "s": s,
+        "z": jnp.ones((1, L)),
+        "conditionals": jnp.array([0.0]),
+        "f": jnp.ones((1, L)),
+    }
+    rngs = {"params": random.key(0), "extra": random.key(1)}
+    init_vars = model.init(rngs, **dummy_batch)
+    init_params = init_vars.pop("params")
+    state_template = TrainState.create(
         apply_fn=model.apply,
-        params=raw["state"]["params"],
-        kwargs=raw["state"]["kwargs"],
+        params=init_params,
+        kwargs=init_vars,
         tx=optimizer,
     )
+    ckptr = PyTreeCheckpointer()
+    ckpt = ckptr.restore(ckpt_dir.absolute(), item={"state": state_template, "config": {}})
+    return ckpt["state"]
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +378,7 @@ def main(seed: int = 42):
 
         if ckpt_dir.exists():
             print(f"  [{model_name}] checkpoint found, reloading.")
-            state = reload_state(ckpt_dir, nn_model, optimizer)
+            state = reload_state(ckpt_dir, nn_model, s, optimizer)
         else:
             print(f"\n=== Training {model_name} ===")
             rng, rng_t, rng_v = random.split(rng, 3)
