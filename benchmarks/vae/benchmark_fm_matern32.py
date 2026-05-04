@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""benchmark_fm.py
+"""benchmark_fm_matern32.py
 
 Benchmark: Baseline GP vs DeepRV vs FM-DeepRV (K = 1, 3, 5, 10 steps)
-on a Matérn-1/2 GP prior with Poisson likelihood.
+on a Matérn-3/2 GP prior with Poisson likelihood.
+
+Identical in structure to benchmark_fm.py; only the kernel differs.
 
 Models:
   - Baseline GP         (exact Cholesky, HMC only)
@@ -15,14 +17,8 @@ Lengthscales: 10, 20
 Self-contained — generates data on the fly, no precomputed pickles required.
 Interruption-safe — skips any model/grid/ls combo that already has single_res.pkl.
 
-NOTE: if results/poc_ls_*/grid_*/FM-DeepRV_{5,10}_steps/ already exist from
-benchmark_fm_extend_k.py (checkpoint-reuse run), delete them first so this
-script trains them from scratch:
-    rm -rf results/poc_ls_*/grid_*/FM-DeepRV_5_steps
-    rm -rf results/poc_ls_*/grid_*/FM-DeepRV_10_steps
-
 Run from the repo root:
-    uv run python benchmarks/vae/benchmark_fm.py
+    uv run python benchmarks/vae/benchmark_fm_matern32.py
 """
 
 import sys
@@ -32,7 +28,7 @@ sys.path.append("benchmarks/vae")
 import pickle
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional, Union
+from typing import Callable, Optional
 
 import arviz as az
 import flax.linen as nn
@@ -48,7 +44,7 @@ from numpyro.diagnostics import summary as numpyro_summary
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig
 from scipy.stats import wasserstein_distance
-from dl4bi_sps.kernels import matern_1_2
+from dl4bi_sps.kernels import matern_3_2
 from dl4bi_sps.utils import build_grid
 from utils.plot_utils import plot_infer_trace
 
@@ -101,7 +97,7 @@ def deep_rv_valid_step(rng, state, batch):
 
 
 # ---------------------------------------------------------------------------
-# Data generation (self-contained, no precomputed pickles)
+# Data generation
 # ---------------------------------------------------------------------------
 
 def build_spatial_grid(grid_n: int) -> Array:
@@ -110,7 +106,7 @@ def build_spatial_grid(grid_n: int) -> Array:
 
 def gen_y_obs(rng: Array, s: Array, gt_ls: float) -> Array:
     rng_mu, rng_poiss = random.split(rng)
-    K = matern_1_2(s, s, 1.0, gt_ls) + 5e-4 * jnp.eye(s.shape[0])
+    K = matern_3_2(s, s, 1.0, gt_ls) + 5e-4 * jnp.eye(s.shape[0])
     mu = dist.MultivariateNormal(0.0, K).sample(rng_mu)
     return dist.Poisson(rate=jnp.exp(1.0 + mu)).sample(rng_poiss)
 
@@ -143,7 +139,7 @@ def gen_spatial_obs_mask(rng: Array, grid_shape: tuple, obs_ratio: float = 0.15)
 
 def gen_train_dataloader(s: Array, priors: dict, batch_size: int = BATCH_SIZE):
     jitter = 5e-4 * jnp.eye(s.shape[0])
-    kernel_jit = jit(lambda s, var, ls: matern_1_2(s, s, var, ls) + jitter)
+    kernel_jit = jit(lambda s, var, ls: matern_3_2(s, s, var, ls) + jitter)
     f_jit = jit(lambda L, z: jnp.einsum("ij,bj->bi", L, z))
 
     def dataloader(rng_data):
@@ -170,7 +166,7 @@ def build_inference_model(s: Array, priors: dict) -> Callable:
         beta = numpyro.sample("beta", priors["beta"])
         z = numpyro.sample("z", dist.Normal(), sample_shape=(1, s.shape[0]))
         if surrogate_decoder is None:
-            K = matern_1_2(s, s, 1.0, ls) + 5e-4 * jnp.eye(s.shape[0])
+            K = matern_3_2(s, s, 1.0, ls) + 5e-4 * jnp.eye(s.shape[0])
             mu = numpyro.deterministic("mu", jnp.matmul(jnp.linalg.cholesky(K), z[0]))
         else:
             mu = numpyro.deterministic(
@@ -351,7 +347,7 @@ def aggregate_and_plot(save_dir: Path):
 
 def main(seed: int = 42, gt_ls: int = 10):
     rng = random.key(seed)
-    save_dir = Path(f"results/poc_ls_{gt_ls}/")
+    save_dir = Path(f"results/matern32_ls_{gt_ls}/")
     save_dir.mkdir(parents=True, exist_ok=True)
 
     priors = {"ls": dist.Uniform(1.0, 100.0), "beta": dist.Normal()}
@@ -421,8 +417,7 @@ def main(seed: int = 42, gt_ls: int = 10):
             mcmc = None
 
             if nn_model is not None:
-                max_lr = MAX_LR
-                lr_schedule = cosine_annealing_lr(TRAIN_STEPS, max_lr)
+                lr_schedule = cosine_annealing_lr(TRAIN_STEPS, MAX_LR)
                 optimizer = optax.chain(
                     optax.clip_by_global_norm(3.0),
                     optax.adamw(lr_schedule, weight_decay=1e-2),
