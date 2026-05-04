@@ -42,6 +42,7 @@ import pandas as pd
 import tensorflow as tf
 tf.config.set_visible_devices([], "GPU")   # TF is CPU-only; JAX owns the GPU
 import tensorflow_datasets as tfds
+import jax
 from jax import Array, jit, random
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
@@ -240,12 +241,17 @@ def reload_state(ckpt_dir: Path, model: nn.Module, s: Array, optimizer) -> Train
     rngs = {"params": random.key(0), "extra": random.key(1)}
     init_vars = model.init(rngs, **dummy_batch)
     init_params = init_vars.pop("params")
-    state_template = TrainState.create(
-        apply_fn=model.apply,
-        params=init_params,
-        kwargs=init_vars,
-        tx=optimizer,
-    )
+    # Build template inside jax.default_device so every array gets an explicit
+    # SingleDeviceSharding(cpu). Without this, orbax falls back to reading the
+    # sharding file, finds cuda:0 (not available), sets sharding=None, and fails.
+    cpu = jax.devices("cpu")[0]
+    with jax.default_device(cpu):
+        state_template = TrainState.create(
+            apply_fn=model.apply,
+            params=init_params,
+            kwargs=init_vars,
+            tx=optimizer,
+        )
     ckptr = PyTreeCheckpointer()
     ckpt = ckptr.restore(ckpt_dir.absolute(), item={"state": state_template, "config": {}})
     return ckpt["state"]
