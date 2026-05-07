@@ -86,15 +86,16 @@ N_TRAIN = 50_000
 N_TEST = 20
 OBS_RATIO = 0.3               # fraction of pixels observed
 OBS_NOISE = 0.05              # Gaussian likelihood sigma on [0,1] pixels
-TRAIN_STEPS = 100_000
-VALID_INTERVAL = 25_000
+TRAIN_STEPS = 500_000
+VALID_INTERVAL = 50_000
 VALID_STEPS = 2_000
 BATCH_SIZE = 64
 MAX_LR = 1e-3
 HMC_WARMUP = 1_000
 HMC_SAMPLES = 1_000
 HMC_CHAINS = 2
-FM_K_STEPS = [1, 3, 5]
+FM_K_STEPS = [1, 3, 5, 7]
+N_BLOCKS = 4
 GP_JITTER = 5e-4
 
 
@@ -442,12 +443,12 @@ def main(seed: int = 42):
     # --- Train surrogates ---
     train_configs = {
         "DeepRV + gMLP": (
-            gMLPDeepRV(num_blks=2),
+            gMLPDeepRV(num_blks=N_BLOCKS),
             deep_rv_train_step,
             deep_rv_valid_step,
         ),
         "FM-DeepRV": (
-            FlowMatchingDeepRV(vf=FlowMatchingVectorField(num_blks=2), n_steps=1),
+            FlowMatchingDeepRV(vf=FlowMatchingVectorField(num_blks=N_BLOCKS), n_steps=1),
             flow_matching_train_step,
             flow_matching_valid_step,
         ),
