@@ -110,14 +110,14 @@ GRID_SHAPE = (16, 16)          # spatial grid
 TIME_STEPS = 5                 # T
 T_OBS_MASK = jnp.array([True, False, False, True, True])    # matches original spatiotemporal_kernel.py
 OBS_RATIO = 0.5                # fraction of spatial locations observed per time step
-GT_LS, GT_A, GT_ALPHA = 20.0, 0.5, 0.8
+GT_LS, GT_A, GT_ALPHA = 20.0, 1.0, 0.8  # FIXED: GT_A=1.0 matches inference (a held at 1.0)
 GT_B, GT_NU, GT_BETA = 1.0, 1.0, 1.0
 JITTER = 5e-4
 
 TRAIN_STEPS = 500_000
 VALID_INTERVAL = 50_000
 VALID_STEPS = 2_000
-BATCH_SIZE = 16                # small batch — each sample requires a T*L Cholesky
+BATCH_SIZE = 32                # FIXED: bumped from 16; YOGI + bs=16 still underfits
 MAX_LR = 5e-3
 N_BLOCKS = 4
 
